@@ -18,6 +18,7 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.types.ArrayType;
@@ -34,7 +35,12 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
-/** Manifest entry for index file. */
+/**
+ * Manifest entry for index file.
+ *
+ * @since 0.9.0
+ */
+@Public
 public class IndexManifestEntry {
 
     public static final RowType SCHEMA =

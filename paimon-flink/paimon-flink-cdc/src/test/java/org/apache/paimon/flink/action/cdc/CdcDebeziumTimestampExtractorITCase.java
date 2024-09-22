@@ -18,8 +18,10 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.flink.action.cdc.mongodb.MongoDBCdcTimestampExtractor;
 import org.apache.paimon.flink.action.cdc.mysql.DebeziumEventTest;
-import org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractorFactory;
+import org.apache.paimon.flink.action.cdc.mysql.MysqlCdcTimestampExtractor;
+import org.apache.paimon.flink.action.cdc.watermark.CdcDebeziumTimestampExtractor;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonParser;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
@@ -33,7 +35,7 @@ import java.net.URL;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** IT cases for {@link CdcTimestampExtractorFactory.CdcDebeziumTimestampExtractor}. */
+/** IT cases for {@link CdcDebeziumTimestampExtractor}. */
 public class CdcDebeziumTimestampExtractorITCase {
 
     private ObjectMapper objectMapper;
@@ -49,8 +51,7 @@ public class CdcDebeziumTimestampExtractorITCase {
 
     @Test
     public void testMysqlCdcTimestampExtractor() throws Exception {
-        CdcTimestampExtractorFactory.MysqlCdcTimestampExtractor extractor =
-                new CdcTimestampExtractorFactory.MysqlCdcTimestampExtractor();
+        MysqlCdcTimestampExtractor extractor = new MysqlCdcTimestampExtractor();
 
         JsonNode data = objectMapper.readValue("{\"payload\" : {\"ts_ms\": 1}}", JsonNode.class);
         CdcSourceRecord record = new CdcSourceRecord(data.toString());
@@ -69,8 +70,7 @@ public class CdcDebeziumTimestampExtractorITCase {
 
     @Test
     public void testMongodbCdcTimestampExtractor() throws Exception {
-        CdcTimestampExtractorFactory.MongoDBCdcTimestampExtractor extractor =
-                new CdcTimestampExtractorFactory.MongoDBCdcTimestampExtractor();
+        MongoDBCdcTimestampExtractor extractor = new MongoDBCdcTimestampExtractor();
 
         JsonNode data = objectMapper.readValue("{\"ts_ms\": 1}", JsonNode.class);
         CdcSourceRecord record = new CdcSourceRecord(data.toString());

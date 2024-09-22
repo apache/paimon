@@ -668,6 +668,32 @@ public abstract class FileStoreTableTestBase {
     }
 
     @Test
+    public void testConsumerIdNotBlank() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(CoreOptions.CONSUMER_ID, "");
+                            options.set(SNAPSHOT_NUM_RETAINED_MIN, 3);
+                            options.set(SNAPSHOT_NUM_RETAINED_MAX, 3);
+                        });
+
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = writeBuilder.newWrite();
+        StreamTableCommit commit = writeBuilder.newCommit();
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        StreamTableScan scan = readBuilder.newStreamScan();
+        TableRead read = readBuilder.newRead();
+
+        write.write(rowData(1, 10, 100L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        // assert can't set consumer-id to blank string
+        assertThatThrownBy(() -> getResult(read, scan.plan().splits(), STREAMING_ROW_TO_STRING))
+                .isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
     public void testConsumeId() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
@@ -1142,7 +1168,7 @@ public abstract class FileStoreTableTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "Branch name 'main' is the default branch and cannot be created."));
+                                "Branch name 'main' is the default branch and cannot be used."));
 
         assertThatThrownBy(() -> table.createBranch("branch-1", "tag1"))
                 .satisfies(

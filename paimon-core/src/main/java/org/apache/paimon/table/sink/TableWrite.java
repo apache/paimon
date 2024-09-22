@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.table.Table;
@@ -60,6 +61,9 @@ public interface TableWrite extends AutoCloseable {
 
     /** Write a row with bucket. */
     void write(InternalRow row, int bucket) throws Exception;
+
+    /** Write a bundle records directly, not per row. */
+    void writeBundle(BinaryRow partition, int bucket, BundleRecords bundle) throws Exception;
 
     /**
      * Compact a bucket of a partition. By default, it will determine whether to perform the

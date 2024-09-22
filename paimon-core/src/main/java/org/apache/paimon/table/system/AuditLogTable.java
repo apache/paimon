@@ -27,10 +27,13 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.BucketEntry;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -55,6 +58,7 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SimpleFileReader;
@@ -122,6 +126,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     @Override
     public SimpleFileReader<ManifestEntry> manifestFileReader() {
         return wrapped.manifestFileReader();
+    }
+
+    @Override
+    public SimpleFileReader<IndexManifestEntry> indexManifestFileReader() {
+        return wrapped.indexManifestFileReader();
     }
 
     @Override
@@ -235,8 +244,23 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public Integer parallelism() {
+            return snapshotReader.parallelism();
+        }
+
+        @Override
         public SnapshotManager snapshotManager() {
             return snapshotReader.snapshotManager();
+        }
+
+        @Override
+        public ManifestsReader manifestsReader() {
+            return snapshotReader.manifestsReader();
+        }
+
+        @Override
+        public List<ManifestEntry> readManifest(ManifestFileMeta manifest) {
+            return snapshotReader.readManifest(manifest);
         }
 
         @Override
@@ -247,6 +271,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public SplitGenerator splitGenerator() {
             return snapshotReader.splitGenerator();
+        }
+
+        @Override
+        public FileStorePathFactory pathFactory() {
+            return snapshotReader.pathFactory();
         }
 
         public SnapshotReader withSnapshot(long snapshotId) {
@@ -295,8 +324,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public SnapshotReader withDataFileTimeMills(long dataFileTimeMills) {
-            snapshotReader.withDataFileTimeMills(dataFileTimeMills);
+        public SnapshotReader withManifestEntryFilter(Filter<ManifestEntry> filter) {
+            snapshotReader.withManifestEntryFilter(filter);
             return this;
         }
 
@@ -352,6 +381,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public List<PartitionEntry> partitionEntries() {
             return snapshotReader.partitionEntries();
+        }
+
+        @Override
+        public List<BucketEntry> bucketEntries() {
+            return snapshotReader.bucketEntries();
         }
     }
 
@@ -411,8 +445,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public List<BinaryRow> listPartitions() {
-            return batchScan.listPartitions();
+        public List<PartitionEntry> listPartitionEntries() {
+            return batchScan.listPartitionEntries();
         }
 
         @Override
@@ -447,8 +481,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public List<BinaryRow> listPartitions() {
-            return streamScan.listPartitions();
+        public List<PartitionEntry> listPartitionEntries() {
+            return streamScan.listPartitionEntries();
         }
 
         @Nullable

@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.types.Either;
 
@@ -30,6 +31,7 @@ public class AppendBypassCompactWorkerOperator
 
     public AppendBypassCompactWorkerOperator(FileStoreTable table, String commitUser) {
         super(table, commitUser);
+        this.chainingStrategy = ChainingStrategy.HEAD;
     }
 
     @Override

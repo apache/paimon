@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
+import org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractor;
 import org.apache.paimon.flink.action.cdc.watermark.CdcWatermarkStrategy;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -52,7 +53,6 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGN
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_TIMEOUT;
-import static org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractorFactory.createExtractor;
 
 /** Base {@link Action} for table/database synchronizing job. */
 public abstract class SynchronizationActionBase extends ActionBase {
@@ -132,6 +132,11 @@ public abstract class SynchronizationActionBase extends ActionBase {
         return syncJobHandler.provideSource();
     }
 
+    protected CdcTimestampExtractor createCdcTimestampExtractor() {
+        throw new IllegalArgumentException(
+                "Unsupported timestamp extractor for current cdc source.");
+    }
+
     private DataStreamSource<CdcSourceRecord> buildDataStreamSource(Object source) {
         if (source instanceof Source) {
             boolean isAutomaticWatermarkCreationEnabled =
@@ -146,13 +151,13 @@ public abstract class SynchronizationActionBase extends ActionBase {
             WatermarkStrategy<CdcSourceRecord> watermarkStrategy =
                     isAutomaticWatermarkCreationEnabled
                             ? watermarkAlignGroup != null
-                                    ? new CdcWatermarkStrategy(createExtractor(source))
+                                    ? new CdcWatermarkStrategy(createCdcTimestampExtractor())
                                             .withWatermarkAlignment(
                                                     watermarkAlignGroup,
                                                     options.get(SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT),
                                                     options.get(
                                                             SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL))
-                                    : new CdcWatermarkStrategy(createExtractor(source))
+                                    : new CdcWatermarkStrategy(createCdcTimestampExtractor())
                             : WatermarkStrategy.noWatermarks();
             if (idleTimeout != null) {
                 watermarkStrategy = watermarkStrategy.withIdleness(idleTimeout);
@@ -184,7 +189,7 @@ public abstract class SynchronizationActionBase extends ActionBase {
 
         // remove immutable options and options with equal values
         Map<String, String> oldOptions = table.options();
-        Set<String> immutableOptionKeys = CoreOptions.getImmutableOptionKeys();
+        Set<String> immutableOptionKeys = CoreOptions.IMMUTABLE_OPTIONS;
         dynamicOptions
                 .entrySet()
                 .removeIf(
@@ -192,6 +197,10 @@ public abstract class SynchronizationActionBase extends ActionBase {
                                 immutableOptionKeys.contains(entry.getKey())
                                         || Objects.equals(
                                                 oldOptions.get(entry.getKey()), entry.getValue()));
+
+        if (dynamicOptions.isEmpty()) {
+            return table;
+        }
 
         // alter the table dynamic options
         List<SchemaChange> optionChanges =

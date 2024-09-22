@@ -29,6 +29,7 @@ import org.apache.paimon.flink.action.cdc.SyncJobHandler;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.schema.JdbcSchemasInfo;
 import org.apache.paimon.flink.action.cdc.schema.JdbcTableInfo;
+import org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractor;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -181,6 +182,11 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
     }
 
     @Override
+    protected CdcTimestampExtractor createCdcTimestampExtractor() {
+        return MySqlActionUtils.createCdcTimestampExtractor();
+    }
+
+    @Override
     protected MySqlSource<CdcSourceRecord> buildSource() {
         return MySqlActionUtils.buildMySqlSource(
                 cdcSourceConfig,
@@ -252,5 +258,10 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
     @VisibleForTesting
     public List<Identifier> excludedTables() {
         return excludedTables;
+    }
+
+    @Override
+    protected boolean requirePrimaryKeys() {
+        return true;
     }
 }

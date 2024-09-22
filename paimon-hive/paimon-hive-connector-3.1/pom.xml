@@ -25,7 +25,7 @@ under the License.
     <parent>
         <artifactId>paimon-hive</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>0.9-SNAPSHOT</version>
+        <version>1.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-hive-connector-3.1</artifactId>
@@ -96,6 +96,13 @@ under the License.
         <dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-table-runtime</artifactId>
+            <version>${test.flink.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-csv</artifactId>
             <version>${test.flink.version}</version>
             <scope>test</scope>
         </dependency>

@@ -36,7 +36,9 @@ public class DataFilePathFactoryTest {
         DataFilePathFactory pathFactory =
                 new DataFilePathFactory(
                         new Path(tempDir + "/bucket-123"),
-                        CoreOptions.FILE_FORMAT.defaultValue().toString());
+                        CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue());
         String uuid = pathFactory.uuid();
 
         for (int i = 0; i < 20; i++) {
@@ -60,7 +62,9 @@ public class DataFilePathFactoryTest {
         DataFilePathFactory pathFactory =
                 new DataFilePathFactory(
                         new Path(tempDir + "/dt=20211224/bucket-123"),
-                        CoreOptions.FILE_FORMAT.defaultValue().toString());
+                        CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue());
         String uuid = pathFactory.uuid();
 
         for (int i = 0; i < 20; i++) {

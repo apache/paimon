@@ -53,7 +53,7 @@ For multiple jobs to write the same table, you can refer to [dedicated compactio
 
 In Paimon, clustering is a feature that allows you to cluster data in your [Append Table]({{< ref "append-table/overview" >}})
 based on the values of certain columns during the write process. This organization of data can significantly enhance the efficiency of downstream
-tasks when reading the data, as it enables faster and more targeted data retrieval. This feature is only supported for [Append Table]({{< ref "append-table/overview" >}})
+tasks when reading the data, as it enables faster and more targeted data retrieval. This feature is only supported for [Append Table]({{< ref "append-table/overview" >}})(bucket = -1)
 and batch execution mode.
 
 To utilize clustering, you can specify the columns you want to cluster when creating or writing to a table. Here's a simple example of how to enable clustering:

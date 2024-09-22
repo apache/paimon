@@ -66,9 +66,7 @@ import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 public class HiveMigrator implements Migrator {
 
     private static final Logger LOG = LoggerFactory.getLogger(HiveMigrator.class);
-
-    private static final ThreadPoolExecutor EXECUTOR =
-            createCachedThreadPool(Runtime.getRuntime().availableProcessors(), "HIVE_MIGRATOR");
+    private ThreadPoolExecutor executor;
 
     private static final Predicate<FileStatus> HIDDEN_PATH_FILTER =
             p -> !p.getPath().getName().startsWith("_") && !p.getPath().getName().startsWith(".");
@@ -84,6 +82,7 @@ public class HiveMigrator implements Migrator {
     private final String targetTable;
     private final CoreOptions coreOptions;
     private Boolean delete = true;
+    private Integer parallelism;
 
     public HiveMigrator(
             HiveCatalog hiveCatalog,
@@ -91,6 +90,7 @@ public class HiveMigrator implements Migrator {
             String sourceTable,
             String targetDatabase,
             String targetTable,
+            Integer parallelism,
             Map<String, String> options) {
         this.hiveCatalog = hiveCatalog;
         this.fileIO = hiveCatalog.fileIO();
@@ -99,11 +99,16 @@ public class HiveMigrator implements Migrator {
         this.sourceTable = sourceTable;
         this.targetDatabase = targetDatabase;
         this.targetTable = targetTable;
+        this.parallelism = parallelism;
         this.coreOptions = new CoreOptions(options);
+        this.executor = createCachedThreadPool(parallelism, "HIVE_MIGRATOR");
     }
 
     public static List<Migrator> databaseMigrators(
-            HiveCatalog hiveCatalog, String sourceDatabase, Map<String, String> options) {
+            HiveCatalog hiveCatalog,
+            String sourceDatabase,
+            Map<String, String> options,
+            Integer parallelism) {
         IMetaStoreClient client = hiveCatalog.getHmsClient();
         try {
             return client.getAllTables(sourceDatabase).stream()
@@ -115,6 +120,7 @@ public class HiveMigrator implements Migrator {
                                             sourceTable,
                                             sourceDatabase,
                                             sourceTable + PAIMON_SUFFIX,
+                                            parallelism,
                                             options))
                     .collect(Collectors.toList());
         } catch (TException e) {
@@ -175,7 +181,7 @@ public class HiveMigrator implements Migrator {
             }
 
             List<Future<CommitMessage>> futures =
-                    tasks.stream().map(EXECUTOR::submit).collect(Collectors.toList());
+                    tasks.stream().map(executor::submit).collect(Collectors.toList());
             List<CommitMessage> commitMessages = new ArrayList<>();
             try {
                 for (Future<CommitMessage> future : futures) {

@@ -41,6 +41,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.function.Predicate;
@@ -70,7 +71,7 @@ public class TagManager {
     public TagManager(FileIO fileIO, Path tablePath, String branch) {
         this.fileIO = fileIO;
         this.tablePath = tablePath;
-        this.branch = StringUtils.isBlank(branch) ? DEFAULT_MAIN_BRANCH : branch;
+        this.branch = StringUtils.isNullOrWhitespaceOnly(branch) ? DEFAULT_MAIN_BRANCH : branch;
     }
 
     public TagManager copyWithBranch(String branchName) {
@@ -87,13 +88,21 @@ public class TagManager {
         return new Path(branchPath(tablePath, branch) + "/tag/" + TAG_PREFIX + tagName);
     }
 
+    public List<Path> tagPaths(Predicate<Path> predicate) throws IOException {
+        return listVersionedFileStatus(fileIO, tagDirectory(), TAG_PREFIX)
+                .map(FileStatus::getPath)
+                .filter(predicate)
+                .collect(Collectors.toList());
+    }
+
     /** Create a tag from given snapshot and save it in the storage. */
     public void createTag(
             Snapshot snapshot,
             String tagName,
             @Nullable Duration timeRetained,
             List<TagCallback> callbacks) {
-        checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name '%s' is blank.", tagName);
 
         // When timeRetained is not defined, please do not write the tagCreatorTime field,
         // as this will cause older versions (<= 0.7) of readers to be unable to read this
@@ -159,7 +168,8 @@ public class TagManager {
             TagDeletion tagDeletion,
             SnapshotManager snapshotManager,
             List<TagCallback> callbacks) {
-        checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name '%s' is blank.", tagName);
         checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
 
         Snapshot taggedSnapshot = taggedSnapshot(tagName);
@@ -235,8 +245,21 @@ public class TagManager {
         }
 
         // delete manifests
-        tagDeletion.cleanUnusedManifests(
-                taggedSnapshot, tagDeletion.manifestSkippingSet(skippedSnapshots));
+        success = true;
+        Set<String> manifestSkippingSet = null;
+        try {
+            manifestSkippingSet = tagDeletion.manifestSkippingSet(skippedSnapshots);
+        } catch (Exception e) {
+            LOG.info(
+                    String.format(
+                            "Skip cleaning manifest files for tag of snapshot %s due to failed to build skipping set.",
+                            taggedSnapshot.id()),
+                    e);
+            success = false;
+        }
+        if (success) {
+            tagDeletion.cleanUnusedManifests(taggedSnapshot, manifestSkippingSet);
+        }
     }
 
     /** Check if a tag exists. */
@@ -291,10 +314,7 @@ public class TagManager {
         TreeMap<Snapshot, List<String>> tags =
                 new TreeMap<>(Comparator.comparingLong(Snapshot::id));
         try {
-            List<Path> paths =
-                    listVersionedFileStatus(fileIO, tagDirectory(), TAG_PREFIX)
-                            .map(FileStatus::getPath)
-                            .collect(Collectors.toList());
+            List<Path> paths = tagPaths(path -> true);
 
             for (Path path : paths) {
                 String tagName = path.getName().substring(TAG_PREFIX.length());
@@ -319,10 +339,7 @@ public class TagManager {
     /** Get all {@link Tag}s. */
     public List<Pair<Tag, String>> tagObjects() {
         try {
-            List<Path> paths =
-                    listVersionedFileStatus(fileIO, tagDirectory(), TAG_PREFIX)
-                            .map(FileStatus::getPath)
-                            .collect(Collectors.toList());
+            List<Path> paths = tagPaths(path -> true);
             List<Pair<Tag, String>> tags = new ArrayList<>();
             for (Path path : paths) {
                 String tagName = path.getName().substring(TAG_PREFIX.length());
@@ -367,5 +384,10 @@ public class TagManager {
                 String.format(
                         "Didn't find tag with snapshot id '%s'.This is unexpected.",
                         taggedSnapshot.id()));
+    }
+
+    /** Read tag for tagName. */
+    public Tag tag(String tagName) {
+        return Tag.fromPath(fileIO, tagPath(tagName));
     }
 }

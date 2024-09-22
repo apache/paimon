@@ -235,6 +235,18 @@ public class CompactDatabaseAction extends ActionBase {
             String fullName,
             FileStoreTable table,
             boolean isStreaming) {
+        if (isStreaming) {
+            // for completely asynchronous compaction
+            HashMap<String, String> dynamicOptions =
+                    new HashMap<String, String>() {
+                        {
+                            put(CoreOptions.NUM_SORTED_RUNS_STOP_TRIGGER.key(), "2147483647");
+                            put(CoreOptions.SORT_SPILL_THRESHOLD.key(), "10");
+                            put(CoreOptions.LOOKUP_WAIT.key(), "false");
+                        }
+                    };
+            table = table.copy(dynamicOptions);
+        }
 
         CompactorSourceBuilder sourceBuilder =
                 new CompactorSourceBuilder(fullName, table)

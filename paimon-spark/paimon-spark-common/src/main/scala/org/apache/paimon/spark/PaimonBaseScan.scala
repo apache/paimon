@@ -54,7 +54,7 @@ abstract class PaimonBaseScan(
 
   private lazy val tableSchema = SparkTypeUtils.fromPaimonRowType(tableRowType)
 
-  private val (tableFields, metadataFields) = {
+  private[paimon] val (requiredTableFields, metadataFields) = {
     val nameToField = tableSchema.map(field => (field.name, field)).toMap
     val _tableFields = requiredSchema.flatMap(field => nameToField.get(field.name))
     val _metadataFields =
@@ -75,14 +75,15 @@ abstract class PaimonBaseScan(
   private lazy val paimonMetricsRegistry: SparkMetricRegistry = SparkMetricRegistry()
 
   lazy val requiredStatsSchema: StructType = {
-    val fieldNames = tableFields.map(_.name) ++ reservedFilters.flatMap(_.references)
+    val fieldNames = requiredTableFields.map(_.name) ++ reservedFilters.flatMap(_.references)
     StructType(tableSchema.filter(field => fieldNames.contains(field.name)))
   }
 
   lazy val readBuilder: ReadBuilder = {
     val _readBuilder = table.newReadBuilder()
 
-    val projection = tableFields.map(field => tableSchema.fieldNames.indexOf(field.name)).toArray
+    val projection =
+      requiredTableFields.map(field => tableSchema.fieldNames.indexOf(field.name)).toArray
     _readBuilder.withProjection(projection)
     if (filters.nonEmpty) {
       val pushedPredicate = PredicateBuilder.and(filters: _*)
@@ -112,12 +113,17 @@ abstract class PaimonBaseScan(
     inputPartitions
   }
 
+  final def partitionType: StructType = {
+    SparkTypeUtils.toSparkPartitionType(table)
+  }
+
   override def readSchema(): StructType = {
-    StructType(tableFields ++ metadataFields)
+    StructType(requiredTableFields ++ metadataFields)
   }
 
   override def toBatch: Batch = {
-    val metadataColumns = metadataFields.map(field => PaimonMetadataColumn.get(field.name))
+    val metadataColumns =
+      metadataFields.map(field => PaimonMetadataColumn.get(field.name, partitionType))
     PaimonBatch(lazyInputPartitions, readBuilder, metadataColumns)
   }
 

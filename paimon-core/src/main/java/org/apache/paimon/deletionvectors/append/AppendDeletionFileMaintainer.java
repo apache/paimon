@@ -36,7 +36,8 @@ import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
  * A maintainer to maintain deletion files for append table, the core methods:
  *
  * <ul>
- *   <li>{@link #notifyDeletionFiles}: Mark the deletion of data files, create new deletion vectors.
+ *   <li>{@link #notifyNewDeletionVector}: Mark the deletion of data files, create new deletion
+ *       vectors.
  *   <li>{@link #persist}: persist deletion files to commit.
  * </ul>
  */
@@ -46,11 +47,11 @@ public interface AppendDeletionFileMaintainer {
 
     int getBucket();
 
-    void notifyDeletionFiles(String dataFile, DeletionVector deletionVector);
+    void notifyNewDeletionVector(String dataFile, DeletionVector deletionVector);
 
     List<IndexManifestEntry> persist();
 
-    static AppendDeletionFileMaintainer forBucketedAppend(
+    static BucketedAppendDeletionFileMaintainer forBucketedAppend(
             IndexFileHandler indexFileHandler,
             @Nullable Long snapshotId,
             BinaryRow partition,
@@ -63,7 +64,7 @@ public interface AppendDeletionFileMaintainer {
         return new BucketedAppendDeletionFileMaintainer(partition, bucket, maintainer);
     }
 
-    static AppendDeletionFileMaintainer forUnawareAppend(
+    static UnawareAppendDeletionFileMaintainer forUnawareAppend(
             IndexFileHandler indexFileHandler, @Nullable Long snapshotId, BinaryRow partition) {
         Map<String, DeletionFile> deletionFiles =
                 indexFileHandler.scanDVIndex(snapshotId, partition, UNAWARE_BUCKET);

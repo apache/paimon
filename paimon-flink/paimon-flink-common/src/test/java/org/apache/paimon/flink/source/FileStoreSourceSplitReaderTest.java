@@ -97,6 +97,35 @@ public class FileStoreSourceSplitReaderTest {
         innerTestOnce(4);
     }
 
+    @Test
+    public void testSplitReaderWakeupAble() throws Exception {
+        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
+        FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(), null);
+
+        List<Tuple2<Long, Long>> input = kvs();
+        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input);
+
+        assignSplit(reader, newSourceSplit("id1", row(1), 0, files, 0));
+        reader.fetch();
+
+        Thread thread =
+                new Thread(
+                        () -> {
+                            try {
+                                // block on object pool
+                                reader.fetch();
+                            } catch (Exception e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
+        thread.start();
+        thread.join(20000);
+        assertThat(thread.isAlive()).isTrue();
+        reader.wakeUp();
+        thread.join(15000);
+        assertThat(thread.isAlive()).isFalse();
+    }
+
     private FileStoreSourceSplitReader createReader(TableRead tableRead, @Nullable Long limit) {
         return new FileStoreSourceSplitReader(
                 tableRead,

@@ -96,7 +96,19 @@ You can create a tag with given name and snapshot ID.
 
 {{< tabs "create-tag" >}}
 
-{{< tab "Flink" >}}
+{{< tab "Flink SQL" >}}
+
+Run the following command:
+
+```sql
+CALL sys.create_tag(`table` => 'database_name.table_name', tag => 'tag_name', [snapshot_id => <snapshot-id>]);
+```
+
+If `snapshot_id` unset, snapshot_id defaults to the latest.
+
+{{< /tab >}}
+
+{{< tab "Flink Action" >}}
 
  Run the following command:
 
@@ -160,7 +172,17 @@ You can delete a tag by its name.
 
 {{< tabs "delete-tag" >}}
 
-{{< tab "Flink" >}}
+{{< tab "Flink SQL" >}}
+
+Run the following command:
+
+```sql
+CALL sys.delete_tag(`table` => 'database_name.table_name', tag => 'tag_name');
+```
+
+{{< /tab >}}
+
+{{< tab "Flink Action" >}}
 
 Run the following command:
 
@@ -211,7 +233,17 @@ the data will be deleted too).
 
 {{< tabs "rollback-to" >}}
 
-{{< tab "Flink" >}}
+{{< tab "Flink SQL" >}}
+
+Run the following command:
+
+```sql
+CALL sys.rollback_to(`table` => 'database_name.table_name', tag => 'tag_name');
+```
+
+{{< /tab >}}
+
+{{< tab "Flink Action" >}}
 
 Run the following command:
 

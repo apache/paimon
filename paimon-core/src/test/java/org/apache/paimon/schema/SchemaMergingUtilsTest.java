@@ -183,6 +183,7 @@ public class SchemaMergingUtilsTest {
         // the element types aren't same, but can be evolved safety.
         DataType t2 = new ArrayType(true, new BigIntType());
         ArrayType r2 = (ArrayType) SchemaMergingUtils.merge(source, t2, highestFieldId, false);
+        assertThat(r2.isNullable()).isFalse();
         assertThat(r2.getElementType() instanceof BigIntType).isTrue();
 
         // the element types aren't same, and can't be evolved safety.
@@ -192,6 +193,7 @@ public class SchemaMergingUtilsTest {
         // the value type of target's isn't same to the source's, but the source type can be cast to
         // the target type explicitly.
         ArrayType r3 = (ArrayType) SchemaMergingUtils.merge(source, t3, highestFieldId, true);
+        assertThat(r3.isNullable()).isFalse();
         assertThat(r3.getElementType() instanceof SmallIntType).isTrue();
     }
 
@@ -211,6 +213,7 @@ public class SchemaMergingUtilsTest {
         // the value type of target's isn't same to the source's, but can be evolved safety.
         DataType t2 = new MapType(new VarCharType(VarCharType.MAX_LENGTH), new DoubleType());
         MapType r2 = (MapType) SchemaMergingUtils.merge(source, t2, highestFieldId, false);
+        assertThat(r2.isNullable()).isTrue();
         assertThat(r2.getKeyType() instanceof VarCharType).isTrue();
         assertThat(r2.getValueType() instanceof DoubleType).isTrue();
 
@@ -221,6 +224,7 @@ public class SchemaMergingUtilsTest {
         // the value type of target's isn't same to the source's, but the source type can be cast to
         // the target type explicitly.
         MapType r3 = (MapType) SchemaMergingUtils.merge(source, t3, highestFieldId, true);
+        assertThat(r3.isNullable()).isTrue();
         assertThat(r3.getKeyType() instanceof VarCharType).isTrue();
         assertThat(r3.getValueType() instanceof SmallIntType).isTrue();
     }
@@ -242,6 +246,7 @@ public class SchemaMergingUtilsTest {
         DataType t2 = new MultisetType(true, new BigIntType());
         MultisetType r2 =
                 (MultisetType) SchemaMergingUtils.merge(source, t2, highestFieldId, false);
+        assertThat(r2.isNullable()).isFalse();
         assertThat(r2.getElementType() instanceof BigIntType).isTrue();
 
         // the element types aren't same, and can't be evolved safety.
@@ -251,6 +256,7 @@ public class SchemaMergingUtilsTest {
         // the value type of target's isn't same to the source's, but the source type can be cast to
         // the target type explicitly.
         MultisetType r3 = (MultisetType) SchemaMergingUtils.merge(source, t3, highestFieldId, true);
+        assertThat(r3.isNullable()).isFalse();
         assertThat(r3.getElementType() instanceof SmallIntType).isTrue();
     }
 
@@ -266,9 +272,23 @@ public class SchemaMergingUtilsTest {
         assertThat(r1.getScale()).isEqualTo(DecimalType.DEFAULT_SCALE);
 
         DataType s2 = new DecimalType(5, 2);
-        DataType t2 = new DecimalType(7, 2);
+        DataType t2 = new DecimalType(7, 3);
         assertThatThrownBy(() -> SchemaMergingUtils.merge(s2, t2, highestFieldId, false))
                 .isInstanceOf(UnsupportedOperationException.class);
+
+        DataType s3 = new DecimalType(false, 5, 2);
+        DataType t3 = new DecimalType(7, 2);
+        DecimalType r3 = (DecimalType) SchemaMergingUtils.merge(s3, t3, highestFieldId, false);
+        assertThat(r3.isNullable()).isFalse();
+        assertThat(r3.getPrecision()).isEqualTo(7);
+        assertThat(r3.getScale()).isEqualTo(2);
+
+        DataType s4 = new DecimalType(7, 2);
+        DataType t4 = new DecimalType(5, 2);
+        DecimalType r4 = (DecimalType) SchemaMergingUtils.merge(s4, t4, highestFieldId, false);
+        assertThat(r4.isNullable()).isTrue();
+        assertThat(r4.getPrecision()).isEqualTo(7);
+        assertThat(r4.getScale()).isEqualTo(2);
 
         // DecimalType -> Other Numeric Type
         DataType dcmSource = new DecimalType();

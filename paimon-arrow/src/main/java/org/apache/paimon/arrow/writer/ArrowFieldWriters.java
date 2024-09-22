@@ -492,9 +492,17 @@ public class ArrowFieldWriters {
 
         private final ArrowFieldWriter elementWriter;
 
+        private int offset;
+
         public ArrayWriter(FieldVector fieldVector, ArrowFieldWriter elementWriter) {
             super(fieldVector);
             this.elementWriter = elementWriter;
+        }
+
+        @Override
+        public void reset() {
+            fieldVector.reset();
+            offset = 0;
         }
 
         @Override
@@ -550,13 +558,12 @@ public class ArrowFieldWriters {
         protected void doWrite(int rowIndex, DataGetters getters, int pos) {
             InternalArray array = getters.getArray(pos);
             ListVector listVector = (ListVector) fieldVector;
-            FieldVector dataVector = listVector.getDataVector();
             listVector.startNewValue(rowIndex);
-            int offset = dataVector.getValueCount();
             for (int arrIndex = 0; arrIndex < array.size(); arrIndex++) {
                 int fieldIndex = offset + arrIndex;
                 elementWriter.write(fieldIndex, array, arrIndex);
             }
+            offset += array.size();
             listVector.endValue(rowIndex, array.size());
         }
     }
@@ -567,11 +574,19 @@ public class ArrowFieldWriters {
         private final ArrowFieldWriter keyWriter;
         private final ArrowFieldWriter valueWriter;
 
+        private int offset;
+
         public MapWriter(
                 FieldVector fieldVector, ArrowFieldWriter keyWriter, ArrowFieldWriter valueWriter) {
             super(fieldVector);
             this.keyWriter = keyWriter;
             this.valueWriter = valueWriter;
+        }
+
+        @Override
+        public void reset() {
+            fieldVector.reset();
+            offset = 0;
         }
 
         @Override
@@ -643,13 +658,13 @@ public class ArrowFieldWriters {
             StructVector structVector = (StructVector) mapVector.getDataVector();
 
             mapVector.startNewValue(rowIndex);
-            int offset = structVector.getValueCount();
             for (int mapIndex = 0; mapIndex < map.size(); mapIndex++) {
                 int fieldIndex = offset + mapIndex;
                 keyWriter.write(fieldIndex, keyArray, mapIndex);
                 valueWriter.write(fieldIndex, valueArray, mapIndex);
                 structVector.setIndexDefined(fieldIndex);
             }
+            offset += map.size();
             mapVector.endValue(rowIndex, map.size());
         }
     }

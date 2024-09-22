@@ -160,6 +160,13 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon DDL: create table without using paimon") {
+    withTable("paimon_tbl") {
+      sql("CREATE TABLE paimon_tbl (id int)")
+      assert(loadTable("paimon_tbl").options().get("provider").equals("paimon"))
+    }
+  }
+
   fileFormats.foreach {
     format =>
       test(s"Paimon DDL: create table with char/varchar/string, file.format: $format") {
@@ -190,7 +197,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
           )
 
           // check select
-          if (!gteqSpark3_4) {
+          if (format == "orc" && !gteqSpark3_4) {
             // Orc reader will right trim the char type, e.g. "Friday   " => "Friday" (see orc's `CharTreeReader`)
             // and Spark has a conf `spark.sql.readSideCharPadding` to auto padding char only since 3.4 (default true)
             // So when using orc with Spark3.4-, here will return "Friday"
@@ -224,6 +231,40 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
           )
         }
       }
+  }
+
+  test("Paimon DDL: write with char") {
+    withTable("paimon_tbl") {
+      spark.sql(s"""
+                   |CREATE TABLE paimon_tbl (id int, c char(6))
+                   |USING PAIMON
+                   |""".stripMargin)
+
+      withSQLConf("spark.sql.legacy.charVarcharAsString" -> "true") {
+        sql("INSERT INTO paimon_tbl VALUES (1, 'ab')")
+      }
+
+      withSQLConf("spark.sql.legacy.charVarcharAsString" -> "false") {
+        sql("INSERT INTO paimon_tbl VALUES (2, 'ab')")
+      }
+
+      if (gteqSpark3_4) {
+        withSQLConf("spark.sql.readSideCharPadding" -> "true") {
+          checkAnswer(
+            spark.sql("SELECT c FROM paimon_tbl ORDER BY id"),
+            Row("ab    ") :: Row("ab    ") :: Nil)
+        }
+        withSQLConf("spark.sql.readSideCharPadding" -> "false") {
+          checkAnswer(
+            spark.sql("SELECT c FROM paimon_tbl ORDER BY id"),
+            Row("ab") :: Row("ab    ") :: Nil)
+        }
+      } else {
+        checkAnswer(
+          spark.sql("SELECT c FROM paimon_tbl ORDER BY id"),
+          Row("ab") :: Row("ab    ") :: Nil)
+      }
+    }
   }
 
   test("Paimon DDL: create table with timestamp/timestamp_ntz") {

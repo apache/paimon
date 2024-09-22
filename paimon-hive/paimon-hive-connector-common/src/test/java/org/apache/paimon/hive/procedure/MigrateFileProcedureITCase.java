@@ -32,12 +32,15 @@ import org.apache.hadoop.hive.conf.HiveConf;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.stream.Stream;
 
 /** Tests for {@link MigrateFileProcedure}. */
 public class MigrateFileProcedureITCase extends ActionITCaseBase {
@@ -56,25 +59,24 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
         TEST_HIVE_METASTORE.stop();
     }
 
-    @Test
-    public void testOrc() throws Exception {
-        test("orc");
-        testMigrateFileAction("orc");
+    private static Stream<Arguments> testArguments() {
+        return Stream.of(
+                Arguments.of("orc", true),
+                Arguments.of("avro", true),
+                Arguments.of("parquet", true),
+                Arguments.of("orc", false),
+                Arguments.of("avro", false),
+                Arguments.of("parquet", false));
     }
 
-    @Test
-    public void testAvro() throws Exception {
-        test("avro");
-        testMigrateFileAction("avro");
+    @ParameterizedTest
+    @MethodSource("testArguments")
+    public void testMigrateFile(String format, boolean isNamedArgument) throws Exception {
+        test(format, isNamedArgument);
+        testMigrateFileAction(format, isNamedArgument);
     }
 
-    @Test
-    public void testParquet() throws Exception {
-        test("parquet");
-        testMigrateFileAction("parquet");
-    }
-
-    public void test(String format) throws Exception {
+    public void test(String format, boolean isNamedArgument) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
@@ -99,14 +101,21 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
         tEnv.useCatalog("PAIMON");
         tEnv.executeSql(
                 "CREATE TABLE paimontable (id STRING, id2 INT, id3 INT) PARTITIONED BY (id2, id3) with ('bucket' = '-1');");
-        tEnv.executeSql("CALL sys.migrate_file('hive', 'default.hivetable', 'default.paimontable')")
-                .await();
+        if (isNamedArgument) {
+            tEnv.executeSql(
+                            "CALL sys.migrate_file(connector => 'hive', source_table => 'default.hivetable', target_table => 'default.paimontable')")
+                    .await();
+        } else {
+            tEnv.executeSql(
+                            "CALL sys.migrate_file('hive', 'default.hivetable', 'default.paimontable')")
+                    .await();
+        }
         List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM paimontable").collect());
 
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
-    public void testMigrateFileAction(String format) throws Exception {
+    public void testMigrateFileAction(String format, boolean isNamedArgument) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
@@ -137,9 +146,16 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
                 "CREATE TABLE paimontable01 (id STRING, id2 INT, id3 INT) PARTITIONED BY (id2, id3) with ('bucket' = '-1');");
         tEnv.executeSql(
                 "CREATE TABLE paimontable02 (id STRING, id2 INT, id3 INT) PARTITIONED BY (id2, id3) with ('bucket' = '-1');");
-        tEnv.executeSql(
-                        "CALL sys.migrate_file('hive', 'default.hivetable01', 'default.paimontable01', false)")
-                .await();
+
+        if (isNamedArgument) {
+            tEnv.executeSql(
+                            "CALL sys.migrate_file(connector => 'hive', source_table => 'default.hivetable01', target_table => 'default.paimontable01', delete_origin => false)")
+                    .await();
+        } else {
+            tEnv.executeSql(
+                            "CALL sys.migrate_file('hive', 'default.hivetable01', 'default.paimontable01', false)")
+                    .await();
+        }
 
         tEnv.useCatalog("PAIMON_GE");
         Map<String, String> catalogConf = new HashMap<>();
@@ -153,7 +169,8 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
                         "default.paimontable02",
                         false,
                         catalogConf,
-                        "");
+                        "",
+                        6);
         migrateFileAction.run();
 
         tEnv.useCatalog("HIVE");

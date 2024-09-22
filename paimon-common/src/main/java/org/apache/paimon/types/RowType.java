@@ -132,6 +132,11 @@ public final class RowType extends DataType {
     }
 
     @Override
+    public int defaultSize() {
+        return fields.stream().mapToInt(f -> f.type().defaultSize()).sum();
+    }
+
+    @Override
     public DataType copy(boolean isNullable) {
         return new RowType(
                 isNullable, fields.stream().map(DataField::copy).collect(Collectors.toList()));

@@ -20,10 +20,11 @@ package org.apache.paimon.format.avro;
 
 import org.apache.avro.file.DataFileWriter;
 
+import java.io.Closeable;
 import java.io.IOException;
 
 /** A simple writer implementation that wraps an Avro {@link DataFileWriter}. */
-public class AvroBulkWriter<T> {
+public class AvroBulkWriter<T> implements Closeable {
 
     /** The underlying Avro writer. */
     private final DataFileWriter<T> dataFileWriter;
@@ -45,7 +46,8 @@ public class AvroBulkWriter<T> {
         dataFileWriter.flush();
     }
 
-    public void finish() throws IOException {
+    @Override
+    public void close() throws IOException {
         dataFileWriter.close();
     }
 }

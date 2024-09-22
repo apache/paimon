@@ -32,6 +32,6 @@ public class AvroFormatReadWriteTest extends FormatReadWriteTest {
 
     @Override
     protected FileFormat fileFormat() {
-        return new AvroFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024));
+        return new AvroFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
     }
 }

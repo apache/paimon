@@ -47,6 +47,16 @@ public abstract class CompactTask implements Callable<CompactResult> {
         try {
             long startMillis = System.currentTimeMillis();
             CompactResult result = doCompact();
+
+            MetricUtils.safeCall(
+                    () -> {
+                        if (metricsReporter != null) {
+                            metricsReporter.reportCompactionTime(
+                                    System.currentTimeMillis() - startMillis);
+                        }
+                    },
+                    LOG);
+
             if (LOG.isDebugEnabled()) {
                 logMetric(startMillis, result.before(), result.after());
             }

@@ -21,6 +21,7 @@ package org.apache.paimon.format;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.AppendOnlyWriter;
 import org.apache.paimon.append.BucketedAppendCompactManager;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.disk.IOManager;
@@ -65,7 +66,11 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
         assertThat(path.toString().endsWith(format)).isTrue();
 
         DataFilePathFactory dataFilePathFactory =
-                new DataFilePathFactory(new Path(tempDir + "/dt=1/bucket-1"), format);
+                new DataFilePathFactory(
+                        new Path(tempDir + "/dt=1/bucket-1"),
+                        format,
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue());
         FileFormat fileFormat = FileFormat.fromIdentifier(format, new Options());
         LinkedList<DataFileMeta> toCompact = new LinkedList<>();
         CoreOptions options = new CoreOptions(new HashMap<>());
@@ -79,7 +84,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         SCHEMA,
                         0,
                         new BucketedAppendCompactManager(
-                                null, toCompact, 4, 10, 10, null, null), // not used
+                                null, toCompact, null, 4, 10, 10, null, null), // not used
                         null,
                         false,
                         dataFilePathFactory,
@@ -87,7 +92,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         false,
                         false,
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
-                        CoreOptions.SPILL_COMPRESSION.defaultValue(),
+                        CompressOptions.defaultOptions(),
                         StatsCollectorFactories.createStatsFactories(
                                 options, SCHEMA.getFieldNames()),
                         MemorySize.MAX_VALUE,

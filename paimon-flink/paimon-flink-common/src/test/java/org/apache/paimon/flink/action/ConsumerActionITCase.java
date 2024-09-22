@@ -27,13 +27,13 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
@@ -43,8 +43,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** IT cases for consumer management actions. */
 public class ConsumerActionITCase extends ActionITCaseBase {
 
-    @Test
-    public void testResetConsumer() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    public void testResetConsumer(String invoker) throws Exception {
         init(warehouse);
 
         RowType rowType =
@@ -99,30 +100,55 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                         "--next_snapshot",
                         "1");
         // reset consumer
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            createAction(ResetConsumerAction.class, args).run();
-        } else {
-            callProcedure(
-                    String.format(
-                            "CALL sys.reset_consumer('%s.%s', 'myid', 1)", database, tableName));
+        switch (invoker) {
+            case "action":
+                createAction(ResetConsumerAction.class, args).run();
+                break;
+            case "procedure_indexed":
+                executeSQL(
+                        String.format(
+                                "CALL sys.reset_consumer('%s.%s', 'myid', 1)",
+                                database, tableName));
+                break;
+            case "procedure_named":
+                executeSQL(
+                        String.format(
+                                "CALL sys.reset_consumer(`table` => '%s.%s', consumer_id => 'myid', next_snapshot_id => cast(1 as bigint))",
+                                database, tableName));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
         }
         Optional<Consumer> consumer2 = consumerManager.consumer("myid");
         assertThat(consumer2).isPresent();
         assertThat(consumer2.get().nextSnapshot()).isEqualTo(1);
 
         // delete consumer
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            createAction(ResetConsumerAction.class, args.subList(0, 9)).run();
-        } else {
-            callProcedure(
-                    String.format("CALL sys.reset_consumer('%s.%s', 'myid')", database, tableName));
+        switch (invoker) {
+            case "action":
+                createAction(ResetConsumerAction.class, args.subList(0, 9)).run();
+                break;
+            case "procedure_indexed":
+                executeSQL(
+                        String.format(
+                                "CALL sys.reset_consumer('%s.%s', 'myid')", database, tableName));
+                break;
+            case "procedure_named":
+                executeSQL(
+                        String.format(
+                                "CALL sys.reset_consumer(`table` => '%s.%s', consumer_id => 'myid')",
+                                database, tableName));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
         }
         Optional<Consumer> consumer3 = consumerManager.consumer("myid");
         assertThat(consumer3).isNotPresent();
     }
 
-    @Test
-    public void testResetBranchConsumer() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    public void testResetBranchConsumer(String invoker) throws Exception {
         init(warehouse);
 
         RowType rowType =
@@ -182,25 +208,48 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                         "--next_snapshot",
                         "1");
         // reset consumer
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            createAction(ResetConsumerAction.class, args).run();
-        } else {
-            callProcedure(
-                    String.format(
-                            "CALL sys.reset_consumer('%s.%s', 'myid', 1)",
-                            database, branchTableName));
+        switch (invoker) {
+            case "action":
+                createAction(ResetConsumerAction.class, args).run();
+                break;
+            case "procedure_indexed":
+                executeSQL(
+                        String.format(
+                                "CALL sys.reset_consumer('%s.%s', 'myid', 1)",
+                                database, branchTableName));
+                break;
+            case "procedure_named":
+                executeSQL(
+                        String.format(
+                                "CALL sys.reset_consumer(`table` => '%s.%s', consumer_id => 'myid', next_snapshot_id => cast(1 as bigint))",
+                                database, branchTableName));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
         }
         Optional<Consumer> consumer2 = consumerManager.consumer("myid");
         assertThat(consumer2).isPresent();
         assertThat(consumer2.get().nextSnapshot()).isEqualTo(1);
 
         // delete consumer
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            createAction(ResetConsumerAction.class, args.subList(0, 9)).run();
-        } else {
-            callProcedure(
-                    String.format(
-                            "CALL sys.reset_consumer('%s.%s', 'myid')", database, branchTableName));
+        switch (invoker) {
+            case "action":
+                createAction(ResetConsumerAction.class, args.subList(0, 9)).run();
+                break;
+            case "procedure_indexed":
+                executeSQL(
+                        String.format(
+                                "CALL sys.reset_consumer('%s.%s', 'myid')",
+                                database, branchTableName));
+                break;
+            case "procedure_named":
+                executeSQL(
+                        String.format(
+                                "CALL sys.reset_consumer(`table` => '%s.%s', consumer_id => 'myid')",
+                                database, branchTableName));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
         }
         Optional<Consumer> consumer3 = consumerManager.consumer("myid");
         assertThat(consumer3).isNotPresent();

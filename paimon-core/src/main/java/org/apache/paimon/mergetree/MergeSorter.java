@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.compression.BlockCompressionFactory;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
@@ -63,7 +64,7 @@ public class MergeSorter {
 
     private final SortEngine sortEngine;
     private final int spillThreshold;
-    private final String compression;
+    private final CompressOptions compression;
 
     private final MemorySegmentPool memoryPool;
 
@@ -76,7 +77,7 @@ public class MergeSorter {
             @Nullable IOManager ioManager) {
         this.sortEngine = options.sortEngine();
         this.spillThreshold = options.sortSpillThreshold();
-        this.compression = options.spillCompression();
+        this.compression = options.spillCompressOptions();
         this.keyType = keyType;
         this.valueType = valueType;
         this.memoryPool =

@@ -54,13 +54,11 @@ public class OrcBulkWriter implements FormatWriter {
     public void addElement(InternalRow element) throws IOException {
         vectorizer.vectorize(element, rowBatch);
         if (rowBatch.size == rowBatch.getMaxSize()) {
-            writer.addRowBatch(rowBatch);
-            rowBatch.reset();
+            flush();
         }
     }
 
-    @Override
-    public void flush() throws IOException {
+    private void flush() throws IOException {
         if (rowBatch.size != 0) {
             writer.addRowBatch(rowBatch);
             rowBatch.reset();
@@ -68,7 +66,7 @@ public class OrcBulkWriter implements FormatWriter {
     }
 
     @Override
-    public void finish() throws IOException {
+    public void close() throws IOException {
         flush();
         writer.close();
     }

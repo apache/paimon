@@ -18,7 +18,6 @@
 
 package org.apache.paimon.format.orc;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;
@@ -43,7 +42,6 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 
-import static org.apache.paimon.format.OrcOptions.ORC_WRITE_BATCH_SIZE;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
@@ -58,7 +56,7 @@ public class OrcWriterFactory implements FormatWriterFactory {
     private final Map<String, String> confMap;
 
     private OrcFile.WriterOptions writerOptions;
-    private final CoreOptions coreOptions;
+    private final int writeBatchSize;
 
     /**
      * Creates a new OrcBulkWriterFactory using the provided Vectorizer implementation.
@@ -66,18 +64,9 @@ public class OrcWriterFactory implements FormatWriterFactory {
      * @param vectorizer The vectorizer implementation to convert input record to a
      *     VectorizerRowBatch.
      */
-    public OrcWriterFactory(Vectorizer<InternalRow> vectorizer) {
-        this(vectorizer, new Configuration());
-    }
-
-    /**
-     * Creates a new OrcBulkWriterFactory using the provided Vectorizer, Hadoop Configuration.
-     *
-     * @param vectorizer The vectorizer implementation to convert input record to a
-     *     VectorizerRowBatch.
-     */
-    public OrcWriterFactory(Vectorizer<InternalRow> vectorizer, Configuration configuration) {
-        this(vectorizer, new Properties(), configuration);
+    @VisibleForTesting
+    OrcWriterFactory(Vectorizer<InternalRow> vectorizer) {
+        this(vectorizer, new Properties(), new Configuration(), 1024);
     }
 
     /**
@@ -91,7 +80,8 @@ public class OrcWriterFactory implements FormatWriterFactory {
     public OrcWriterFactory(
             Vectorizer<InternalRow> vectorizer,
             Properties writerProperties,
-            Configuration configuration) {
+            Configuration configuration,
+            int writeBatchSize) {
         this.vectorizer = checkNotNull(vectorizer);
         this.writerProperties = checkNotNull(writerProperties);
         this.confMap = new HashMap<>();
@@ -100,7 +90,7 @@ public class OrcWriterFactory implements FormatWriterFactory {
         for (Map.Entry<String, String> entry : configuration) {
             confMap.put(entry.getKey(), entry.getValue());
         }
-        coreOptions = new CoreOptions(this.confMap);
+        this.writeBatchSize = writeBatchSize;
     }
 
     @Override
@@ -127,10 +117,7 @@ public class OrcWriterFactory implements FormatWriterFactory {
         // the key of writer in the ORC memory manager, thus we need to make it unique.
         Path unusedPath = new Path(UUID.randomUUID().toString());
         return new OrcBulkWriter(
-                vectorizer,
-                new WriterImpl(null, unusedPath, opts),
-                out,
-                coreOptions.toConfiguration().get(ORC_WRITE_BATCH_SIZE));
+                vectorizer, new WriterImpl(null, unusedPath, opts), out, writeBatchSize);
     }
 
     @VisibleForTesting

@@ -131,6 +131,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final List<CommitCallback> commitCallbacks;
     private final StatsFileHandler statsFileHandler;
     private final BucketMode bucketMode;
+    private final int commitMaxRetries;
 
     @Nullable private Lock lock;
     private boolean ignoreEmptyCommit;
@@ -159,7 +160,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             StatsFileHandler statsFileHandler,
             BucketMode bucketMode,
             @Nullable Integer manifestReadParallelism,
-            List<CommitCallback> commitCallbacks) {
+            List<CommitCallback> commitCallbacks,
+            int commitMaxRetries) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.commitUser = commitUser;
@@ -180,6 +182,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.branchName = branchName;
         this.manifestReadParallelism = manifestReadParallelism;
         this.commitCallbacks = commitCallbacks;
+        this.commitMaxRetries = commitMaxRetries;
 
         this.lock = null;
         this.ignoreEmptyCommit = true;
@@ -712,6 +715,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
             cnt++;
+            if (cnt >= commitMaxRetries) {
+                throw new RuntimeException(
+                        String.format(
+                                "Commit failed after %s attempts, there maybe exist commit conflicts between multiple jobs.",
+                                commitMaxRetries));
+            }
             if (tryCommitOnce(
                     tableFiles,
                     changelogFiles,
@@ -742,6 +751,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
 
             cnt++;
+            if (cnt >= commitMaxRetries) {
+                throw new RuntimeException(
+                        String.format(
+                                "Commit failed after %s attempts, there maybe exist commit conflicts between multiple jobs.",
+                                commitMaxRetries));
+            }
             List<ManifestEntry> changesWithOverwrite = new ArrayList<>();
             List<IndexManifestEntry> indexChangesWithOverwrite = new ArrayList<>();
             if (latestSnapshot != null) {
@@ -805,6 +820,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             ConflictCheck conflictCheck,
             String branchName,
             @Nullable String newStatsFileName) {
+        long startMillis = System.currentTimeMillis();
         long newSnapshotId =
                 latestSnapshot == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshot.id() + 1;
         Path newSnapshotPath =
@@ -1007,17 +1023,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 identifier,
                                 commitKind.name()));
             }
-            commitCallbacks.forEach(callback -> callback.call(tableFiles, identifier, watermark));
+            commitCallbacks.forEach(callback -> callback.call(tableFiles, newSnapshot));
             return true;
         }
 
         // atomic rename fails, clean up and try again
+        long commitTime = (System.currentTimeMillis() - startMillis) / 1000;
         LOG.warn(
                 String.format(
                         "Atomic commit failed for snapshot #%d (path %s) by user %s "
-                                + "with identifier %s and kind %s. "
+                                + "with identifier %s and kind %s after %s seconds. "
                                 + "Clean up and try again.",
-                        newSnapshotId, newSnapshotPath, commitUser, identifier, commitKind.name()));
+                        newSnapshotId,
+                        newSnapshotPath,
+                        commitUser,
+                        identifier,
+                        commitKind.name(),
+                        commitTime));
         cleanUpTmpManifests(
                 previousChangesListName,
                 newChangesListName,

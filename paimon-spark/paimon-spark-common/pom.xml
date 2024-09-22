@@ -25,7 +25,7 @@ under the License.
     <parent>
         <artifactId>paimon-spark</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>0.9-SNAPSHOT</version>
+        <version>1.0-SNAPSHOT</version>
     </parent>
 
     <packaging>jar</packaging>
@@ -34,7 +34,7 @@ under the License.
     <name>Paimon : Spark : Common</name>
 
     <properties>
-        <spark.version>3.5.2</spark.version>
+        <spark.version>3.5.3</spark.version>
     </properties>
 
     <dependencies>

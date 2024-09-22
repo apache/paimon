@@ -37,9 +37,9 @@ import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
-import org.apache.spark.sql.catalyst.plans.logical.{Filter => FilterLogicalNode, LogicalPlan, Project}
+import org.apache.spark.sql.catalyst.plans.logical.{Filter => FilterLogicalNode, LogicalPlan}
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
-import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, Filter}
+import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, EqualTo, Filter}
 
 import java.net.URI
 import java.util.Collections
@@ -58,23 +58,20 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
     filters.length == 1 && filters.head.isInstanceOf[AlwaysTrue]
   }
 
-  /**
-   * For the 'INSERT OVERWRITE T PARTITION (partitionVal, ...)' semantics of SQL, Spark will
-   * transform `partitionVal`s to EqualNullSafe Filters.
-   */
-  def convertFilterToMap(filter: Filter, partitionRowType: RowType): Map[String, String] = {
+  /** See [[ org.apache.paimon.spark.SparkWriteBuilder#failIfCanNotOverwrite]] */
+  def convertPartitionFilterToMap(
+      filter: Filter,
+      partitionRowType: RowType): Map[String, String] = {
     val converter = new SparkFilterConverter(partitionRowType)
     splitConjunctiveFilters(filter).map {
       case EqualNullSafe(attribute, value) =>
-        if (isNestedFilterInValue(value)) {
-          throw new RuntimeException(
-            s"Not support the complex partition value in EqualNullSafe when run `INSERT OVERWRITE`.")
-        } else {
-          (attribute, converter.convertLiteral(attribute, value).toString)
-        }
+        (attribute, converter.convertString(attribute, value))
+      case EqualTo(attribute, value) =>
+        (attribute, converter.convertString(attribute, value))
       case _ =>
+        // Should not happen
         throw new RuntimeException(
-          s"Only EqualNullSafe should be used when run `INSERT OVERWRITE`.")
+          s"Only support Overwrite filters with Equal and EqualNullSafe, but got: $filter")
     }.toMap
   }
 
@@ -84,10 +81,6 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
         splitConjunctiveFilters(filter1) ++ splitConjunctiveFilters(filter2)
       case other => other :: Nil
     }
-  }
-
-  private def isNestedFilterInValue(value: Any): Boolean = {
-    value.isInstanceOf[Filter]
   }
 
   /** Gets a relative path against the table path. */
@@ -172,16 +165,33 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
       condition: Expression,
       relation: DataSourceV2Relation,
       sparkSession: SparkSession): Dataset[SparkDeletionVectors] = {
+    val metadataCols = Seq(FILE_PATH, ROW_INDEX)
+    val filteredRelation = createNewScanPlan(candidateDataSplits, condition, relation, metadataCols)
+    val dataWithMetadataColumns = createDataset(sparkSession, filteredRelation)
+    collectDeletionVectors(dataFilePathToMeta, dataWithMetadataColumns, sparkSession)
+  }
+
+  protected def collectDeletionVectors(
+      dataFilePathToMeta: Map[String, SparkDataFileMeta],
+      dataWithMetadataColumns: Dataset[Row],
+      sparkSession: SparkSession): Dataset[SparkDeletionVectors] = {
     import sparkSession.implicits._
+
+    val resolver = sparkSession.sessionState.conf.resolver
+    Seq(FILE_PATH_COLUMN, ROW_INDEX_COLUMN).foreach {
+      metadata =>
+        dataWithMetadataColumns.schema
+          .find(field => resolver(field.name, metadata))
+          .orElse(throw new RuntimeException(
+            "This input dataset doesn't contains the required metadata columns: __paimon_file_path and __paimon_row_index."))
+    }
 
     val dataFileToPartitionAndBucket =
       dataFilePathToMeta.mapValues(meta => (meta.partition, meta.bucket)).toArray
-    val metadataCols = Seq(FILE_PATH, ROW_INDEX)
-    val filteredRelation = createNewScanPlan(candidateDataSplits, condition, relation, metadataCols)
 
     val my_table = table
     val location = my_table.location
-    createDataset(sparkSession, filteredRelation)
+    dataWithMetadataColumns
       .select(FILE_PATH_COLUMN, ROW_INDEX_COLUMN)
       .as[(String, Long)]
       .groupByKey(_._1)
@@ -208,7 +218,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
       }
   }
 
-  private def createNewScanPlan(
+  protected def createNewScanPlan(
       candidateDataSplits: Seq[DataSplit],
       condition: Expression,
       relation: DataSourceV2Relation,
@@ -216,11 +226,9 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
     val metadataProj = metadataCols.map(_.toAttribute)
     val newRelation = relation.copy(output = relation.output ++ metadataProj)
     val scan = PaimonSplitScan(table, candidateDataSplits.toArray, metadataCols)
-    Project(
-      metadataProj,
-      FilterLogicalNode(
-        condition,
-        Compatibility.createDataSourceV2ScanRelation(newRelation, scan, newRelation.output)))
+    FilterLogicalNode(
+      condition,
+      Compatibility.createDataSourceV2ScanRelation(newRelation, scan, newRelation.output))
 
   }
 

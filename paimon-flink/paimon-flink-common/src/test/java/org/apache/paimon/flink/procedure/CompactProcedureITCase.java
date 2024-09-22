@@ -153,6 +153,48 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
         select.close();
     }
 
+    @Test
+    public void testHistoryPartitionCompact() throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " k INT,"
+                        + " v INT,"
+                        + " hh INT,"
+                        + " dt STRING,"
+                        + " PRIMARY KEY (k, dt, hh) NOT ENFORCED"
+                        + ") PARTITIONED BY (dt, hh) WITH ("
+                        + " 'write-only' = 'true',"
+                        + " 'bucket' = '1'"
+                        + ")");
+        FileStoreTable table = paimonTable("T");
+
+        sql(
+                "INSERT INTO T VALUES (1, 100, 15, '20221208'), (1, 100, 16, '20221208'), (1, 100, 15, '20221209')");
+        sql(
+                "INSERT INTO T VALUES (2, 100, 15, '20221208'), (2, 100, 16, '20221208'), (2, 100, 15, '20221209')");
+
+        Thread.sleep(5000);
+        sql("INSERT INTO T VALUES (3, 100, 16, '20221208')");
+
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+
+        sql("CALL sys.compact(`table` => 'default.T', partition_idle_time => '5s')");
+
+        checkLatestSnapshot(table, 4, Snapshot.CommitKind.COMPACT);
+
+        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+        assertThat(splits.size()).isEqualTo(3);
+        for (DataSplit split : splits) {
+            if (split.partition().getInt(1) == 15) {
+                // compacted
+                assertThat(split.dataFiles().size()).isEqualTo(1);
+            } else {
+                // not compacted
+                assertThat(split.dataFiles().size()).isEqualTo(3);
+            }
+        }
+    }
+
     // ----------------------- Sort Compact -----------------------
 
     @Test

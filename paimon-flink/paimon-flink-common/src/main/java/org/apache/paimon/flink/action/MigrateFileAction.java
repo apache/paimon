@@ -32,6 +32,7 @@ public class MigrateFileAction extends ActionBase {
     private final String targetTable;
     private final String tableProperties;
     private boolean deleteOrigin;
+    private Integer parallelism;
 
     public MigrateFileAction(
             String connector,
@@ -40,13 +41,15 @@ public class MigrateFileAction extends ActionBase {
             String targetTable,
             boolean deleteOrigin,
             Map<String, String> catalogConfig,
-            String tableProperties) {
+            String tableProperties,
+            Integer parallelism) {
         super(warehouse, catalogConfig);
         this.connector = connector;
         this.sourceTable = sourceTable;
         this.targetTable = targetTable;
         this.deleteOrigin = deleteOrigin;
         this.tableProperties = tableProperties;
+        this.parallelism = parallelism;
     }
 
     @Override
@@ -58,6 +61,7 @@ public class MigrateFileAction extends ActionBase {
                 connector,
                 sourceTable,
                 targetTable,
-                deleteOrigin);
+                deleteOrigin,
+                parallelism);
     }
 }

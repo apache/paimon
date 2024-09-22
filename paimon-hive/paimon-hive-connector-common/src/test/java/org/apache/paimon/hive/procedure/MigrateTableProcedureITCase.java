@@ -32,14 +32,16 @@ import org.apache.hadoop.hive.conf.HiveConf;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.stream.Stream;
 
 /** Tests for {@link MigrateFileProcedure}. */
 public class MigrateTableProcedureITCase extends ActionITCaseBase {
@@ -58,25 +60,22 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
         TEST_HIVE_METASTORE.stop();
     }
 
-    @Test
-    public void testOrc() throws Exception {
-        testUpgradeNonPartitionTable("orc");
-        resetMetastore();
-        testUpgradePartitionTable("orc");
+    private static Stream<Arguments> testArguments() {
+        return Stream.of(
+                Arguments.of("orc", true),
+                Arguments.of("avro", true),
+                Arguments.of("parquet", true),
+                Arguments.of("orc", false),
+                Arguments.of("avro", false),
+                Arguments.of("parquet", false));
     }
 
-    @Test
-    public void testAvro() throws Exception {
-        testUpgradeNonPartitionTable("avro");
+    @ParameterizedTest
+    @MethodSource("testArguments")
+    public void testMigrateProcedure(String format, boolean isNamedArgument) throws Exception {
+        testUpgradeNonPartitionTable(format, isNamedArgument);
         resetMetastore();
-        testUpgradePartitionTable("avro");
-    }
-
-    @Test
-    public void testParquet() throws Exception {
-        testUpgradeNonPartitionTable("parquet");
-        resetMetastore();
-        testUpgradePartitionTable("parquet");
+        testUpgradePartitionTable(format, isNamedArgument);
     }
 
     private void resetMetastore() throws Exception {
@@ -85,7 +84,7 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
         TEST_HIVE_METASTORE.start(PORT);
     }
 
-    public void testUpgradePartitionTable(String format) throws Exception {
+    public void testUpgradePartitionTable(String format, boolean isNamedArgument) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
@@ -108,17 +107,26 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
                         + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
                         + "')");
         tEnv.useCatalog("PAIMON");
-        tEnv.executeSql(
-                        "CALL sys.migrate_table('hive', 'default.hivetable', 'file.format="
-                                + format
-                                + "')")
-                .await();
+        if (isNamedArgument) {
+            tEnv.executeSql(
+                            "CALL sys.migrate_table(connector => 'hive', source_table => 'default.hivetable', options => 'file.format="
+                                    + format
+                                    + "')")
+                    .await();
+        } else {
+            tEnv.executeSql(
+                            "CALL sys.migrate_table('hive', 'default.hivetable', 'file.format="
+                                    + format
+                                    + "')")
+                    .await();
+        }
         List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
 
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
-    public void testUpgradeNonPartitionTable(String format) throws Exception {
+    public void testUpgradeNonPartitionTable(String format, boolean isNamedArgument)
+            throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
@@ -139,11 +147,19 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
                         + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
                         + "')");
         tEnv.useCatalog("PAIMON");
-        tEnv.executeSql(
-                        "CALL sys.migrate_table('hive', 'default.hivetable', 'file.format="
-                                + format
-                                + "')")
-                .await();
+        if (isNamedArgument) {
+            tEnv.executeSql(
+                            "CALL sys.migrate_table(connector => 'hive', source_table => 'default.hivetable', options => 'file.format="
+                                    + format
+                                    + "')")
+                    .await();
+        } else {
+            tEnv.executeSql(
+                            "CALL sys.migrate_table('hive', 'default.hivetable', 'file.format="
+                                    + format
+                                    + "')")
+                    .await();
+        }
         List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
 
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
@@ -175,7 +191,8 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
                         System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
                         "default.hivetable",
                         catalogConf,
-                        "");
+                        "",
+                        6);
         migrateTableAction.run();
 
         tEnv.executeSql(

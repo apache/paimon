@@ -49,7 +49,7 @@ public class ManifestCommittable {
 
     public ManifestCommittable(
             long identifier,
-            Long watermark,
+            @Nullable Long watermark,
             Map<Integer, Long> logOffsets,
             List<CommitMessage> commitMessages) {
         this.identifier = identifier;

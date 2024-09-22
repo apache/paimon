@@ -176,7 +176,7 @@ SELECT * FROM t /*+ OPTIONS('scan.file-creation-time-millis' = '1678883047356') 
 
 You can specify the `consumer-id` when streaming read table:
 ```sql
-SELECT * FROM t /*+ OPTIONS('consumer-id' = 'myid') */;
+SELECT * FROM t /*+ OPTIONS('consumer-id' = 'myid', 'consumer.expiration-time' = '1 d', 'consumer.mode' = 'at-least-once') */;
 ```
 
 When stream read Paimon tables, the next snapshot id to be recorded into the file system. This has several advantages:
@@ -187,28 +187,37 @@ When stream read Paimon tables, the next snapshot id to be recorded into the fil
 2. When deciding whether a snapshot has expired, Paimon looks at all the consumers of the table in the file system,
    and if there are consumers that still depend on this snapshot, then this snapshot will not be deleted by expiration.
 
-{{< hint info >}}
-NOTE: The consumer will prevent expiration of the snapshot. You can specify 'consumer.expiration-time' to manage the 
-lifetime of consumers.
-{{< /hint >}}
-
-By default, the consumer uses `exactly-once` mode to record consumption progress, which strictly ensures that what is 
-recorded in the consumer is the snapshot-id + 1 that all readers have exactly consumed. You can set `consumer.mode` to 
-`at-least-once` to allow readers consume snapshots at different rates and record the slowest snapshot-id among all 
-readers into the consumer. This mode can provide more capabilities, such as watermark alignment.
-
 {{< hint warning >}}
-Since the implementation of `exactly-once` mode and `at-least-once` mode are completely different, the state of 
-flink is incompatible and cannot be restored from the state when switching modes.
+NOTE 1: The consumer will prevent expiration of the snapshot. You can specify `'consumer.expiration-time'` to manage the 
+lifetime of consumers.
+
+NOTE 2: If you don't want to affect the checkpoint time, you need to configure `'consumer.mode' = 'at-least-once'`.
+This mode allow readers consume snapshots at different rates and record the slowest snapshot-id among all readers into
+the consumer. This mode can provide more capabilities, such as watermark alignment.
+
+NOTE 3: About `'consumer.mode'`, since the implementation of `exactly-once` mode and `at-least-once` mode are completely
+different, the state of flink is incompatible and cannot be restored from the state when switching modes.
 {{< /hint >}}
 
 You can reset a consumer with a given consumer ID and next snapshot ID and delete a consumer with a given consumer ID.
-
-{{< hint info >}}
 First, you need to stop the streaming task using this consumer ID, and then execute the reset consumer action job.
-{{< /hint >}}
 
 Run the following command:
+
+{{< tabs "reset_consumer" >}}
+
+{{< tab "Flink SQL" >}}
+
+```sql
+CALL sys.reset_consumer(
+   `table` => 'database_name.table_name', 
+   consumer_id => 'consumer_id', 
+   next_snapshot_id -> <snapshot_id>
+);
+```
+{{< /tab >}}
+
+{{< tab "Flink Action" >}}
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -221,6 +230,9 @@ Run the following command:
     [--next_snapshot <next-snapshot-id>] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 ```
+{{< /tab >}}
+
+{{< /tabs >}}
 
 please don't specify --next_snapshot parameter if you want to delete the consumer.
 

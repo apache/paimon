@@ -71,20 +71,19 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
 
     @Override
     public Object agg(Object accumulator, Object inputField) {
-        if (accumulator == null || inputField == null) {
-            return accumulator == null ? inputField : accumulator;
+        if (accumulator == null) {
+            return inputField;
+        }
+        if (inputField == null) {
+            return accumulator;
         }
 
         InternalArray acc = (InternalArray) accumulator;
         InternalArray input = (InternalArray) inputField;
 
-        List<InternalRow> rows = new ArrayList<>();
-        for (int i = 0; i < acc.size(); i++) {
-            rows.add(acc.getRow(i, nestedFields));
-        }
-        for (int i = 0; i < input.size(); i++) {
-            rows.add(input.getRow(i, nestedFields));
-        }
+        List<InternalRow> rows = new ArrayList<>(acc.size() + input.size());
+        addNonNullRows(acc, rows);
+        addNonNullRows(input, rows);
 
         if (keyProjection != null) {
             Map<BinaryRow, InternalRow> map = new HashMap<>();
@@ -111,10 +110,11 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
         if (keyProjection == null) {
             checkNotNull(elementEqualiser);
             List<InternalRow> rows = new ArrayList<>();
-            for (int i = 0; i < acc.size(); i++) {
-                rows.add(acc.getRow(i, nestedFields));
-            }
+            addNonNullRows(acc, rows);
             for (int i = 0; i < retract.size(); i++) {
+                if (retract.isNullAt(i)) {
+                    continue;
+                }
                 InternalRow retractRow = retract.getRow(i, nestedFields);
                 rows.removeIf(next -> elementEqualiser.equals(next, retractRow));
             }
@@ -123,15 +123,30 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
             Map<BinaryRow, InternalRow> map = new HashMap<>();
 
             for (int i = 0; i < acc.size(); i++) {
+                if (acc.isNullAt(i)) {
+                    continue;
+                }
                 InternalRow row = acc.getRow(i, nestedFields);
                 map.put(keyProjection.apply(row).copy(), row);
             }
 
             for (int i = 0; i < retract.size(); i++) {
+                if (retract.isNullAt(i)) {
+                    continue;
+                }
                 map.remove(keyProjection.apply(retract.getRow(i, nestedFields)));
             }
 
             return new GenericArray(new ArrayList<>(map.values()).toArray());
+        }
+    }
+
+    private void addNonNullRows(InternalArray array, List<InternalRow> rows) {
+        for (int i = 0; i < array.size(); i++) {
+            if (array.isNullAt(i)) {
+                continue;
+            }
+            rows.add(array.getRow(i, nestedFields));
         }
     }
 }

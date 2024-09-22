@@ -47,6 +47,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -1161,9 +1162,9 @@ public class PreAggregationITCase {
     /** IT Test for aggregation merge engine. */
     public static class BasicAggregateITCase extends CatalogITCaseBase {
 
-        @Test
-        public void testLocalMerge() {
-            sql(
+        @Override
+        protected List<String> ddl() {
+            return Collections.singletonList(
                     "CREATE TABLE T ("
                             + "k INT,"
                             + "v INT,"
@@ -1173,10 +1174,26 @@ public class PreAggregationITCase {
                             + "'fields.v.aggregate-function'='sum',"
                             + "'local-merge-buffer-size'='1m'"
                             + ");");
+        }
 
+        @Test
+        public void testLocalMerge() {
             sql("INSERT INTO T VALUES(1, 1, 1), (2, 1, 1), (1, 2, 1)");
             assertThat(batchSql("SELECT * FROM T"))
                     .containsExactlyInAnyOrder(Row.of(1, 3, 1), Row.of(2, 1, 1));
+        }
+
+        @Test
+        public void testMergeRead() {
+            sql("INSERT INTO T VALUES(1, 1, 1), (2, 1, 1)");
+            sql("INSERT INTO T VALUES(1, 2, 1)");
+            assertThat(batchSql("SELECT * FROM T"))
+                    .containsExactlyInAnyOrder(Row.of(1, 3, 1), Row.of(2, 1, 1));
+            // filter
+            assertThat(batchSql("SELECT * FROM T where v = 3"))
+                    .containsExactlyInAnyOrder(Row.of(1, 3, 1));
+            assertThat(batchSql("SELECT * FROM T where v = 1"))
+                    .containsExactlyInAnyOrder(Row.of(2, 1, 1));
         }
     }
 
@@ -1306,6 +1323,39 @@ public class PreAggregationITCase {
         }
 
         @Test
+        public void testUseCaseWithNullValue() {
+            sql(
+                    "INSERT INTO order_wide\n"
+                            + "SELECT 6, CAST (NULL AS STRING), CAST (NULL AS STRING), "
+                            + "ARRAY[cast(null as ROW<daily_id INT, today STRING, product_name STRING, price BIGINT>)]");
+
+            List<Row> result =
+                    sql("SELECT * FROM order_wide").stream()
+                            .sorted(Comparator.comparingInt(r -> r.getFieldAs(0)))
+                            .collect(Collectors.toList());
+
+            assertThat(checkOneRecord(result.get(0), 6, null, null, (Row) null)).isTrue();
+
+            sql(
+                    "INSERT INTO order_wide\n"
+                            + "SELECT 6, 'Sun', CAST (NULL AS STRING), "
+                            + "ARRAY[ROW(1, '01-01','Apple', 6999)]");
+
+            result =
+                    sql("SELECT * FROM order_wide").stream()
+                            .sorted(Comparator.comparingInt(r -> r.getFieldAs(0)))
+                            .collect(Collectors.toList());
+            assertThat(
+                            checkOneRecord(
+                                    result.get(0),
+                                    6,
+                                    "Sun",
+                                    null,
+                                    Row.of(1, "01-01", "Apple", 6999L)))
+                    .isTrue();
+        }
+
+        @Test
         public void testUseCaseAppend() {
             sql(
                     "INSERT INTO orders VALUES "
@@ -1413,10 +1463,10 @@ public class PreAggregationITCase {
             if ((int) record.getField(0) != orderId) {
                 return false;
             }
-            if (!record.getFieldAs(1).equals(userName)) {
+            if (!Objects.equals(record.getFieldAs(1), userName)) {
                 return false;
             }
-            if (!record.getFieldAs(2).equals(address)) {
+            if (!Objects.equals(record.getFieldAs(2), address)) {
                 return false;
             }
 
@@ -1439,7 +1489,7 @@ public class PreAggregationITCase {
                     Arrays.stream(subOrders).sorted(comparator).collect(Collectors.toList());
 
             for (int i = 0; i < sortedActual.size(); i++) {
-                if (!sortedActual.get(i).equals(sortedExpected.get(i))) {
+                if (!Objects.equals(sortedActual.get(i), sortedExpected.get(i))) {
                     return false;
                 }
             }

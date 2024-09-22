@@ -1,6 +1,6 @@
 ---
 title: "Flink API"
-weight: 2
+weight: 1
 type: docs
 aliases:
 - /api/flink-api.html
@@ -41,21 +41,21 @@ Maven dependency:
 ```xml
 <dependency>
   <groupId>org.apache.paimon</groupId>
-  <artifactId>paimon-flink-1.17</artifactId>
+  <artifactId>paimon-flink-{{< param FlinkVersion >}}</artifactId>
   <version>{{< version >}}</version>
 </dependency>
 
 <dependency>
   <groupId>org.apache.flink</groupId>
   <artifactId>flink-table-api-java-bridge</artifactId>
-  <version>1.17.0</version>
+  <version>{{< param FlinkVersion >}}.0</version>
   <scope>provided</scope>
 </dependency>
 ```
 
 Or download the jar file:
-{{< stable >}}[Paimon Flink](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.17/{{< version >}}/paimon-flink-1.17-{{< version >}}.jar).{{< /stable >}}
-{{< unstable >}}[Paimon Flink](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.17/{{< version >}}/).{{< /unstable >}}
+{{< stable >}}[Paimon Flink](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-{{< param FlinkVersion >}}/{{< version >}}/paimon-flink-{{< param FlinkVersion >}}-{{< version >}}.jar).{{< /stable >}}
+{{< unstable >}}[Paimon Flink](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-{{< param FlinkVersion >}}/{{< version >}}/).{{< /unstable >}}
 
 Please choose your Flink version.
 

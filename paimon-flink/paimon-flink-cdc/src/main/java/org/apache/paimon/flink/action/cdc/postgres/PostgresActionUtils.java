@@ -167,6 +167,13 @@ public class PostgresActionUtils {
             sourceBuilder.startupOptions(StartupOptions.initial());
         } else if ("latest-offset".equalsIgnoreCase(startupMode)) {
             sourceBuilder.startupOptions(StartupOptions.latest());
+        } else if ("snapshot".equalsIgnoreCase(startupMode)) {
+            sourceBuilder.startupOptions(StartupOptions.snapshot());
+        } else {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Unknown scan.startup.mode='%s'. Valid scan.startup.mode for Postgres CDC are [initial, latest-offset, snapshot]",
+                            startupMode));
         }
 
         Properties debeziumProperties = new Properties();

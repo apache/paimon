@@ -36,6 +36,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -56,6 +57,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     protected List<String> primaryKeys = new ArrayList<>();
     @Nullable protected String excludingTables;
     protected List<FileStoreTable> tables = new ArrayList<>();
+    protected Map<String, List<String>> partitionKeyMultiple = new HashMap<>();
 
     public SyncDatabaseActionBase(
             String warehouse,
@@ -130,6 +132,14 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
                 Collections.emptyList(), typeMapping, metadataConverters);
     }
 
+    public SyncDatabaseActionBase withPartitionKeyMultiple(
+            Map<String, List<String>> partitionKeyMultiple) {
+        if (partitionKeyMultiple != null) {
+            this.partitionKeyMultiple = partitionKeyMultiple;
+        }
+        return this;
+    }
+
     @Override
     protected EventParser.Factory<RichCdcMultiplexRecord> buildEventParserFactory() {
         NewTableSchemaBuilder schemaBuilder =
@@ -138,6 +148,8 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
                         allowUpperCase,
                         partitionKeys,
                         primaryKeys,
+                        requirePrimaryKeys(),
+                        partitionKeyMultiple,
                         metadataConverters);
         Pattern includingPattern = Pattern.compile(includingTables);
         Pattern excludingPattern =
@@ -158,6 +170,8 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
                         tableNameConverter,
                         createdTables);
     }
+
+    protected abstract boolean requirePrimaryKeys();
 
     @Override
     protected void buildSink(

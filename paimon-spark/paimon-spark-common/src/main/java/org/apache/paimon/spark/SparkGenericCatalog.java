@@ -66,6 +66,7 @@ import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.apache.paimon.spark.SparkCatalogOptions.CREATE_UNDERLYING_SESSION_CATALOG;
 import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -338,34 +339,42 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
         }
     }
 
+    private CatalogPlugin getDelegateCatalog() {
+        checkNotNull(
+                sessionCatalog,
+                "Delegated SessionCatalog is missing, '%s' can only be used with 'spark_catalog'.",
+                SparkGenericCatalog.class.getName());
+        return sessionCatalog;
+    }
+
     private TableCatalog asTableCatalog() {
-        return (TableCatalog) sessionCatalog;
+        return (TableCatalog) getDelegateCatalog();
     }
 
     private SupportsNamespaces asNamespaceCatalog() {
-        return (SupportsNamespaces) sessionCatalog;
+        return (SupportsNamespaces) getDelegateCatalog();
     }
 
     private FunctionCatalog asFunctionCatalog() {
-        return (FunctionCatalog) sessionCatalog;
+        return (FunctionCatalog) getDelegateCatalog();
     }
 
     @Override
     public Identifier[] listFunctions(String[] namespace) throws NoSuchNamespaceException {
-        if (namespace.length == 0 || isSystemNamespace(namespace) || namespaceExists(namespace)) {
-            return new Identifier[0];
+        try {
+            return sparkCatalog.listFunctions(namespace);
+        } catch (NoSuchNamespaceException e) {
+            return asFunctionCatalog().listFunctions(namespace);
         }
-
-        return asFunctionCatalog().listFunctions(namespace);
     }
 
     @Override
     public UnboundFunction loadFunction(Identifier ident) throws NoSuchFunctionException {
-        return asFunctionCatalog().loadFunction(ident);
-    }
-
-    private static boolean isSystemNamespace(String[] namespace) {
-        return namespace.length == 1 && namespace[0].equalsIgnoreCase("system");
+        try {
+            return sparkCatalog.loadFunction(ident);
+        } catch (NoSuchFunctionException e) {
+            return asFunctionCatalog().loadFunction(ident);
+        }
     }
 
     private Table throwsOldIfExceptionHappens(Callable<Table> call, NoSuchTableException e)

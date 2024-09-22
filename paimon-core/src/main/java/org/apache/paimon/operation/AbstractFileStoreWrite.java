@@ -69,7 +69,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private final FileStoreScan scan;
     private final int writerNumberMax;
     @Nullable private final IndexMaintainer.Factory<T> indexFactory;
-    @Nullable private final DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory;
+    @Nullable private final DeletionVectorsMaintainer.Factory dvMaintainerFactory;
 
     @Nullable protected IOManager ioManager;
 
@@ -89,14 +89,14 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             @Nullable IndexMaintainer.Factory<T> indexFactory,
-            @Nullable DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory,
+            @Nullable DeletionVectorsMaintainer.Factory dvMaintainerFactory,
             String tableName,
             int writerNumberMax) {
         this.commitUser = commitUser;
         this.snapshotManager = snapshotManager;
         this.scan = scan;
         this.indexFactory = indexFactory;
-        this.deletionVectorsMaintainerFactory = deletionVectorsMaintainerFactory;
+        this.dvMaintainerFactory = dvMaintainerFactory;
         this.writers = new HashMap<>();
         this.tableName = tableName;
         this.writerNumberMax = writerNumberMax;
@@ -333,6 +333,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         for (State<T> state : states) {
             RecordWriter<T> writer =
                     createWriter(
+                            state.baseSnapshotId,
                             state.partition,
                             state.bucket,
                             state.dataFiles,
@@ -362,7 +363,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         return result;
     }
 
-    private WriterContainer<T> getWriterWrapper(BinaryRow partition, int bucket) {
+    protected WriterContainer<T> getWriterWrapper(BinaryRow partition, int bucket) {
         Map<Integer, WriterContainer<T>> buckets = writers.get(partition);
         if (buckets == null) {
             buckets = new HashMap<>();
@@ -402,12 +403,13 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         : indexFactory.createOrRestore(
                                 ignorePreviousFiles ? null : latestSnapshotId, partition, bucket);
         DeletionVectorsMaintainer deletionVectorsMaintainer =
-                deletionVectorsMaintainerFactory == null
+                dvMaintainerFactory == null
                         ? null
-                        : deletionVectorsMaintainerFactory.createOrRestore(
+                        : dvMaintainerFactory.createOrRestore(
                                 ignorePreviousFiles ? null : latestSnapshotId, partition, bucket);
         RecordWriter<T> writer =
                 createWriter(
+                        latestSnapshotId,
                         partition.copy(),
                         bucket,
                         restoreFiles,
@@ -460,6 +462,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     protected void notifyNewWriter(RecordWriter<T> writer) {}
 
     protected abstract RecordWriter<T> createWriter(
+            @Nullable Long snapshotId,
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> restoreFiles,

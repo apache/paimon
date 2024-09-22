@@ -56,6 +56,7 @@ import java.io.Serializable;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,7 +65,9 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 
 import static org.apache.paimon.catalog.Catalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
@@ -93,7 +96,7 @@ public class SchemaManager implements Serializable {
     public SchemaManager(FileIO fileIO, Path tableRoot, String branch) {
         this.fileIO = fileIO;
         this.tableRoot = tableRoot;
-        this.branch = StringUtils.isBlank(branch) ? DEFAULT_MAIN_BRANCH : branch;
+        this.branch = StringUtils.isNullOrWhitespaceOnly(branch) ? DEFAULT_MAIN_BRANCH : branch;
     }
 
     public SchemaManager copyWithBranch(String branchName) {
@@ -117,6 +120,49 @@ public class SchemaManager implements Serializable {
 
     public List<TableSchema> listAll() {
         return listAllIds().stream().map(this::schema).collect(Collectors.toList());
+    }
+
+    public List<TableSchema> listWithRange(
+            Optional<Long> optionalMaxSchemaId, Optional<Long> optionalMinSchemaId) {
+        Long lowerBoundSchemaId = 0L;
+        Long upperBoundSchematId = latest().get().id();
+
+        // null check on optionalMaxSchemaId & optionalMinSchemaId return all schemas
+        if (!optionalMaxSchemaId.isPresent() && !optionalMinSchemaId.isPresent()) {
+            return listAll();
+        }
+
+        if (optionalMaxSchemaId.isPresent()) {
+            if (optionalMaxSchemaId.get() < lowerBoundSchemaId) {
+                throw new RuntimeException(
+                        String.format(
+                                "schema id: %s should not lower than min schema id: %s",
+                                optionalMaxSchemaId.get(), lowerBoundSchemaId));
+            }
+            upperBoundSchematId =
+                    optionalMaxSchemaId.get() > upperBoundSchematId
+                            ? upperBoundSchematId
+                            : optionalMaxSchemaId.get();
+        }
+
+        if (optionalMinSchemaId.isPresent()) {
+            if (optionalMinSchemaId.get() > upperBoundSchematId) {
+                throw new RuntimeException(
+                        String.format(
+                                "schema id: %s should not greater than max schema id: %s",
+                                optionalMinSchemaId.get(), upperBoundSchematId));
+            }
+            lowerBoundSchemaId =
+                    optionalMinSchemaId.get() > lowerBoundSchemaId
+                            ? optionalMinSchemaId.get()
+                            : lowerBoundSchemaId;
+        }
+
+        // +1 here to include the upperBoundSchemaId
+        return LongStream.range(lowerBoundSchemaId, upperBoundSchematId + 1)
+                .mapToObj(this::schema)
+                .sorted(Comparator.comparingLong(TableSchema::id))
+                .collect(Collectors.toList());
     }
 
     /** List all schema IDs. */
@@ -195,6 +241,7 @@ public class SchemaManager implements Serializable {
                                             new Catalog.TableNotExistException(
                                                     identifierFromPath(
                                                             tableRoot.toString(), true, branch)));
+            Map<String, String> oldOptions = new HashMap<>(oldTableSchema.options());
             Map<String, String> newOptions = new HashMap<>(oldTableSchema.options());
             List<DataField> newFields = new ArrayList<>(oldTableSchema.fields());
             AtomicInteger highestFieldId = new AtomicInteger(oldTableSchema.highestFieldId());
@@ -203,13 +250,17 @@ public class SchemaManager implements Serializable {
                 if (change instanceof SetOption) {
                     SetOption setOption = (SetOption) change;
                     if (hasSnapshots) {
-                        checkAlterTableOption(setOption.key());
+                        checkAlterTableOption(
+                                setOption.key(),
+                                oldOptions.get(setOption.key()),
+                                setOption.value(),
+                                false);
                     }
                     newOptions.put(setOption.key(), setOption.value());
                 } else if (change instanceof RemoveOption) {
                     RemoveOption removeOption = (RemoveOption) change;
                     if (hasSnapshots) {
-                        checkAlterTableOption(removeOption.key());
+                        checkResetTableOption(removeOption.key());
                     }
                     newOptions.remove(removeOption.key());
                 } else if (change instanceof UpdateComment) {
@@ -530,6 +581,7 @@ public class SchemaManager implements Serializable {
     @VisibleForTesting
     boolean commit(TableSchema newSchema) throws Exception {
         SchemaValidation.validateTableSchema(newSchema);
+        SchemaValidation.validateFallbackBranch(this, newSchema);
         Path schemaPath = toSchemaPath(newSchema.id());
         Callable<Boolean> callable =
                 () -> fileIO.tryToWriteAtomic(schemaPath, newSchema.toString());
@@ -545,6 +597,19 @@ public class SchemaManager implements Serializable {
             return JsonSerdeUtil.fromJson(fileIO.readFileUtf8(toSchemaPath(id)), TableSchema.class);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+    }
+
+    /** Check if a schema exists. */
+    public boolean schemaExists(long id) {
+        Path path = toSchemaPath(id);
+        try {
+            return fileIO.exists(path);
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to determine if schema '%s' exists in path %s.", id, path),
+                    e);
         }
     }
 
@@ -569,6 +634,13 @@ public class SchemaManager implements Serializable {
         return new Path(branchPath() + "/schema/" + SCHEMA_PREFIX + schemaId);
     }
 
+    public List<Path> schemaPaths(Predicate<Long> predicate) throws IOException {
+        return listVersionedFiles(fileIO, schemaDirectory(), SCHEMA_PREFIX)
+                .filter(predicate)
+                .map(this::toSchemaPath)
+                .collect(Collectors.toList());
+    }
+
     /**
      * Delete schema with specific id.
      *
@@ -578,10 +650,41 @@ public class SchemaManager implements Serializable {
         fileIO.deleteQuietly(toSchemaPath(schemaId));
     }
 
-    public static void checkAlterTableOption(String key) {
-        if (CoreOptions.getImmutableOptionKeys().contains(key)) {
+    public static void checkAlterTableOption(
+            String key, @Nullable String oldValue, String newValue, boolean fromDynamicOptions) {
+        if (CoreOptions.IMMUTABLE_OPTIONS.contains(key)) {
             throw new UnsupportedOperationException(
                     String.format("Change '%s' is not supported yet.", key));
+        }
+
+        if (CoreOptions.BUCKET.key().equals(key)) {
+            int oldBucket =
+                    oldValue == null
+                            ? CoreOptions.BUCKET.defaultValue()
+                            : Integer.parseInt(oldValue);
+            int newBucket = Integer.parseInt(newValue);
+
+            if (fromDynamicOptions) {
+                throw new UnsupportedOperationException(
+                        "Cannot change bucket number through dynamic options. You might need to rescale bucket.");
+            }
+            if (oldBucket == -1) {
+                throw new UnsupportedOperationException("Cannot change bucket when it is -1.");
+            }
+            if (newBucket == -1) {
+                throw new UnsupportedOperationException("Cannot change bucket to -1.");
+            }
+        }
+    }
+
+    public static void checkResetTableOption(String key) {
+        if (CoreOptions.IMMUTABLE_OPTIONS.contains(key)) {
+            throw new UnsupportedOperationException(
+                    String.format("Change '%s' is not supported yet.", key));
+        }
+
+        if (CoreOptions.BUCKET.key().equals(key)) {
+            throw new UnsupportedOperationException(String.format("Cannot reset %s.", key));
         }
     }
 

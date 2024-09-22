@@ -148,14 +148,10 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
         Path path = pathFactory.newPath();
         try {
             try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
-                FormatWriter writer = writerFactory.create(out, compression);
-                try {
+                try (FormatWriter writer = writerFactory.create(out, compression)) {
                     while (records.hasNext()) {
                         writer.addElement(serializer.toRow(records.next()));
                     }
-                } finally {
-                    writer.flush();
-                    writer.finish();
                 }
             }
             return path.getName();

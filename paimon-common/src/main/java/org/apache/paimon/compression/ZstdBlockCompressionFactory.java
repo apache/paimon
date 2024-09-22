@@ -21,6 +21,12 @@ package org.apache.paimon.compression;
 /** Implementation of {@link BlockCompressionFactory} for zstd codec. */
 public class ZstdBlockCompressionFactory implements BlockCompressionFactory {
 
+    private final int compressLevel;
+
+    public ZstdBlockCompressionFactory(int compressLevel) {
+        this.compressLevel = compressLevel;
+    }
+
     @Override
     public BlockCompressionType getCompressionType() {
         return BlockCompressionType.ZSTD;
@@ -28,7 +34,7 @@ public class ZstdBlockCompressionFactory implements BlockCompressionFactory {
 
     @Override
     public BlockCompressor getCompressor() {
-        return new ZstdBlockCompressor();
+        return new ZstdBlockCompressor(compressLevel);
     }
 
     @Override

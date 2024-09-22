@@ -24,6 +24,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
@@ -115,7 +116,6 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                 checkArgument(
                         isStreaming, "Set 'streaming-compact' in batch mode. This is unexpected.");
                 return new ContinuousCompactorStartingScanner(snapshotManager);
-            case COMPACT_APPEND_NO_BUCKET:
             case FILE_MONITOR:
                 return new FullStartingScanner(snapshotManager);
         }
@@ -242,7 +242,7 @@ public abstract class AbstractDataTableScan implements DataTableScan {
     }
 
     @Override
-    public List<BinaryRow> listPartitions() {
-        return snapshotReader.partitions();
+    public List<PartitionEntry> listPartitionEntries() {
+        return snapshotReader.partitionEntries();
     }
 }

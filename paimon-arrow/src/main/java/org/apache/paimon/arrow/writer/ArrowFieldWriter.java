@@ -71,7 +71,6 @@ public abstract class ArrowFieldWriter {
         } else {
             doWrite(rowIndex, getters, pos);
         }
-        fieldVector.setValueCount(fieldVector.getValueCount() + 1);
     }
 
     protected abstract void doWrite(int rowIndex, DataGetters getters, int pos);

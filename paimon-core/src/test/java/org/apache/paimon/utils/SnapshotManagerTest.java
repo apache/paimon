@@ -112,6 +112,11 @@ public class SnapshotManagerTest {
             Snapshot snapshot = createSnapshotWithMillis(i, millis + i * 1000);
             localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
         }
+
+        // there is no snapshot smaller than "millis - 1L" return the earliest snapshot
+        assertThat(snapshotManager.earlierOrEqualTimeMills(millis - 1L).timeMillis())
+                .isEqualTo(millis);
+
         // smaller than the second snapshot return the first snapshot
         assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 999).timeMillis())
                 .isEqualTo(millis);
@@ -121,6 +126,31 @@ public class SnapshotManagerTest {
         // larger than the second snapshot return the second snapshot
         assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 1001).timeMillis())
                 .isEqualTo(millis + 1000);
+    }
+
+    @Test
+    public void testLaterOrEqualTimeMills() throws IOException {
+        long millis = 1684726826L;
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // create 10 snapshots
+        for (long i = 0; i < 10; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, millis + i * 1000);
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+        // smaller than the second snapshot return the second snapshot
+        assertThat(snapshotManager.laterOrEqualTimeMills(millis + 999).timeMillis())
+                .isEqualTo(millis + 1000);
+        // equal to the second snapshot return the second snapshot
+        assertThat(snapshotManager.laterOrEqualTimeMills(millis + 1000).timeMillis())
+                .isEqualTo(millis + 1000);
+        // larger than the second snapshot return the third snapshot
+        assertThat(snapshotManager.laterOrEqualTimeMills(millis + 1001).timeMillis())
+                .isEqualTo(millis + 2000);
+
+        // larger than the latest snapshot return null
+        assertThat(snapshotManager.laterOrEqualTimeMills(millis + 10001)).isNull();
     }
 
     @Test

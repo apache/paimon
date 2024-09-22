@@ -39,7 +39,8 @@ public class OrcFileFormatTest {
     public void testAbsent() {
         Options options = new Options();
         options.setString("haha", "1");
-        OrcFileFormat orc = new OrcFileFormatFactory().create(new FormatContext(options, 1024));
+        OrcFileFormat orc =
+                new OrcFileFormatFactory().create(new FormatContext(options, 1024, 1024));
         assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".haha", "")).isEqualTo("1");
     }
 
@@ -48,7 +49,8 @@ public class OrcFileFormatTest {
         Options options = new Options();
         options.setString("haha", "1");
         options.setString("compress", "zlib");
-        OrcFileFormat orc = new OrcFileFormatFactory().create(new FormatContext(options, 1024));
+        OrcFileFormat orc =
+                new OrcFileFormatFactory().create(new FormatContext(options, 1024, 1024));
         assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".haha", "")).isEqualTo("1");
         assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".compress", "")).isEqualTo("zlib");
     }
@@ -56,7 +58,7 @@ public class OrcFileFormatTest {
     @Test
     public void testSupportedDataTypes() {
         OrcFileFormat orc =
-                new OrcFileFormatFactory().create(new FormatContext(new Options(), 1024));
+                new OrcFileFormatFactory().create(new FormatContext(new Options(), 1024, 1024));
 
         int index = 0;
         List<DataField> dataFields = new ArrayList<DataField>();

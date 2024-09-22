@@ -63,6 +63,12 @@ under the License.
             <td>Memory page size for caching.</td>
         </tr>
         <tr>
+            <td><h5>changelog-file.prefix</h5></td>
+            <td style="word-wrap: break-word;">"changelog-"</td>
+            <td>String</td>
+            <td>Specify the file name prefix of changelog files.</td>
+        </tr>
+        <tr>
             <td><h5>changelog-producer</h5></td>
             <td style="word-wrap: break-word;">none</td>
             <td><p>Enum</p></td>
@@ -73,6 +79,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to generate -U, +U changelog for the same record. This configuration is only valid for the changelog-producer is lookup or full-compaction.</td>
+        </tr>
+        <tr>
+            <td><h5>changelog-producer.row-deduplicate-ignore-fields</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Fields that are ignored for comparison while generating -U, +U changelog for the same record. This configuration is only valid for the changelog-producer.row-deduplicate is true.</td>
         </tr>
         <tr>
             <td><h5>changelog.num-retained.max</h5></td>
@@ -115,6 +127,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to force create snapshot on commit.</td>
+        </tr>
+        <tr>
+            <td><h5>commit.max-retries</h5></td>
+            <td style="word-wrap: break-word;">10</td>
+            <td>Integer</td>
+            <td>Maximum number of retries when commit failed.</td>
         </tr>
         <tr>
             <td><h5>commit.user-prefix</h5></td>
@@ -193,6 +211,12 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
             <td>The TTL in rocksdb index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
+        </tr>
+        <tr>
+            <td><h5>data-file.prefix</h5></td>
+            <td style="word-wrap: break-word;">"data-"</td>
+            <td>String</td>
+            <td>Specify the file name prefix of data files.</td>
         </tr>
         <tr>
             <td><h5>delete-file.thread-num</h5></td>
@@ -549,7 +573,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>partition.mark-done-action</h5></td>
             <td style="word-wrap: break-word;">"success-file"</td>
             <td>String</td>
-            <td>Action to mark a partition done is to notify the downstream application that the partition has finished writing, the partition is ready to be read.<br />1. 'success-file': add '_success' file to directory.<br />2. 'done-partition': add 'xxx.done' partition to metastore.<br />Both can be configured at the same time: 'done-partition,success-file'.</td>
+            <td>Action to mark a partition done is to notify the downstream application that the partition has finished writing, the partition is ready to be read.<br />1. 'success-file': add '_success' file to directory.<br />2. 'done-partition': add 'xxx.done' partition to metastore.<br />3. 'mark-event': mark partition event to metastore.<br />Both can be configured at the same time: 'done-partition,success-file,mark-event'.</td>
         </tr>
         <tr>
             <td><h5>partition.timestamp-formatter</h5></td>
@@ -573,7 +597,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>read.batch-size</h5></td>
             <td style="word-wrap: break-word;">1024</td>
             <td>Integer</td>
-            <td>Read batch size for orc and parquet.</td>
+            <td>Read batch size for any file format if it supports.</td>
         </tr>
         <tr>
             <td><h5>record-level.expire-time</h5></td>
@@ -585,7 +609,13 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>record-level.time-field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Time field for record level expire, it should be a seconds INT.</td>
+            <td>Time field for record level expire.</td>
+        </tr>
+        <tr>
+            <td><h5>record-level.time-field-type</h5></td>
+            <td style="word-wrap: break-word;">seconds-int</td>
+            <td><p>Enum</p></td>
+            <td>Time field type for record level expire, it can be seconds-int,seconds-long or millis-long.<br /><br />Possible values:<ul><li>"seconds-int": Timestamps in seconds with INT field type.</li><li>"seconds-long": Timestamps in seconds with BIGINT field type.</li><li>"millis-long": Timestamps in milliseconds with BIGINT field type.</li></ul></td>
         </tr>
         <tr>
             <td><h5>rowkind.field</h5></td>
@@ -769,6 +799,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>Compression for spill, currently zstd, lzo and zstd are supported.</td>
         </tr>
         <tr>
+            <td><h5>spill-compression.zstd-level</h5></td>
+            <td style="word-wrap: break-word;">1</td>
+            <td>Integer</td>
+            <td>Default spill compression zstd level. For higher compression rates, it can be configured to 9, but the read and write speed will significantly decrease.</td>
+        </tr>
+        <tr>
             <td><h5>streaming-read-mode</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td><p>Enum</p></td>
@@ -779,6 +815,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to read the changes from overwrite in streaming mode. Cannot be set to true when changelog producer is full-compaction or lookup because it will read duplicated changes.</td>
+        </tr>
+        <tr>
+            <td><h5>streaming.read.snapshot.delay</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>The delay duration of stream read when scan incremental snapshots.</td>
         </tr>
         <tr>
             <td><h5>tag.automatic-completion</h5></td>
@@ -881,6 +923,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs.</td>
+        </tr>
+        <tr>
+            <td><h5>write.batch-size</h5></td>
+            <td style="word-wrap: break-word;">1024</td>
+            <td>Integer</td>
+            <td>Write batch size for any file format if it supports.</td>
         </tr>
         <tr>
             <td><h5>zorder.var-length-contribution</h5></td>

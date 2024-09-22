@@ -87,8 +87,9 @@ case class PaimonPartitionReader(
 
   private def readSplit(): PaimonRecordReaderIterator = {
     if (splits.hasNext) {
-      val reader = readFunc(splits.next())
-      PaimonRecordReaderIterator(reader, metadataColumns)
+      val split = splits.next();
+      val reader = readFunc(split)
+      PaimonRecordReaderIterator(reader, metadataColumns, split)
     } else {
       null
     }

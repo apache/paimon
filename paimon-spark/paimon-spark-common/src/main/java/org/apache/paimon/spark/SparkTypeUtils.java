@@ -19,6 +19,7 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.spark.util.shim.TypeUtils;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
@@ -58,6 +59,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class SparkTypeUtils {
 
     private SparkTypeUtils() {}
+
+    public static StructType toSparkPartitionType(Table table) {
+        int[] projections = table.rowType().getFieldIndices(table.partitionKeys());
+        List<DataField> partitionTypes = new ArrayList<>();
+        for (int i : projections) {
+            partitionTypes.add(table.rowType().getFields().get(i));
+        }
+        return (StructType) SparkTypeUtils.fromPaimonType(new RowType(false, partitionTypes));
+    }
 
     public static StructType fromPaimonRowType(RowType type) {
         return (StructType) fromPaimonType(type);

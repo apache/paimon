@@ -58,6 +58,11 @@ public final class ArrayType extends DataType {
     }
 
     @Override
+    public int defaultSize() {
+        return elementType.defaultSize();
+    }
+
+    @Override
     public DataType copy(boolean isNullable) {
         return new ArrayType(isNullable, elementType.copy());
     }

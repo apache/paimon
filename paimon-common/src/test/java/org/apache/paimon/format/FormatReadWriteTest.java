@@ -91,8 +91,7 @@ public abstract class FormatReadWriteTest {
         writer.addElement(GenericRow.of(1, 1L));
         writer.addElement(GenericRow.of(2, 2L));
         writer.addElement(GenericRow.of(3, null));
-        writer.flush();
-        writer.finish();
+        writer.close();
         out.close();
 
         RecordReader<InternalRow> reader =
@@ -107,10 +106,6 @@ public abstract class FormatReadWriteTest {
                         GenericRow.of(1, 1L), GenericRow.of(2, 2L), GenericRow.of(3, null));
     }
 
-    /**
-     * Currently, Parquet format doesn't support nested row in array, so this test handles Parquet
-     * specially.
-     */
     @Test
     public void testFullTypes() throws IOException {
         RowType rowType = rowTypeForFullTypesTest();
@@ -120,8 +115,7 @@ public abstract class FormatReadWriteTest {
         PositionOutputStream out = fileIO.newOutputStream(file, false);
         FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
         writer.addElement(expected);
-        writer.flush();
-        writer.finish();
+        writer.close();
         out.close();
 
         RecordReader<InternalRow> reader =
@@ -135,6 +129,48 @@ public abstract class FormatReadWriteTest {
         validateFullTypesResult(result.get(0), expected);
     }
 
+    @Test
+    public void testNestedReadPruning() throws Exception {
+        FileFormat format = fileFormat();
+
+        RowType writeType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "f0", DataTypes.INT()),
+                        DataTypes.FIELD(
+                                1,
+                                "f1",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(2, "f0", DataTypes.INT()),
+                                        DataTypes.FIELD(3, "f1", DataTypes.INT()),
+                                        DataTypes.FIELD(4, "f2", DataTypes.INT()))));
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false);
+                FormatWriter writer = format.createWriterFactory(writeType).create(out, "zstd")) {
+            writer.addElement(GenericRow.of(0, GenericRow.of(10, 11, 12)));
+        }
+
+        // skip read f0, f1.f1
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                1,
+                                "f1",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(2, "f0", DataTypes.INT()),
+                                        DataTypes.FIELD(4, "f2", DataTypes.INT()))));
+
+        List<InternalRow> result = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(readType)
+                        .createReader(
+                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+            InternalRowSerializer serializer = new InternalRowSerializer(readType);
+            reader.forEachRemaining(row -> result.add(serializer.copy(row)));
+        }
+
+        assertThat(result).containsExactly(GenericRow.of(GenericRow.of(10, 12)));
+    }
+
     private RowType rowTypeForFullTypesTest() {
         RowType.Builder builder =
                 RowType.builder()
@@ -144,6 +180,9 @@ public abstract class FormatReadWriteTest {
                         .field(
                                 "locations",
                                 DataTypes.MAP(DataTypes.STRING().notNull(), getMapValueType()))
+                        .field(
+                                "nonStrKeyMap",
+                                DataTypes.MAP(DataTypes.INT().notNull(), getMapValueType()))
                         .field("strArray", DataTypes.ARRAY(DataTypes.STRING()).nullable())
                         .field("intArray", DataTypes.ARRAY(DataTypes.INT()).nullable())
                         .field("boolean", DataTypes.BOOLEAN().nullable())
@@ -197,6 +236,13 @@ public abstract class FormatReadWriteTest {
                                         this.put(fromString("key2"), mapValueData[1]);
                                     }
                                 }),
+                        new GenericMap(
+                                new HashMap<Object, Object>() {
+                                    {
+                                        this.put(1, mapValueData[0]);
+                                        this.put(2, mapValueData[1]);
+                                    }
+                                }),
                         new GenericArray(new Object[] {fromString("123"), fromString("456")}),
                         new GenericArray(new Object[] {123, 456}),
                         true,
@@ -248,7 +294,16 @@ public abstract class FormatReadWriteTest {
                 Object expectedField = fieldGetters[i].getFieldOrNull(expected);
                 switch (name) {
                     case "locations":
-                        validateInternalMap((InternalMap) actualField, (InternalMap) expectedField);
+                        validateInternalMap(
+                                (InternalMap) actualField,
+                                (InternalMap) expectedField,
+                                DataTypes.STRING());
+                        break;
+                    case "nonStrKeyMap":
+                        validateInternalMap(
+                                (InternalMap) actualField,
+                                (InternalMap) expectedField,
+                                DataTypes.INT());
                         break;
                     case "strArray":
                         validateInternalArray(
@@ -282,8 +337,9 @@ public abstract class FormatReadWriteTest {
         }
     }
 
-    private void validateInternalMap(InternalMap actualMap, InternalMap expectedMap) {
-        validateInternalArray(actualMap.keyArray(), expectedMap.keyArray(), DataTypes.STRING());
+    private void validateInternalMap(
+            InternalMap actualMap, InternalMap expectedMap, DataType keyType) {
+        validateInternalArray(actualMap.keyArray(), expectedMap.keyArray(), keyType);
         validateInternalArray(actualMap.valueArray(), expectedMap.valueArray(), getMapValueType());
     }
 

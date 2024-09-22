@@ -19,14 +19,15 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.operation.OrphanFilesClean;
-import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.flink.orphan.FlinkOrphanFilesClean;
 
+import org.apache.flink.table.annotation.ArgumentHint;
+import org.apache.flink.table.annotation.DataTypeHint;
+import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
-import java.util.List;
-
-import static org.apache.paimon.operation.OrphanFilesClean.executeOrphanFilesClean;
+import static org.apache.paimon.operation.OrphanFilesClean.createFileCleaner;
+import static org.apache.paimon.operation.OrphanFilesClean.olderThanMillis;
 
 /**
  * Remove orphan files procedure. Usage:
@@ -46,34 +47,37 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
 
     public static final String IDENTIFIER = "remove_orphan_files";
 
-    public String[] call(ProcedureContext procedureContext, String tableId) throws Exception {
-        return call(procedureContext, tableId, "");
-    }
-
-    public String[] call(ProcedureContext procedureContext, String tableId, String olderThan)
-            throws Exception {
-        return call(procedureContext, tableId, olderThan, false);
-    }
-
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
+                @ArgumentHint(
+                        name = "older_than",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(name = "dry_run", type = @DataTypeHint("BOOLEAN"), isOptional = true),
+                @ArgumentHint(name = "parallelism", type = @DataTypeHint("INT"), isOptional = true)
+            })
     public String[] call(
-            ProcedureContext procedureContext, String tableId, String olderThan, boolean dryRun)
+            ProcedureContext procedureContext,
+            String tableId,
+            String olderThan,
+            Boolean dryRun,
+            Integer parallelism)
             throws Exception {
         Identifier identifier = Identifier.fromString(tableId);
         String databaseName = identifier.getDatabaseName();
         String tableName = identifier.getObjectName();
 
-        List<OrphanFilesClean> tableCleans =
-                OrphanFilesClean.createOrphanFilesCleans(catalog, databaseName, tableName);
-
-        if (!StringUtils.isBlank(olderThan)) {
-            tableCleans.forEach(clean -> clean.olderThan(olderThan));
-        }
-
-        if (dryRun) {
-            tableCleans.forEach(clean -> clean.fileCleaner(path -> {}));
-        }
-
-        return executeOrphanFilesClean(tableCleans);
+        long deleted =
+                FlinkOrphanFilesClean.executeDatabaseOrphanFiles(
+                        procedureContext.getExecutionEnvironment(),
+                        catalog,
+                        olderThanMillis(olderThan),
+                        createFileCleaner(catalog, dryRun),
+                        parallelism,
+                        databaseName,
+                        tableName);
+        return new String[] {String.valueOf(deleted)};
     }
 
     @Override

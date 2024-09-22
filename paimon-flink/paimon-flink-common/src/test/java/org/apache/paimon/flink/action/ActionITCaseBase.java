@@ -191,12 +191,12 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         }
     }
 
-    protected CloseableIterator<Row> callProcedure(String procedureStatement) {
+    protected CloseableIterator<Row> executeSQL(String procedureStatement) {
         // default execution mode
-        return callProcedure(procedureStatement, true, false);
+        return executeSQL(procedureStatement, true, false);
     }
 
-    protected CloseableIterator<Row> callProcedure(
+    protected CloseableIterator<Row> executeSQL(
             String procedureStatement, boolean isStreaming, boolean dmlSync) {
         TableEnvironment tEnv;
         if (isStreaming) {

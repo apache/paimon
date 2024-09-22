@@ -153,6 +153,10 @@ public class Options implements Serializable {
         data.remove(key);
     }
 
+    public synchronized void remove(ConfigOption<?> option) {
+        data.remove(option.key());
+    }
+
     public synchronized boolean containsKey(String key) {
         return data.containsKey(key);
     }

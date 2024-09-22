@@ -73,6 +73,11 @@ public final class TimeType extends DataType {
     }
 
     @Override
+    public int defaultSize() {
+        return 4;
+    }
+
+    @Override
     public DataType copy(boolean isNullable) {
         return new TimeType(isNullable, precision);
     }

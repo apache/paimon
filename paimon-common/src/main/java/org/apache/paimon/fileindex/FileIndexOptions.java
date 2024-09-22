@@ -71,7 +71,7 @@ public class FileIndexOptions {
                                     key.length() - fileIndexColumnSuffix.length());
                     String[] names = entry.getValue().split(",");
                     for (String name : names) {
-                        if (StringUtils.isBlank(name)) {
+                        if (StringUtils.isNullOrWhitespaceOnly(name)) {
                             throw new IllegalArgumentException(
                                     "Wrong option in " + key + ", should not have empty column");
                         }

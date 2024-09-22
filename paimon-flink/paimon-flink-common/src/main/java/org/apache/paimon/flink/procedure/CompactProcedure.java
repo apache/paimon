@@ -21,6 +21,8 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.CompactAction;
 import org.apache.paimon.flink.action.SortCompactAction;
+import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.TimeUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
@@ -32,7 +34,7 @@ import java.util.Map;
 
 import static org.apache.paimon.utils.ParameterUtils.getPartitions;
 import static org.apache.paimon.utils.ParameterUtils.parseCommaSeparatedKeyValues;
-import static org.apache.paimon.utils.StringUtils.isBlank;
+import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
 /** Compact procedure. */
 public class CompactProcedure extends ProcedureBase {
@@ -52,7 +54,11 @@ public class CompactProcedure extends ProcedureBase {
                         isOptional = true),
                 @ArgumentHint(name = "order_by", type = @DataTypeHint("STRING"), isOptional = true),
                 @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true),
-                @ArgumentHint(name = "where", type = @DataTypeHint("STRING"), isOptional = true)
+                @ArgumentHint(name = "where", type = @DataTypeHint("STRING"), isOptional = true),
+                @ArgumentHint(
+                        name = "partition_idle_time",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
@@ -61,18 +67,19 @@ public class CompactProcedure extends ProcedureBase {
             String orderStrategy,
             String orderByColumns,
             String tableOptions,
-            String where)
+            String where,
+            String partitionIdleTime)
             throws Exception {
         String warehouse = catalog.warehouse();
         Map<String, String> catalogOptions = catalog.options();
         Map<String, String> tableConf =
-                isBlank(tableOptions)
+                isNullOrWhitespaceOnly(tableOptions)
                         ? Collections.emptyMap()
                         : parseCommaSeparatedKeyValues(tableOptions);
         Identifier identifier = Identifier.fromString(tableId);
         CompactAction action;
         String jobName;
-        if (isBlank(orderStrategy) && isBlank(orderByColumns)) {
+        if (isNullOrWhitespaceOnly(orderStrategy) && isNullOrWhitespaceOnly(orderByColumns)) {
             action =
                     new CompactAction(
                             warehouse,
@@ -80,8 +87,15 @@ public class CompactProcedure extends ProcedureBase {
                             identifier.getObjectName(),
                             catalogOptions,
                             tableConf);
+            if (!isNullOrWhitespaceOnly(partitionIdleTime)) {
+                action.withPartitionIdleTime(TimeUtils.parseDuration(partitionIdleTime));
+            }
             jobName = "Compact Job";
-        } else if (!isBlank(orderStrategy) && !isBlank(orderByColumns)) {
+        } else if (!isNullOrWhitespaceOnly(orderStrategy)
+                && !isNullOrWhitespaceOnly(orderByColumns)) {
+            Preconditions.checkArgument(
+                    isNullOrWhitespaceOnly(partitionIdleTime),
+                    "sort compact do not support 'partition_idle_time'.");
             action =
                     new SortCompactAction(
                                     warehouse,
@@ -97,11 +111,11 @@ public class CompactProcedure extends ProcedureBase {
                     "You must specify 'order strategy' and 'order by columns' both.");
         }
 
-        if (!(isBlank(partitions))) {
+        if (!(isNullOrWhitespaceOnly(partitions))) {
             action.withPartitions(getPartitions(partitions.split(";")));
         }
 
-        if (!isBlank(where)) {
+        if (!isNullOrWhitespaceOnly(where)) {
             action.withWhereSql(where);
         }
 

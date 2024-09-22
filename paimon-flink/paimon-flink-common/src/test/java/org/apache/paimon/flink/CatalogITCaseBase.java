@@ -185,7 +185,7 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
                 catalog.getTable(Identifier.create(tEnv.getCurrentDatabase(), tableName));
     }
 
-    private FlinkCatalog flinkCatalog() {
+    protected FlinkCatalog flinkCatalog() {
         return (FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get();
     }
 

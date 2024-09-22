@@ -24,6 +24,9 @@ import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.flink.table.annotation.ArgumentHint;
+import org.apache.flink.table.annotation.DataTypeHint;
+import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 /**
@@ -41,11 +44,20 @@ public class ResetConsumerProcedure extends ProcedureBase {
 
     public static final String IDENTIFIER = "reset_consumer";
 
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "consumer_id", type = @DataTypeHint("STRING")),
+                @ArgumentHint(
+                        name = "next_snapshot_id",
+                        type = @DataTypeHint("BIGINT"),
+                        isOptional = true)
+            })
     public String[] call(
             ProcedureContext procedureContext,
             String tableId,
             String consumerId,
-            long nextSnapshotId)
+            Long nextSnapshotId)
             throws Catalog.TableNotExistException {
         FileStoreTable fileStoreTable =
                 (FileStoreTable) catalog.getTable(Identifier.fromString(tableId));
@@ -54,21 +66,11 @@ public class ResetConsumerProcedure extends ProcedureBase {
                         fileStoreTable.fileIO(),
                         fileStoreTable.location(),
                         fileStoreTable.snapshotManager().branch());
-        consumerManager.resetConsumer(consumerId, new Consumer(nextSnapshotId));
-
-        return new String[] {"Success"};
-    }
-
-    public String[] call(ProcedureContext procedureContext, String tableId, String consumerId)
-            throws Catalog.TableNotExistException {
-        FileStoreTable fileStoreTable =
-                (FileStoreTable) catalog.getTable(Identifier.fromString(tableId));
-        ConsumerManager consumerManager =
-                new ConsumerManager(
-                        fileStoreTable.fileIO(),
-                        fileStoreTable.location(),
-                        fileStoreTable.snapshotManager().branch());
-        consumerManager.deleteConsumer(consumerId);
+        if (nextSnapshotId != null) {
+            consumerManager.resetConsumer(consumerId, new Consumer(nextSnapshotId));
+        } else {
+            consumerManager.deleteConsumer(consumerId);
+        }
 
         return new String[] {"Success"};
     }

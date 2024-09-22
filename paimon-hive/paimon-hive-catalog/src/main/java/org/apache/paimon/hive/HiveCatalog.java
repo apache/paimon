@@ -41,6 +41,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.TableType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -85,6 +86,7 @@ import java.util.stream.Collectors;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTOREWAREHOUSE;
 import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
+import static org.apache.paimon.hive.HiveCatalogOptions.FORMAT_TABLE_ENABLED;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
@@ -154,6 +156,10 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         this.clients = new CachedClientPool(hiveConf, options, clientClassName);
+    }
+
+    private boolean formatTableEnabled() {
+        return options.get(FORMAT_TABLE_ENABLED);
     }
 
     @Override
@@ -415,10 +421,26 @@ public class HiveCatalog extends AbstractCatalog {
                     "Interrupted in call to tableExists " + identifier.getFullName(), e);
         }
 
-        return isPaimonTable(table)
-                && tableSchemaInFileSystem(
-                                getTableLocation(identifier), identifier.getBranchNameOrDefault())
-                        .isPresent();
+        boolean isDataTable =
+                isPaimonTable(table)
+                        && tableSchemaInFileSystem(
+                                        getTableLocation(identifier),
+                                        identifier.getBranchNameOrDefault())
+                                .isPresent();
+        if (isDataTable) {
+            return true;
+        }
+
+        if (formatTableEnabled()) {
+            try {
+                HiveFormatTableUtils.convertToFormatTable(table);
+                return true;
+            } catch (UnsupportedOperationException e) {
+                return false;
+            }
+        }
+
+        return false;
     }
 
     private static boolean isPaimonTable(Table table) {
@@ -437,6 +459,35 @@ public class HiveCatalog extends AbstractCatalog {
         return tableSchemaInFileSystem(
                         getTableLocation(identifier), identifier.getBranchNameOrDefault())
                 .orElseThrow(() -> new TableNotExistException(identifier));
+    }
+
+    @Override
+    public FormatTable getFormatTable(Identifier identifier) throws TableNotExistException {
+        if (!formatTableEnabled()) {
+            throw new TableNotExistException(identifier);
+        }
+
+        Table table;
+        try {
+            table =
+                    clients.run(
+                            client ->
+                                    client.getTable(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName()));
+        } catch (NoSuchObjectException e) {
+            throw new TableNotExistException(identifier);
+        } catch (TException e) {
+            throw new RuntimeException(e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+        try {
+            return HiveFormatTableUtils.convertToFormatTable(table);
+        } catch (UnsupportedOperationException e) {
+            throw new TableNotExistException(identifier);
+        }
     }
 
     private boolean usingExternalTable() {
@@ -517,6 +568,9 @@ public class HiveCatalog extends AbstractCatalog {
         Map<String, String> tblProperties;
         if (syncAllProperties()) {
             tblProperties = new HashMap<>(tableSchema.options());
+
+            // add primary-key, partition-key to tblproperties
+            tblProperties.putAll(convertToPropertiesTableKey(tableSchema));
         } else {
             tblProperties = convertToPropertiesPrefixKey(tableSchema.options(), HIVE_PREFIX);
         }
@@ -676,7 +730,8 @@ public class HiveCatalog extends AbstractCatalog {
                         isPaimonTable(table),
                         "Table %s is not a paimon table in hive metastore.",
                         identifier.getFullName());
-                if (!newTable.getSd().getCols().equals(table.getSd().getCols())) {
+                if (!newTable.getSd().getCols().equals(table.getSd().getCols())
+                        || !newTable.getParameters().equals(table.getParameters())) {
                     alterTableToHms(table, identifier, tableSchema);
                 }
             } catch (NoSuchObjectException e) {
@@ -804,10 +859,28 @@ public class HiveCatalog extends AbstractCatalog {
     private void updateHmsTablePars(Table table, TableSchema schema) {
         if (syncAllProperties()) {
             table.getParameters().putAll(schema.options());
+            table.getParameters().putAll(convertToPropertiesTableKey(schema));
         } else {
             table.getParameters()
                     .putAll(convertToPropertiesPrefixKey(schema.options(), HIVE_PREFIX));
         }
+    }
+
+    private Map<String, String> convertToPropertiesTableKey(TableSchema tableSchema) {
+        Map<String, String> properties = new HashMap<>();
+        if (!tableSchema.primaryKeys().isEmpty()) {
+            properties.put(
+                    CoreOptions.PRIMARY_KEY.key(), String.join(",", tableSchema.primaryKeys()));
+        }
+        if (!tableSchema.partitionKeys().isEmpty()) {
+            properties.put(
+                    CoreOptions.PARTITION.key(), String.join(",", tableSchema.partitionKeys()));
+        }
+        if (!tableSchema.bucketKeys().isEmpty()) {
+            properties.put(
+                    CoreOptions.BUCKET_KEY.key(), String.join(",", tableSchema.bucketKeys()));
+        }
+        return properties;
     }
 
     @VisibleForTesting

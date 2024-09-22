@@ -48,6 +48,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -77,9 +78,18 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
         this.conf = conf;
         this.clientPoolSize = options.get(CLIENT_POOL_SIZE);
         this.evictionInterval = options.get(CLIENT_POOL_CACHE_EVICTION_INTERVAL_MS);
-        this.key = extractKey(options.get(CLIENT_POOL_CACHE_KEYS), conf);
+        this.key = extractKey(clientClassName, options.get(CLIENT_POOL_CACHE_KEYS), conf);
         this.clientClassName = clientClassName;
         init();
+        // set ugi information to hms client
+        try {
+            run(client -> null);
+        } catch (TException e) {
+            throw new RuntimeException(e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
     }
 
     @VisibleForTesting
@@ -142,9 +152,10 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
     }
 
     @VisibleForTesting
-    static Key extractKey(String cacheKeys, Configuration conf) {
+    static Key extractKey(String clientClassName, String cacheKeys, Configuration conf) {
         // generate key elements in a certain order, so that the Key instances are comparable
         List<Object> elements = Lists.newArrayList();
+        elements.add(clientClassName);
         elements.add(conf.get(HiveConf.ConfVars.METASTOREURIS.varname, ""));
         elements.add(HiveCatalogOptions.IDENTIFIER);
         if (cacheKeys == null || cacheKeys.isEmpty()) {
@@ -219,6 +230,38 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
         public static Key of(List<Object> elements) {
             return new Key(elements);
         }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+
+            final Key that = (Key) o;
+            if (this.elements.size() != that.elements.size()) {
+                return false;
+            }
+            for (int i = 0; i < elements.size(); i++) {
+                if (!Objects.equals(this.elements.get(i), that.elements.get(i))) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        @Override
+        public int hashCode() {
+            int hashCode = 0;
+            synchronized (elements) {
+                for (Object p : elements) {
+                    hashCode ^= p.hashCode();
+                }
+            }
+            return hashCode;
+        }
     }
 
     static class ConfElement {
@@ -237,6 +280,23 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
         @Nullable
         public String value() {
             return value;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) {
+                return true;
+            }
+            if (obj == null || getClass() != obj.getClass()) {
+                return false;
+            }
+            ConfElement other = (ConfElement) obj;
+            return Objects.equals(key, other.key) && Objects.equals(value, other.value);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(key, value);
         }
 
         public static ConfElement of(String key, String value) {

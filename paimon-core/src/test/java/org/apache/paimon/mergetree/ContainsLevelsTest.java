@@ -20,6 +20,7 @@ package org.apache.paimon.mergetree;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -194,7 +195,10 @@ public class ContainsLevelsTest {
                                         0, file.fileName(), file.fileSize(), file.level()),
                 file -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
                 new HashLookupStoreFactory(
-                        new CacheManager(MemorySize.ofMebiBytes(1)), 2048, 0.75, "none"),
+                        new CacheManager(MemorySize.ofMebiBytes(1)),
+                        2048,
+                        0.75,
+                        new CompressOptions("none", 1)),
                 rowCount -> BloomFilter.builder(rowCount, 0.01),
                 LookupFile.createCache(Duration.ofHours(1), maxDiskSize));
     }
@@ -216,15 +220,14 @@ public class ContainsLevelsTest {
 
     private KeyValueFileWriterFactory createWriterFactory() {
         Path path = new Path(tempDir.toUri().toString());
-        String identifier = "avro";
         Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
-        pathFactoryMap.put(identifier, createNonPartFactory(path));
+        pathFactoryMap.put("avro", createNonPartFactory(path));
         return KeyValueFileWriterFactory.builder(
                         FileIOFinder.find(path),
                         0,
                         keyType,
                         rowType,
-                        new FlushingFileFormat(identifier),
+                        new FlushingFileFormat("avro"),
                         pathFactoryMap,
                         VALUE_128_MB.getBytes())
                 .build(BinaryRow.EMPTY_ROW, 0, new CoreOptions(new Options()));

@@ -18,9 +18,9 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.stats
+import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.stats.ColStats
-import org.apache.paimon.types.DataType
+import org.apache.paimon.types.{DataField, DataType, RowType}
 
 import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.catalyst.plans.logical.ColumnStat
@@ -40,10 +40,53 @@ case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
 
   private lazy val paimonStats = if (scan.statistics.isPresent) scan.statistics.get() else null
 
-  lazy val paimonStatsEnabled: Boolean = paimonStats != null
+  lazy val paimonStatsEnabled: Boolean = {
+    paimonStats != null &&
+    paimonStats.mergedRecordSize().isPresent &&
+    paimonStats.mergedRecordCount().isPresent
+  }
 
-  override def sizeInBytes(): OptionalLong =
-    if (paimonStatsEnabled) paimonStats.mergedRecordSize() else OptionalLong.of(scannedTotalSize)
+  private def getSizeForField(field: DataField): Long = {
+    Option(paimonStats.colStats().get(field.name()))
+      .map(_.avgLen())
+      .filter(_.isPresent)
+      .map(_.getAsLong)
+      .getOrElse(field.`type`().defaultSize().toLong)
+  }
+
+  private def getSizeForRow(schema: RowType): Long = {
+    schema.getFields.asScala.map(field => getSizeForField(field)).sum
+  }
+
+  override def sizeInBytes(): OptionalLong = {
+    if (!paimonStatsEnabled) {
+      return OptionalLong.of(scannedTotalSize)
+    }
+
+    val wholeSchemaSize = getSizeForRow(scan.tableRowType)
+
+    val requiredDataSchemaSize = scan.requiredTableFields.map {
+      field =>
+        val dataField = scan.tableRowType.getField(field.name)
+        getSizeForField(dataField)
+    }.sum
+    val requiredDataSizeInBytes =
+      paimonStats.mergedRecordSize().getAsLong * (requiredDataSchemaSize.toDouble / wholeSchemaSize)
+
+    val metadataSchemaSize = scan.metadataFields.map {
+      field =>
+        val dataField = PaimonMetadataColumn.get(field.name, scan.partitionType).toPaimonDataField
+        getSizeForField(dataField)
+    }.sum
+    val metadataSizeInBytes = paimonStats.mergedRecordCount().getAsLong * metadataSchemaSize
+
+    val sizeInBytes = (requiredDataSizeInBytes + metadataSizeInBytes).toLong
+    // Avoid return 0 bytes if there are some valid rows.
+    // Avoid return too small size in bytes which may less than row count,
+    // note the compression ratio on disk is usually bigger than memory.
+    val normalized = Math.max(sizeInBytes, paimonStats.mergedRecordCount().getAsLong)
+    OptionalLong.of(normalized)
+  }
 
   override def numRows(): OptionalLong =
     if (paimonStatsEnabled) paimonStats.mergedRecordCount() else OptionalLong.of(rowCount)

@@ -52,7 +52,7 @@ public class BucketedAppendDeletionFileMaintainer implements AppendDeletionFileM
     }
 
     @Override
-    public void notifyDeletionFiles(String dataFile, DeletionVector deletionVector) {
+    public void notifyNewDeletionVector(String dataFile, DeletionVector deletionVector) {
         maintainer.mergeNewDeletion(dataFile, deletionVector);
     }
 

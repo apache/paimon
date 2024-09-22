@@ -21,17 +21,26 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.append.UnawareAppendTableCompactionCoordinator;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.ExecutorUtils;
 
-import org.apache.flink.api.common.operators.ProcessingTimeService;
+import org.apache.flink.api.common.operators.MailboxExecutor;
+import org.apache.flink.api.common.operators.ProcessingTimeService.ProcessingTimeCallback;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
+import org.apache.flink.streaming.runtime.tasks.mailbox.MailboxExecutorImpl;
 import org.apache.flink.types.Either;
 
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.ThreadUtils.newDaemonThreadFactory;
 
 /**
  * A {@link OneInputStreamOperator} to accept commit messages and send append compact coordinate
@@ -40,15 +49,25 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class AppendBypassCoordinateOperator<CommitT>
         extends AbstractStreamOperator<Either<CommitT, UnawareAppendCompactionTask>>
         implements OneInputStreamOperator<CommitT, Either<CommitT, UnawareAppendCompactionTask>>,
-                ProcessingTimeService.ProcessingTimeCallback {
+                ProcessingTimeCallback {
+
+    private static final long MAX_PENDING_TASKS = 5000;
+    private static final long EMIT_PER_BATCH = 100;
 
     private final FileStoreTable table;
+    private final MailboxExecutorImpl mailbox;
 
-    private transient UnawareAppendTableCompactionCoordinator coordinator;
+    private transient ScheduledExecutorService executorService;
+    private transient LinkedBlockingQueue<UnawareAppendCompactionTask> compactTasks;
 
-    public AppendBypassCoordinateOperator(FileStoreTable table) {
+    public AppendBypassCoordinateOperator(
+            FileStoreTable table,
+            ProcessingTimeService processingTimeService,
+            MailboxExecutor mailbox) {
         this.table = table;
-        this.chainingStrategy = ChainingStrategy.NEVER;
+        this.processingTimeService = processingTimeService;
+        this.mailbox = (MailboxExecutorImpl) mailbox;
+        this.chainingStrategy = ChainingStrategy.HEAD;
     }
 
     @Override
@@ -57,19 +76,22 @@ public class AppendBypassCoordinateOperator<CommitT>
         checkArgument(
                 getRuntimeContext().getNumberOfParallelSubtasks() == 1,
                 "Compaction Coordinator parallelism in paimon MUST be one.");
-        this.coordinator = new UnawareAppendTableCompactionCoordinator(table, true, null);
         long intervalMs = table.coreOptions().continuousDiscoveryInterval().toMillis();
-        getProcessingTimeService().scheduleWithFixedDelay(this, 0, intervalMs);
+        this.compactTasks = new LinkedBlockingQueue<>();
+        UnawareAppendTableCompactionCoordinator coordinator =
+                new UnawareAppendTableCompactionCoordinator(table, true, null);
+        this.executorService =
+                Executors.newSingleThreadScheduledExecutor(
+                        newDaemonThreadFactory("Compaction Coordinator"));
+        this.executorService.scheduleWithFixedDelay(
+                () -> asyncPlan(coordinator), 0, intervalMs, TimeUnit.MILLISECONDS);
+        this.getProcessingTimeService().scheduleWithFixedDelay(this, 0, intervalMs);
     }
 
-    @Override
-    public void onProcessingTime(long time) {
-        while (true) {
+    private void asyncPlan(UnawareAppendTableCompactionCoordinator coordinator) {
+        while (compactTasks.size() < MAX_PENDING_TASKS) {
             List<UnawareAppendCompactionTask> tasks = coordinator.run();
-            for (UnawareAppendCompactionTask task : tasks) {
-                output.collect(new StreamRecord<>(Either.Right(task)));
-            }
-
+            compactTasks.addAll(tasks);
             if (tasks.isEmpty()) {
                 break;
             }
@@ -77,7 +99,26 @@ public class AppendBypassCoordinateOperator<CommitT>
     }
 
     @Override
+    public void onProcessingTime(long time) {
+        while (mailbox.isIdle()) {
+            for (int i = 0; i < EMIT_PER_BATCH; i++) {
+                UnawareAppendCompactionTask task = compactTasks.poll();
+                if (task == null) {
+                    return;
+                }
+                output.collect(new StreamRecord<>(Either.Right(task)));
+            }
+        }
+    }
+
+    @Override
     public void processElement(StreamRecord<CommitT> record) throws Exception {
         output.collect(new StreamRecord<>(Either.Left(record.getValue())));
+    }
+
+    @Override
+    public void close() throws Exception {
+        ExecutorUtils.gracefulShutdown(1, TimeUnit.MINUTES, executorService);
+        super.close();
     }
 }

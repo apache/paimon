@@ -24,7 +24,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.iceberg.IcebergCommitCallback;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.metastore.AddPartitionCommitCallback;
@@ -140,6 +140,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public SimpleFileReader<IndexManifestEntry> indexManifestFileReader() {
+        return store().indexManifestFileFactory().create();
+    }
+
+    @Override
     public String name() {
         return identifier().getObjectName();
     }
@@ -252,12 +257,13 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     private void checkImmutability(Map<String, String> dynamicOptions) {
-        Map<String, String> options = tableSchema.options();
+        Map<String, String> oldOptions = tableSchema.options();
         // check option is not immutable
         dynamicOptions.forEach(
-                (k, v) -> {
-                    if (!Objects.equals(v, options.get(k))) {
-                        SchemaManager.checkAlterTableOption(k);
+                (k, newValue) -> {
+                    String oldValue = oldOptions.get(k);
+                    if (!Objects.equals(oldValue, newValue)) {
+                        SchemaManager.checkAlterTableOption(k, oldValue, newValue, true);
 
                         if (CoreOptions.BUCKET.key().equals(k)) {
                             throw new UnsupportedOperationException(
@@ -397,7 +403,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 options.forceCreatingSnapshot());
     }
 
-    private List<CommitCallback> createCommitCallbacks(String commitUser) {
+    protected List<CommitCallback> createCommitCallbacks(String commitUser) {
         List<CommitCallback> callbacks =
                 new ArrayList<>(CallbackUtils.loadCommitCallbacks(coreOptions()));
         CoreOptions options = coreOptions();
@@ -421,10 +427,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                                     metastoreClientFactory.create(), options.tagToPartitionField()),
                             tagPreview);
             callbacks.add(callback);
-        }
-
-        if (options.metadataIcebergCompatible()) {
-            callbacks.add(new IcebergCommitCallback(this, commitUser));
         }
 
         return callbacks;

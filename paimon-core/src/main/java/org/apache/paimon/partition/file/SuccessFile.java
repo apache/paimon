@@ -86,6 +86,11 @@ public class SuccessFile {
         }
     }
 
+    public static SuccessFile fromPath(FileIO fileIO, Path path) throws IOException {
+        String json = fileIO.readFileUtf8(path);
+        return SuccessFile.fromJson(json);
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {

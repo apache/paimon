@@ -23,10 +23,12 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.BundleFileStoreWriter;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
 import org.apache.paimon.table.BucketMode;
@@ -148,6 +150,18 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     @Override
     public void write(InternalRow row, int bucket) throws Exception {
         writeAndReturn(row, bucket);
+    }
+
+    @Override
+    public void writeBundle(BinaryRow partition, int bucket, BundleRecords bundle)
+            throws Exception {
+        if (write instanceof BundleFileStoreWriter) {
+            ((BundleFileStoreWriter) write).writeBundle(partition, bucket, bundle);
+        } else {
+            for (InternalRow row : bundle) {
+                write(row, bucket);
+            }
+        }
     }
 
     @Nullable

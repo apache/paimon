@@ -19,6 +19,7 @@
 package org.apache.paimon;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCacheFilter;
@@ -103,6 +104,10 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 snapshotManager(),
                 newScan(true).withManifestCacheFilter(manifestFilter),
                 options,
+                bucketMode(),
+                options.deletionVectorsEnabled()
+                        ? DeletionVectorsMaintainer.factory(newIndexFileHandler())
+                        : null,
                 tableName);
     }
 
@@ -131,13 +136,13 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 };
 
         return new AppendOnlyFileStoreScan(
+                newManifestsReader(forWrite),
                 partitionType,
                 bucketFilter,
                 snapshotManager(),
                 schemaManager,
                 schema,
                 manifestFileFactory(forWrite),
-                manifestListFactory(forWrite),
                 options.bucket(),
                 forWrite,
                 options.scanManifestParallelism(),

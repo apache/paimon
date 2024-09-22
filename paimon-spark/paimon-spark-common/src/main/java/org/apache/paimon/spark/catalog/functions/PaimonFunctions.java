@@ -18,20 +18,40 @@
 
 package org.apache.paimon.spark.catalog.functions;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
+
 import org.apache.spark.sql.connector.catalog.functions.BoundFunction;
 import org.apache.spark.sql.connector.catalog.functions.UnboundFunction;
 import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
+import javax.annotation.Nullable;
+
+import java.util.List;
+import java.util.Map;
+
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.spark.sql.types.DataTypes.IntegerType;
 
-/**
- * It should be only used for resolving, e.g., for {@link
- * org.apache.spark.sql.connector.read.SupportsReportPartitioning}.
- */
+/** Paimon functions. */
 public class PaimonFunctions {
+
+    private static final Map<String, UnboundFunction> FUNCTIONS =
+            ImmutableMap.of("bucket", new PaimonFunctions.BucketFunction());
+
+    private static final List<String> FUNCTION_NAMES = ImmutableList.copyOf(FUNCTIONS.keySet());
+
+    public static List<String> names() {
+        return FUNCTION_NAMES;
+    }
+
+    @Nullable
+    public static UnboundFunction load(String name) {
+        return FUNCTIONS.get(name);
+    }
+
     /**
      * For now, we only support report bucket partitioning for table scan. So the case `SELECT
      * bucket(10, col)` would fail since we do not implement {@link

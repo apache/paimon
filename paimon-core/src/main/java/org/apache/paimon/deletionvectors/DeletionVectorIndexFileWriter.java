@@ -54,6 +54,10 @@ public class DeletionVectorIndexFileWriter {
         this.targetSizeInBytes = targetSizePerIndexFile.getBytes();
     }
 
+    /**
+     * For unaware-bucket mode, this method will write out multiple index files, else, it will write
+     * out only one index file.
+     */
     public List<IndexFileMeta> write(Map<String, DeletionVector> input) throws IOException {
         if (input.isEmpty()) {
             return emptyIndexFile();

@@ -27,7 +27,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Filter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,7 +36,9 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -64,13 +66,13 @@ public class ManifestFileMerger {
             RowType partitionType,
             @Nullable Integer manifestReadParallelism) {
         // these are the newly created manifest files, clean them up if exception occurs
-        List<ManifestFileMeta> newMetas = new ArrayList<>();
+        List<ManifestFileMeta> newFilesForAbort = new ArrayList<>();
 
         try {
             Optional<List<ManifestFileMeta>> fullCompacted =
                     tryFullCompaction(
                             input,
-                            newMetas,
+                            newFilesForAbort,
                             manifestFile,
                             suggestedMetaSize,
                             manifestFullCompactionSize,
@@ -80,14 +82,14 @@ public class ManifestFileMerger {
                     () ->
                             tryMinorCompaction(
                                     input,
-                                    newMetas,
+                                    newFilesForAbort,
                                     manifestFile,
                                     suggestedMetaSize,
                                     suggestedMinMetaCount,
                                     manifestReadParallelism));
         } catch (Throwable e) {
             // exception occurs, clean up and rethrow
-            for (ManifestFileMeta manifest : newMetas) {
+            for (ManifestFileMeta manifest : newFilesForAbort) {
                 manifestFile.delete(manifest.fileName());
             }
             throw new RuntimeException(e);
@@ -96,7 +98,7 @@ public class ManifestFileMerger {
 
     private static List<ManifestFileMeta> tryMinorCompaction(
             List<ManifestFileMeta> input,
-            List<ManifestFileMeta> newMetas,
+            List<ManifestFileMeta> newFilesForAbort,
             ManifestFile manifestFile,
             long suggestedMetaSize,
             int suggestedMinMetaCount,
@@ -111,7 +113,11 @@ public class ManifestFileMerger {
             if (totalSize >= suggestedMetaSize) {
                 // reach suggested file size, perform merging and produce new file
                 mergeCandidates(
-                        candidates, manifestFile, result, newMetas, manifestReadParallelism);
+                        candidates,
+                        manifestFile,
+                        result,
+                        newFilesForAbort,
+                        manifestReadParallelism);
                 candidates.clear();
                 totalSize = 0;
             }
@@ -119,7 +125,8 @@ public class ManifestFileMerger {
 
         // merge the last bit of manifests if there are too many
         if (candidates.size() >= suggestedMinMetaCount) {
-            mergeCandidates(candidates, manifestFile, result, newMetas, manifestReadParallelism);
+            mergeCandidates(
+                    candidates, manifestFile, result, newFilesForAbort, manifestReadParallelism);
         } else {
             result.addAll(candidates);
         }
@@ -148,37 +155,28 @@ public class ManifestFileMerger {
 
     public static Optional<List<ManifestFileMeta>> tryFullCompaction(
             List<ManifestFileMeta> inputs,
-            List<ManifestFileMeta> newMetas,
+            List<ManifestFileMeta> newFilesForAbort,
             ManifestFile manifestFile,
             long suggestedMetaSize,
             long sizeTrigger,
             RowType partitionType,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
+        checkArgument(sizeTrigger > 0, "Manifest full compaction size trigger cannot be zero.");
+
         // 1. should trigger full compaction
 
-        List<ManifestFileMeta> base = new ArrayList<>();
+        Filter<ManifestFileMeta> mustChange =
+                file -> file.numDeletedFiles() > 0 || file.fileSize() < suggestedMetaSize;
         long totalManifestSize = 0;
-        int i = 0;
-        for (; i < inputs.size(); i++) {
-            ManifestFileMeta file = inputs.get(i);
-            if (file.numDeletedFiles() == 0 && file.fileSize() >= suggestedMetaSize) {
-                base.add(file);
-                totalManifestSize += file.fileSize();
-            } else {
-                break;
-            }
-        }
-
-        List<ManifestFileMeta> delta = new ArrayList<>();
         long deltaDeleteFileNum = 0;
         long totalDeltaFileSize = 0;
-        for (; i < inputs.size(); i++) {
-            ManifestFileMeta file = inputs.get(i);
-            delta.add(file);
+        for (ManifestFileMeta file : inputs) {
             totalManifestSize += file.fileSize();
-            deltaDeleteFileNum += file.numDeletedFiles();
-            totalDeltaFileSize += file.fileSize();
+            if (mustChange.test(file)) {
+                totalDeltaFileSize += file.fileSize();
+                deltaDeleteFileNum += file.numDeletedFiles();
+            }
         }
 
         if (totalDeltaFileSize < sizeTrigger) {
@@ -188,108 +186,79 @@ public class ManifestFileMerger {
         // 2. do full compaction
 
         LOG.info(
-                "Start Manifest File Full Compaction, pick the number of delete file: {}, total manifest file size: {}",
+                "Start Manifest File Full Compaction: totalManifestSize: {}, deltaDeleteFileNum {}, totalDeltaFileSize {}",
+                totalManifestSize,
                 deltaDeleteFileNum,
-                totalManifestSize);
+                totalDeltaFileSize);
 
-        // 2.1. try to skip base files by partition filter
+        // 2.1. read all delete entries
 
-        Map<FileEntry.Identifier, ManifestEntry> deltaMerged = new LinkedHashMap<>();
-        FileEntry.mergeEntries(manifestFile, delta, deltaMerged, manifestReadParallelism);
+        Set<FileEntry.Identifier> deleteEntries =
+                FileEntry.readDeletedEntries(manifestFile, inputs, manifestReadParallelism);
+
+        // 2.2. try to skip base files by partition filter
 
         List<ManifestFileMeta> result = new ArrayList<>();
-        int j = 0;
+        List<ManifestFileMeta> toBeMerged = new LinkedList<>(inputs);
         if (partitionType.getFieldCount() > 0) {
-            Set<BinaryRow> deletePartitions = computeDeletePartitions(deltaMerged);
+            Set<BinaryRow> deletePartitions = computeDeletePartitions(deleteEntries);
             PartitionPredicate predicate =
                     PartitionPredicate.fromMultiple(partitionType, deletePartitions);
             if (predicate != null) {
-                for (; j < base.size(); j++) {
-                    // TODO: optimize this to binary search.
-                    ManifestFileMeta file = base.get(j);
-                    if (predicate.test(
+                Iterator<ManifestFileMeta> iterator = toBeMerged.iterator();
+                while (iterator.hasNext()) {
+                    ManifestFileMeta file = iterator.next();
+                    if (mustChange.test(file)) {
+                        continue;
+                    }
+                    if (!predicate.test(
                             file.numAddedFiles() + file.numDeletedFiles(),
                             file.partitionStats().minValues(),
                             file.partitionStats().maxValues(),
                             file.partitionStats().nullCounts())) {
-                        break;
-                    } else {
+                        iterator.remove();
                         result.add(file);
                     }
                 }
-            } else {
-                // There is no DELETE Entry in Delta, Base don't need compaction
-                j = base.size();
-                result.addAll(base);
             }
         }
 
-        // 2.2. try to skip base files by reading entries
+        // 2.2. merge
 
-        Set<FileEntry.Identifier> deleteEntries = new HashSet<>();
-        deltaMerged.forEach(
-                (k, v) -> {
-                    if (v.kind() == FileKind.DELETE) {
-                        deleteEntries.add(k);
-                    }
-                });
-
-        List<ManifestEntry> mergedEntries = new ArrayList<>();
-        for (; j < base.size(); j++) {
-            ManifestFileMeta file = base.get(j);
-            boolean contains = false;
-            for (ManifestEntry entry : manifestFile.read(file.fileName(), file.fileSize())) {
-                checkArgument(entry.kind() == FileKind.ADD);
-                if (deleteEntries.contains(entry.identifier())) {
-                    contains = true;
-                } else {
-                    mergedEntries.add(entry);
-                }
-            }
-            if (contains) {
-                // already read this file into fullMerged
-                j++;
-                break;
-            } else {
-                mergedEntries.clear();
-                result.add(file);
-            }
+        if (toBeMerged.size() <= 1) {
+            return Optional.empty();
         }
-
-        // 2.3. merge
 
         RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
                 manifestFile.createRollingWriter();
         Exception exception = null;
         try {
+            for (ManifestFileMeta file : toBeMerged) {
+                List<ManifestEntry> entries = new ArrayList<>();
+                boolean requireChange = mustChange.test(file);
+                for (ManifestEntry entry : manifestFile.read(file.fileName(), file.fileSize())) {
+                    if (entry.kind() == FileKind.DELETE) {
+                        continue;
+                    }
 
-            // 2.3.1 merge mergedEntries
-            for (ManifestEntry entry : mergedEntries) {
-                writer.write(entry);
-            }
-            mergedEntries.clear();
-
-            // 2.3.2 merge base files
-            for (ManifestEntry entry :
-                    FileEntry.readManifestEntries(
-                            manifestFile, base.subList(j, base.size()), manifestReadParallelism)) {
-                checkArgument(entry.kind() == FileKind.ADD);
-                if (!deleteEntries.contains(entry.identifier())) {
-                    writer.write(entry);
+                    if (deleteEntries.contains(entry.identifier())) {
+                        requireChange = true;
+                    } else {
+                        entries.add(entry);
+                    }
                 }
-            }
 
-            // 2.3.3 merge deltaMerged
-            for (ManifestEntry entry : deltaMerged.values()) {
-                if (entry.kind() == FileKind.ADD) {
-                    writer.write(entry);
+                if (requireChange) {
+                    writer.write(entries);
+                } else {
+                    result.add(file);
                 }
             }
         } catch (Exception e) {
             exception = e;
         } finally {
             if (exception != null) {
-                IOUtils.closeQuietly(writer);
+                writer.abort();
                 throw exception;
             }
             writer.close();
@@ -297,18 +266,14 @@ public class ManifestFileMerger {
 
         List<ManifestFileMeta> merged = writer.result();
         result.addAll(merged);
-        newMetas.addAll(merged);
+        newFilesForAbort.addAll(merged);
         return Optional.of(result);
     }
 
-    private static Set<BinaryRow> computeDeletePartitions(
-            Map<FileEntry.Identifier, ManifestEntry> deltaMerged) {
+    private static Set<BinaryRow> computeDeletePartitions(Set<FileEntry.Identifier> deleteEntries) {
         Set<BinaryRow> partitions = new HashSet<>();
-        for (ManifestEntry manifestEntry : deltaMerged.values()) {
-            if (manifestEntry.kind() == FileKind.DELETE) {
-                BinaryRow partition = manifestEntry.partition();
-                partitions.add(partition);
-            }
+        for (FileEntry.Identifier identifier : deleteEntries) {
+            partitions.add(identifier.partition);
         }
         return partitions;
     }

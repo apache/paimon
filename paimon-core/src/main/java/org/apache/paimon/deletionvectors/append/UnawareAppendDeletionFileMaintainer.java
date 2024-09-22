@@ -46,6 +46,7 @@ public class UnawareAppendDeletionFileMaintainer implements AppendDeletionFileMa
     private final IndexFileHandler indexFileHandler;
 
     private final BinaryRow partition;
+    private final Map<String, DeletionFile> dataFileToDeletionFile;
     private final Map<String, IndexManifestEntry> indexNameToEntry = new HashMap<>();
 
     private final Map<String, Map<String, DeletionFile>> indexFileToDeletionFiles = new HashMap<>();
@@ -61,16 +62,13 @@ public class UnawareAppendDeletionFileMaintainer implements AppendDeletionFileMa
             Map<String, DeletionFile> deletionFiles) {
         this.indexFileHandler = indexFileHandler;
         this.partition = partition;
+        this.dataFileToDeletionFile = deletionFiles;
         // the deletion of data files is independent
         // just create an empty maintainer
         this.maintainer = new DeletionVectorsMaintainer.Factory(indexFileHandler).create();
-        init(deletionFiles);
-    }
 
-    @VisibleForTesting
-    public void init(Map<String, DeletionFile> dataFileToDeletionFiles) {
         List<String> touchedIndexFileNames =
-                dataFileToDeletionFiles.values().stream()
+                deletionFiles.values().stream()
                         .map(deletionFile -> new Path(deletionFile.path()).getName())
                         .distinct()
                         .collect(Collectors.toList());
@@ -81,8 +79,8 @@ public class UnawareAppendDeletionFileMaintainer implements AppendDeletionFileMa
                                         indexManifestEntry.indexFile().fileName()))
                 .forEach(entry -> indexNameToEntry.put(entry.indexFile().fileName(), entry));
 
-        for (String dataFile : dataFileToDeletionFiles.keySet()) {
-            DeletionFile deletionFile = dataFileToDeletionFiles.get(dataFile);
+        for (String dataFile : deletionFiles.keySet()) {
+            DeletionFile deletionFile = deletionFiles.get(dataFile);
             String indexFileName = new Path(deletionFile.path()).getName();
             if (!indexFileToDeletionFiles.containsKey(indexFileName)) {
                 indexFileToDeletionFiles.put(indexFileName, new HashMap<>());
@@ -102,19 +100,39 @@ public class UnawareAppendDeletionFileMaintainer implements AppendDeletionFileMa
         return UNAWARE_BUCKET;
     }
 
-    @Override
-    public void notifyDeletionFiles(String dataFile, DeletionVector deletionVector) {
-        DeletionVectorsIndexFile deletionVectorsIndexFile = indexFileHandler.deletionVectorsIndex();
-        DeletionFile previous = null;
+    public boolean hasDeletionFile(String dataFile) {
+        return this.dataFileToDeletionFile.containsKey(dataFile);
+    }
+
+    public DeletionFile getDeletionFile(String dataFile) {
+        return this.dataFileToDeletionFile.get(dataFile);
+    }
+
+    public DeletionVector getDeletionVector(String dataFile) {
+        DeletionFile deletionFile = getDeletionFile(dataFile);
+        if (deletionFile != null) {
+            return indexFileHandler.deletionVectorsIndex().readDeletionVector(deletionFile);
+        }
+        return null;
+    }
+
+    public DeletionFile notifyRemovedDeletionVector(String dataFile) {
         if (dataFileToIndexFile.containsKey(dataFile)) {
             String indexFileName = dataFileToIndexFile.get(dataFile);
             touchedIndexFiles.add(indexFileName);
             if (indexFileToDeletionFiles.containsKey(indexFileName)) {
-                previous = indexFileToDeletionFiles.get(indexFileName).remove(dataFile);
+                return indexFileToDeletionFiles.get(indexFileName).remove(dataFile);
             }
         }
+        return null;
+    }
+
+    @Override
+    public void notifyNewDeletionVector(String dataFile, DeletionVector deletionVector) {
+        DeletionVectorsIndexFile deletionVectorsIndexFile = indexFileHandler.deletionVectorsIndex();
+        DeletionFile previous = notifyRemovedDeletionVector(dataFile);
         if (previous != null) {
-            deletionVector.merge(deletionVectorsIndexFile.readDeletionVector(dataFile, previous));
+            deletionVector.merge(deletionVectorsIndexFile.readDeletionVector(previous));
         }
         maintainer.notifyNewDeletion(dataFile, deletionVector);
     }
@@ -131,6 +149,17 @@ public class UnawareAppendDeletionFileMaintainer implements AppendDeletionFileMa
                         .collect(Collectors.toList());
         result.addAll(newIndexFileEntries);
         return result;
+    }
+
+    public IndexFileMeta getIndexFile(String dataFile) {
+        DeletionFile deletionFile = getDeletionFile(dataFile);
+        if (deletionFile == null) {
+            return null;
+        } else {
+            IndexManifestEntry entry =
+                    this.indexNameToEntry.get(new Path(deletionFile.path()).getName());
+            return entry == null ? null : entry.indexFile();
+        }
     }
 
     @VisibleForTesting

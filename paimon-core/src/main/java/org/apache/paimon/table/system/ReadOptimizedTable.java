@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.DefaultValueAssigner;
@@ -86,6 +87,11 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public SimpleFileReader<IndexManifestEntry> indexManifestFileReader() {
+        return wrapped.indexManifestFileReader();
+    }
+
+    @Override
     public String name() {
         return wrapped.name() + SYSTEM_TABLE_SPLITTER + READ_OPTIMIZED;
     }
@@ -131,6 +137,10 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
 
     @Override
     public StreamDataTableScan newStreamScan() {
+        if (wrapped.schema().primaryKeys().size() > 0) {
+            throw new UnsupportedOperationException(
+                    "Unsupported streaming scan for read optimized table");
+        }
         return new DataTableStreamScan(
                 coreOptions(),
                 newSnapshotReader(),

@@ -26,6 +26,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
+import org.apache.paimon.spark.catalog.SupportFunction;
 
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
@@ -59,11 +60,10 @@ import static org.apache.paimon.options.CatalogOptions.ALLOW_UPPER_CASE;
 import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 import static org.apache.paimon.spark.util.OptionUtils.copyWithSQLConf;
-import static org.apache.paimon.spark.util.OptionUtils.mergeSQLConf;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Spark {@link TableCatalog} for paimon. */
-public class SparkCatalog extends SparkBaseCatalog {
+public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
 
     private static final Logger LOG = LoggerFactory.getLogger(SparkCatalog.class);
 
@@ -389,7 +389,10 @@ public class SparkCatalog extends SparkBaseCatalog {
 
     private Schema toInitialSchema(
             StructType schema, Transform[] partitions, Map<String, String> properties) {
-        Map<String, String> normalizedProperties = mergeSQLConf(properties);
+        Map<String, String> normalizedProperties = new HashMap<>(properties);
+        if (!normalizedProperties.containsKey(TableCatalog.PROP_PROVIDER)) {
+            normalizedProperties.put(TableCatalog.PROP_PROVIDER, SparkSource.NAME());
+        }
         normalizedProperties.remove(PRIMARY_KEY_IDENTIFIER);
         normalizedProperties.remove(TableCatalog.PROP_COMMENT);
         String pkAsString = properties.get(PRIMARY_KEY_IDENTIFIER);

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.lookup.hash;
 
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.LookupStoreFactory.Context;
@@ -64,14 +65,14 @@ public class HashLookupStoreFactoryTest {
     private final int pageSize = 1024;
 
     private final boolean enableBloomFilter;
-    private final String compress;
+    private final CompressOptions compress;
 
     private File file;
     private HashLookupStoreFactory factory;
 
     public HashLookupStoreFactoryTest(List<Object> var) {
         this.enableBloomFilter = (Boolean) var.get(0);
-        this.compress = (String) var.get(1);
+        this.compress = new CompressOptions((String) var.get(1), 1);
     }
 
     @SuppressWarnings("unused")

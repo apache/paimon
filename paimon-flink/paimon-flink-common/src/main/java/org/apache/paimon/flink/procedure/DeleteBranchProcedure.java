@@ -21,6 +21,9 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 
+import org.apache.flink.table.annotation.ArgumentHint;
+import org.apache.flink.table.annotation.DataTypeHint;
+import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 /**
@@ -39,6 +42,11 @@ public class DeleteBranchProcedure extends ProcedureBase {
         return IDENTIFIER;
     }
 
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "branch", type = @DataTypeHint("STRING"))
+            })
     public String[] call(ProcedureContext procedureContext, String tableId, String branchStr)
             throws Catalog.TableNotExistException {
         catalog.getTable(Identifier.fromString(tableId)).deleteBranches(branchStr);

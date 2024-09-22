@@ -32,6 +32,6 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
 
     @Override
     protected FileFormat fileFormat() {
-        return new OrcFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024));
+        return new OrcFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
     }
 }

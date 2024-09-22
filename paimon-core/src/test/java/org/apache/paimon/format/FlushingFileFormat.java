@@ -20,6 +20,7 @@ package org.apache.paimon.format;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowType;
@@ -53,34 +54,30 @@ public class FlushingFileFormat extends FileFormat {
                             .create(
                                     PositionOutputStream,
                                     CoreOptions.FILE_COMPRESSION.defaultValue());
+            InternalRowSerializer serializer = new InternalRowSerializer(type);
             return new FormatWriter() {
+
+                long totalSize = 0;
+
                 @Override
-                public void addElement(InternalRow rowData) throws IOException {
-                    wrapped.addElement(rowData);
-                    wrapped.flush();
+                public void addElement(InternalRow row) throws IOException {
+                    wrapped.addElement(row);
+                    totalSize += serializer.toBinaryRow(row).getSizeInBytes();
                 }
 
                 @Override
-                public void flush() throws IOException {
-                    wrapped.flush();
+                public void close() throws IOException {
+                    wrapped.close();
                 }
 
                 @Override
-                public void finish() throws IOException {
-                    wrapped.finish();
-                }
-
-                @Override
-                public boolean reachTargetSize(boolean suggestedCheck, long targetSize)
-                        throws IOException {
-                    return wrapped.reachTargetSize(suggestedCheck, targetSize);
+                public boolean reachTargetSize(boolean suggestedCheck, long targetSize) {
+                    return totalSize > targetSize;
                 }
             };
         };
     }
 
     @Override
-    public void validateDataFields(RowType rowType) {
-        return;
-    }
+    public void validateDataFields(RowType rowType) {}
 }

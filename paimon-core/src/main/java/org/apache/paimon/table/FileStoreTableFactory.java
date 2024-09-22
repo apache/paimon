@@ -106,7 +106,7 @@ public class FileStoreTableFactory {
         return table;
     }
 
-    private static FileStoreTable createWithoutFallbackBranch(
+    public static FileStoreTable createWithoutFallbackBranch(
             FileIO fileIO,
             Path tablePath,
             TableSchema tableSchema,

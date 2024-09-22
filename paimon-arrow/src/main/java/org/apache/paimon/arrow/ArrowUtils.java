@@ -23,6 +23,7 @@ import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
@@ -73,7 +74,15 @@ public class ArrowUtils {
         return VectorSchemaRoot.create(new Schema(fields), allocator);
     }
 
-    private static Field toArrowField(String fieldName, DataType dataType) {
+    public static FieldVector createVector(
+            DataField dataField, BufferAllocator allocator, boolean allowUpperCase) {
+        return toArrowField(
+                        allowUpperCase ? dataField.name() : dataField.name().toLowerCase(),
+                        dataField.type())
+                .createVector(allocator);
+    }
+
+    public static Field toArrowField(String fieldName, DataType dataType) {
         FieldType fieldType = dataType.accept(ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR);
         List<Field> children = null;
         if (dataType instanceof ArrayType) {
@@ -136,7 +145,7 @@ public class ArrowUtils {
         return ArrowCStruct.of(array, schema);
     }
 
-    public void serializeToIpc(VectorSchemaRoot vsr, OutputStream out) {
+    public static void serializeToIpc(VectorSchemaRoot vsr, OutputStream out) {
         try (ArrowStreamWriter writer = new ArrowStreamWriter(vsr, null, out)) {
             writer.start();
             writer.writeBatch();

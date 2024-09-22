@@ -40,14 +40,17 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
+import static org.apache.paimon.CoreOptions.SCAN_FALLBACK_BRANCH;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
@@ -93,11 +96,10 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
         return new Path(table.location(), orphanFile);
     }
 
-    @Test
-    public void testRunWithoutException() throws Exception {
-        FileStoreTable table = createTableAndWriteData(tableName);
-        Path orphanFile1 = getOrphanFilePath(table, ORPHAN_FILE_1);
-        Path orphanFile2 = getOrphanFilePath(table, ORPHAN_FILE_2);
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testRunWithoutException(boolean isNamedArgument) throws Exception {
+        createTableAndWriteData(tableName);
 
         List<String> args =
                 new ArrayList<>(
@@ -118,40 +120,42 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
         assertThatCode(action2::run).doesNotThrowAnyException();
 
         String withoutOlderThan =
-                String.format("CALL sys.remove_orphan_files('%s.%s')", database, tableName);
-        CloseableIterator<Row> withoutOlderThanCollect = callProcedure(withoutOlderThan);
-        assertThat(ImmutableList.copyOf(withoutOlderThanCollect).size()).isEqualTo(0);
+                String.format(
+                        isNamedArgument
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s')"
+                                : "CALL sys.remove_orphan_files('%s.%s')",
+                        database,
+                        tableName);
+        CloseableIterator<Row> withoutOlderThanCollect = executeSQL(withoutOlderThan);
+        assertThat(ImmutableList.copyOf(withoutOlderThanCollect)).containsOnly(Row.of("0"));
 
         String withDryRun =
                 String.format(
-                        "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true)",
-                        database, tableName);
-        ImmutableList<Row> actualDryRunDeleteFile = ImmutableList.copyOf(callProcedure(withDryRun));
-        assertThat(actualDryRunDeleteFile)
-                .containsExactlyInAnyOrder(
-                        Row.of(orphanFile1.toUri().getPath()),
-                        Row.of(orphanFile2.toUri().getPath()));
+                        isNamedArgument
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59', dry_run => true)"
+                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true)",
+                        database,
+                        tableName);
+        ImmutableList<Row> actualDryRunDeleteFile = ImmutableList.copyOf(executeSQL(withDryRun));
+        assertThat(actualDryRunDeleteFile).containsOnly(Row.of("2"));
 
         String withOlderThan =
                 String.format(
-                        "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59')",
-                        database, tableName);
-        ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(callProcedure(withOlderThan));
+                        isNamedArgument
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59')"
+                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59')",
+                        database,
+                        tableName);
+        ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(executeSQL(withOlderThan));
 
-        assertThat(actualDeleteFile)
-                .containsExactlyInAnyOrder(
-                        Row.of(orphanFile1.toUri().getPath()),
-                        Row.of(orphanFile2.toUri().getPath()));
+        assertThat(actualDeleteFile).containsExactlyInAnyOrder(Row.of("2"));
     }
 
-    @Test
-    public void testRemoveDatabaseOrphanFilesITCase() throws Exception {
-        FileStoreTable table1 = createTableAndWriteData("tableName1");
-        Path orphanFile11 = getOrphanFilePath(table1, ORPHAN_FILE_1);
-        Path orphanFile12 = getOrphanFilePath(table1, ORPHAN_FILE_2);
-        FileStoreTable table2 = createTableAndWriteData("tableName2");
-        Path orphanFile21 = getOrphanFilePath(table2, ORPHAN_FILE_1);
-        Path orphanFile22 = getOrphanFilePath(table2, ORPHAN_FILE_2);
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testRemoveDatabaseOrphanFilesITCase(boolean isNamedArgument) throws Exception {
+        createTableAndWriteData("tableName1");
+        createTableAndWriteData("tableName2");
 
         List<String> args =
                 new ArrayList<>(
@@ -171,43 +175,53 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
         RemoveOrphanFilesAction action2 = createAction(RemoveOrphanFilesAction.class, args);
         assertThatCode(action2::run).doesNotThrowAnyException();
 
+        args.add("--parallelism");
+        args.add("5");
+        RemoveOrphanFilesAction action3 = createAction(RemoveOrphanFilesAction.class, args);
+        assertThatCode(action3::run).doesNotThrowAnyException();
+
         String withoutOlderThan =
-                String.format("CALL sys.remove_orphan_files('%s.%s')", database, "*");
-        CloseableIterator<Row> withoutOlderThanCollect = callProcedure(withoutOlderThan);
-        assertThat(ImmutableList.copyOf(withoutOlderThanCollect).size()).isEqualTo(0);
+                String.format(
+                        isNamedArgument
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s')"
+                                : "CALL sys.remove_orphan_files('%s.%s')",
+                        database,
+                        "*");
+        CloseableIterator<Row> withoutOlderThanCollect = executeSQL(withoutOlderThan);
+        assertThat(ImmutableList.copyOf(withoutOlderThanCollect)).containsOnly(Row.of("0"));
+
+        String withParallelism =
+                String.format("CALL sys.remove_orphan_files('%s.%s','',true,5)", database, "*");
+        CloseableIterator<Row> withParallelismCollect = executeSQL(withParallelism);
+        assertThat(ImmutableList.copyOf(withParallelismCollect)).containsOnly(Row.of("0"));
 
         String withDryRun =
                 String.format(
-                        "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true)",
-                        database, "*");
-        ImmutableList<Row> actualDryRunDeleteFile = ImmutableList.copyOf(callProcedure(withDryRun));
-        assertThat(actualDryRunDeleteFile)
-                .containsExactlyInAnyOrder(
-                        Row.of(orphanFile11.toUri().getPath()),
-                        Row.of(orphanFile12.toUri().getPath()),
-                        Row.of(orphanFile21.toUri().getPath()),
-                        Row.of(orphanFile22.toUri().getPath()));
+                        isNamedArgument
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59', dry_run => true)"
+                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true)",
+                        database,
+                        "*");
+        ImmutableList<Row> actualDryRunDeleteFile = ImmutableList.copyOf(executeSQL(withDryRun));
+        assertThat(actualDryRunDeleteFile).containsOnly(Row.of("4"));
 
         String withOlderThan =
                 String.format(
-                        "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59')",
-                        database, "*");
-        ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(callProcedure(withOlderThan));
+                        isNamedArgument
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59')"
+                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59')",
+                        database,
+                        "*");
+        ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(executeSQL(withOlderThan));
 
-        assertThat(actualDeleteFile)
-                .containsExactlyInAnyOrder(
-                        Row.of(orphanFile11.toUri().getPath()),
-                        Row.of(orphanFile12.toUri().getPath()),
-                        Row.of(orphanFile21.toUri().getPath()),
-                        Row.of(orphanFile22.toUri().getPath()));
+        assertThat(actualDeleteFile).containsOnly(Row.of("4"));
     }
 
-    @Test
-    public void testCleanWithBranch() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testCleanWithBranch(boolean isNamedArgument) throws Exception {
         // create main branch
         FileStoreTable table = createTableAndWriteData(tableName);
-        Path orphanFile1 = getOrphanFilePath(table, ORPHAN_FILE_1);
-        Path orphanFile2 = getOrphanFilePath(table, ORPHAN_FILE_2);
 
         // create first branch and write some data
         table.createBranch("br");
@@ -239,16 +253,22 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
         Path orphanFile4 = new Path(table.location(), "branch/branch-br2/snapshot/orphan_file4");
         branchTable.fileIO().writeFile(orphanFile4, "y", true);
 
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            executeSQL(
+                    String.format(
+                            "ALTER TABLE `%s`.`%s` SET ('%s' = 'br')",
+                            database, tableName, SCAN_FALLBACK_BRANCH.key()),
+                    false,
+                    true);
+        }
         String procedure =
                 String.format(
-                        "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59')",
-                        database, "*");
-        ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(callProcedure(procedure));
-        assertThat(actualDeleteFile)
-                .containsExactlyInAnyOrder(
-                        Row.of(orphanFile1.toUri().getPath()),
-                        Row.of(orphanFile2.toUri().getPath()),
-                        Row.of(orphanFile3.toUri().getPath()),
-                        Row.of(orphanFile4.toUri().getPath()));
+                        isNamedArgument
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59')"
+                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59')",
+                        database,
+                        "*");
+        ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(executeSQL(procedure));
+        assertThat(actualDeleteFile).containsOnly(Row.of("4"));
     }
 }

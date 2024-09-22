@@ -19,6 +19,7 @@
 package org.apache.paimon.benchmark.lookup;
 
 import org.apache.paimon.benchmark.Benchmark;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.lookup.hash.HashLookupStoreReader;
@@ -34,13 +35,11 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.UUID;
-import java.util.concurrent.ThreadLocalRandom;
 
 /** Benchmark for measure the bloom filter for lookup. */
 public class LookupBloomFilterBenchmark extends AbstractLookupBenchmark {
 
     @TempDir Path tempDir;
-    ThreadLocalRandom rnd = ThreadLocalRandom.current();
 
     @Test
     public void testHighMatch() throws Exception {
@@ -56,15 +55,6 @@ public class LookupBloomFilterBenchmark extends AbstractLookupBenchmark {
     public void testLowMatch() throws Exception {
         innerTest(
                 "lookup", generateSequenceInputs(0, 100000), generateRandomInputs(100000, 200000));
-    }
-
-    private byte[][] generateRandomInputs(int start, int end) {
-        int count = end - start;
-        byte[][] result = new byte[count][4];
-        for (int i = 0; i < count; i++) {
-            result[i] = intToByteArray(rnd.nextInt(start, end));
-        }
-        return result;
     }
 
     public void innerTest(String name, byte[][] inputs, byte[][] probe) throws Exception {
@@ -113,7 +103,10 @@ public class LookupBloomFilterBenchmark extends AbstractLookupBenchmark {
         Arrays.fill(value, (byte) 1);
         HashLookupStoreFactory factory =
                 new HashLookupStoreFactory(
-                        new CacheManager(MemorySize.ofMebiBytes(10)), 16 * 1024, 0.75, "none");
+                        new CacheManager(MemorySize.ofMebiBytes(10)),
+                        16 * 1024,
+                        0.75,
+                        new CompressOptions("none", 1));
 
         File file = new File(tempDir.toFile(), UUID.randomUUID().toString());
         HashLookupStoreWriter writer = factory.createWriter(file, filter);
