@@ -268,7 +268,9 @@ public class OrcReaderFactory implements FormatReaderFactory {
                             .schema(schema)
                             .range(offsetAndLength.getLeft(), offsetAndLength.getRight())
                             .useZeroCopy(OrcConf.USE_ZEROCOPY.getBoolean(conf))
-                            .skipCorruptRecords(OrcConf.SKIP_CORRUPT_DATA.getBoolean(conf));
+                            .skipCorruptRecords(OrcConf.SKIP_CORRUPT_DATA.getBoolean(conf))
+                            .tolerateMissingSchema(
+                                    OrcConf.TOLERATE_MISSING_SCHEMA.getBoolean(conf));
             if (!conjunctPredicates.isEmpty()) {
                 options.useSelected(true);
                 options.allowSARGToFilter(true);
