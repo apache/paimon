@@ -28,10 +28,13 @@ import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.flink.lookup.FileStoreLookupFunction;
 import org.apache.paimon.flink.lookup.LookupRuntimeProviderFactory;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.DataTableBatchScan;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.utils.Projection;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -198,8 +201,10 @@ public abstract class BaseDataTableSource extends FlinkTableSource
     }
 
     private ScanRuntimeProvider createCountStarScan() {
-        long count = ((DataTable) table).newSnapshotReader().withFilter(predicate).rowCount();
-        NumberSequenceRowSource source = new NumberSequenceRowSource(count, count);
+        TableScan scan = table.newReadBuilder().withFilter(predicate).newScan();
+        List<PartitionEntry> partitionEntries = ((DataTableBatchScan) scan).planPartitions();
+        long rowCount = partitionEntries.stream().mapToLong(PartitionEntry::recordCount).sum();
+        NumberSequenceRowSource source = new NumberSequenceRowSource(rowCount, rowCount);
         return new SourceProvider() {
             @Override
             public Source<RowData, ?, ?> createSource() {

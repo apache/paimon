@@ -387,11 +387,6 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         public List<BucketEntry> bucketEntries() {
             return wrapped.bucketEntries();
         }
-
-        @Override
-        public long rowCount() {
-            return wrapped.rowCount();
-        }
     }
 
     private class AuditLogBatchScan implements DataTableScan {

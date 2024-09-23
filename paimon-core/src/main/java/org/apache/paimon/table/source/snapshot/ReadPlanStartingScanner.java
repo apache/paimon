@@ -18,32 +18,39 @@
 
 package org.apache.paimon.table.source.snapshot;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.Snapshot;
-import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.TagManager;
 
-/** {@link StartingScanner} for the {@link CoreOptions#SCAN_TAG_NAME} of a batch read. */
-public class StaticFromTagStartingScanner extends ReadPlanStartingScanner {
+import javax.annotation.Nullable;
 
-    private final String tagName;
+import java.util.Collections;
+import java.util.List;
 
-    public StaticFromTagStartingScanner(SnapshotManager snapshotManager, String tagName) {
+/** An {@link AbstractStartingScanner} to return plan. */
+public abstract class ReadPlanStartingScanner extends AbstractStartingScanner {
+
+    ReadPlanStartingScanner(SnapshotManager snapshotManager) {
         super(snapshotManager);
-        this.tagName = tagName;
+    }
+
+    @Nullable
+    protected abstract SnapshotReader configure(SnapshotReader snapshotReader);
+
+    @Override
+    public Result scan(SnapshotReader snapshotReader) {
+        SnapshotReader configured = configure(snapshotReader);
+        if (configured == null) {
+            return new NoSnapshot();
+        }
+        return StartingScanner.fromPlan(configured.read());
     }
 
     @Override
-    public ScanMode startingScanMode() {
-        return ScanMode.ALL;
-    }
-
-    @Override
-    public SnapshotReader configure(SnapshotReader snapshotReader) {
-        TagManager tagManager =
-                new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
-        Snapshot snapshot = tagManager.taggedSnapshot(tagName);
-        return snapshotReader.withMode(ScanMode.ALL).withSnapshot(snapshot);
+    public List<PartitionEntry> scanPartitions(SnapshotReader snapshotReader) {
+        SnapshotReader configured = configure(snapshotReader);
+        if (configured == null) {
+            return Collections.emptyList();
+        }
+        return configured.partitionEntries();
     }
 }

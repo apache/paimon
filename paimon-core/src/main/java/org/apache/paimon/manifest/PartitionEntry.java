@@ -20,6 +20,8 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.table.source.DataSplit;
 
 import java.util.Collection;
 import java.util.HashMap;
@@ -97,6 +99,14 @@ public class PartitionEntry {
                 entry.file().creationTimeEpochMillis());
     }
 
+    public static PartitionEntry fromDataFile(BinaryRow partition, DataFileMeta file) {
+        long recordCount = file.rowCount();
+        long fileSizeInBytes = file.fileSize();
+        long fileCount = 1;
+        return new PartitionEntry(
+                partition, recordCount, fileSizeInBytes, fileCount, file.creationTimeEpochMillis());
+    }
+
     public static Collection<PartitionEntry> merge(Collection<ManifestEntry> fileEntries) {
         Map<BinaryRow, PartitionEntry> partitions = new HashMap<>();
         for (ManifestEntry entry : fileEntries) {
@@ -104,6 +114,23 @@ public class PartitionEntry {
             partitions.compute(
                     entry.partition(),
                     (part, old) -> old == null ? partitionEntry : old.merge(partitionEntry));
+        }
+        return partitions.values();
+    }
+
+    public static Collection<PartitionEntry> mergeSplits(Collection<DataSplit> splits) {
+        Map<BinaryRow, PartitionEntry> partitions = new HashMap<>();
+        for (DataSplit split : splits) {
+            BinaryRow partition = split.partition();
+            if (!split.beforeFiles().isEmpty()) {
+                throw new UnsupportedOperationException();
+            }
+            for (DataFileMeta file : split.dataFiles()) {
+                PartitionEntry partitionEntry = fromDataFile(partition, file);
+                partitions.compute(
+                        partition,
+                        (part, old) -> old == null ? partitionEntry : old.merge(partitionEntry));
+            }
         }
         return partitions.values();
     }

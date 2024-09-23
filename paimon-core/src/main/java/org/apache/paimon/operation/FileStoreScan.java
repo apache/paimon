@@ -108,12 +108,6 @@ public interface FileStoreScan {
 
     List<BucketEntry> readBucketEntries();
 
-    /**
-     * Short path of count all records, this is not work good for primary key table and deletion
-     * vectors table.
-     */
-    long rowCount();
-
     default List<BinaryRow> listPartitions() {
         return readPartitionEntries().stream()
                 .map(PartitionEntry::partition)

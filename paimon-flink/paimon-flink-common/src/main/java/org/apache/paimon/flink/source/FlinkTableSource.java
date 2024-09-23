@@ -30,6 +30,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.DataTableBatchScan;
 import org.apache.paimon.table.source.Split;
 
 import org.apache.flink.configuration.Configuration;
@@ -173,10 +174,9 @@ public abstract class FlinkTableSource
         if (splitStatistics == null) {
             if (table instanceof DataTable) {
                 List<PartitionEntry> partitionEntries =
-                        ((DataTable) table)
-                                .newSnapshotReader()
-                                .withFilter(predicate)
-                                .partitionEntries();
+                        ((DataTableBatchScan)
+                                        table.newReadBuilder().withFilter(predicate).newScan())
+                                .planPartitions();
                 long totalSize = 0;
                 long rowCount = 0;
                 for (PartitionEntry entry : partitionEntries) {

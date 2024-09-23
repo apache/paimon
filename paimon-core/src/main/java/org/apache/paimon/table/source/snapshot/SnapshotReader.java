@@ -103,12 +103,6 @@ public interface SnapshotReader {
 
     List<BucketEntry> bucketEntries();
 
-    /**
-     * Short path of count all records, this is not work good for primary key table and deletion
-     * vectors table.
-     */
-    long rowCount();
-
     /** Result plan of this scan. */
     interface Plan extends TableScan.Plan {
 

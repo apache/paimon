@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
@@ -76,6 +77,19 @@ public class DataTableBatchScan extends AbstractDataTableScan {
             StartingScanner.Result result = startingScanner.scan(snapshotReader);
             StartingScanner.Result limitedResult = applyPushDownLimit(result);
             return DataFilePlan.fromResult(limitedResult);
+        } else {
+            throw new EndOfScanException();
+        }
+    }
+
+    public List<PartitionEntry> planPartitions() {
+        if (startingScanner == null) {
+            startingScanner = createStartingScanner(false);
+        }
+
+        if (hasNext) {
+            hasNext = false;
+            return startingScanner.scanPartitions(snapshotReader);
         } else {
             throw new EndOfScanException();
         }

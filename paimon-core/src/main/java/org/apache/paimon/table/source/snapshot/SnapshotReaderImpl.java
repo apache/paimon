@@ -364,16 +364,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
-    public long rowCount() {
-        if (!tableSchema.primaryKeys().isEmpty() || deletionVectors) {
-            throw new UnsupportedOperationException(
-                    "Unsupported short path for counting "
-                            + "primary key table and deletion vectors table");
-        }
-        return scan.rowCount();
-    }
-
-    @Override
     public Plan readChanges() {
         withMode(ScanMode.DELTA);
         FileStoreScan.Plan plan = scan.plan();

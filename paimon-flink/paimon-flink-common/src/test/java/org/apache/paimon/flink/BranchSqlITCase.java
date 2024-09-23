@@ -348,10 +348,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
 
         sql("ALTER TABLE t SET ( 'scan.fallback-branch' = 'pk' )");
         assertThatThrownBy(() -> sql("SELECT * FROM t"))
-                .hasRootCauseMessage(
-                        "Branch main and pk does not have the same row type.\n"
-                                + "Row type of branch main is ROW<`pt` INT NOT NULL, `k` INT NOT NULL, `v` STRING>.\n"
-                                + "Row type of branch pk is ROW<`pt` INT NOT NULL, `k` INT NOT NULL, `v` STRING, `v2` INT>.");
+                .hasMessageContaining("Branch main and pk does not have the same row type");
 
         sql("ALTER TABLE t RESET ( 'scan.fallback-branch' )");
         assertThat(collectResult("SELECT v, k FROM t")).containsExactlyInAnyOrder("+I[apple, 10]");
