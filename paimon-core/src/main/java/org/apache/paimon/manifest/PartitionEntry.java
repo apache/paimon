@@ -116,18 +116,15 @@ public class PartitionEntry {
         Map<BinaryRow, PartitionEntry> partitions = new HashMap<>();
         for (DataSplit split : splits) {
             BinaryRow partition = split.partition();
-            for (DataFileMeta file : split.beforeFiles()) {
-                PartitionEntry partitionEntry = fromDataFile(partition, DELETE, file);
-                partitions.compute(
-                        partition,
-                        (part, old) -> old == null ? partitionEntry : old.merge(partitionEntry));
-            }
             for (DataFileMeta file : split.dataFiles()) {
                 PartitionEntry partitionEntry = fromDataFile(partition, ADD, file);
                 partitions.compute(
                         partition,
                         (part, old) -> old == null ? partitionEntry : old.merge(partitionEntry));
             }
+
+            // Ignore before files, because we don't know how to merge them
+            // Ignore deletion files, because it is costly to read from it
         }
         return partitions.values();
     }
