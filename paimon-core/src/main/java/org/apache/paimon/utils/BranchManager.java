@@ -68,6 +68,10 @@ public class BranchManager {
         return new Path(tablePath + "/branch");
     }
 
+    public static String normalizeBranch(String branch) {
+        return StringUtils.isNullOrWhitespaceOnly(branch) ? DEFAULT_MAIN_BRANCH : branch;
+    }
+
     public static boolean isMainBranch(String branch) {
         return branch.equals(DEFAULT_MAIN_BRANCH);
     }

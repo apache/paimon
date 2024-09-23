@@ -71,7 +71,7 @@ public class TagManager {
     public TagManager(FileIO fileIO, Path tablePath, String branch) {
         this.fileIO = fileIO;
         this.tablePath = tablePath;
-        this.branch = StringUtils.isNullOrWhitespaceOnly(branch) ? DEFAULT_MAIN_BRANCH : branch;
+        this.branch = BranchManager.normalizeBranch(branch);
     }
 
     public TagManager copyWithBranch(String branchName) {

@@ -113,6 +113,10 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         this.catalogEnvironment = catalogEnvironment;
     }
 
+    public String currentBranch() {
+        return CoreOptions.branch(options());
+    }
+
     @Override
     public void setManifestCache(SegmentsCache<Path> manifestCache) {
         store().setManifestCache(manifestCache);
@@ -158,9 +162,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         Identifier identifier = catalogEnvironment.identifier();
         return identifier == null
                 ? SchemaManager.identifierFromPath(
-                        location().toUri().toString(),
-                        true,
-                        options().get(CoreOptions.BRANCH.key()))
+                        location().toUri().toString(), true, currentBranch())
                 : identifier;
     }
 
@@ -310,11 +312,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public FileStoreTable copyWithLatestSchema() {
-        Map<String, String> options = tableSchema.options();
-        SchemaManager schemaManager =
-                new SchemaManager(fileIO(), location(), CoreOptions.branch(options()));
-        Optional<TableSchema> optionalLatestSchema = schemaManager.latest();
+        Optional<TableSchema> optionalLatestSchema = schemaManager().latest();
         if (optionalLatestSchema.isPresent()) {
+            Map<String, String> options = tableSchema.options();
             TableSchema newTableSchema = optionalLatestSchema.get();
             newTableSchema = newTableSchema.copy(options);
             SchemaValidation.validateTableSchema(newTableSchema);
@@ -332,7 +332,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     protected SchemaManager schemaManager() {
-        return new SchemaManager(fileIO(), path, CoreOptions.branch(options()));
+        return new SchemaManager(fileIO(), path, currentBranch());
     }
 
     @Override
@@ -629,7 +629,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public TagManager tagManager() {
-        return new TagManager(fileIO, path, CoreOptions.branch(options()));
+        return new TagManager(fileIO, path, currentBranch());
     }
 
     @Override
@@ -639,14 +639,20 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public FileStoreTable switchToBranch(String branchName) {
+        String currentBranch = BranchManager.normalizeBranch(currentBranch());
+        String targetBranch = BranchManager.normalizeBranch(branchName);
+        if (currentBranch.equals(targetBranch)) {
+            return this;
+        }
+
         Optional<TableSchema> optionalSchema =
-                new SchemaManager(fileIO(), location(), branchName).latest();
+                new SchemaManager(fileIO(), location(), targetBranch).latest();
         Preconditions.checkArgument(
-                optionalSchema.isPresent(), "Branch " + branchName + " does not exist");
+                optionalSchema.isPresent(), "Branch " + targetBranch + " does not exist");
 
         TableSchema branchSchema = optionalSchema.get();
         Options branchOptions = new Options(branchSchema.options());
-        branchOptions.set(CoreOptions.BRANCH, branchName);
+        branchOptions.set(CoreOptions.BRANCH, targetBranch);
         branchSchema = branchSchema.copy(branchOptions.toMap());
         return FileStoreTableFactory.create(
                 fileIO(), location(), branchSchema, new Options(), catalogEnvironment());

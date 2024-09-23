@@ -46,7 +46,6 @@ import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
@@ -96,7 +95,7 @@ public class SchemaManager implements Serializable {
     public SchemaManager(FileIO fileIO, Path tableRoot, String branch) {
         this.fileIO = fileIO;
         this.tableRoot = tableRoot;
-        this.branch = StringUtils.isNullOrWhitespaceOnly(branch) ? DEFAULT_MAIN_BRANCH : branch;
+        this.branch = BranchManager.normalizeBranch(branch);
     }
 
     public SchemaManager copyWithBranch(String branchName) {
