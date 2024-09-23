@@ -186,14 +186,14 @@ public class CompactAction extends TableActionBase {
             predicate = simpleSqlPredicateConvertor.convertSqlToPredicate(whereSql);
         }
 
-        // Check whether predicate contain non parition key.
+        // Check whether predicate contain non partition key.
         if (predicate != null) {
             LOGGER.info("the partition predicate of compaction is {}", predicate);
             PartitionPredicateVisitor partitionPredicateVisitor =
                     new PartitionPredicateVisitor(table.partitionKeys());
             Preconditions.checkArgument(
                     predicate.visit(partitionPredicateVisitor),
-                    "Only parition key can be specialized in compaction action.");
+                    "Only partition key can be specialized in compaction action.");
         }
 
         return predicate;
