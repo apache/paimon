@@ -191,7 +191,7 @@ public class FilesTable implements ReadonlyTable {
                 String[] partFields = partitionStr.split(", ");
                 LinkedHashMap<String, String> partSpec = new LinkedHashMap<>();
                 List<String> partitionKeys = fileStoreTable.partitionKeys();
-                if (partitionKeys.size() == partFields.length) {
+                if (partitionKeys.size() != partFields.length) {
                     return Collections::emptyList;
                 }
                 for (int i = 0; i < partitionKeys.size(); i++) {
