@@ -367,7 +367,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
     public long rowCount() {
         if (!tableSchema.primaryKeys().isEmpty() || deletionVectors) {
             throw new UnsupportedOperationException(
-                    "Unsupported short path for primary key table and deletion vectors table");
+                    "Unsupported short path for counting "
+                            + "primary key table and deletion vectors table");
         }
         return scan.rowCount();
     }
