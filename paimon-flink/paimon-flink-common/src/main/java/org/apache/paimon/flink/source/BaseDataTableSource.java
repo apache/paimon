@@ -48,7 +48,6 @@ import org.apache.flink.table.connector.source.abilities.SupportsAggregatePushDo
 import org.apache.flink.table.connector.source.abilities.SupportsWatermarkPushDown;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.expressions.AggregateExpression;
-import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.types.DataType;
 
@@ -71,7 +70,6 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGN
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_EMIT_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_TIMEOUT;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Table source to create {@link StaticFileStoreSource} or {@link ContinuousFileStoreSource} under
@@ -200,8 +198,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
     }
 
     private ScanRuntimeProvider createCountStarScan() {
-        checkArgument(predicate == null);
-        long count = ((FileStoreTable) table).newSnapshotReader().rowCount();
+        long count = ((FileStoreTable) table).newSnapshotReader().withFilter(predicate).rowCount();
         NumberSequenceRowSource source = new NumberSequenceRowSource(count, count);
         return new SourceProvider() {
             @Override
@@ -249,25 +246,11 @@ public abstract class BaseDataTableSource extends FlinkTableSource
     }
 
     @Override
-    public Result applyFilters(List<ResolvedExpression> filters) {
-        Result result = super.applyFilters(filters);
-        // TODO support count star with Partition filter? Fix Flink SQL
-        if (predicate != null) {
-            isBatchCountStar = false;
-        }
-        return result;
-    }
-
-    @Override
     public boolean applyAggregates(
             List<int[]> groupingSets,
             List<AggregateExpression> aggregateExpressions,
             DataType producedDataType) {
         if (isStreaming()) {
-            return false;
-        }
-
-        if (predicate != null) {
             return false;
         }
 
