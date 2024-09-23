@@ -55,13 +55,6 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     public void initializeState(StateInitializationContext context) throws Exception {
         super.initializeState(context);
 
-        // Each job can only have one user name and this name must be consistent across restarts.
-        // We cannot use job id as commit user name here because user may change job id by creating
-        // a savepoint, stop the job and then resume from savepoint.
-        String commitUser =
-                StateUtils.getSingleValueFromState(
-                        context, "commit_user_state", String.class, initialCommitUser);
-
         boolean containLogSystem = containLogSystem();
         int numTasks = getRuntimeContext().getNumberOfParallelSubtasks();
         StateValueFilter stateFilter =
@@ -77,7 +70,7 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
         write =
                 storeSinkWriteProvider.provide(
                         table,
-                        commitUser,
+                        getCommitUser(context),
                         state,
                         getContainingTask().getEnvironment().getIOManager(),
                         memoryPool,
@@ -88,6 +81,14 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
             StateInitializationContext context, StoreSinkWriteState.StateValueFilter stateFilter)
             throws Exception {
         return new StoreSinkWriteStateImpl(context, stateFilter);
+    }
+
+    protected String getCommitUser(StateInitializationContext context) throws Exception {
+        // Each job can only have one username and this name must be consistent across restarts.
+        // We cannot use job id as commit username here because user may change job id by creating
+        // a savepoint, stop the job and then resume from savepoint.
+        return StateUtils.getSingleValueFromState(
+                context, "commit_user_state", String.class, initialCommitUser);
     }
 
     protected abstract boolean containLogSystem();

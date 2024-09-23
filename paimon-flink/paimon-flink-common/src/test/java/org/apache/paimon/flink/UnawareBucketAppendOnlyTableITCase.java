@@ -18,15 +18,29 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.flink.runtime.state.FunctionInitializationContext;
+import org.apache.flink.runtime.state.FunctionSnapshotContext;
+import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.utils.FailingFileIO;
 
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.source.RichParallelSourceFunction;
+import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.io.File;
 import java.time.Duration;
@@ -344,6 +358,95 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
 
         assertThat(batchSql("SELECT * FROM index_table WHERE indexc = 'c' and (id = 2 or id = 3)"))
                 .containsExactlyInAnyOrder(Row.of(2, "c", "BBB"), Row.of(3, "c", "BBB"));
+    }
+
+    @Timeout(60)
+    @Test
+    public void testStatelessWriter() throws Exception {
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(), new Path(path, "default.db/append_table"));
+
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder()
+                        .streamingMode()
+                        .parallelism(2)
+                        .checkpointIntervalMs(500)
+                        .build();
+        DataStream<Integer> source =
+                env.addSource(new TestStatelessWriterSource(table)).setParallelism(2).forward();
+
+        StreamTableEnvironment tEnv = StreamTableEnvironment.create(env);
+        tEnv.registerCatalog("mycat", sEnv.getCatalog("PAIMON").get());
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.createTemporaryView("S", tEnv.fromDataStream(source).as("id"));
+
+        tEnv.executeSql("INSERT INTO append_table SELECT id, 'test' FROM S").await();
+        assertThat(batchSql("SELECT * FROM append_table"))
+                .containsExactlyInAnyOrder(Row.of(1, "test"), Row.of(2, "test"));
+        System.out.println(table.snapshotManager().latestSnapshotId());
+    }
+
+    private static class TestStatelessWriterSource extends RichParallelSourceFunction<Integer> {
+
+        private final FileStoreTable table;
+
+        private volatile boolean isRunning = true;
+
+        private TestStatelessWriterSource(FileStoreTable table) {
+            this.table = table;
+        }
+
+        @Override
+        public void run(SourceContext<Integer> sourceContext) throws Exception {
+            int taskId = getRuntimeContext().getIndexOfThisSubtask();
+            // wait some time in parallelism #2,
+            // so that it does not commit in the same checkpoint with parallelism #1
+            int waitCount = (taskId == 0 ? 0 : 10);
+
+            while (isRunning) {
+                synchronized (sourceContext.getCheckpointLock()) {
+                    if (taskId == 0) {
+                        if (waitCount == 0) {
+                            sourceContext.collect(1);
+                        } else if (countNumRecords() >= 1) {
+                            // wait for the record to commit before exiting
+                            break;
+                        }
+                    } else {
+                        int numRecords = countNumRecords();
+                        if (numRecords >= 1) {
+                            if (waitCount == 0) {
+                                sourceContext.collect(2);
+                            } else if (countNumRecords() >= 2) {
+                                // make sure the next checkpoint is successful
+                                break;
+                            }
+                        }
+                    }
+                    waitCount--;
+                }
+                Thread.sleep(1000);
+            }
+        }
+
+        private int countNumRecords() throws Exception {
+            int ret = 0;
+            RecordReader<InternalRow> reader =
+                    table.newRead().createReader(table.newSnapshotReader().read());
+            try (RecordReaderIterator<InternalRow> it = new RecordReaderIterator<>(reader)) {
+                while (it.hasNext()) {
+                    it.next();
+                    ret++;
+                }
+            }
+            return ret;
+        }
+
+        @Override
+        public void cancel() {
+            isRunning = false;
+        }
     }
 
     @Override

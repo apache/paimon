@@ -51,6 +51,13 @@ public class RowUnawareBucketSink extends UnawareBucketSink<InternalRow> {
                 // needed.
                 return new NoopStoreSinkWriteState(stateFilter);
             }
+
+            @Override
+            protected String getCommitUser(StateInitializationContext context) throws Exception {
+                // No conflicts will occur in append only unaware bucket writer, so commitUser does
+                // not matter.
+                return commitUser;
+            }
         };
     }
 }
