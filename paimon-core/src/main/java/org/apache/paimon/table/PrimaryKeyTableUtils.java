@@ -34,7 +34,8 @@ import org.apache.paimon.types.RowType;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
+import static org.apache.paimon.table.SystemFields.KEY_FIELD_ID_START;
+import static org.apache.paimon.table.SystemFields.KEY_FIELD_PREFIX;
 
 /** Utils for creating changelog table with primary keys. */
 public class PrimaryKeyTableUtils {
@@ -45,7 +46,7 @@ public class PrimaryKeyTableUtils {
 
     public static List<DataField> addKeyNamePrefix(List<DataField> keyFields) {
         return keyFields.stream()
-                .map(f -> f.newName(KEY_FIELD_PREFIX + f.name()))
+                .map(f -> f.newName(KEY_FIELD_PREFIX + f.name()).newId(f.id() + KEY_FIELD_ID_START))
                 .collect(Collectors.toList());
     }
 
