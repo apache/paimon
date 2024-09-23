@@ -101,9 +101,12 @@ public class FlinkSinkBuilder {
         DataFormatConverters.RowConverter converter =
                 new DataFormatConverters.RowConverter(fieldDataTypes);
         this.input =
-                input.map((MapFunction<Row, RowData>) converter::toInternal)
-                        .setParallelism(input.getParallelism())
-                        .returns(InternalTypeInfo.of(rowType));
+                input.transform(
+                                "Map",
+                                InternalTypeInfo.of(rowType),
+                                new StreamMapWithForwardingRecordAttributes<>(
+                                        (MapFunction<Row, RowData>) converter::toInternal))
+                        .setParallelism(input.getParallelism());
         return this;
     }
 
@@ -237,9 +240,12 @@ public class FlinkSinkBuilder {
 
     protected DataStream<InternalRow> mapToInternalRow(
             DataStream<RowData> input, org.apache.paimon.types.RowType rowType) {
-        return input.map((MapFunction<RowData, InternalRow>) FlinkRowWrapper::new)
-                .setParallelism(input.getParallelism())
-                .returns(org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(rowType));
+        return input.transform(
+                        "Map",
+                        org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(rowType),
+                        new StreamMapWithForwardingRecordAttributes<>(
+                                (MapFunction<RowData, InternalRow>) FlinkRowWrapper::new))
+                .setParallelism(input.getParallelism());
     }
 
     protected DataStreamSink<?> buildDynamicBucketSink(

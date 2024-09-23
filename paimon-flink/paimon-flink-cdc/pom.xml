@@ -301,6 +301,11 @@ under the License.
                         </goals>
                         <configuration>
                             <relocations>
+                                <!-- Avoid overriding the equivalent class introduced in flink and paimon-flink -->
+                                <relocation>
+                                    <pattern>org.apache.flink.streaming.runtime.streamrecord.RecordAttributes</pattern>
+                                    <shadedPattern>org.apache.flink.shaded.org.apache.flink.streaming.runtime.streamrecord.RecordAttributes</shadedPattern>
+                                </relocation>
                                 <!-- Same as flink-sql-connector-kafka. -->
                                 <relocation>
                                     <pattern>org.apache.kafka.connect</pattern>
