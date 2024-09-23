@@ -289,7 +289,7 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
                                         .stream()
                                         .map(Row::toString))
                 .hasRootCauseInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Tag 'tag1' doesn't exist.");
+                .hasRootCauseMessage("Tag 'tag1' doesn't exist.");
     }
 
     @Test
