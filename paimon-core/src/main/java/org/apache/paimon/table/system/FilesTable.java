@@ -180,9 +180,7 @@ public class FilesTable implements ReadonlyTable {
         @Override
         public Plan innerPlan() {
             SnapshotReader snapshotReader = fileStoreTable.newSnapshotReader();
-            if (partitionPredicate != null
-                    && !fileStoreTable.partitionKeys().isEmpty()
-                    && partitionPredicate.function() instanceof Equal) {
+            if (partitionPredicate != null && partitionPredicate.function() instanceof Equal) {
                 String partitionStr = partitionPredicate.literals().get(0).toString();
                 if (partitionStr.startsWith("[")) {
                     partitionStr = partitionStr.substring(1);
