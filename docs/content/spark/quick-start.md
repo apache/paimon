@@ -177,10 +177,6 @@ tblproperties (
 
 ## Insert Table
 
-{{< hint info >}}
-Paimon currently supports Spark 3.2+ for SQL write.
-{{< /hint >}}
-
 ```sql
 INSERT INTO my_table VALUES (1, 'Hi'), (2, 'Hello');
 ```
