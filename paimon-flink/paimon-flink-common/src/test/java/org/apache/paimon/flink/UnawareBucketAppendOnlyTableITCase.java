@@ -381,7 +381,6 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
         tEnv.executeSql("INSERT INTO append_table SELECT id, 'test' FROM S").await();
         assertThat(batchSql("SELECT * FROM append_table"))
                 .containsExactlyInAnyOrder(Row.of(1, "test"), Row.of(2, "test"));
-        System.out.println(table.snapshotManager().latestSnapshotId());
     }
 
     private static class TestStatelessWriterSource extends RichParallelSourceFunction<Integer> {
