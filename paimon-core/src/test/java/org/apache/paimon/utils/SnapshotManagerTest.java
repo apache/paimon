@@ -369,7 +369,9 @@ public class SnapshotManagerTest {
         localFileIO.deleteQuietly(snapshotManager.snapshotPath(3));
         thread.join();
 
-        assertThat(exception.get()).hasMessageContaining("Fails to read snapshot from path");
+        assertThat(exception.get())
+                .hasMessageFindingMatch("Snapshot file .* does not exist")
+                .hasMessageContaining("dedicated compaction job");
     }
 
     @Test
