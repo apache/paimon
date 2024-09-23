@@ -30,7 +30,7 @@ import org.apache.paimon.flink.lookup.FileStoreLookupFunction;
 import org.apache.paimon.flink.lookup.LookupRuntimeProviderFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.Projection;
 
@@ -198,7 +198,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
     }
 
     private ScanRuntimeProvider createCountStarScan() {
-        long count = ((FileStoreTable) table).newSnapshotReader().withFilter(predicate).rowCount();
+        long count = ((DataTable) table).newSnapshotReader().withFilter(predicate).rowCount();
         NumberSequenceRowSource source = new NumberSequenceRowSource(count, count);
         return new SourceProvider() {
             @Override
@@ -254,16 +254,16 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             return false;
         }
 
+        if (!(table instanceof DataTable)) {
+            return false;
+        }
+
         if (!table.primaryKeys().isEmpty()) {
             return false;
         }
 
-        CoreOptions options = CoreOptions.fromMap(table.options());
+        CoreOptions options = ((DataTable) table).coreOptions();
         if (options.deletionVectorsEnabled()) {
-            return false;
-        }
-
-        if (!(table instanceof FileStoreTable)) {
             return false;
         }
 

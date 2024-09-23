@@ -552,11 +552,11 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     @Test
     public void testCountStarPartAppend() {
         sql("CREATE TABLE count_part_append (f0 INT, f1 STRING, dt STRING) PARTITIONED BY (dt)");
-        sql("INSERT INTO count_part_append VALUES (1, 'a', '1'), (2, 'b', '2')");
+        sql("INSERT INTO count_part_append VALUES (1, 'a', '1'), (1, 'a', '1'), (2, 'b', '2')");
         String sql = "SELECT COUNT(*) FROM count_part_append WHERE dt = '1'";
-        assertThat(sql(sql)).containsOnly(Row.of(1L));
-        // TODO wait Flink SQL fixing this bug
-        // validateCount1PushDown(sql);
+
+        assertThat(sql(sql)).containsOnly(Row.of(2L));
+        validateCount1PushDown(sql);
     }
 
     @Test

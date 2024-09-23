@@ -22,11 +22,13 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.PredicateConverter;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PartitionPredicateVisitor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateVisitor;
+import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
 
@@ -169,9 +171,28 @@ public abstract class FlinkTableSource
 
     protected void scanSplitsForInference() {
         if (splitStatistics == null) {
-            List<Split> splits =
-                    table.newReadBuilder().withFilter(predicate).newScan().plan().splits();
-            splitStatistics = new SplitStatistics(splits);
+            if (table instanceof DataTable) {
+                List<PartitionEntry> partitionEntries =
+                        ((DataTable) table)
+                                .newSnapshotReader()
+                                .withFilter(predicate)
+                                .partitionEntries();
+                long totalSize = 0;
+                long rowCount = 0;
+                for (PartitionEntry entry : partitionEntries) {
+                    totalSize += entry.fileSizeInBytes();
+                    rowCount += entry.recordCount();
+                }
+                long splitTargetSize = ((DataTable) table).coreOptions().splitTargetSize();
+                splitStatistics =
+                        new SplitStatistics((int) (totalSize / splitTargetSize + 1), rowCount);
+            } else {
+                List<Split> splits =
+                        table.newReadBuilder().withFilter(predicate).newScan().plan().splits();
+                splitStatistics =
+                        new SplitStatistics(
+                                splits.size(), splits.stream().mapToLong(Split::rowCount).sum());
+            }
         }
     }
 
@@ -181,9 +202,9 @@ public abstract class FlinkTableSource
         private final int splitNumber;
         private final long totalRowCount;
 
-        protected SplitStatistics(List<Split> splits) {
-            this.splitNumber = splits.size();
-            this.totalRowCount = splits.stream().mapToLong(Split::rowCount).sum();
+        protected SplitStatistics(int splitNumber, long totalRowCount) {
+            this.splitNumber = splitNumber;
+            this.totalRowCount = totalRowCount;
         }
 
         public int splitNumber() {
