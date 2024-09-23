@@ -559,11 +559,40 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         // validateCount1PushDown(sql);
     }
 
+    @Test
+    public void testCountStarAppendWithDv() {
+        sql(
+                "CREATE TABLE count_append_dv (f0 INT, f1 STRING) WITH ('deletion-vectors.enabled' = 'true')");
+        sql("INSERT INTO count_append_dv VALUES (1, 'a'), (2, 'b')");
+
+        String sql = "SELECT COUNT(*) FROM count_append_dv";
+        assertThat(sql(sql)).containsOnly(Row.of(2L));
+        validateCount1NotPushDown(sql);
+    }
+
+    @Test
+    public void testCountStarPK() {
+        sql("CREATE TABLE count_pk (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING)");
+        sql("INSERT INTO count_pk VALUES (1, 'a'), (2, 'b')");
+
+        String sql = "SELECT COUNT(*) FROM count_pk";
+        assertThat(sql(sql)).containsOnly(Row.of(2L));
+        validateCount1NotPushDown(sql);
+    }
+
     private void validateCount1PushDown(String sql) {
         Transformation<?> transformation = AbstractTestBase.translate(tEnv, sql);
         while (!transformation.getInputs().isEmpty()) {
             transformation = transformation.getInputs().get(0);
         }
         assertThat(transformation.getDescription()).contains("Count1AggFunction");
+    }
+
+    private void validateCount1NotPushDown(String sql) {
+        Transformation<?> transformation = AbstractTestBase.translate(tEnv, sql);
+        while (!transformation.getInputs().isEmpty()) {
+            transformation = transformation.getInputs().get(0);
+        }
+        assertThat(transformation.getDescription()).doesNotContain("Count1AggFunction");
     }
 }
