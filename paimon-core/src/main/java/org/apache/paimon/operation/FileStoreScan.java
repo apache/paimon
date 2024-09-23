@@ -108,6 +108,8 @@ public interface FileStoreScan {
 
     List<BucketEntry> readBucketEntries();
 
+    long rowCount();
+
     default List<BinaryRow> listPartitions() {
         return readPartitionEntries().stream()
                 .map(PartitionEntry::partition)

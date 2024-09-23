@@ -19,10 +19,12 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.DateTimeUtils;
 
+import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
@@ -535,5 +537,20 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                                 DateTimeUtils.formatTimestamp(
                                         DateTimeUtils.toInternal(timestamp, 0), 0)))
                 .containsExactlyInAnyOrder(Row.of(1, "a"), Row.of(2, "b"));
+    }
+
+    @Test
+    public void testCountStarAppend() {
+        sql("CREATE TABLE count_append (f0 INT, f1 STRING)");
+        sql("INSERT INTO count_append VALUES (1, 'a'), (2, 'b')");
+
+        String sql = "SELECT COUNT(*) FROM count_append";
+        assertThat(sql(sql)).containsOnly(Row.of(2L));
+
+        Transformation<?> transformation = AbstractTestBase.translate(tEnv, sql);
+        while (!transformation.getInputs().isEmpty()) {
+            transformation = transformation.getInputs().get(0);
+        }
+        assertThat(transformation.getDescription()).contains("Count1AggFunction");
     }
 }

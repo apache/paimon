@@ -94,7 +94,8 @@ public abstract class FlinkTableSource
         List<ResolvedExpression> unConsumedFilters = new ArrayList<>();
         List<ResolvedExpression> consumedFilters = new ArrayList<>();
         List<Predicate> converted = new ArrayList<>();
-        PredicateVisitor<Boolean> visitor = new PartitionPredicateVisitor(partitionKeys);
+        PredicateVisitor<Boolean> onlyPartFieldsVisitor =
+                new PartitionPredicateVisitor(partitionKeys);
 
         for (ResolvedExpression filter : filters) {
             Optional<Predicate> predicateOptional = PredicateConverter.convert(rowType, filter);
@@ -103,7 +104,7 @@ public abstract class FlinkTableSource
                 unConsumedFilters.add(filter);
             } else {
                 Predicate p = predicateOptional.get();
-                if (isStreaming() || !p.visit(visitor)) {
+                if (isStreaming() || !p.visit(onlyPartFieldsVisitor)) {
                     unConsumedFilters.add(filter);
                 } else {
                     consumedFilters.add(filter);

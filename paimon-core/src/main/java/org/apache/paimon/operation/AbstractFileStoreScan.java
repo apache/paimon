@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.ManifestCacheFilter;
@@ -54,6 +55,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -285,6 +287,22 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         return buckets.values().stream()
                 .filter(p -> p.fileCount() > 0)
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    public long rowCount() {
+        List<ManifestFileMeta> manifests = readManifests().filteredManifests;
+        AtomicLong rowCount = new AtomicLong(0);
+        Consumer<ManifestFileMeta> processor =
+                m -> {
+                    List<ManifestEntry> entries = readManifest(m);
+                    for (ManifestEntry entry : entries) {
+                        DataFileMeta file = entry.file();
+                        rowCount.addAndGet(file.addRowCount().orElse(file.rowCount()));
+                    }
+                };
+        randomlyOnlyExecute(getExecutorService(parallelism), processor, manifests);
+        return rowCount.get();
     }
 
     private Pair<Snapshot, List<ManifestEntry>> doPlan() {

@@ -103,6 +103,9 @@ public interface SnapshotReader {
 
     List<BucketEntry> bucketEntries();
 
+    /** Count all records. */
+    long rowCount();
+
     /** Result plan of this scan. */
     interface Plan extends TableScan.Plan {
 

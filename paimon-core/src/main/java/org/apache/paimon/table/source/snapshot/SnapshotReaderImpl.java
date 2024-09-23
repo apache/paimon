@@ -364,6 +364,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public long rowCount() {
+        return scan.rowCount();
+    }
+
+    @Override
     public Plan readChanges() {
         withMode(ScanMode.DELTA);
         FileStoreScan.Plan plan = scan.plan();
