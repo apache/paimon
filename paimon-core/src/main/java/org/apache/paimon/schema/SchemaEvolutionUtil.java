@@ -381,7 +381,7 @@ public class SchemaEvolutionUtil {
             } else {
                 DataField tableField = tableFields.get(i);
                 DataField dataField = dataFields.get(dataIndex);
-                if (tableField.type().copy(true).subsetOf(dataField.type().copy(true))) {
+                if (dataField.type().equalsIgnoreNullable(tableField.type())) {
                     // Create getter with index i and projected row data will convert to underlying
                     // data
                     converterMapping[i] =
