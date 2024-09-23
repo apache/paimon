@@ -244,7 +244,8 @@ public abstract class AbstractCatalog implements Catalog {
 
         copyTableDefaultOptions(schema.options());
 
-        if (schema.options().containsKey("paimon.format.table")) {
+        if (schema.options().containsKey("paimon.format.table")
+                && schema.options().get("paimon.format.table").equalsIgnoreCase("true")) {
             createFormatTable(identifier, schema);
         } else {
             createTableImpl(identifier, schema);
@@ -381,8 +382,7 @@ public abstract class AbstractCatalog implements Catalog {
      * @param identifier Path of the table
      * @param schema Schema of the table
      */
-    public void createFormatTable(
-            Identifier identifier, Schema schema) {
+    public void createFormatTable(Identifier identifier, Schema schema) {
         throw new UnsupportedOperationException(
                 this.getClass().getName() + " currently does not support format table");
     }

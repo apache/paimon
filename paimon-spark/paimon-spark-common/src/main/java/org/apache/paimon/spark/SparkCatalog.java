@@ -247,8 +247,9 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
      */
     public SparkTable loadTable(Identifier ident, String version) throws NoSuchTableException {
         LOG.info("Time travel to version '{}'.", version);
-        org.apache.spark.sql.connector.catalog.Table table = loadSparkTable(
-                ident, Collections.singletonMap(CoreOptions.SCAN_VERSION.key(), version));
+        org.apache.spark.sql.connector.catalog.Table table =
+                loadSparkTable(
+                        ident, Collections.singletonMap(CoreOptions.SCAN_VERSION.key(), version));
         if (table instanceof SparkTable) {
             return (SparkTable) table;
         } else {
@@ -266,7 +267,8 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
         // Paimon's timestamp use millisecond
         timestamp = timestamp / 1000;
         LOG.info("Time travel target timestamp is {} milliseconds.", timestamp);
-        org.apache.spark.sql.connector.catalog.Table table = loadSparkTable(
+        org.apache.spark.sql.connector.catalog.Table table =
+                loadSparkTable(
                         ident,
                         Collections.singletonMap(
                                 CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
@@ -311,7 +313,10 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
             throws TableAlreadyExistsException, NoSuchNamespaceException {
         try {
             String provider = properties.get(TableCatalog.PROP_PROVIDER);
-            if (SparkSource.FORMAT_NAMES().contains(provider.toLowerCase())) {
+            if (SparkSource.FORMAT_NAMES().contains(provider.toLowerCase())
+                    && properties
+                            .getOrDefault("paimon.format.table", "false")
+                            .equalsIgnoreCase("true")) {
                 catalog.createTable(
                         toIdentifier(ident),
                         toInitialSchema(schema, partitions, properties),
@@ -523,7 +528,10 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
                             ParquetFileFormat.class);
                 } else {
                     throw new UnsupportedOperationException(
-                            "Unsupported format table " + ident.name() + " format " + formatTable.format().name());
+                            "Unsupported format table "
+                                    + ident.name()
+                                    + " format "
+                                    + formatTable.format().name());
                 }
             } else {
                 return new SparkTable(copyWithSQLConf(paimonTable, extraOptions));
