@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.system;
 
-import org.apache.paimon.codegen.SimpleProjection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -49,6 +48,7 @@ import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -60,7 +60,6 @@ import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SerializationUtils;
-import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
@@ -71,6 +70,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -179,12 +179,10 @@ public class FilesTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            List<BinaryRow> partitions = new ArrayList<>();
+            SnapshotReader snapshotReader = fileStoreTable.newSnapshotReader();
             if (partitionPredicate != null
                     && !fileStoreTable.partitionKeys().isEmpty()
                     && partitionPredicate.function() instanceof Equal) {
-                GenericRow partitionRow = new GenericRow(fileStoreTable.partitionKeys().size());
-                RowType partitionRowType = fileStoreTable.schema().logicalPartitionType();
                 String partitionStr = partitionPredicate.literals().get(0).toString();
                 if (partitionStr.startsWith("[")) {
                     partitionStr = partitionStr.substring(1);
@@ -193,26 +191,20 @@ public class FilesTable implements ReadonlyTable {
                     partitionStr = partitionStr.substring(0, partitionStr.length() - 1);
                 }
                 String[] partFields = partitionStr.split(", ");
+                LinkedHashMap<String, String> partSpec = new LinkedHashMap<>();
                 List<String> partitionKeys = fileStoreTable.partitionKeys();
-                if (partitionKeys.size() != partFields.length) {
+                if (partitionKeys.size() == partFields.length) {
                     return Collections::emptyList;
                 }
                 for (int i = 0; i < partitionKeys.size(); i++) {
-                    partitionRow.setField(
-                            i,
-                            TypeUtils.castFromString(partFields[i], partitionRowType.getTypeAt(i)));
+                    partSpec.put(partitionKeys.get(i), partFields[i]);
                 }
-
-                partitions.add(
-                        new SimpleProjection(partitionRowType, fileStoreTable.partitionKeys())
-                                .apply(partitionRow));
+                snapshotReader.withPartitionFilter(partSpec);
                 // TODO support range?
-            } else {
-                partitions.addAll(fileStoreTable.newScan().listPartitions());
             }
 
             return () ->
-                    partitions.stream()
+                    snapshotReader.partitions().stream()
                             .map(p -> new FilesSplit(p, bucketPredicate, levelPredicate))
                             .collect(Collectors.toList());
         }
