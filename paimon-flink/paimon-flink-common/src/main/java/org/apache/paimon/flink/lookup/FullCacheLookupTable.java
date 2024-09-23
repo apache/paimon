@@ -62,6 +62,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.apache.paimon.CoreOptions.ChangelogProducer.NONE;
+import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC_PENDING_SNAPSHOT_COUNT;
 
@@ -83,7 +85,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
     private final int maxPendingSnapshotCount;
     private final FileStoreTable table;
     private Future<?> refreshFuture;
-    private LookupStreamingReader reader;
+    private AbstractLookupReader reader;
     private Predicate specificPartition;
 
     public FullCacheLookupTable(Context context) {
@@ -149,12 +151,20 @@ public abstract class FullCacheLookupTable implements LookupTable {
     protected void bootstrap() throws Exception {
         Predicate scanPredicate =
                 PredicateBuilder.andNullable(context.tablePredicate, specificPartition);
+
+        CoreOptions options = CoreOptions.fromMap(table.options());
         this.reader =
-                new LookupStreamingReader(
-                        context.table,
-                        context.projection,
-                        scanPredicate,
-                        context.requiredCachedBucketIds);
+                (options.mergeEngine() == PARTIAL_UPDATE && options.changelogProducer() == NONE)
+                        ? new LookupBatchReader(
+                                context.table,
+                                context.projection,
+                                scanPredicate,
+                                context.requiredCachedBucketIds)
+                        : new LookupStreamingReader(
+                                context.table,
+                                context.projection,
+                                scanPredicate,
+                                context.requiredCachedBucketIds);
         BinaryExternalSortBuffer bulkLoadSorter =
                 RocksDBState.createBulkLoadSorter(
                         IOManager.create(context.tempPath.toString()), context.table.coreOptions());
@@ -236,13 +246,23 @@ public abstract class FullCacheLookupTable implements LookupTable {
     }
 
     private void doRefresh() throws Exception {
-        while (true) {
+        if (reader instanceof LookupBatchReader) {
             try (RecordReaderIterator<InternalRow> batch =
                     new RecordReaderIterator<>(reader.nextBatch(false))) {
                 if (!batch.hasNext()) {
                     return;
                 }
                 refresh(batch);
+            }
+        } else {
+            while (true) {
+                try (RecordReaderIterator<InternalRow> batch =
+                        new RecordReaderIterator<>(reader.nextBatch(false))) {
+                    if (!batch.hasNext()) {
+                        return;
+                    }
+                    refresh(batch);
+                }
             }
         }
     }
