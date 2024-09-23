@@ -20,7 +20,6 @@ package org.apache.paimon.flink.sink;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
 import java.util.List;
 
 /**
@@ -42,11 +41,13 @@ public class NoopStoreSinkWriteState implements StoreSinkWriteState {
 
     @Override
     public @Nullable List<StateValue> get(String tableName, String key) {
-        return Collections.emptyList();
+        throw new UnsupportedOperationException();
     }
 
     @Override
-    public void put(String tableName, String key, List<StateValue> stateValues) {}
+    public void put(String tableName, String key, List<StateValue> stateValues) {
+        throw new UnsupportedOperationException();
+    }
 
     @Override
     public void snapshotState() throws Exception {}

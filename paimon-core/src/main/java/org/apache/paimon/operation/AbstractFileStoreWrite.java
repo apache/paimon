@@ -214,7 +214,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 result.add(committable);
 
                 if (committable.isEmpty()) {
-
                     if (writerCleanChecker.apply(writerContainer)) {
                         // Clear writer if no update, and if its latest modification has committed.
                         //
@@ -246,6 +245,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         return result;
     }
 
+    // This abstract function returns a whole function (instead of just a boolean value),
+    // because we do not want to introduce `commitUser` into this base class.
+    //
+    // For writers with no conflicts, `commitUser` might be some random value.
     protected abstract Function<WriterContainer<T>, Boolean> createWriterCleanChecker();
 
     protected static <T>

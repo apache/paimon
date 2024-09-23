@@ -38,7 +38,7 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     private final StoreSinkWrite.Provider storeSinkWriteProvider;
     private final String initialCommitUser;
 
-    protected transient StoreSinkWriteState state;
+    private transient StoreSinkWriteState state;
     protected transient StoreSinkWrite write;
 
     public TableWriteOperator(

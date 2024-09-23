@@ -139,7 +139,7 @@ public abstract class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<Inte
             int bucket,
             List<DataFileMeta> restoredFiles,
             ExecutorService compactExecutor,
-            @javax.annotation.Nullable DeletionVectorsMaintainer dvMaintainer);
+            @Nullable DeletionVectorsMaintainer dvMaintainer);
 
     public List<DataFileMeta> compactRewrite(
             BinaryRow partition,
