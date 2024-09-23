@@ -24,27 +24,16 @@ import org.apache.paimon.table.Table;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.table.catalog.ObjectIdentifier;
-import org.apache.flink.table.connector.source.abilities.SupportsDynamicFiltering;
-import org.apache.flink.table.connector.source.abilities.SupportsStatisticReport;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
-import org.apache.flink.table.plan.stats.TableStats;
 
 import javax.annotation.Nullable;
 
 import java.util.Collections;
 import java.util.List;
 
-import static org.apache.paimon.utils.Preconditions.checkState;
-
-/**
- * A {@link BaseDataTableSource} implements {@link SupportsStatisticReport} and {@link
- * SupportsDynamicFiltering}.
- */
-public class DataTableSource extends BaseDataTableSource
-        implements SupportsStatisticReport, SupportsDynamicFiltering {
-
-    @Nullable private List<String> dynamicPartitionFilteringFields;
+/** A {@link BaseDataTableSource} for Flink 1.15. */
+public class DataTableSource extends BaseDataTableSource {
 
     public DataTableSource(
             ObjectIdentifier tableIdentifier,
@@ -61,7 +50,6 @@ public class DataTableSource extends BaseDataTableSource
                 null,
                 null,
                 null,
-                null,
                 null);
     }
 
@@ -74,8 +62,7 @@ public class DataTableSource extends BaseDataTableSource
             @Nullable Predicate predicate,
             @Nullable int[][] projectFields,
             @Nullable Long limit,
-            @Nullable WatermarkStrategy<RowData> watermarkStrategy,
-            @Nullable List<String> dynamicPartitionFilteringFields) {
+            @Nullable WatermarkStrategy<RowData> watermarkStrategy) {
         super(
                 tableIdentifier,
                 table,
@@ -86,7 +73,6 @@ public class DataTableSource extends BaseDataTableSource
                 projectFields,
                 limit,
                 watermarkStrategy);
-        this.dynamicPartitionFilteringFields = dynamicPartitionFilteringFields;
     }
 
     @Override
@@ -100,43 +86,11 @@ public class DataTableSource extends BaseDataTableSource
                 predicate,
                 projectFields,
                 limit,
-                watermarkStrategy,
-                dynamicPartitionFilteringFields);
-    }
-
-    @Override
-    public TableStats reportStatistics() {
-        if (streaming) {
-            return TableStats.UNKNOWN;
-        }
-
-        scanSplitsForInference();
-        return new TableStats(splitStatistics.totalRowCount());
-    }
-
-    @Override
-    public List<String> listAcceptedFilterFields() {
-        // note that streaming query doesn't support dynamic filtering
-        return streaming ? Collections.emptyList() : table.partitionKeys();
-    }
-
-    @Override
-    public void applyDynamicFiltering(List<String> candidateFilterFields) {
-        checkState(
-                !streaming,
-                "Cannot apply dynamic filtering to Paimon table '%s' when streaming reading.",
-                table.name());
-
-        checkState(
-                !table.partitionKeys().isEmpty(),
-                "Cannot apply dynamic filtering to non-partitioned Paimon table '%s'.",
-                table.name());
-
-        this.dynamicPartitionFilteringFields = candidateFilterFields;
+                watermarkStrategy);
     }
 
     @Override
     protected List<String> dynamicPartitionFilteringFields() {
-        return dynamicPartitionFilteringFields;
+        return Collections.emptyList();
     }
 }

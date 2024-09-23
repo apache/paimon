@@ -58,33 +58,6 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSourceReuseWithoutScanPushDown() {
-        sEnv.executeSql("CREATE TEMPORARY TABLE print1 (a STRING) WITH ('connector'='print')");
-        sEnv.executeSql("CREATE TEMPORARY TABLE print2 (b STRING) WITH ('connector'='print')");
-
-        StatementSet statementSet = sEnv.createStatementSet();
-        statementSet.addInsertSql(
-                "INSERT INTO print1 SELECT a FROM T1 /*+ OPTIONS('scan.push-down' = 'false') */");
-        statementSet.addInsertSql(
-                "INSERT INTO print2 SELECT b FROM T1 /*+ OPTIONS('scan.push-down' = 'false') */");
-        assertThat(statementSet.compilePlan().explain()).contains("Reused");
-
-        statementSet = sEnv.createStatementSet();
-        statementSet.addInsertSql(
-                "INSERT INTO print1 SELECT a FROM T1 /*+ OPTIONS('scan.push-down' = 'false') */ WHERE b = 'Apache'");
-        statementSet.addInsertSql(
-                "INSERT INTO print2 SELECT b FROM T1 /*+ OPTIONS('scan.push-down' = 'false') */ WHERE a = 'Paimon'");
-        assertThat(statementSet.compilePlan().explain()).contains("Reused");
-
-        statementSet = sEnv.createStatementSet();
-        statementSet.addInsertSql(
-                "INSERT INTO print1 SELECT a FROM T1 /*+ OPTIONS('scan.push-down' = 'false') */ WHERE b = 'Apache' LIMIT 5");
-        statementSet.addInsertSql(
-                "INSERT INTO print2 SELECT b FROM T1 /*+ OPTIONS('scan.push-down' = 'false') */ WHERE a = 'Paimon' LIMIT 10");
-        assertThat(statementSet.compilePlan().explain()).contains("Reused");
-    }
-
-    @Test
     public void testSourceReuseWithScanPushDown() {
         // source can be reused with projection applied
         sEnv.executeSql("CREATE TEMPORARY TABLE print1 (a STRING) WITH ('connector'='print')");
