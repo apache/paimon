@@ -28,6 +28,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
+import static org.apache.paimon.manifest.FileKind.ADD;
 import static org.apache.paimon.manifest.FileKind.DELETE;
 
 /** Entry representing a partition. */
@@ -83,26 +84,19 @@ public class PartitionEntry {
     }
 
     public static PartitionEntry fromManifestEntry(ManifestEntry entry) {
-        long recordCount = entry.file().rowCount();
-        long fileSizeInBytes = entry.file().fileSize();
+        return fromDataFile(entry.partition(), entry.kind(), entry.file());
+    }
+
+    public static PartitionEntry fromDataFile(
+            BinaryRow partition, FileKind kind, DataFileMeta file) {
+        long recordCount = file.rowCount();
+        long fileSizeInBytes = file.fileSize();
         long fileCount = 1;
-        if (entry.kind() == DELETE) {
+        if (kind == DELETE) {
             recordCount = -recordCount;
             fileSizeInBytes = -fileSizeInBytes;
             fileCount = -fileCount;
         }
-        return new PartitionEntry(
-                entry.partition(),
-                recordCount,
-                fileSizeInBytes,
-                fileCount,
-                entry.file().creationTimeEpochMillis());
-    }
-
-    public static PartitionEntry fromDataFile(BinaryRow partition, DataFileMeta file) {
-        long recordCount = file.rowCount();
-        long fileSizeInBytes = file.fileSize();
-        long fileCount = 1;
         return new PartitionEntry(
                 partition, recordCount, fileSizeInBytes, fileCount, file.creationTimeEpochMillis());
     }
@@ -122,11 +116,14 @@ public class PartitionEntry {
         Map<BinaryRow, PartitionEntry> partitions = new HashMap<>();
         for (DataSplit split : splits) {
             BinaryRow partition = split.partition();
-            if (!split.beforeFiles().isEmpty()) {
-                throw new UnsupportedOperationException();
+            for (DataFileMeta file : split.beforeFiles()) {
+                PartitionEntry partitionEntry = fromDataFile(partition, DELETE, file);
+                partitions.compute(
+                        partition,
+                        (part, old) -> old == null ? partitionEntry : old.merge(partitionEntry));
             }
             for (DataFileMeta file : split.dataFiles()) {
-                PartitionEntry partitionEntry = fromDataFile(partition, file);
+                PartitionEntry partitionEntry = fromDataFile(partition, ADD, file);
                 partitions.compute(
                         partition,
                         (part, old) -> old == null ? partitionEntry : old.merge(partitionEntry));
