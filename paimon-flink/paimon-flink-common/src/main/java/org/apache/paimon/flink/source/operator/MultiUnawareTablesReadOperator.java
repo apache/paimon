@@ -30,6 +30,8 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -49,6 +51,8 @@ public class MultiUnawareTablesReadOperator
         implements OneInputStreamOperator<
                 MultiTableUnawareAppendCompactionTask, MultiTableUnawareAppendCompactionTask> {
     private static final long serialVersionUID = 1L;
+
+    private static final Logger LOG = LoggerFactory.getLogger(MultiUnawareTablesReadOperator.class);
 
     private final Catalog.Loader catalogLoader;
 
