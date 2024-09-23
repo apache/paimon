@@ -271,7 +271,8 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             return false;
         }
 
-        if (!table.primaryKeys().isEmpty()) {
+        CoreOptions options = CoreOptions.fromMap(table.options());
+        if (!table.primaryKeys().isEmpty() && !options.deletionVectorsEnabled()) {
             return false;
         }
 
