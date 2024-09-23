@@ -18,13 +18,14 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.catalog.CatalogContext
+import org.apache.paimon.catalog.{CatalogContext, CatalogFactory, Identifier}
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable
 import org.apache.paimon.spark.sources.PaimonSink
 import org.apache.paimon.spark.util.OptionUtils.mergeSQLConf
 import org.apache.paimon.table.{DataTable, FileStoreTable, FileStoreTableFactory}
 import org.apache.paimon.table.system.AuditLogTable
+import org.apache.paimon.utils.StringUtils
 
 import org.apache.spark.sql.{DataFrame, SaveMode => SparkSaveMode, SparkSession, SQLContext}
 import org.apache.spark.sql.connector.catalog.{SessionConfigSupport, Table}
@@ -79,12 +80,26 @@ class SparkSource
     SparkSource.toBaseRelation(table, sqlContext)
   }
 
-  private def loadTable(options: JMap[String, String]): DataTable = {
+  private def loadTable(parameters: JMap[String, String]): DataTable = {
     val catalogContext = CatalogContext.create(
-      Options.fromMap(mergeSQLConf(options)),
+      Options.fromMap(mergeSQLConf(parameters)),
       SparkSession.active.sessionState.newHadoopConf())
-    val table = FileStoreTableFactory.create(catalogContext)
-    if (Options.fromMap(options).get(SparkConnectorOptions.READ_CHANGELOG)) {
+    val options = Options.fromMap(parameters)
+    val databaseName = options.get(SparkConnectorOptions.DATABASE)
+    val tableName = options.get(SparkConnectorOptions.TABLE)
+    val table =
+      if (
+        !StringUtils.isNullOrWhitespaceOnly(databaseName) && !StringUtils.isNullOrWhitespaceOnly(
+          tableName)
+      ) {
+        CatalogFactory
+          .createCatalog(catalogContext)
+          .getTable(new Identifier(databaseName, tableName))
+          .asInstanceOf[FileStoreTable]
+      } else {
+        FileStoreTableFactory.create(catalogContext)
+      }
+    if (options.get(SparkConnectorOptions.READ_CHANGELOG)) {
       new AuditLogTable(table)
     } else {
       table
