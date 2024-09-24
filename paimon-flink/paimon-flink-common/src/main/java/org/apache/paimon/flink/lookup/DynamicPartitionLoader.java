@@ -24,7 +24,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -49,7 +48,6 @@ public class DynamicPartitionLoader implements Serializable {
     private final Table table;
     private final Duration refreshInterval;
 
-    private TableScan scan;
     private Comparator<InternalRow> comparator;
 
     private LocalDateTime lastRefresh;
@@ -61,7 +59,6 @@ public class DynamicPartitionLoader implements Serializable {
     }
 
     public void open() {
-        this.scan = table.newReadBuilder().newScan();
         RowType partitionType = table.rowType().project(table.partitionKeys());
         this.comparator = CodeGenUtils.newRecordComparator(partitionType.getFieldTypes());
     }
@@ -87,7 +84,10 @@ public class DynamicPartitionLoader implements Serializable {
         }
 
         BinaryRow previous = this.partition;
-        partition = scan.listPartitions().stream().max(comparator).orElse(null);
+        partition =
+                table.newReadBuilder().newScan().listPartitions().stream()
+                        .max(comparator)
+                        .orElse(null);
         lastRefresh = LocalDateTime.now();
 
         return !Objects.equals(previous, partition);

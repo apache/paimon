@@ -22,9 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.utils.TableScanUtils;
-import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
@@ -33,10 +30,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.DelegatedFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.InnerTableRead;
-import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.table.source.ReadBuilderImpl;
 import org.apache.paimon.table.source.StreamDataTableScan;
-import org.apache.paimon.utils.SimpleFileReader;
 
 import java.util.HashSet;
 import java.util.List;
@@ -64,11 +58,6 @@ public class LookupFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
-    public ReadBuilder newReadBuilder() {
-        return new ReadBuilderImpl(this);
-    }
-
-    @Override
     public InnerTableRead newRead() {
         switch (lookupScanMode) {
             case CHANGELOG:
@@ -92,21 +81,6 @@ public class LookupFileStoreTable extends DelegatedFileStoreTable {
                 wrapped.supportStreamingReadOverwrite(),
                 DefaultValueAssigner.create(wrapped.schema()),
                 lookupScanMode);
-    }
-
-    @Override
-    public SimpleFileReader<ManifestFileMeta> manifestListReader() {
-        return wrapped.manifestListReader();
-    }
-
-    @Override
-    public SimpleFileReader<ManifestEntry> manifestFileReader() {
-        return wrapped.manifestFileReader();
-    }
-
-    @Override
-    public SimpleFileReader<IndexManifestEntry> indexManifestFileReader() {
-        return wrapped.indexManifestFileReader();
     }
 
     @Override

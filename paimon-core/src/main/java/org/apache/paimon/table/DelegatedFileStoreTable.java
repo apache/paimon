@@ -58,6 +58,10 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
         this.wrapped = wrapped;
     }
 
+    public FileStoreTable wrapped() {
+        return wrapped;
+    }
+
     @Override
     public String name() {
         return wrapped.name();
