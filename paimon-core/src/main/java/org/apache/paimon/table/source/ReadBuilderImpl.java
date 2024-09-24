@@ -90,7 +90,7 @@ public class ReadBuilderImpl implements ReadBuilder {
         RowType tableRowType = table.rowType();
         checkState(
                 readType.prunedFrom(tableRowType),
-                "read row type must be subset of table row type, read row type: %s, table row type: %s",
+                "read row type must be a pruned type from table row type, read row type: %s, table row type: %s",
                 readType,
                 tableRowType);
         this.readType = readType;

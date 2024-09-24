@@ -147,7 +147,7 @@ public abstract class DataType implements Serializable {
 
     /**
      * Determine whether the current type is the result of the target type after pruning (e.g.
-     * select some fields for a nested type) or just the same.
+     * select some fields from a nested type) or just the same.
      *
      * @param o the target data type
      */

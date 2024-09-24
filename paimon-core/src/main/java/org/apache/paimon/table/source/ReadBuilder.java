@@ -112,9 +112,9 @@ public interface ReadBuilder extends Serializable {
     ReadBuilder withBucketFilter(Filter<Integer> bucketFilter);
 
     /**
-     * Push row type to the reader, support nested row pruning.
+     * Push read row type to the reader, support nested row pruning.
      *
-     * @param readType read row type, can be a subset of {@link Table#rowType()}
+     * @param readType read row type, can be a pruned type from {@link Table#rowType()}
      * @since 1.0.0
      */
     ReadBuilder withReadType(RowType readType);
