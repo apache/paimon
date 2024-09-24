@@ -93,6 +93,11 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
 
     checkAnswer(
       spark.sql(
+        "SELECT snapshot_id, schema_id, mergedRecordCount, colstat from `T$statistics` where snapshot_id=3"),
+      Nil)
+
+    checkAnswer(
+      spark.sql(
         "SELECT snapshot_id, schema_id, mergedRecordCount, colstat from `T$statistics` where snapshot_id=2"),
       Row(2, 0, 2, "{ }"))
 
