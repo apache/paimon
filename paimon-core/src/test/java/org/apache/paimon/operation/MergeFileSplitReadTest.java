@@ -143,7 +143,7 @@ public class MergeFileSplitReadTest {
         List<KeyValue> readData =
                 writeThenRead(
                         data,
-                        readKeyType.copyAndSetOriginalRowType(rowType),
+                        readKeyType,
                         null,
                         projectedKeySerializer,
                         valueSerializer,
@@ -203,9 +203,8 @@ public class MergeFileSplitReadTest {
                 writeThenRead(
                         data,
                         null,
-                        TestKeyValueGenerator.DEFAULT_ROW_TYPE
-                                .project("shopId", "itemId", "dt", "hr")
-                                .copyAndSetOriginalRowType(TestKeyValueGenerator.DEFAULT_ROW_TYPE),
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE.project(
+                                "shopId", "itemId", "dt", "hr"),
                         TestKeyValueGenerator.KEY_SERIALIZER,
                         projectedValueSerializer,
                         store,

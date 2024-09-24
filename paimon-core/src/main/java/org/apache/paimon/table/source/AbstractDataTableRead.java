@@ -72,7 +72,7 @@ public abstract class AbstractDataTableRead<T> implements InnerTableRead {
     }
 
     @Override
-    public final InnerTableRead withProjection(int[][] projection) {
+    public final InnerTableRead withProjection(int[] projection) {
         if (projection == null) {
             return this;
         }
@@ -81,9 +81,8 @@ public abstract class AbstractDataTableRead<T> implements InnerTableRead {
 
     @Override
     public final InnerTableRead withReadType(RowType readType) {
-        this.readType = readType.copyAndSetOriginalRowType(schema.logicalRowType());
-        this.defaultValueAssigner.handleReadRowType(this.readType);
-        applyReadType(this.readType);
+        this.defaultValueAssigner.handleReadRowType(readType);
+        applyReadType(readType);
         return this;
     }
 
@@ -107,8 +106,9 @@ public abstract class AbstractDataTableRead<T> implements InnerTableRead {
 
         Predicate predicate = this.predicate;
         if (readType != null) {
+            int[] projection = schema.logicalRowType().getFieldIndices(readType.getFieldNames());
             Optional<Predicate> optional =
-                    predicate.visit(new PredicateProjectionConverter(readType.toProjection()));
+                    predicate.visit(new PredicateProjectionConverter(projection));
             if (!optional.isPresent()) {
                 return reader;
             }

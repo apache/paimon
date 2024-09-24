@@ -156,7 +156,7 @@ public class BulkFormatMapping {
                                     if (f.type() instanceof RowType) {
                                         RowType tableFieldType = (RowType) f.type();
                                         RowType dataFieldType = (RowType) dataField.type();
-                                        checkState(tableFieldType.subsetOf(dataFieldType));
+                                        checkState(tableFieldType.prunedFrom(dataFieldType));
                                         // Since the nested type schema evolution is not supported,
                                         // directly copy the fields from tableField's type to
                                         // dataField's type.

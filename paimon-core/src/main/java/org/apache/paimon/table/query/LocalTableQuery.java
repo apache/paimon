@@ -195,11 +195,9 @@ public class LocalTableQuery implements TableQuery {
         }
     }
 
-    // todo: replace it with withReadType
     @Override
-    public LocalTableQuery withValueProjection(int[][] projection) {
-        this.readerFactoryBuilder.withReadValueType(
-                rowType.project(projection).copyAndSetOriginalRowType(rowType));
+    public LocalTableQuery withValueProjection(int[] projection) {
+        this.readerFactoryBuilder.withReadValueType(rowType.project(projection));
         return this;
     }
 

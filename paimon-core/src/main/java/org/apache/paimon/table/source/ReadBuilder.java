@@ -121,18 +121,19 @@ public interface ReadBuilder extends Serializable {
 
     /** Apply projection to the reader, Use {@link #withReadType(RowType)} instead. */
     @Deprecated
-    default ReadBuilder withProjection(int[] projection) {
-        if (projection == null) {
-            return this;
-        }
-        int[][] nestedProjection =
-                Arrays.stream(projection).mapToObj(i -> new int[] {i}).toArray(int[][]::new);
-        return withProjection(nestedProjection);
-    }
+    ReadBuilder withProjection(int[] projection);
 
     /** Apply projection to the reader, Use {@link #withReadType(RowType)} instead. */
     @Deprecated
-    ReadBuilder withProjection(int[][] projection);
+    default ReadBuilder withProjection(int[][] projection) {
+        if (projection == null) {
+            return this;
+        }
+        if (Arrays.stream(projection).anyMatch(arr -> arr.length > 1)) {
+            throw new IllegalStateException("Not support nested projection");
+        }
+        return withProjection(Arrays.stream(projection).mapToInt(arr -> arr[0]).toArray());
+    }
 
     /** the row number pushed down. */
     ReadBuilder withLimit(int limit);

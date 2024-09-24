@@ -32,7 +32,6 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.utils.ProjectedRow;
-import org.apache.paimon.utils.Projection;
 
 import javax.annotation.Nullable;
 
@@ -187,7 +186,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                 Set<Integer> requireCachedBucketIds) {
             this.tableQuery =
                     table.newLocalTableQuery()
-                            .withValueProjection(Projection.of(projection).toNestedIndexes())
+                            .withValueProjection(projection)
                             .withIOManager(new IOManagerImpl(tempPath.toString()));
 
             this.scan =

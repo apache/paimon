@@ -30,7 +30,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.query.TableQuery;
 import org.apache.paimon.utils.ProjectedRow;
-import org.apache.paimon.utils.Projection;
 import org.apache.paimon.utils.TypeUtils;
 
 import javax.annotation.Nullable;
@@ -93,12 +92,7 @@ public class RemoteTableQuery implements TableQuery {
 
     @Override
     public RemoteTableQuery withValueProjection(int[] projection) {
-        return withValueProjection(Projection.of(projection).toNestedIndexes());
-    }
-
-    @Override
-    public RemoteTableQuery withValueProjection(int[][] projection) {
-        this.projection = Projection.of(projection).toTopLevelIndexes();
+        this.projection = projection;
         return this;
     }
 

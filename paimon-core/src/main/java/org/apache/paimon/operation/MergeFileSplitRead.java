@@ -116,6 +116,10 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         return mergeSorter;
     }
 
+    public TableSchema tableSchema() {
+        return tableSchema;
+    }
+
     public MergeFileSplitRead withReadKeyType(@Nullable RowType readKeyType) {
         readerFactoryBuilder.withReadKeyType(readKeyType);
         this.readKeyType = readKeyType;
@@ -127,9 +131,12 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         if (readType == null) {
             return this;
         }
-        // todo: replace projectedFields with reedType
+        // todo: replace projectedFields with readType
         int[][] projectedFields =
-                Arrays.stream(readType.toProjection())
+                Arrays.stream(
+                                tableSchema
+                                        .logicalRowType()
+                                        .getFieldIndices(readType.getFieldNames()))
                         .mapToObj(i -> new int[] {i})
                         .toArray(int[][]::new);
         int[][] newProjectedFields = projectedFields;
@@ -156,8 +163,12 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         this.outerProjection = projection.outerProjection;
         if (pushdownProjection != null) {
             RowType pushdownRowType =
-                    readType.buildWithNewProjection(
-                            Arrays.stream(pushdownProjection).mapToInt(arr -> arr[0]).toArray());
+                    tableSchema
+                            .logicalRowType()
+                            .project(
+                                    Arrays.stream(pushdownProjection)
+                                            .mapToInt(arr -> arr[0])
+                                            .toArray());
             readerFactoryBuilder.withReadValueType(pushdownRowType);
             mergeSorter.setProjectedValueType(pushdownRowType);
         }
@@ -315,7 +326,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
             return reader;
         }
 
-        ProjectedRow projectedRow = ProjectedRow.from(readKeyType.toProjection());
+        ProjectedRow projectedRow = ProjectedRow.from(readKeyType, tableSchema.logicalRowType());
         return reader.transform(kv -> kv.replaceKey(projectedRow.replaceRow(kv.key())));
     }
 

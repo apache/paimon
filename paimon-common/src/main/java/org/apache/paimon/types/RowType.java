@@ -56,7 +56,6 @@ public final class RowType extends DataType {
 
     private final List<DataField> fields;
     private InternalRow.FieldGetter[] fieldGetters;
-    private RowType originalRowType;
 
     public RowType(boolean isNullable, List<DataField> fields) {
         super(isNullable, DataTypeRoot.ROW);
@@ -191,7 +190,8 @@ public final class RowType extends DataType {
         return fields.equals(rowType.fields);
     }
 
-    public boolean subsetOf(Object o) {
+    @Override
+    public boolean prunedFrom(Object o) {
         if (this == o) {
             return true;
         }
@@ -203,7 +203,7 @@ public final class RowType extends DataType {
         }
         RowType rowType = (RowType) o;
         for (DataField field : fields) {
-            if (!field.subsetOf(rowType.getField(field.name()))) {
+            if (!field.prunedFrom(rowType.getField(field.name()))) {
                 return false;
             }
         }
@@ -256,10 +256,6 @@ public final class RowType extends DataType {
         return new RowType(newFields);
     }
 
-    public RowType project(int[][] mapping) {
-        return project(Arrays.stream(mapping).mapToInt(arr -> arr[0]).toArray());
-    }
-
     public RowType project(int[] mapping) {
         List<DataField> fields = getFields();
         return new RowType(
@@ -277,40 +273,6 @@ public final class RowType extends DataType {
 
     public RowType project(String... names) {
         return project(Arrays.asList(names));
-    }
-
-    // These methods are just for compatibility with old code to get the projection, once
-    // toProjection and buildWithNewProjection are not used anymore, remove them.
-    public RowType copyAndSetOriginalRowType(RowType originalRowType) {
-        if (this.originalRowType != null && !originalRowType.equals(this.originalRowType)) {
-            throw new RuntimeException();
-        }
-        return ((RowType) this.copy()).setOriginalRowType(originalRowType);
-    }
-
-    public int[] toProjection() {
-        if (fields.isEmpty()) {
-            return new int[0];
-        }
-        if (originalRowType == null) {
-            throw new RuntimeException();
-        }
-        return fields.stream()
-                .mapToInt(field -> originalRowType.getFieldIndexByFieldId(field.id()))
-                .toArray();
-    }
-
-    // create new RowType based on the new projection and originalRowType
-    public RowType buildWithNewProjection(int[] projection) {
-        if (originalRowType == null) {
-            throw new RuntimeException();
-        }
-        return originalRowType.project(projection).setOriginalRowType(originalRowType);
-    }
-
-    private RowType setOriginalRowType(RowType originalRowType) {
-        this.originalRowType = originalRowType;
-        return this;
     }
 
     public static RowType of() {

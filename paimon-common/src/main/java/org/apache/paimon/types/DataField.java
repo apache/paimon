@@ -148,7 +148,7 @@ public final class DataField implements Serializable {
                 && Objects.equals(description, field.description);
     }
 
-    public boolean subsetOf(DataField field) {
+    public boolean prunedFrom(DataField field) {
         if (this == field) {
             return true;
         }
@@ -157,7 +157,7 @@ public final class DataField implements Serializable {
         }
         return Objects.equals(id, field.id)
                 && Objects.equals(name, field.name)
-                && type.subsetOf(field.type)
+                && type.prunedFrom(field.type)
                 && Objects.equals(description, field.description);
     }
 

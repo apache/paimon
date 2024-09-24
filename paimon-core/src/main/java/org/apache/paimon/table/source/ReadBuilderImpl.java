@@ -87,7 +87,7 @@ public class ReadBuilderImpl implements ReadBuilder {
     public ReadBuilder withReadType(RowType readType) {
         RowType tableRowType = table.rowType();
         checkState(
-                readType.subsetOf(tableRowType),
+                readType.prunedFrom(tableRowType),
                 "read row type must be subset of table row type, read row type: %s, table row type: %s",
                 readType,
                 tableRowType);
@@ -96,7 +96,7 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
-    public ReadBuilder withProjection(int[][] projection) {
+    public ReadBuilder withProjection(int[] projection) {
         if (projection == null) {
             return this;
         }
