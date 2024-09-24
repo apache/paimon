@@ -19,10 +19,12 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.DateTimeUtils;
 
+import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
@@ -527,5 +529,62 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                                 DateTimeUtils.formatTimestamp(
                                         DateTimeUtils.toInternal(timestamp, 0), 0)))
                 .containsExactlyInAnyOrder(Row.of(1, "a"), Row.of(2, "b"));
+    }
+
+    @Test
+    public void testCountStarAppend() {
+        sql("CREATE TABLE count_append (f0 INT, f1 STRING)");
+        sql("INSERT INTO count_append VALUES (1, 'a'), (2, 'b')");
+
+        String sql = "SELECT COUNT(*) FROM count_append";
+        assertThat(sql(sql)).containsOnly(Row.of(2L));
+        validateCount1PushDown(sql);
+    }
+
+    @Test
+    public void testCountStarPartAppend() {
+        sql("CREATE TABLE count_part_append (f0 INT, f1 STRING, dt STRING) PARTITIONED BY (dt)");
+        sql("INSERT INTO count_part_append VALUES (1, 'a', '1'), (1, 'a', '1'), (2, 'b', '2')");
+        String sql = "SELECT COUNT(*) FROM count_part_append WHERE dt = '1'";
+
+        assertThat(sql(sql)).containsOnly(Row.of(2L));
+        validateCount1PushDown(sql);
+    }
+
+    @Test
+    public void testCountStarAppendWithDv() {
+        sql(
+                "CREATE TABLE count_append_dv (f0 INT, f1 STRING) WITH ('deletion-vectors.enabled' = 'true')");
+        sql("INSERT INTO count_append_dv VALUES (1, 'a'), (2, 'b')");
+
+        String sql = "SELECT COUNT(*) FROM count_append_dv";
+        assertThat(sql(sql)).containsOnly(Row.of(2L));
+        validateCount1NotPushDown(sql);
+    }
+
+    @Test
+    public void testCountStarPK() {
+        sql("CREATE TABLE count_pk (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING)");
+        sql("INSERT INTO count_pk VALUES (1, 'a'), (2, 'b')");
+
+        String sql = "SELECT COUNT(*) FROM count_pk";
+        assertThat(sql(sql)).containsOnly(Row.of(2L));
+        validateCount1NotPushDown(sql);
+    }
+
+    private void validateCount1PushDown(String sql) {
+        Transformation<?> transformation = AbstractTestBase.translate(tEnv, sql);
+        while (!transformation.getInputs().isEmpty()) {
+            transformation = transformation.getInputs().get(0);
+        }
+        assertThat(transformation.getDescription()).contains("Count1AggFunction");
+    }
+
+    private void validateCount1NotPushDown(String sql) {
+        Transformation<?> transformation = AbstractTestBase.translate(tEnv, sql);
+        while (!transformation.getInputs().isEmpty()) {
+            transformation = transformation.getInputs().get(0);
+        }
+        assertThat(transformation.getDescription()).doesNotContain("Count1AggFunction");
     }
 }

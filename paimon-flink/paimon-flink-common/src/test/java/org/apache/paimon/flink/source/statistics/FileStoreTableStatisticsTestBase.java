@@ -87,7 +87,8 @@ public abstract class FileStoreTableStatisticsTestBase {
                         null,
                         null,
                         null,
-                        null);
+                        null,
+                        false);
         Assertions.assertThat(partitionFilterSource.reportStatistics().getRowCount()).isEqualTo(5L);
         // TODO validate column statistics
     }
@@ -107,7 +108,8 @@ public abstract class FileStoreTableStatisticsTestBase {
                         null,
                         null,
                         null,
-                        null);
+                        null,
+                        false);
         Assertions.assertThat(keyFilterSource.reportStatistics().getRowCount()).isEqualTo(2L);
         // TODO validate column statistics
     }
@@ -127,7 +129,8 @@ public abstract class FileStoreTableStatisticsTestBase {
                         null,
                         null,
                         null,
-                        null);
+                        null,
+                        false);
         Assertions.assertThat(keyFilterSource.reportStatistics().getRowCount()).isEqualTo(4L);
         // TODO validate column statistics
     }

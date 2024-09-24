@@ -334,7 +334,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
     /** Context for {@link LookupTable}. */
     public static class Context {
 
-        public final FileStoreTable table;
+        public final LookupFileStoreTable table;
         public final int[] projection;
         @Nullable public final Predicate tablePredicate;
         @Nullable public final Predicate projectedPredicate;
@@ -361,7 +361,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
         public Context copy(int[] newProjection) {
             return new Context(
-                    table,
+                    table.wrapped(),
                     newProjection,
                     tablePredicate,
                     projectedPredicate,

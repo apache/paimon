@@ -38,8 +38,8 @@ import static org.apache.paimon.flink.lookup.LookupFileStoreTable.LookupStreamSc
  */
 public class LookupDataTableScan extends DataTableStreamScan {
 
-    private StartupMode startupMode;
-    private LookupStreamScanMode lookupScanMode;
+    private final StartupMode startupMode;
+    private final LookupStreamScanMode lookupScanMode;
 
     public LookupDataTableScan(
             CoreOptions options,

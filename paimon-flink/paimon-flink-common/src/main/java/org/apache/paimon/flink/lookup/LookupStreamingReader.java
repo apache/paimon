@@ -26,7 +26,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
@@ -50,14 +49,14 @@ import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping
 /** A streaming reader to load data into {@link LookupTable}. */
 public class LookupStreamingReader {
 
-    private final Table table;
+    private final LookupFileStoreTable table;
     private final int[] projection;
     private final ReadBuilder readBuilder;
     @Nullable private final Predicate projectedPredicate;
     private final StreamTableScan scan;
 
     public LookupStreamingReader(
-            Table table,
+            LookupFileStoreTable table,
             int[] projection,
             @Nullable Predicate predicate,
             Set<Integer> requireCachedBucketIds) {

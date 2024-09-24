@@ -46,7 +46,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -302,13 +301,6 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                 }
             }
             return new DataFilePlan(splits);
-        }
-
-        @Override
-        public List<BinaryRow> listPartitions() {
-            Set<BinaryRow> partitions = new LinkedHashSet<>(mainScan.listPartitions());
-            partitions.addAll(fallbackScan.listPartitions());
-            return new ArrayList<>(partitions);
         }
 
         @Override

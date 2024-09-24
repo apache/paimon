@@ -62,7 +62,8 @@ public class DataTableSource extends BaseDataTableSource
                 null,
                 null,
                 null,
-                null);
+                null,
+                false);
     }
 
     public DataTableSource(
@@ -75,7 +76,8 @@ public class DataTableSource extends BaseDataTableSource
             @Nullable int[][] projectFields,
             @Nullable Long limit,
             @Nullable WatermarkStrategy<RowData> watermarkStrategy,
-            @Nullable List<String> dynamicPartitionFilteringFields) {
+            @Nullable List<String> dynamicPartitionFilteringFields,
+            boolean isBatchCountStar) {
         super(
                 tableIdentifier,
                 table,
@@ -85,7 +87,8 @@ public class DataTableSource extends BaseDataTableSource
                 predicate,
                 projectFields,
                 limit,
-                watermarkStrategy);
+                watermarkStrategy,
+                isBatchCountStar);
         this.dynamicPartitionFilteringFields = dynamicPartitionFilteringFields;
     }
 
@@ -101,7 +104,8 @@ public class DataTableSource extends BaseDataTableSource
                 projectFields,
                 limit,
                 watermarkStrategy,
-                dynamicPartitionFilteringFields);
+                dynamicPartitionFilteringFields,
+                isBatchCountStar);
     }
 
     @Override
