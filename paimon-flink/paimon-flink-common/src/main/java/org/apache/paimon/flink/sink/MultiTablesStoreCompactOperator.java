@@ -95,15 +95,15 @@ public class MultiTablesStoreCompactOperator
 
         catalog = catalogLoader.load();
 
-        // Each job can only have one user name and this name must be consistent across restarts.
-        // We cannot use job id as commit user name here because user may change job id by creating
+        // Each job can only have one username and this name must be consistent across restarts.
+        // We cannot use job id as commit username here because user may change job id by creating
         // a savepoint, stop the job and then resume from savepoint.
         commitUser =
                 StateUtils.getSingleValueFromState(
                         context, "commit_user_state", String.class, initialCommitUser);
 
         state =
-                new StoreSinkWriteState(
+                new StoreSinkWriteStateImpl(
                         context,
                         (tableName, partition, bucket) ->
                                 ChannelComputer.select(
