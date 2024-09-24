@@ -194,6 +194,7 @@ public class StatisticTable implements ReadonlyTable {
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
+            // TODO
             return this;
         }
 
