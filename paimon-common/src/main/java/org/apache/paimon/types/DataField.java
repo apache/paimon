@@ -153,4 +153,20 @@ public final class DataField implements Serializable {
     public String toString() {
         return asSQLString();
     }
+
+    /**
+     * When the order of the same field is different, its ID may also be different, so the
+     * comparison should not include the ID.
+     */
+    public static boolean dataFieldEqualsIgnoreId(DataField dataField1, DataField dataField2) {
+        if (dataField1 == dataField2) {
+            return true;
+        } else if (dataField1 != null && dataField2 != null) {
+            return Objects.equals(dataField1.name(), dataField2.name())
+                    && Objects.equals(dataField1.type(), dataField2.type())
+                    && Objects.equals(dataField1.description(), dataField2.description());
+        } else {
+            return false;
+        }
+    }
 }

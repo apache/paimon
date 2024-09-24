@@ -20,12 +20,14 @@ package org.apache.paimon.flink.action.cdc.format.debezium;
 
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.StringUtils;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import io.debezium.data.Bits;
@@ -36,8 +38,12 @@ import io.debezium.time.MicroTime;
 import io.debezium.time.MicroTimestamp;
 import io.debezium.time.Timestamp;
 import io.debezium.time.ZonedTimestamp;
+import org.apache.avro.LogicalType;
+import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
+import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
+import org.apache.avro.util.Utf8;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 
 import javax.annotation.Nullable;
@@ -49,13 +55,16 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
+import static org.apache.paimon.utils.TypeUtils.OBJECT_MAPPER;
 
 /**
  * Utils to handle 'schema' field in debezium Json. TODO: The methods have many duplicate codes with
@@ -101,6 +110,8 @@ public class DebeziumSchemaUtils {
                                 e);
                     }
                 },
+                origin,
+                false,
                 serverTimeZone);
     }
 
@@ -122,6 +133,8 @@ public class DebeziumSchemaUtils {
                 className,
                 typeMapping,
                 () -> (ByteBuffer) ((GenericRecord) origin).get(Geometry.WKB_FIELD),
+                origin,
+                true,
                 serverTimeZone);
     }
 
@@ -132,6 +145,8 @@ public class DebeziumSchemaUtils {
             @Nullable String className,
             TypeMapping typeMapping,
             Supplier<ByteBuffer> geometryGetter,
+            Object origin,
+            boolean isAvro,
             ZoneId serverTimeZone) {
         if (rawValue == null) {
             return null;
@@ -232,9 +247,68 @@ public class DebeziumSchemaUtils {
                 throw new IllegalArgumentException(
                         String.format("Failed to convert %s to geometry JSON.", rawValue), e);
             }
+        } else if (isAvro) {
+            Object convertedObject = convertAvroObjectToJsonCompatible(origin);
+            try {
+                transformed = OBJECT_MAPPER.writer().writeValueAsString(convertedObject);
+            } catch (JsonProcessingException e) {
+                throw new RuntimeException(
+                        String.format("Failed to convert %s to JSON.", origin), e);
+            }
         }
 
         return transformed;
+    }
+
+    public static Object convertAvroObjectToJsonCompatible(Object avroObject) {
+        if (avroObject instanceof GenericData.Record) {
+            return convertRecord((GenericData.Record) avroObject);
+        } else if (avroObject instanceof GenericData.Array) {
+            return convertArray((GenericData.Array<?>) avroObject);
+        } else if (avroObject instanceof Utf8) {
+            return avroObject.toString();
+        } else if (avroObject instanceof Map) {
+            return convertMap((Map<Object, Object>) avroObject);
+        } else if (avroObject instanceof List) {
+            return convertList((List<Object>) avroObject);
+        } else {
+            return avroObject;
+        }
+    }
+
+    private static Map<Object, Object> convertMap(Map<Object, Object> map) {
+        Map<Object, Object> newMap = new HashMap<>();
+        for (Map.Entry<Object, Object> entry : map.entrySet()) {
+            Object key = convertAvroObjectToJsonCompatible(entry.getKey());
+            Object value = convertAvroObjectToJsonCompatible(entry.getValue());
+            newMap.put(key, value);
+        }
+        return newMap;
+    }
+
+    private static List<Object> convertList(List<Object> list) {
+        List<Object> newList = new ArrayList<>();
+        for (Object element : list) {
+            newList.add(convertAvroObjectToJsonCompatible(element));
+        }
+        return newList;
+    }
+
+    private static Map<String, Object> convertRecord(GenericData.Record record) {
+        Map<String, Object> map = new HashMap<>();
+        for (Schema.Field field : record.getSchema().getFields()) {
+            Object value = record.get(field.pos());
+            map.put(field.name(), convertAvroObjectToJsonCompatible(value));
+        }
+        return map;
+    }
+
+    private static List<Object> convertArray(GenericData.Array<?> array) {
+        List<Object> list = new ArrayList<>();
+        for (Object element : array) {
+            list.add(convertAvroObjectToJsonCompatible(element));
+        }
+        return list;
     }
 
     public static DataType toDataType(
@@ -362,6 +436,30 @@ public class DebeziumSchemaUtils {
     }
 
     private static DataType fromDebeziumAvroType(Schema schema) {
+        LogicalType logicalType = schema.getLogicalType();
+        if (logicalType != null) {
+            if (logicalType instanceof LogicalTypes.Date) {
+                return DataTypes.DATE();
+            } else if (logicalType instanceof LogicalTypes.TimestampMillis) {
+                return DataTypes.TIMESTAMP_MILLIS();
+            } else if (logicalType instanceof LogicalTypes.TimestampMicros) {
+                return DataTypes.TIMESTAMP();
+            } else if (logicalType instanceof LogicalTypes.Decimal) {
+                LogicalTypes.Decimal decimalType = (LogicalTypes.Decimal) logicalType;
+                return DataTypes.DECIMAL(decimalType.getPrecision(), decimalType.getScale());
+            } else if (logicalType instanceof LogicalTypes.TimeMillis) {
+                return DataTypes.TIME(3);
+            } else if (logicalType instanceof LogicalTypes.TimeMicros) {
+                return DataTypes.TIME(6);
+            } else if (logicalType instanceof LogicalTypes.LocalTimestampMicros) {
+                return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE();
+            } else if (logicalType instanceof LogicalTypes.LocalTimestampMillis) {
+                return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3);
+            } else {
+                throw new UnsupportedOperationException(
+                        String.format("Don't support logical avro type '%s' yet.", logicalType));
+            }
+        }
         Schema.Type avroType = schema.getType();
         switch (avroType) {
             case BOOLEAN:
@@ -378,8 +476,39 @@ public class DebeziumSchemaUtils {
             case LONG:
                 return DataTypes.BIGINT();
             case STRING:
-            case RECORD:
                 return DataTypes.STRING();
+            case RECORD:
+                List<DataField> fields = new ArrayList<>();
+                for (Schema.Field field : schema.getFields()) {
+                    DataType fieldType = fromDebeziumAvroType(field.schema());
+                    fields.add(DataTypes.FIELD(field.pos(), field.name(), fieldType, field.doc()));
+                }
+                return DataTypes.ROW(fields.toArray(new DataField[0]));
+            case ARRAY:
+                Schema elementSchema = schema.getElementType();
+                DataType elementType = fromDebeziumAvroType(elementSchema);
+                return DataTypes.ARRAY(elementType);
+            case MAP:
+                DataType valueType = fromDebeziumAvroType(schema.getValueType());
+                return DataTypes.MAP(DataTypes.STRING(), valueType);
+            case UNION:
+                List<Schema> unionTypes = schema.getTypes();
+                // Check if it's a nullable type union
+                if (unionTypes.size() == 2
+                        && unionTypes.contains(Schema.create(Schema.Type.NULL))) {
+                    Schema actualSchema =
+                            unionTypes.stream()
+                                    .filter(s -> s.getType() != Schema.Type.NULL)
+                                    .findFirst()
+                                    .orElseThrow(
+                                            () ->
+                                                    new IllegalStateException(
+                                                            "Union type does not contain a non-null type"));
+                    return fromDebeziumAvroType(actualSchema)
+                            .copy(true); // Return nullable version of the non-null type
+                }
+                // Handle generic unions or throw an exception
+                throw new UnsupportedOperationException("Generic unions are not supported");
             default:
                 throw new UnsupportedOperationException(
                         String.format("Don't support avro type '%s' yet.", avroType));
