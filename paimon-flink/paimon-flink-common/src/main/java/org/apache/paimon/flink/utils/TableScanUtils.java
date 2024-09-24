@@ -20,12 +20,15 @@ package org.apache.paimon.flink.utils;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.TableScan;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
 
 /** Utility methods for {@link TableScan}, such as validating. */
 public class TableScanUtils {
@@ -58,5 +61,25 @@ public class TableScanUtils {
             return Optional.of(((DataSplit) split.split()).snapshotId());
         }
         return Optional.empty();
+    }
+
+    /**
+     * Check whether streaming reading is supported based on the data changed before and after
+     * compact.
+     */
+    public static boolean supportCompactDiffStreamingReading(Table table) {
+        CoreOptions options = CoreOptions.fromMap(table.options());
+        Set<CoreOptions.MergeEngine> compactDiffReadingEngine =
+                new HashSet<CoreOptions.MergeEngine>() {
+                    {
+                        add(CoreOptions.MergeEngine.PARTIAL_UPDATE);
+                        add(CoreOptions.MergeEngine.AGGREGATE);
+                    }
+                };
+
+        return options.needLookup()
+                && compactDiffReadingEngine.contains(options.mergeEngine())
+                && !Options.fromMap(options.toMap())
+                        .get(CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE);
     }
 }

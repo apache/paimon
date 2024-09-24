@@ -219,7 +219,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         return false;
     }
 
-    private FollowUpScanner createFollowUpScanner() {
+    protected FollowUpScanner createFollowUpScanner() {
         CoreOptions.StreamScanMode type =
                 options.toConfiguration().get(CoreOptions.STREAM_SCAN_MODE);
         switch (type) {
@@ -249,7 +249,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         return followUpScanner;
     }
 
-    private BoundedChecker createBoundedChecker() {
+    protected BoundedChecker createBoundedChecker() {
         Long boundedWatermark = options.scanBoundedWatermark();
         return boundedWatermark != null
                 ? BoundedChecker.watermark(boundedWatermark)
