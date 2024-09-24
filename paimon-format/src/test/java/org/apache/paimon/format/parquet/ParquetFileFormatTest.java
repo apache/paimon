@@ -34,7 +34,6 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.paimon.format.parquet.ParquetFileFormat.getParquetConfiguration;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ParquetFileFormatFactory}. */
@@ -51,7 +50,7 @@ public class ParquetFileFormatTest {
         options.set(otherKey, "test");
         FormatContext context = new FormatContext(options, 1024, 1024, 2, null);
 
-        Options actual = ParquetFileFormat.getParquetConfiguration(context);
+        Options actual = new ParquetFileFormat(context).getOptions();
         assertThat(actual.get(parquetKey)).isEqualTo("hello");
         assertThat(actual.contains(otherKey)).isFalse();
         assertThat(actual.get("parquet.compression.codec.zstd.level")).isEqualTo("2");
@@ -65,7 +64,7 @@ public class ParquetFileFormatTest {
         RowDataParquetBuilder builder =
                 new RowDataParquetBuilder(
                         new RowType(new ArrayList<>()),
-                        getParquetConfiguration(new FormatContext(conf, 1024, 1024)));
+                        new ParquetFileFormat(new FormatContext(conf, 1024, 1024)).getOptions());
         assertThat(builder.getCompression(null)).isEqualTo(lz4);
         assertThat(builder.getCompression("SNAPPY")).isEqualTo(lz4);
     }

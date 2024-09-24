@@ -68,7 +68,7 @@ public class AvroFileFormat extends FileFormat {
     public AvroFileFormat(FormatContext context) {
         super(IDENTIFIER);
 
-        this.options = context.options().removePrefix(IDENTIFIER + ".");
+        this.options = getIdentifierPrefixOptions(context.options(), false);
         this.zstdLevel = context.zstdLevel();
     }
 

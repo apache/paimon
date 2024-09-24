@@ -28,7 +28,9 @@ import org.apache.paimon.types.RowType;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.ServiceLoader;
 
@@ -106,5 +108,21 @@ public abstract class FileFormat {
         }
 
         return Optional.empty();
+    }
+
+    protected Options getIdentifierPrefixOptions(Options options, boolean keepPrefix) {
+        Map<String, String> result = new HashMap<>();
+        String prefix = formatIdentifier.toLowerCase() + ".";
+        for (String key : options.keySet()) {
+            if (key.toLowerCase().startsWith(prefix)) {
+                String substr = key.substring(prefix.length());
+                if (keepPrefix) {
+                    result.put(prefix + substr, options.get(key));
+                } else {
+                    result.put(substr, options.get(key));
+                }
+            }
+        }
+        return new Options(result);
     }
 }

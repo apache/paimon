@@ -145,9 +145,9 @@ public class OrcFileFormat extends FileFormat {
         return new OrcWriterFactory(vectorizer, orcProperties, writerConf, writeBatchSize);
     }
 
-    private static Properties getOrcProperties(Options options, FormatContext formatContext) {
+    private Properties getOrcProperties(Options options, FormatContext formatContext) {
         Properties orcProperties = new Properties();
-        orcProperties.putAll(options.withPrefix(IDENTIFIER + ".").toMap());
+        orcProperties.putAll(getIdentifierPrefixOptions(options, true).toMap());
 
         if (!orcProperties.containsKey(OrcConf.COMPRESSION_ZSTD_LEVEL.getAttribute())) {
             orcProperties.setProperty(

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.parquet;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -41,27 +42,31 @@ import static org.apache.paimon.format.parquet.ParquetFileFormatFactory.IDENTIFI
 /** Parquet {@link FileFormat}. */
 public class ParquetFileFormat extends FileFormat {
 
-    private final FormatContext formatContext;
+    private final Options options;
+    private final int readBatchSize;
 
     public ParquetFileFormat(FormatContext formatContext) {
         super(IDENTIFIER);
-        this.formatContext = formatContext;
+
+        this.options = getParquetConfiguration(formatContext);
+        this.readBatchSize = formatContext.readBatchSize();
+    }
+
+    @VisibleForTesting
+    Options getOptions() {
+        return options;
     }
 
     @Override
     public FormatReaderFactory createReaderFactory(
             RowType projectedRowType, List<Predicate> filters) {
         return new ParquetReaderFactory(
-                getParquetConfiguration(formatContext),
-                projectedRowType,
-                formatContext.readBatchSize(),
-                ParquetFilters.convert(filters));
+                options, projectedRowType, readBatchSize, ParquetFilters.convert(filters));
     }
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        return new ParquetWriterFactory(
-                new RowDataParquetBuilder(type, getParquetConfiguration(formatContext)));
+        return new ParquetWriterFactory(new RowDataParquetBuilder(type, options));
     }
 
     @Override
@@ -75,8 +80,8 @@ public class ParquetFileFormat extends FileFormat {
         return Optional.of(new ParquetSimpleStatsExtractor(type, statsCollectors));
     }
 
-    public static Options getParquetConfiguration(FormatContext context) {
-        Options parquetOptions = context.options().withPrefix(IDENTIFIER + ".");
+    private Options getParquetConfiguration(FormatContext context) {
+        Options parquetOptions = getIdentifierPrefixOptions(context.options(), true);
 
         if (!parquetOptions.containsKey("parquet.compression.codec.zstd.level")) {
             parquetOptions.set(
