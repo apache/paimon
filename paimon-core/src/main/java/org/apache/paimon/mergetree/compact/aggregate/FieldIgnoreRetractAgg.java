@@ -23,6 +23,8 @@ public class FieldIgnoreRetractAgg extends FieldAggregator {
 
     private final FieldAggregator aggregator;
 
+    private static final long serialVersionUID = 1L;
+
     public FieldIgnoreRetractAgg(FieldAggregator aggregator) {
         super(aggregator.fieldType);
         this.aggregator = aggregator;

@@ -37,6 +37,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public abstract class FieldAggregator implements Serializable {
     protected DataType fieldType;
 
+    private static final long serialVersionUID = 1L;
+
     public FieldAggregator(DataType dataType) {
         this.fieldType = dataType;
     }

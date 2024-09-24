@@ -46,6 +46,8 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
 
     public static final String NAME = "nested_update";
 
+    private static final long serialVersionUID = 1L;
+
     private final int nestedFields;
 
     @Nullable private final Projection keyProjection;

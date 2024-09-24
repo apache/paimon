@@ -45,6 +45,8 @@ public class FieldCollectAgg extends FieldAggregator {
 
     public static final String NAME = "collect";
 
+    private static final long serialVersionUID = 1L;
+
     private final boolean distinct;
     private final InternalArray.ElementGetter elementGetter;
     @Nullable private final BiFunction<Object, Object, Boolean> equaliser;

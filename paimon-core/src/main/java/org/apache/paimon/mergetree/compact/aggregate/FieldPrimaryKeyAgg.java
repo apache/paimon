@@ -25,6 +25,8 @@ public class FieldPrimaryKeyAgg extends FieldAggregator {
 
     public static final String NAME = "primary-key";
 
+    private static final long serialVersionUID = 1L;
+
     public FieldPrimaryKeyAgg(DataType dataType) {
         super(dataType);
     }

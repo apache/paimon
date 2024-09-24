@@ -28,6 +28,8 @@ public class FieldListaggAgg extends FieldAggregator {
 
     public static final String NAME = "listagg";
 
+    private static final long serialVersionUID = 1L;
+
     private final String delimiter;
 
     public FieldListaggAgg(DataType dataType, CoreOptions options, String field) {

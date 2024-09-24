@@ -27,6 +27,8 @@ public class FieldMaxAgg extends FieldAggregator {
 
     public static final String NAME = "max";
 
+    private static final long serialVersionUID = 1L;
+
     public FieldMaxAgg(DataType dataType) {
         super(dataType);
     }
