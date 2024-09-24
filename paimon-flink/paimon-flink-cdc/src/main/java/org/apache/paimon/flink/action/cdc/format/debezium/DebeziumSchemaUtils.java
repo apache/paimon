@@ -111,7 +111,6 @@ public class DebeziumSchemaUtils {
                     }
                 },
                 origin,
-                false,
                 serverTimeZone);
     }
 
@@ -134,7 +133,6 @@ public class DebeziumSchemaUtils {
                 typeMapping,
                 () -> (ByteBuffer) ((GenericRecord) origin).get(Geometry.WKB_FIELD),
                 origin,
-                true,
                 serverTimeZone);
     }
 
@@ -146,7 +144,6 @@ public class DebeziumSchemaUtils {
             TypeMapping typeMapping,
             Supplier<ByteBuffer> geometryGetter,
             Object origin,
-            boolean isAvro,
             ZoneId serverTimeZone) {
         if (rawValue == null) {
             return null;
@@ -247,7 +244,10 @@ public class DebeziumSchemaUtils {
                 throw new IllegalArgumentException(
                         String.format("Failed to convert %s to geometry JSON.", rawValue), e);
             }
-        } else if (isAvro) {
+        } else if ((origin instanceof GenericData.Record)
+                || (origin instanceof GenericData.Array)
+                || (origin instanceof Map)
+                || (origin instanceof List)) {
             Object convertedObject = convertAvroObjectToJsonCompatible(origin);
             try {
                 transformed = OBJECT_MAPPER.writer().writeValueAsString(convertedObject);

@@ -172,7 +172,7 @@ public class TypeUtils {
                     List<Object> resultList = new ArrayList<>();
                     for (JsonNode elementNode : arrayNode) {
                         if (!elementNode.isNull()) {
-                            String elementJson = elementNode.toString();
+                            String elementJson = elementNode.asText();
                             Object elementObject =
                                     castFromStringInternal(elementJson, elementType, isCdcValue);
                             resultList.add(elementObject);
@@ -186,7 +186,23 @@ public class TypeUtils {
                             String.format(
                                     "Failed to parse ARRAY for type %s with value %s", type, s),
                             e);
-                    return new GenericArray(new int[] {});
+                    // try existing code flow
+                    if (elementType instanceof VarCharType) {
+                        if (s.startsWith("[")) {
+                            s = s.substring(1);
+                        }
+                        if (s.endsWith("]")) {
+                            s = s.substring(0, s.length() - 1);
+                        }
+                        String[] ss = s.split(",");
+                        BinaryString[] binaryStrings = new BinaryString[ss.length];
+                        for (int i = 0; i < ss.length; i++) {
+                            binaryStrings[i] = BinaryString.fromString(ss[i]);
+                        }
+                        return new GenericArray(binaryStrings);
+                    } else {
+                        throw new UnsupportedOperationException("Unsupported type " + type);
+                    }
                 } catch (Exception e) {
                     throw new RuntimeException(
                             String.format("Failed to parse Json String %s", s), e);
@@ -208,7 +224,7 @@ public class TypeUtils {
                                         if (!entry.getValue().isNull()) {
                                             value =
                                                     castFromStringInternal(
-                                                            entry.getValue().toString(),
+                                                            entry.getValue().asText(),
                                                             valueType,
                                                             isCdcValue);
                                         }
@@ -236,7 +252,7 @@ public class TypeUtils {
                         DataField field = rowType.getFields().get(pos);
                         JsonNode fieldNode = rowNode.get(field.name());
                         if (fieldNode != null && !fieldNode.isNull()) {
-                            String fieldJson = fieldNode.toString();
+                            String fieldJson = fieldNode.asText();
                             Object fieldObject =
                                     castFromStringInternal(fieldJson, field.type(), isCdcValue);
                             genericRow.setField(pos, fieldObject);
