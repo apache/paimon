@@ -73,6 +73,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private long latestSequenceNumber;
     private GenericRow row;
     private KeyValue reused;
+    private boolean currentDeleteRow;
 
     protected PartialUpdateMergeFunction(
             InternalRow.FieldGetter[] getters,
@@ -100,6 +101,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     public void add(KeyValue kv) {
         // refresh key object to avoid reference overwritten
         currentKey = kv.key();
+        currentDeleteRow = false;
 
         if (kv.valueKind().isRetract()) {
             // In 0.7- versions, the delete records might be written into data file even when
@@ -115,7 +117,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
             if (removeRecordOnDelete) {
                 if (kv.valueKind() == RowKind.DELETE) {
-                    row = null;
+                    currentDeleteRow = true;
+                    row = new GenericRow(getters.length);
                 }
                 // ignore -U records
                 return;
@@ -127,7 +130,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                             "By default, Partial update can not accept delete records,"
                                     + " you can choose one of the following solutions:",
                             "1. Configure 'ignore-delete' to ignore delete records.",
-                            "2. Configure 'sequence-group's to retract partial columns.");
+                            "2. Configure 'partial-update.remove-record-on-delete' to remove the whole row when receiving delete records.",
+                            "3. Configure 'sequence-group's to retract partial columns.");
 
             throw new IllegalArgumentException(msg);
         }
@@ -250,7 +254,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         if (reused == null) {
             reused = new KeyValue();
         }
-        if (removeRecordOnDelete && row == null) {
+        if (currentDeleteRow) {
             return null;
         }
         return reused.replace(currentKey, latestSequenceNumber, RowKind.INSERT, row);
