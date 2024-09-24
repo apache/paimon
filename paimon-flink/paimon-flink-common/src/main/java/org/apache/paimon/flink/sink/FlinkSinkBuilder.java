@@ -55,6 +55,7 @@ import static org.apache.flink.configuration.CoreOptions.DEFAULT_PARALLELISM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SAMPLE_FACTOR;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.MIN_CLUSTERING_SAMPLE_FACTOR;
+import static org.apache.paimon.flink.sink.FlinkSink.isStreaming;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 import static org.apache.paimon.flink.sorter.TableSorter.OrderType.HILBERT;
 import static org.apache.paimon.flink.sorter.TableSorter.OrderType.ORDER;
@@ -144,7 +145,7 @@ public class FlinkSinkBuilder {
             return this;
         }
         checkState(input != null, "The input stream should be specified earlier.");
-        if (FlinkSink.isStreaming(input) || !table.bucketMode().equals(BUCKET_UNAWARE)) {
+        if (isStreaming(input) || !table.bucketMode().equals(BUCKET_UNAWARE)) {
             LOG.warn(
                     "Clustering is enabled; however, it has been skipped as "
                             + "it only supports the bucket unaware table without primary keys and "
@@ -210,7 +211,7 @@ public class FlinkSinkBuilder {
 
     /** Build {@link DataStreamSink}. */
     public DataStreamSink<?> build() {
-        parallelism = checkAndUpdateParallelism(input, parallelism);
+        setParallelismIfAdaptiveConflict();
         input = trySortInput(input);
         DataStream<InternalRow> input = mapToInternalRow(this.input, table.rowType());
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
@@ -286,10 +287,10 @@ public class FlinkSinkBuilder {
         return input;
     }
 
-    private Integer checkAndUpdateParallelism(DataStream<?> input, Integer parallelism) {
+    private void setParallelismIfAdaptiveConflict() {
         try {
             boolean parallelismUndefined = parallelism == null || parallelism == -1;
-            boolean isStreaming = FlinkSink.isStreaming(input);
+            boolean isStreaming = isStreaming(input);
             boolean isAdaptiveParallelismEnabled =
                     AdaptiveParallelism.isEnabled(input.getExecutionEnvironment());
             boolean writeMCacheEnabled = table.coreOptions().writeManifestCache().getBytes() > 0;
@@ -325,10 +326,8 @@ public class FlinkSinkBuilder {
                                 messages, parallelismSource);
                 LOG.warn(msg);
             }
-            return parallelism;
         } catch (NoClassDefFoundError ignored) {
             // before 1.17, there is no adaptive parallelism
-            return parallelism;
         }
     }
 }
