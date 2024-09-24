@@ -21,7 +21,7 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.table.TableType;
+import org.apache.paimon.table.CatalogTableType;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdfs.HdfsConfiguration;
@@ -63,7 +63,7 @@ public class CatalogFactoryTest {
         Path root = new Path(path.toUri().toString());
         Options options = new Options();
         options.set(WAREHOUSE, new Path(root, "warehouse").toString());
-        options.set(TABLE_TYPE, TableType.EXTERNAL);
+        options.set(TABLE_TYPE, CatalogTableType.EXTERNAL);
         assertThatThrownBy(() -> CatalogFactory.createCatalog(CatalogContext.create(options)))
                 .hasMessageContaining("Only managed table is supported in File system catalog.");
     }

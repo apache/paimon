@@ -24,7 +24,7 @@ import org.apache.paimon.options.description.InlineElement;
 import static org.apache.paimon.options.description.TextElement.text;
 
 /** Enum of catalog table type. */
-public enum TableType implements DescribedEnum {
+public enum CatalogTableType implements DescribedEnum {
     MANAGED(
             "managed",
             "Paimon owned table where the entire lifecycle of the table data is managed."),
@@ -35,7 +35,7 @@ public enum TableType implements DescribedEnum {
     private final String value;
     private final String description;
 
-    TableType(String value, String description) {
+    CatalogTableType(String value, String description) {
         this.value = value;
         this.description = description;
     }

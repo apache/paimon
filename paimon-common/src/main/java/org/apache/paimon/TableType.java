@@ -54,6 +54,6 @@ public enum TableType implements DescribedEnum {
                 return type;
             }
         }
-        throw new UnsupportedOperationException("Unknown type: " + name);
+        throw new UnsupportedOperationException("Unknown table type: " + name);
     }
 }
