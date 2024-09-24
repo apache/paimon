@@ -191,7 +191,7 @@ public final class RowType extends DataType {
     }
 
     @Override
-    public boolean prunedFrom(Object o) {
+    public boolean isPrunedFrom(Object o) {
         if (this == o) {
             return true;
         }
@@ -203,7 +203,7 @@ public final class RowType extends DataType {
         }
         RowType rowType = (RowType) o;
         for (DataField field : fields) {
-            if (!field.prunedFrom(rowType.getField(field.name()))) {
+            if (!field.isPrunedFrom(rowType.getField(field.name()))) {
                 return false;
             }
         }

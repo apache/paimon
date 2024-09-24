@@ -151,7 +151,7 @@ public abstract class DataType implements Serializable {
      *
      * @param o the target data type
      */
-    public boolean prunedFrom(Object o) {
+    public boolean isPrunedFrom(Object o) {
         return equals(o);
     }
 

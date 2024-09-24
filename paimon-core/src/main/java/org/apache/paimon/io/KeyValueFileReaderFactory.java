@@ -260,7 +260,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                 @Nullable List<Predicate> filters) {
             RowType finalReadKeyType = projectKeys ? this.readKeyType : keyType;
             Function<TableSchema, List<DataField>> fieldsExtractor =
-                    (schema) -> {
+                    schema -> {
                         List<DataField> dataKeyFields = extractor.keyFields(schema);
                         List<DataField> dataValueFields = extractor.valueFields(schema);
                         return KeyValue.createKeyValueFields(dataKeyFields, dataValueFields);

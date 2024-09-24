@@ -119,11 +119,13 @@ public interface ReadBuilder extends Serializable {
      */
     ReadBuilder withReadType(RowType readType);
 
-    /** Apply projection to the reader, Use {@link #withReadType(RowType)} instead. */
-    @Deprecated
+    /**
+     * Apply projection to the reader, if you need nested row pruning, use {@link
+     * #withReadType(RowType)} instead.
+     */
     ReadBuilder withProjection(int[] projection);
 
-    /** Apply projection to the reader, Use {@link #withReadType(RowType)} instead. */
+    /** Apply projection to the reader, only support top level projection. */
     @Deprecated
     default ReadBuilder withProjection(int[][] projection) {
         if (projection == null) {
