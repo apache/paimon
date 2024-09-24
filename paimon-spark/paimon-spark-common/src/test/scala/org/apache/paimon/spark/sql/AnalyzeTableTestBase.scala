@@ -86,17 +86,15 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
 
     spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
 
-    val df =
-      spark.sql("select snapshot_id, schema_id, mergedRecordCount, colstat from `T$statistics` where snapshot_id=2")
-    Assertions.assertEquals(df.collect().size, 1)
-    checkAnswer(
-      spark.sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat from `T$statistics` where snapshot_id=2"),
-      Row(2, 0, 2, "{ }"))
-
     spark.sql(s"INSERT INTO T VALUES ('3', 'b', 2, 1)")
     spark.sql(s"INSERT INTO T VALUES ('4', 'bbb', 3, 2)")
 
     spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
+
+    checkAnswer(
+      spark.sql(
+        "SELECT snapshot_id, schema_id, mergedRecordCount, colstat from `T$statistics` where snapshot_id=2"),
+      Row(2, 0, 2, "{ }"))
 
     checkAnswer(
       spark.sql(
