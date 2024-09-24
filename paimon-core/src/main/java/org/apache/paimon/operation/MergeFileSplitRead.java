@@ -120,17 +120,14 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         return tableSchema;
     }
 
-    public MergeFileSplitRead withReadKeyType(@Nullable RowType readKeyType) {
+    public MergeFileSplitRead withReadKeyType(RowType readKeyType) {
         readerFactoryBuilder.withReadKeyType(readKeyType);
         this.readKeyType = readKeyType;
         return this;
     }
 
     @Override
-    public MergeFileSplitRead withReadType(@Nullable RowType readType) {
-        if (readType == null) {
-            return this;
-        }
+    public MergeFileSplitRead withReadType(RowType readType) {
         // todo: replace projectedFields with readType
         int[][] projectedFields =
                 Arrays.stream(
