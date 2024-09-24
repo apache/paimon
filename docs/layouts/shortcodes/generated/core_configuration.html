@@ -883,6 +883,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>Target size of a file.<ul><li>primary key table: the default value is 128 MB.</li><li>append table: the default value is 256 MB.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>type</h5></td>
+            <td style="word-wrap: break-word;">table</td>
+            <td><p>Enum</p></td>
+            <td>Type of the table.<br /><br />Possible values:<ul><li>"table": Normal Paimon table.</li><li>"format-table": A file format table refers to a directory that contains multiple files of the same format.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>write-buffer-for-append</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
