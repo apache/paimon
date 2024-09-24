@@ -31,6 +31,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
 
@@ -49,9 +50,9 @@ public class LookupCompactDiffRead extends AbstractDataTableRead<KeyValue> {
     }
 
     @Override
-    public void projection(int[][] projection) {
-        fullPhaseMergeRead.withProjection(projection);
-        incrementalDiffRead.withProjection(projection);
+    public void applyReadType(RowType readType) {
+        fullPhaseMergeRead.withReadType(readType);
+        incrementalDiffRead.withReadType(readType);
     }
 
     @Override
