@@ -70,9 +70,7 @@ public class SparkCatalogWithHiveTest {
 
         spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
         spark.sql("USE spark_catalog.my_db1");
-        spark.sql(
-                "CREATE TABLE IF NOT EXISTS table_orc (a INT, bb INT, c STRING) USING orc TBLPROPERTIES"
-                        + " ('paimon.format.table'='true')");
+        spark.sql("CREATE TABLE IF NOT EXISTS table_orc (a INT, bb INT, c STRING) USING orc");
 
         assertThat(
                         spark.sql("SHOW TABLES").collectAsList().stream()

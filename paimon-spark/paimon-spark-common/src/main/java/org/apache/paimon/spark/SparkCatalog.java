@@ -314,13 +314,13 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
         try {
             String provider = properties.get(TableCatalog.PROP_PROVIDER);
             if ((!usePaimon(provider))
-                    && SparkSource.FORMAT_NAMES().contains(provider.toLowerCase())
-                    && properties
-                            .getOrDefault("paimon.format.table", "false")
-                            .equalsIgnoreCase("true")) {
+                    && SparkSource.FORMAT_NAMES().contains(provider.toLowerCase())) {
+                Map<String, String> newProperties = new HashMap<String, String>(properties);
+                newProperties.put("type", "format-table");
+                newProperties.put("file.format", provider.toLowerCase());
                 catalog.createTable(
                         toIdentifier(ident),
-                        toInitialSchema(schema, partitions, properties),
+                        toInitialSchema(schema, partitions, newProperties),
                         false);
             } else {
                 checkArgument(

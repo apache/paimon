@@ -244,8 +244,7 @@ public abstract class AbstractCatalog implements Catalog {
 
         copyTableDefaultOptions(schema.options());
 
-        if (schema.options().containsKey("paimon.format.table")
-                && schema.options().get("paimon.format.table").equalsIgnoreCase("true")) {
+        if (schema.options().getOrDefault("type", "table").equalsIgnoreCase("format-table")) {
             createFormatTable(identifier, schema);
         } else {
             createTableImpl(identifier, schema);

@@ -597,7 +597,11 @@ public class HiveCatalog extends AbstractCatalog {
 
     private Table createHiveTable(Identifier identifier, TableSchema tableSchema) {
         Map<String, String> tblProperties;
-        if (syncAllProperties()) {
+        String provider = "paimon";
+        if (tableSchema.options().getOrDefault("type", "table").equalsIgnoreCase("format-table")) {
+            provider = tableSchema.options().get("file.format");
+        }
+        if (syncAllProperties() || !provider.equals("paimon")) {
             tblProperties = new HashMap<>(tableSchema.options());
 
             // add primary-key, partition-key to tblproperties
@@ -606,8 +610,8 @@ public class HiveCatalog extends AbstractCatalog {
             tblProperties = convertToPropertiesPrefixKey(tableSchema.options(), HIVE_PREFIX);
         }
 
-        Table table = newHmsTable(identifier, tblProperties, tableSchema.options().get("provider"));
-        updateHmsTable(table, identifier, tableSchema, tableSchema.options().get("provider"));
+        Table table = newHmsTable(identifier, tblProperties, provider);
+        updateHmsTable(table, identifier, tableSchema, provider);
         return table;
     }
 
@@ -826,6 +830,9 @@ public class HiveCatalog extends AbstractCatalog {
         if ("paimon".equalsIgnoreCase(provider)) {
             table.getParameters()
                     .put(hive_metastoreConstants.META_TABLE_STORAGE, STORAGE_HANDLER_CLASS_NAME);
+        } else {
+            table.getParameters().put("file.format", provider.toLowerCase());
+            table.getParameters().put("type", "format-table");
         }
         if (CatalogTableType.EXTERNAL.equals(tableType)) {
             table.getParameters().put("EXTERNAL", "TRUE");

@@ -198,10 +198,7 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
             Map<String, String> properties)
             throws TableAlreadyExistsException, NoSuchNamespaceException {
         String provider = properties.get(TableCatalog.PROP_PROVIDER);
-        if (usePaimon(provider)
-                || properties
-                        .getOrDefault("paimon.format.table", "false")
-                        .equalsIgnoreCase("true")) {
+        if (usePaimon(provider)) {
             return sparkCatalog.createTable(ident, schema, partitions, properties);
         } else {
             // delegate to the session catalog
