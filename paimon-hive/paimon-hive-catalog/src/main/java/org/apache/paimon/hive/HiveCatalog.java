@@ -835,7 +835,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     private String getSerdeClassName(String provider) {
         if (provider == null || provider.equalsIgnoreCase("paimon")) {
-            return STORAGE_HANDLER_CLASS_NAME;
+            return SERDE_CLASS_NAME;
         } else if (provider.equalsIgnoreCase("csv")) {
             return "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe";
         } else if (provider.equalsIgnoreCase("parquet")) {
@@ -843,7 +843,7 @@ public class HiveCatalog extends AbstractCatalog {
         } else if (provider.equalsIgnoreCase("orc")) {
             return "org.apache.hadoop.hive.ql.io.orc.OrcSerde";
         } else {
-            return STORAGE_HANDLER_CLASS_NAME;
+            return SERDE_CLASS_NAME;
         }
     }
 
