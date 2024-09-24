@@ -154,9 +154,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
       val error = intercept[Exception] {
         spark.sql(s"CREATE TABLE parquet_tbl (id int) USING parquet")
       }.getMessage
-      assert(
-        error.contains(
-          "SparkCatalog can only create paimon table, but current provider is parquet"))
+      assert(error.contains("does not support format table"))
     }
   }
 
