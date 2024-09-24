@@ -318,7 +318,7 @@ public class AbstractTestBase {
         List<Operation> operations = envImpl.getParser().parse(statement);
 
         if (operations.size() != 1) {
-            throw new RuntimeException();
+            throw new RuntimeException("No operation after parsing for " + statement);
         }
 
         Operation operation = operations.get(0);
@@ -330,6 +330,7 @@ public class AbstractTestBase {
                 Method translate =
                         TableEnvironmentImpl.class.getDeclaredMethod("translate", List.class);
                 translate.setAccessible(true);
+                //noinspection unchecked
                 transformations =
                         (List<Transformation<?>>)
                                 translate.invoke(envImpl, Collections.singletonList(sinkOperation));
@@ -338,7 +339,7 @@ public class AbstractTestBase {
             }
 
             if (transformations.size() != 1) {
-                throw new RuntimeException();
+                throw new RuntimeException("No transformation after translating for " + statement);
             }
 
             return transformations.get(0);

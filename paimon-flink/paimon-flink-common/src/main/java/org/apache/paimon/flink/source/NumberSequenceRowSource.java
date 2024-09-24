@@ -182,11 +182,13 @@ public class NumberSequenceRowSource
             return to;
         }
 
+        @SuppressWarnings("ClassEscapesDefinedScope")
         @Override
         public NumberSequenceRowSource.NumberSequenceIterator getIterator() {
             return new NumberSequenceRowSource.NumberSequenceIterator(from, to);
         }
 
+        @SuppressWarnings("ClassEscapesDefinedScope")
         @Override
         public IteratorSourceSplit<RowData, NumberSequenceRowSource.NumberSequenceIterator>
                 getUpdatedSplitForIterator(
@@ -318,6 +320,7 @@ public class NumberSequenceRowSource
          * @param to The last number returned by the iterator.
          * @param unused A dummy parameter to disambiguate the constructor.
          */
+        @SuppressWarnings("unused")
         private NumberSequenceIterator(long from, long to, boolean unused) {
             this.current = from;
             this.to = to;
@@ -389,47 +392,34 @@ public class NumberSequenceRowSource
                 elementsPerSplit = halfDiff / numPartitions * 2;
             }
 
-            if (elementsPerSplit < Long.MAX_VALUE) {
-                // figure out how many get one in addition
-                long numWithExtra = -(elementsPerSplit * numPartitions) + to - current + 1;
+            // figure out how many get one in addition
+            long numWithExtra = -(elementsPerSplit * numPartitions) + to - current + 1;
 
-                // based on rounding errors, we may have lost one)
+            // based on rounding errors, we may have lost one
+            if (numWithExtra > numPartitions) {
+                elementsPerSplit++;
+                numWithExtra -= numPartitions;
+
                 if (numWithExtra > numPartitions) {
-                    elementsPerSplit++;
-                    numWithExtra -= numPartitions;
-
-                    if (numWithExtra > numPartitions) {
-                        throw new RuntimeException(
-                                "Bug in splitting logic. To much rounding loss.");
-                    }
+                    throw new RuntimeException("Bug in splitting logic. Too much rounding loss.");
                 }
-
-                NumberSequenceIterator[] iters = new NumberSequenceIterator[numPartitions];
-                long curr = current;
-                int i = 0;
-                for (; i < numWithExtra; i++) {
-                    long next = curr + elementsPerSplit + 1;
-                    iters[i] = new NumberSequenceIterator(curr, next - 1);
-                    curr = next;
-                }
-                for (; i < numPartitions; i++) {
-                    long next = curr + elementsPerSplit;
-                    iters[i] = new NumberSequenceIterator(curr, next - 1, true);
-                    curr = next;
-                }
-
-                return iters;
-            } else {
-                // this can only be the case when there are two partitions
-                if (numPartitions != 2) {
-                    throw new RuntimeException("Bug in splitting logic.");
-                }
-
-                return new NumberSequenceIterator[] {
-                    new NumberSequenceIterator(current, current + elementsPerSplit),
-                    new NumberSequenceIterator(current + elementsPerSplit, to)
-                };
             }
+
+            NumberSequenceIterator[] iters = new NumberSequenceIterator[numPartitions];
+            long curr = current;
+            int i = 0;
+            for (; i < numWithExtra; i++) {
+                long next = curr + elementsPerSplit + 1;
+                iters[i] = new NumberSequenceIterator(curr, next - 1);
+                curr = next;
+            }
+            for (; i < numPartitions; i++) {
+                long next = curr + elementsPerSplit;
+                iters[i] = new NumberSequenceIterator(curr, next - 1, true);
+                curr = next;
+            }
+
+            return iters;
         }
 
         @Override
