@@ -74,6 +74,9 @@ public interface Table extends Serializable {
     @Experimental
     Optional<Statistics> statistics();
 
+    @Experimental
+    Optional<Statistics> statistics(Long snapshotId);
+
     // ================= Table Operations ====================
 
     /** Copy this table with adding dynamic options. */

@@ -217,6 +217,11 @@ public interface FormatTable extends Table {
     }
 
     @Override
+    default Optional<Statistics> statistics(Long snapshotId) {
+        return Optional.empty();
+    }
+
+    @Override
     default OptionalLong latestSnapshotId() {
         throw new UnsupportedOperationException();
     }
