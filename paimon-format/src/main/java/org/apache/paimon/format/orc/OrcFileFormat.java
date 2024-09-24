@@ -72,7 +72,7 @@ public class OrcFileFormat extends FileFormat {
 
     public OrcFileFormat(FormatContext formatContext) {
         super(IDENTIFIER);
-        this.orcProperties = getOrcProperties(formatContext.formatOptions(), formatContext);
+        this.orcProperties = getOrcProperties(formatContext.options(), formatContext);
         this.readerConf = new org.apache.hadoop.conf.Configuration();
         this.orcProperties.forEach((k, v) -> readerConf.set(k.toString(), v.toString()));
         this.writerConf = new org.apache.hadoop.conf.Configuration();
@@ -147,10 +147,7 @@ public class OrcFileFormat extends FileFormat {
 
     private static Properties getOrcProperties(Options options, FormatContext formatContext) {
         Properties orcProperties = new Properties();
-
-        Properties properties = new Properties();
-        options.addAllToProperties(properties);
-        properties.forEach((k, v) -> orcProperties.put(IDENTIFIER + "." + k, v));
+        orcProperties.putAll(options.withPrefix(IDENTIFIER + ".").toMap());
 
         if (!orcProperties.containsKey(OrcConf.COMPRESSION_ZSTD_LEVEL.getAttribute())) {
             orcProperties.setProperty(

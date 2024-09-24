@@ -145,6 +145,12 @@ public class Options implements Serializable {
         return data;
     }
 
+    public synchronized Options withPrefix(String prefix) {
+        Map<String, String> newData = new HashMap<>();
+        convertToPropertiesPrefixKey(data, prefix).forEach((k, v) -> newData.put(prefix + k, v));
+        return new Options(newData);
+    }
+
     public synchronized Options removePrefix(String prefix) {
         return new Options(convertToPropertiesPrefixKey(data, prefix));
     }

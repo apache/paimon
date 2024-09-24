@@ -1458,7 +1458,7 @@ public class CoreOptions implements Serializable {
 
     public static FileFormat createFileFormat(Options options, ConfigOption<String> formatOption) {
         String formatIdentifier = normalizeFileFormat(options.get(formatOption));
-        return FileFormat.getFileFormat(options, formatIdentifier);
+        return FileFormat.fromIdentifier(formatIdentifier, options);
     }
 
     public Map<Integer, String> fileCompressionPerLevel() {

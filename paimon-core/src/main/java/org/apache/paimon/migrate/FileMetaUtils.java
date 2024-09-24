@@ -109,9 +109,9 @@ public class FileMetaUtils {
                             table.rowType().getFieldNames());
 
             SimpleStatsExtractor simpleStatsExtractor =
-                    FileFormat.getFileFormat(
-                                    ((FileStoreTable) table).coreOptions().toConfiguration(),
-                                    format)
+                    FileFormat.fromIdentifier(
+                                    format,
+                                    ((FileStoreTable) table).coreOptions().toConfiguration())
                             .createStatsExtractor(table.rowType(), factories)
                             .orElseThrow(
                                     () ->

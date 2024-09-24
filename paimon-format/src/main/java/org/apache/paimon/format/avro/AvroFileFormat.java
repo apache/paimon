@@ -62,11 +62,14 @@ public class AvroFileFormat extends FileFormat {
     public static final ConfigOption<Map<String, String>> AVRO_ROW_NAME_MAPPING =
             ConfigOptions.key("row-name-mapping").mapType().defaultValue(new HashMap<>());
 
-    private final FormatContext context;
+    private final Options options;
+    private final int zstdLevel;
 
     public AvroFileFormat(FormatContext context) {
         super(IDENTIFIER);
-        this.context = context;
+
+        this.options = context.options().removePrefix(IDENTIFIER + ".");
+        this.zstdLevel = context.zstdLevel();
     }
 
     @Override
@@ -95,13 +98,12 @@ public class AvroFileFormat extends FileFormat {
     }
 
     private CodecFactory createCodecFactory(String compression) {
-        Options options = context.formatOptions();
         if (options.contains(AVRO_OUTPUT_CODEC)) {
             return CodecFactory.fromString(options.get(AVRO_OUTPUT_CODEC));
         }
 
         if (compression.equalsIgnoreCase("zstd")) {
-            return CodecFactory.zstandardCodec(context.zstdLevel());
+            return CodecFactory.zstandardCodec(zstdLevel);
         }
         return CodecFactory.fromString(options.get(AVRO_OUTPUT_CODEC));
     }
@@ -117,8 +119,7 @@ public class AvroFileFormat extends FileFormat {
                             (out, compression) -> {
                                 Schema schema =
                                         AvroSchemaConverter.convertToSchema(
-                                                rowType,
-                                                context.formatOptions().get(AVRO_ROW_NAME_MAPPING));
+                                                rowType, options.get(AVRO_ROW_NAME_MAPPING));
                                 AvroRowDatumWriter datumWriter = new AvroRowDatumWriter(rowType);
                                 DataFileWriter<InternalRow> dataFileWriter =
                                         new DataFileWriter<>(datumWriter);

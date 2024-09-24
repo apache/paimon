@@ -19,7 +19,6 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -74,9 +73,15 @@ public abstract class FileFormat {
         return Optional.empty();
     }
 
-    @VisibleForTesting
     public static FileFormat fromIdentifier(String identifier, Options options) {
-        return fromIdentifier(identifier, new FormatContext(options, 1024, 1024));
+        return fromIdentifier(
+                identifier,
+                new FormatContext(
+                        options,
+                        options.get(CoreOptions.READ_BATCH_SIZE),
+                        options.get(CoreOptions.WRITE_BATCH_SIZE),
+                        options.get(CoreOptions.FILE_COMPRESSION_ZSTD_LEVEL),
+                        options.get(CoreOptions.FILE_BLOCK_SIZE)));
     }
 
     /** Create a {@link FileFormat} from format identifier and format options. */
@@ -101,16 +106,5 @@ public abstract class FileFormat {
         }
 
         return Optional.empty();
-    }
-
-    public static FileFormat getFileFormat(Options options, String formatIdentifier) {
-        FormatContext context =
-                new FormatContext(
-                        options.removePrefix(formatIdentifier + "."),
-                        options.get(CoreOptions.READ_BATCH_SIZE),
-                        options.get(CoreOptions.WRITE_BATCH_SIZE),
-                        options.get(CoreOptions.FILE_COMPRESSION_ZSTD_LEVEL),
-                        options.get(CoreOptions.FILE_BLOCK_SIZE));
-        return FileFormat.fromIdentifier(formatIdentifier, context);
     }
 }

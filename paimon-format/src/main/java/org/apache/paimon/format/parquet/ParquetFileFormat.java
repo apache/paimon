@@ -18,7 +18,6 @@
 
 package org.apache.paimon.format.parquet;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -49,11 +48,6 @@ public class ParquetFileFormat extends FileFormat {
         this.formatContext = formatContext;
     }
 
-    @VisibleForTesting
-    Options formatOptions() {
-        return formatContext.formatOptions();
-    }
-
     @Override
     public FormatReaderFactory createReaderFactory(
             RowType projectedRowType, List<Predicate> filters) {
@@ -82,10 +76,7 @@ public class ParquetFileFormat extends FileFormat {
     }
 
     public static Options getParquetConfiguration(FormatContext context) {
-        Options parquetOptions = new Options();
-        context.formatOptions()
-                .toMap()
-                .forEach((key, value) -> parquetOptions.setString(IDENTIFIER + "." + key, value));
+        Options parquetOptions = context.options().withPrefix(IDENTIFIER + ".");
 
         if (!parquetOptions.containsKey("parquet.compression.codec.zstd.level")) {
             parquetOptions.set(
