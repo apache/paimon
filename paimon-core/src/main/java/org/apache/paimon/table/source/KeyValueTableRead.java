@@ -49,7 +49,7 @@ public final class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
 
     private final List<SplitReadProvider> readProviders;
 
-    private RowType readType = null;
+    @Nullable private RowType readType = null;
     private boolean forceKeepDelete = false;
     private Predicate predicate = null;
     private IOManager ioManager = null;
@@ -81,7 +81,10 @@ public final class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
         if (forceKeepDelete) {
             read = read.forceKeepDelete();
         }
-        read.withReadType(readType).withFilter(predicate).withIOManager(ioManager);
+        if (readType != null) {
+            read = read.withReadType(readType);
+        }
+        read.withFilter(predicate).withIOManager(ioManager);
     }
 
     @Override
