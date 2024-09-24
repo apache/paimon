@@ -55,8 +55,10 @@ public class SparkCatalogWithHiveTest {
                         .config("spark.sql.warehouse.dir", warehousePath.toString())
                         // with hive metastore
                         .config("spark.sql.catalogImplementation", "hive")
+                        .config("hive.metastore.uris", "thrift://localhost:" + PORT)
                         .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
                         .config("spark.sql.catalog.spark_catalog.metastore", "hive")
+                        .config("spark.sql.catalog.spark_catalog.hive.metastore.uris", "thrift://localhost:" + PORT)
                         .config("spark.sql.catalog.spark_catalog.format-table.enabled", "true")
                         .config(
                                 "spark.sql.catalog.spark_catalog.warehouse",
@@ -82,8 +84,10 @@ public class SparkCatalogWithHiveTest {
                         .config("spark.sql.warehouse.dir", warehousePath.toString())
                         // with hive metastore
                         .config("spark.sql.catalogImplementation", "hive")
+                        .config("hive.metastore.uris", "thrift://localhost:" + PORT)
                         .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
                         .config("spark.sql.catalog.spark_catalog.metastore", "hive")
+                        .config("spark.sql.catalog.spark_catalog.hive.metastore.uris", "thrift://localhost:" + PORT)
                         .config("spark.sql.catalog.spark_catalog.format-table.enabled", "true")
                         .config(
                                 "spark.sql.catalog.spark_catalog.warehouse",
