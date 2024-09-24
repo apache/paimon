@@ -40,9 +40,9 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.CatalogTableType;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
-import org.apache.paimon.table.TableType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
@@ -491,11 +491,11 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private boolean usingExternalTable() {
-        TableType tableType =
+        CatalogTableType tableType =
                 OptionsUtils.convertToEnum(
-                        hiveConf.get(TABLE_TYPE.key(), TableType.MANAGED.toString()),
-                        TableType.class);
-        return TableType.EXTERNAL.equals(tableType);
+                        hiveConf.get(TABLE_TYPE.key(), CatalogTableType.MANAGED.toString()),
+                        CatalogTableType.class);
+        return CatalogTableType.EXTERNAL.equals(tableType);
     }
 
     @Override
@@ -768,10 +768,10 @@ public class HiveCatalog extends AbstractCatalog {
 
     private Table newHmsTable(Identifier identifier, Map<String, String> tableParameters) {
         long currentTimeMillis = System.currentTimeMillis();
-        TableType tableType =
+        CatalogTableType tableType =
                 OptionsUtils.convertToEnum(
-                        hiveConf.get(TABLE_TYPE.key(), TableType.MANAGED.toString()),
-                        TableType.class);
+                        hiveConf.get(TABLE_TYPE.key(), CatalogTableType.MANAGED.toString()),
+                        CatalogTableType.class);
         Table table =
                 new Table(
                         identifier.getTableName(),
@@ -790,7 +790,7 @@ public class HiveCatalog extends AbstractCatalog {
         table.getParameters().put(TABLE_TYPE_PROP, PAIMON_TABLE_TYPE_VALUE.toUpperCase());
         table.getParameters()
                 .put(hive_metastoreConstants.META_TABLE_STORAGE, STORAGE_HANDLER_CLASS_NAME);
-        if (TableType.EXTERNAL.equals(tableType)) {
+        if (CatalogTableType.EXTERNAL.equals(tableType)) {
             table.getParameters().put("EXTERNAL", "TRUE");
         }
         return table;

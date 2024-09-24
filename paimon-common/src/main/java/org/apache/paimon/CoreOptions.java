@@ -87,6 +87,12 @@ public class CoreOptions implements Serializable {
 
     public static final String COLUMNS = "columns";
 
+    public static final ConfigOption<TableType> TYPE =
+            key("type")
+                    .enumType(TableType.class)
+                    .defaultValue(TableType.TABLE)
+                    .withDescription("Type of the table.");
+
     public static final ConfigOption<Integer> BUCKET =
             key("bucket")
                     .intType()

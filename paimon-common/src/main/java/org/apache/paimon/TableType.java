@@ -16,21 +16,19 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table;
+package org.apache.paimon;
 
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.InlineElement;
 
 import static org.apache.paimon.options.description.TextElement.text;
 
-/** Enum of catalog table type. */
+/** Type of the table. */
 public enum TableType implements DescribedEnum {
-    MANAGED(
-            "managed",
-            "Paimon owned table where the entire lifecycle of the table data is managed."),
-    EXTERNAL(
-            "external",
-            "The table where Paimon has loose coupling with the data stored in external locations.");
+    TABLE("table", "Normal Paimon table."),
+    FORMAT_TABLE(
+            "format-table",
+            "A file format table refers to a directory that contains multiple files of the same format.");
 
     private final String value;
     private final String description;
@@ -48,5 +46,14 @@ public enum TableType implements DescribedEnum {
     @Override
     public InlineElement getDescription() {
         return text(description);
+    }
+
+    public static TableType fromString(String name) {
+        for (TableType type : TableType.values()) {
+            if (type.value.equals(name)) {
+                return type;
+            }
+        }
+        throw new UnsupportedOperationException("Unknown table type: " + name);
     }
 }
