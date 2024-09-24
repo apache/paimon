@@ -33,7 +33,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.DataTableBatchScan;
+import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.utils.Projection;
 
@@ -202,7 +202,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
 
     private ScanRuntimeProvider createCountStarScan() {
         TableScan scan = table.newReadBuilder().withFilter(predicate).newScan();
-        List<PartitionEntry> partitionEntries = ((DataTableBatchScan) scan).planPartitions();
+        List<PartitionEntry> partitionEntries = ((DataTableScan) scan).planPartitions();
         long rowCount = partitionEntries.stream().mapToLong(PartitionEntry::recordCount).sum();
         NumberSequenceRowSource source = new NumberSequenceRowSource(rowCount, rowCount);
         return new SourceProvider() {
