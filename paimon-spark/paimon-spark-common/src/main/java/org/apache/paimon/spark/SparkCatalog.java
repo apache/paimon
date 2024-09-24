@@ -313,7 +313,8 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
             throws TableAlreadyExistsException, NoSuchNamespaceException {
         try {
             String provider = properties.get(TableCatalog.PROP_PROVIDER);
-            if (SparkSource.FORMAT_NAMES().contains(provider.toLowerCase())
+            if ((!usePaimon(provider))
+                    && SparkSource.FORMAT_NAMES().contains(provider.toLowerCase())
                     && properties
                             .getOrDefault("paimon.format.table", "false")
                             .equalsIgnoreCase("true")) {
