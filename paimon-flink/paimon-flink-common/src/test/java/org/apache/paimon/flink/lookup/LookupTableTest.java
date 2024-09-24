@@ -20,6 +20,7 @@ package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
@@ -720,6 +721,108 @@ public class LookupTableTest extends TableTestBase {
         table.refresh();
 
         table.close();
+    }
+
+    @Test
+    public void testFullCacheLookupTableWithForceLookup() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.PARTIAL_UPDATE);
+        options.set(
+                FlinkConnectorOptions.LOOKUP_CACHE_MODE,
+                FlinkConnectorOptions.LookupCacheMode.FULL);
+        options.set(CoreOptions.WRITE_ONLY, true);
+        options.set(CoreOptions.FORCE_LOOKUP, true);
+        options.set(CoreOptions.BUCKET, 1);
+        FileStoreTable storeTable = createTable(singletonList("f0"), options);
+        FileStoreTable compactTable =
+                storeTable.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        storeTable,
+                        new int[] {0, 1, 2},
+                        null,
+                        null,
+                        tempDir.toFile(),
+                        singletonList("f0"),
+                        null);
+        table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+
+        // initialize
+        write(storeTable, ioManager, GenericRow.of(1, 11, 111));
+        compact(compactTable, BinaryRow.EMPTY_ROW, 0, ioManager, true);
+        table.open();
+
+        List<InternalRow> result = table.get(row(1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 1, 11, 111);
+
+        // first write
+        write(storeTable, GenericRow.of(1, null, 222));
+        table.refresh();
+        result = table.get(row(1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 1, 11, 111); // old value because there is no compact
+
+        // only L0 occur compact
+        compact(compactTable, BinaryRow.EMPTY_ROW, 0, ioManager, false);
+        table.refresh();
+        result = table.get(row(1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 1, 11, 222); // get new value after compact
+
+        // second write
+        write(storeTable, GenericRow.of(1, 22, null));
+        table.refresh();
+        result = table.get(row(1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 1, 11, 222); // old value
+
+        // full compact
+        compact(compactTable, BinaryRow.EMPTY_ROW, 0, ioManager, true);
+        table.refresh();
+        result = table.get(row(1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 1, 22, 222); // new value
+    }
+
+    @Test
+    public void testPartialLookupTableWithForceLookup() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.PARTIAL_UPDATE);
+        options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.NONE);
+        options.set(CoreOptions.FORCE_LOOKUP, true);
+        options.set(CoreOptions.BUCKET, 1);
+        FileStoreTable dimTable = createTable(singletonList("f0"), options);
+
+        PrimaryKeyPartialLookupTable table =
+                PrimaryKeyPartialLookupTable.createLocalTable(
+                        dimTable,
+                        new int[] {0, 1, 2},
+                        tempDir.toFile(),
+                        ImmutableList.of("f0"),
+                        null);
+        table.open();
+
+        List<InternalRow> result = table.get(row(1, -1));
+        assertThat(result).hasSize(0);
+
+        write(dimTable, ioManager, GenericRow.of(1, -1, 11), GenericRow.of(2, -2, 22));
+        result = table.get(row(1));
+        assertThat(result).hasSize(0);
+
+        table.refresh();
+        result = table.get(row(1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 1, -1, 11);
+        result = table.get(row(2));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 2, -2, 22);
+
+        write(dimTable, ioManager, GenericRow.of(1, null, 111));
+        table.refresh();
+        result = table.get(row(1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 1, -1, 111);
     }
 
     private FileStoreTable createDimTable() throws Exception {
