@@ -33,10 +33,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class SparkCatalogWithHiveTest {
     private static TestHiveMetastore testHiveMetastore;
 
+    private static final int PORT = 9087;
+
     @BeforeAll
     public static void startMetastore() {
         testHiveMetastore = new TestHiveMetastore();
-        testHiveMetastore.start();
+        testHiveMetastore.start(PORT);
     }
 
     @AfterAll
