@@ -43,6 +43,7 @@ public class SystemFields {
     public static final DataField LEVEL =
             new DataField(Integer.MAX_VALUE - 3, "_LEVEL", DataTypes.INT().notNull());
 
+    // only used by AuditLogTable
     public static final DataField ROW_KIND =
             new DataField(
                     Integer.MAX_VALUE - 4, "rowkind", new VarCharType(VarCharType.MAX_LENGTH));
