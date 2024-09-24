@@ -87,13 +87,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         if (startingScanner == null) {
             startingScanner = createStartingScanner(false);
         }
-
-        if (hasNext) {
-            hasNext = false;
-            return startingScanner.scanPartitions(snapshotReader);
-        } else {
-            throw new EndOfScanException();
-        }
+        return startingScanner.scanPartitions(snapshotReader);
     }
 
     private StartingScanner.Result applyPushDownLimit(StartingScanner.Result result) {
