@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.lookup.LookupStrategy;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.AllDeltaFollowUpScanner;
@@ -43,6 +44,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+
+import java.util.List;
 
 import static org.apache.paimon.CoreOptions.ChangelogProducer.FULL_COMPACTION;
 
@@ -108,6 +111,12 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         } else {
             return nextPlan();
         }
+    }
+
+    @Override
+    public List<PartitionEntry> listPartitionEntries() {
+        throw new UnsupportedOperationException(
+                "List Partition Entries is not supported in Stream Scan.");
     }
 
     private void initScanner() {

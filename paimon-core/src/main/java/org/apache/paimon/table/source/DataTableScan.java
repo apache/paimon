@@ -18,17 +18,9 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.manifest.PartitionEntry;
-
-import java.util.List;
-
 /** Table scan for data table. */
 public interface DataTableScan extends InnerTableScan {
 
     /** Specify the shard to be read, and allocate sharded files to read records. */
     DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks);
-
-    default List<PartitionEntry> planPartitions() {
-        throw new UnsupportedOperationException();
-    }
 }

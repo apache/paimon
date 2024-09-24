@@ -83,7 +83,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     }
 
     @Override
-    public List<PartitionEntry> planPartitions() {
+    public List<PartitionEntry> listPartitionEntries() {
         if (startingScanner == null) {
             startingScanner = createStartingScanner(false);
         }
