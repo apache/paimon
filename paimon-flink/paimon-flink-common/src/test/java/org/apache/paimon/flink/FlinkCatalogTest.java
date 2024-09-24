@@ -19,6 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.log.LogSinkProvider;
@@ -86,7 +87,6 @@ import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
 import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
-import static org.apache.paimon.flink.FlinkConnectorOptions.CATALOG_TABLE_TYPE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -787,7 +787,7 @@ public class FlinkCatalogTest {
         if (t1.getTableKind() == CatalogBaseTable.TableKind.TABLE) {
             t1 = ((ResolvedCatalogTable) t1).copy(options);
         } else {
-            options.put(CATALOG_TABLE_TYPE.key(), "MATERIALIZED_TABLE");
+            options.put(CoreOptions.TYPE.key(), TableType.FLINK_MATERIALIZED_TABLE.toString());
             t1 = ((ResolvedCatalogMaterializedTable) t1).copy(options);
         }
         checkEquals(t1, t2);

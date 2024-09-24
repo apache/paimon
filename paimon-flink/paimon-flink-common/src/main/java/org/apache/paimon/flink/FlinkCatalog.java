@@ -19,9 +19,9 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.FlinkConnectorOptions.CatalogTableType;
 import org.apache.paimon.flink.FlinkConnectorOptions.MaterializedTableIntervalFreshnessTimeUnit;
 import org.apache.paimon.flink.FlinkConnectorOptions.MaterializedTableRefreshMode;
 import org.apache.paimon.flink.FlinkConnectorOptions.MaterializedTableRefreshStatus;
@@ -136,7 +136,6 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.CATALOG_MATERIALIZED
 import static org.apache.paimon.flink.FlinkConnectorOptions.CATALOG_MATERIALIZED_TABLE_REFRESH_MODE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CATALOG_MATERIALIZED_TABLE_REFRESH_STATUS;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CATALOG_MATERIALIZED_TABLE_SNAPSHOT;
-import static org.apache.paimon.flink.FlinkConnectorOptions.CATALOG_TABLE_TYPE;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.flink.log.LogStoreRegister.registerLogSystem;
@@ -349,40 +348,7 @@ public class FlinkCatalog extends AbstractCatalog {
         // TableDescriptor)
         Map<String, String> options = new HashMap<>(table.getOptions());
         if (table instanceof CatalogMaterializedTable) {
-            CatalogMaterializedTable mt = (CatalogMaterializedTable) table;
-            Options mtOptions = new Options();
-            mtOptions.set(CATALOG_TABLE_TYPE, CatalogTableType.MATERIALIZED_TABLE);
-            mt.getSnapshot().ifPresent(x -> mtOptions.set(CATALOG_MATERIALIZED_TABLE_SNAPSHOT, x));
-            mtOptions.set(CATALOG_MATERIALIZED_TABLE_DEFINITION_QUERY, mt.getDefinitionQuery());
-            mtOptions.set(
-                    CATALOG_MATERIALIZED_TABLE_INTERVAL_FRESHNESS,
-                    mt.getDefinitionFreshness().getInterval());
-            mtOptions.set(
-                    CATALOG_MATERIALIZED_TABLE_INTERVAL_FRESHNESS_TIME_UNIT,
-                    MaterializedTableIntervalFreshnessTimeUnit.valueOf(
-                            mt.getDefinitionFreshness().getTimeUnit().name()));
-            mtOptions.set(
-                    CATALOG_MATERIALIZED_TABLE_LOGICAL_REFRESH_MODE,
-                    MaterializedTableRefreshMode.valueOf(mt.getLogicalRefreshMode().name()));
-            mtOptions.set(
-                    CATALOG_MATERIALIZED_TABLE_REFRESH_MODE,
-                    MaterializedTableRefreshMode.valueOf(mt.getRefreshMode().name()));
-            mtOptions.set(
-                    CATALOG_MATERIALIZED_TABLE_REFRESH_STATUS,
-                    MaterializedTableRefreshStatus.valueOf(mt.getRefreshStatus().name()));
-            mt.getRefreshHandlerDescription()
-                    .ifPresent(
-                            desc ->
-                                    mtOptions.set(
-                                            CATALOG_MATERIALIZED_TABLE_REFRESH_HANDLER_DESCRIPTION,
-                                            desc));
-            byte[] serializedRefreshHandler = mt.getSerializedRefreshHandler();
-            if (serializedRefreshHandler != null) {
-                mtOptions.set(
-                        CATALOG_MATERIALIZED_TABLE_REFRESH_HANDLER_BYTES,
-                        encodeBytesToBase64(serializedRefreshHandler));
-            }
-            options.putAll(mtOptions.toMap());
+            fillOptionsForMaterializedTable((CatalogMaterializedTable) table, options);
         }
         Schema paimonSchema = buildPaimonSchema(identifier, table, options);
 
@@ -400,6 +366,43 @@ public class FlinkCatalog extends AbstractCatalog {
                 unRegisterLogSystem(identifier, options, classLoader);
             }
         }
+    }
+
+    private static void fillOptionsForMaterializedTable(
+            CatalogMaterializedTable mt, Map<String, String> options) {
+        Options mtOptions = new Options();
+        mtOptions.set(CoreOptions.TYPE, TableType.FLINK_MATERIALIZED_TABLE);
+        mt.getSnapshot().ifPresent(x -> mtOptions.set(CATALOG_MATERIALIZED_TABLE_SNAPSHOT, x));
+        mtOptions.set(CATALOG_MATERIALIZED_TABLE_DEFINITION_QUERY, mt.getDefinitionQuery());
+        mtOptions.set(
+                CATALOG_MATERIALIZED_TABLE_INTERVAL_FRESHNESS,
+                mt.getDefinitionFreshness().getInterval());
+        mtOptions.set(
+                CATALOG_MATERIALIZED_TABLE_INTERVAL_FRESHNESS_TIME_UNIT,
+                MaterializedTableIntervalFreshnessTimeUnit.valueOf(
+                        mt.getDefinitionFreshness().getTimeUnit().name()));
+        mtOptions.set(
+                CATALOG_MATERIALIZED_TABLE_LOGICAL_REFRESH_MODE,
+                MaterializedTableRefreshMode.valueOf(mt.getLogicalRefreshMode().name()));
+        mtOptions.set(
+                CATALOG_MATERIALIZED_TABLE_REFRESH_MODE,
+                MaterializedTableRefreshMode.valueOf(mt.getRefreshMode().name()));
+        mtOptions.set(
+                CATALOG_MATERIALIZED_TABLE_REFRESH_STATUS,
+                MaterializedTableRefreshStatus.valueOf(mt.getRefreshStatus().name()));
+        mt.getRefreshHandlerDescription()
+                .ifPresent(
+                        desc ->
+                                mtOptions.set(
+                                        CATALOG_MATERIALIZED_TABLE_REFRESH_HANDLER_DESCRIPTION,
+                                        desc));
+        byte[] serializedRefreshHandler = mt.getSerializedRefreshHandler();
+        if (serializedRefreshHandler != null) {
+            mtOptions.set(
+                    CATALOG_MATERIALIZED_TABLE_REFRESH_HANDLER_BYTES,
+                    encodeBytesToBase64(serializedRefreshHandler));
+        }
+        options.putAll(mtOptions.toMap());
     }
 
     protected Schema buildPaimonSchema(
@@ -882,17 +885,20 @@ public class FlinkCatalog extends AbstractCatalog {
         removeProperties.asMap().keySet().forEach(newOptions::remove);
 
         Options options = Options.fromMap(newOptions);
-        if (CatalogBaseTable.TableKind.TABLE
-                .name()
-                .equals(options.get(CATALOG_TABLE_TYPE).name())) {
-            return new DataCatalogTable(
-                    table,
-                    schema,
-                    table.partitionKeys(),
-                    newOptions,
-                    table.comment().orElse(""),
-                    nonPhysicalColumnComments);
+        if (TableType.FLINK_MATERIALIZED_TABLE == options.get(CoreOptions.TYPE)) {
+            return buildMaterializedTable(table, newOptions, schema, options);
         }
+        return new DataCatalogTable(
+                table,
+                schema,
+                table.partitionKeys(),
+                newOptions,
+                table.comment().orElse(""),
+                nonPhysicalColumnComments);
+    }
+
+    private CatalogMaterializedTable buildMaterializedTable(
+            Table table, Map<String, String> newOptions, TableSchema schema, Options options) {
         Long snapshot = options.get(CATALOG_MATERIALIZED_TABLE_SNAPSHOT);
         String definitionQuery = options.get(CATALOG_MATERIALIZED_TABLE_DEFINITION_QUERY);
         IntervalFreshness freshness =
