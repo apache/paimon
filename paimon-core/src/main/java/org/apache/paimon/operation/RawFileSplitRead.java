@@ -92,7 +92,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         this.pathFactory = pathFactory;
         this.bulkFormatMappings = new HashMap<>();
         this.fileIndexReadEnabled = fileIndexReadEnabled;
-        this.readRowType = schema.logicalRowType();
+        this.readRowType = rowType;
     }
 
     @Override
@@ -106,10 +106,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
-    public SplitRead<InternalRow> withReadType(@Nullable RowType readRowType) {
-        if (readRowType != null) {
-            this.readRowType = readRowType;
-        }
+    public SplitRead<InternalRow> withReadType(RowType readRowType) {
+        this.readRowType = readRowType;
         return this;
     }
 

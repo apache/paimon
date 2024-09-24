@@ -81,6 +81,7 @@ public abstract class AbstractDataTableRead<T> implements InnerTableRead {
 
     @Override
     public final InnerTableRead withReadType(RowType readType) {
+        this.readType = readType;
         this.defaultValueAssigner.handleReadRowType(readType);
         applyReadType(readType);
         return this;

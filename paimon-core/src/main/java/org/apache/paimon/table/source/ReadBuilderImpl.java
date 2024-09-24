@@ -24,6 +24,8 @@ import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 
+import javax.annotation.Nullable;
+
 import java.util.Map;
 import java.util.Objects;
 
@@ -47,7 +49,7 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     private Filter<Integer> bucketFilter;
 
-    private RowType readType;
+    private @Nullable RowType readType;
 
     public ReadBuilderImpl(InnerTable table) {
         this.table = table;

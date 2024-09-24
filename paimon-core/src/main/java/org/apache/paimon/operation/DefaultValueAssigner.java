@@ -35,6 +35,8 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -51,7 +53,7 @@ public class DefaultValueAssigner {
 
     private boolean needToAssign;
 
-    private RowType readRowType;
+    private @Nullable RowType readRowType;
     private DefaultValueRow defaultValueRow;
 
     private DefaultValueAssigner(Map<String, String> defaultValues, RowType rowType) {
@@ -62,10 +64,8 @@ public class DefaultValueAssigner {
 
     public DefaultValueAssigner handleReadRowType(RowType readRowType) {
         this.readRowType = readRowType;
-        if (readRowType != null) {
-            List<String> requiredFieldNames = readRowType.getFieldNames();
-            needToAssign = defaultValues.keySet().stream().anyMatch(requiredFieldNames::contains);
-        }
+        List<String> requiredFieldNames = readRowType.getFieldNames();
+        needToAssign = defaultValues.keySet().stream().anyMatch(requiredFieldNames::contains);
         return this;
     }
 

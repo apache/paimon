@@ -40,7 +40,7 @@ public interface SplitRead<T> {
 
     SplitRead<T> withIOManager(@Nullable IOManager ioManager);
 
-    SplitRead<T> withReadType(@Nullable RowType readType);
+    SplitRead<T> withReadType(RowType readType);
 
     SplitRead<T> withFilter(@Nullable Predicate predicate);
 
@@ -63,7 +63,7 @@ public interface SplitRead<T> {
             }
 
             @Override
-            public SplitRead<R> withReadType(@Nullable RowType readType) {
+            public SplitRead<R> withReadType(RowType readType) {
                 read.withReadType(readType);
                 return this;
             }

@@ -72,7 +72,7 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
-    public SplitRead<InternalRow> withReadType(@Nullable RowType readType) {
+    public SplitRead<InternalRow> withReadType(RowType readType) {
         this.readType = readType;
         return this;
     }
