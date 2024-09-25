@@ -89,8 +89,8 @@ public class RangeShuffle {
      *     -----------------------------BATCH-[ARange,n]-PARTITION->[RRange,m]->
      * }</pre>
      *
-     * <p>The streams except the sample and histogram process stream will be blocked, so the
-     * sample and histogram process stream does not care about requiredExchangeMode.
+     * <p>The streams except the sample and histogram process stream will be blocked, so the sample
+     * and histogram process stream does not care about requiredExchangeMode.
      */
     public static <T> DataStream<Tuple2<T, RowData>> rangeShuffleByKey(
             DataStream<Tuple2<T, RowData>> inputDataStream,
@@ -324,8 +324,8 @@ public class RangeShuffle {
     }
 
     /**
-     * This two-input-operator require an input with RangeBoundaries as broadcast input, and generate
-     * Tuple2 which includes range index and record from the other input itself as output.
+     * This two-input-operator require an input with RangeBoundaries as broadcast input, and
+     * generate Tuple2 which includes range index and record from the other input itself as output.
      */
     private static class AssignRangeIndexOperator<T>
             extends TableStreamOperator<Tuple2<Integer, Tuple2<T, RowData>>>
