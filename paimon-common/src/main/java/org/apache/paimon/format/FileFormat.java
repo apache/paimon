@@ -110,17 +110,12 @@ public abstract class FileFormat {
         return Optional.empty();
     }
 
-    protected Options getIdentifierPrefixOptions(Options options, boolean keepPrefix) {
+    protected Options getIdentifierPrefixOptions(Options options) {
         Map<String, String> result = new HashMap<>();
         String prefix = formatIdentifier.toLowerCase() + ".";
         for (String key : options.keySet()) {
             if (key.toLowerCase().startsWith(prefix)) {
-                String substr = key.substring(prefix.length());
-                if (keepPrefix) {
-                    result.put(prefix + substr, options.get(key));
-                } else {
-                    result.put(substr, options.get(key));
-                }
+                result.put(prefix + key.substring(prefix.length()), options.get(key));
             }
         }
         return new Options(result);

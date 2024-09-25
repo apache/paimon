@@ -53,14 +53,14 @@ public class AvroFileFormat extends FileFormat {
 
     public static final String IDENTIFIER = "avro";
 
-    public static final ConfigOption<String> AVRO_OUTPUT_CODEC =
-            ConfigOptions.key("codec")
+    private static final ConfigOption<String> AVRO_OUTPUT_CODEC =
+            ConfigOptions.key("avro.codec")
                     .stringType()
                     .defaultValue(SNAPPY_CODEC)
                     .withDescription("The compression codec for avro");
 
-    public static final ConfigOption<Map<String, String>> AVRO_ROW_NAME_MAPPING =
-            ConfigOptions.key("row-name-mapping").mapType().defaultValue(new HashMap<>());
+    private static final ConfigOption<Map<String, String>> AVRO_ROW_NAME_MAPPING =
+            ConfigOptions.key("avro.row-name-mapping").mapType().defaultValue(new HashMap<>());
 
     private final Options options;
     private final int zstdLevel;
@@ -68,7 +68,7 @@ public class AvroFileFormat extends FileFormat {
     public AvroFileFormat(FormatContext context) {
         super(IDENTIFIER);
 
-        this.options = getIdentifierPrefixOptions(context.options(), false);
+        this.options = getIdentifierPrefixOptions(context.options());
         this.zstdLevel = context.zstdLevel();
     }
 

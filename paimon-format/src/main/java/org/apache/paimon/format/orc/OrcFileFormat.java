@@ -147,7 +147,7 @@ public class OrcFileFormat extends FileFormat {
 
     private Properties getOrcProperties(Options options, FormatContext formatContext) {
         Properties orcProperties = new Properties();
-        orcProperties.putAll(getIdentifierPrefixOptions(options, true).toMap());
+        orcProperties.putAll(getIdentifierPrefixOptions(options).toMap());
 
         if (!orcProperties.containsKey(OrcConf.COMPRESSION_ZSTD_LEVEL.getAttribute())) {
             orcProperties.setProperty(

@@ -81,7 +81,7 @@ public class ParquetFileFormat extends FileFormat {
     }
 
     private Options getParquetConfiguration(FormatContext context) {
-        Options parquetOptions = getIdentifierPrefixOptions(context.options(), true);
+        Options parquetOptions = getIdentifierPrefixOptions(context.options());
 
         if (!parquetOptions.containsKey("parquet.compression.codec.zstd.level")) {
             parquetOptions.set(
