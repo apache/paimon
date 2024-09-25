@@ -31,7 +31,6 @@ import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.stats.SimpleStatsConverters;
 import org.apache.paimon.table.source.ScanMode;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.ArrayList;
@@ -56,7 +55,6 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     public KeyValueFileStoreScan(
             ManifestsReader manifestsReader,
-            RowType partitionType,
             ScanBucketFilter bucketFilter,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
@@ -64,21 +62,18 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             KeyValueFieldsExtractor keyValueFieldsExtractor,
             ManifestFile.Factory manifestFileFactory,
             int numOfBuckets,
-            boolean checkNumOfBuckets,
             Integer scanManifestParallelism,
             boolean deletionVectorsEnabled,
             MergeEngine mergeEngine,
             ChangelogProducer changelogProducer) {
         super(
                 manifestsReader,
-                partitionType,
                 bucketFilter,
                 snapshotManager,
                 schemaManager,
                 schema,
                 manifestFileFactory,
                 numOfBuckets,
-                checkNumOfBuckets,
                 scanManifestParallelism);
         this.fieldKeyStatsConverters =
                 new SimpleStatsConverters(

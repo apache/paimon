@@ -52,26 +52,22 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
     public AppendOnlyFileStoreScan(
             ManifestsReader manifestsReader,
-            RowType partitionType,
             ScanBucketFilter bucketFilter,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
             TableSchema schema,
             ManifestFile.Factory manifestFileFactory,
             int numOfBuckets,
-            boolean checkNumOfBuckets,
             Integer scanManifestParallelism,
             boolean fileIndexReadEnabled) {
         super(
                 manifestsReader,
-                partitionType,
                 bucketFilter,
                 snapshotManager,
                 schemaManager,
                 schema,
                 manifestFileFactory,
                 numOfBuckets,
-                checkNumOfBuckets,
                 scanManifestParallelism);
         this.simpleStatsConverters =
                 new SimpleStatsConverters(sid -> scanTableSchema(sid).fields(), schema.id());

@@ -34,6 +34,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.RecordWriter;
@@ -54,7 +55,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Function;
 
+import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
+import static org.apache.paimon.utils.FileStorePathFactory.getPartitionComputer;
 
 /**
  * Base {@link FileStoreWrite} implementation.
@@ -70,6 +73,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private final int writerNumberMax;
     @Nullable private final IndexMaintainer.Factory<T> indexFactory;
     @Nullable private final DeletionVectorsMaintainer.Factory dvMaintainerFactory;
+    private final int totalBuckets;
+    private final RowType partitionType;
 
     @Nullable protected IOManager ioManager;
 
@@ -90,11 +95,15 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             @Nullable IndexMaintainer.Factory<T> indexFactory,
             @Nullable DeletionVectorsMaintainer.Factory dvMaintainerFactory,
             String tableName,
+            int totalBuckets,
+            RowType partitionType,
             int writerNumberMax) {
         this.snapshotManager = snapshotManager;
         this.scan = scan;
         this.indexFactory = indexFactory;
         this.dvMaintainerFactory = dvMaintainerFactory;
+        this.totalBuckets = totalBuckets;
+        this.partitionType = partitionType;
         this.writers = new HashMap<>();
         this.tableName = tableName;
         this.writerNumberMax = writerNumberMax;
@@ -451,10 +460,26 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private List<DataFileMeta> scanExistingFileMetas(
             long snapshotId, BinaryRow partition, int bucket) {
         List<DataFileMeta> existingFileMetas = new ArrayList<>();
-        // Concat all the DataFileMeta of existing files into existingFileMetas.
-        scan.withSnapshot(snapshotId).withPartitionBucket(partition, bucket).plan().files().stream()
-                .map(ManifestEntry::file)
-                .forEach(existingFileMetas::add);
+        List<ManifestEntry> files =
+                scan.withSnapshot(snapshotId).withPartitionBucket(partition, bucket).plan().files();
+        for (ManifestEntry entry : files) {
+            if (entry.totalBuckets() != totalBuckets) {
+                String partInfo =
+                        partitionType.getFieldCount() > 0
+                                ? "partition "
+                                        + getPartitionComputer(
+                                                        partitionType,
+                                                        PARTITION_DEFAULT_NAME.defaultValue())
+                                                .generatePartValues(partition)
+                                : "table";
+                throw new RuntimeException(
+                        String.format(
+                                "Try to write %s with a new bucket num %d, but the previous bucket num is %d. "
+                                        + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
+                                partInfo, totalBuckets, entry.totalBuckets()));
+            }
+            existingFileMetas.add(entry.file());
+        }
         return existingFileMetas;
     }
 

@@ -106,6 +106,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                     newRead(),
                     schema.id(),
                     rowType,
+                    partitionType,
                     pathFactory(),
                     snapshotManager(),
                     newScan(true).withManifestCacheFilter(manifestFilter),
@@ -119,6 +120,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                     schema.id(),
                     commitUser,
                     rowType,
+                    partitionType,
                     pathFactory(),
                     snapshotManager(),
                     newScan(true).withManifestCacheFilter(manifestFilter),
@@ -154,14 +156,12 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
 
         return new AppendOnlyFileStoreScan(
                 newManifestsReader(forWrite),
-                partitionType,
                 bucketFilter,
                 snapshotManager(),
                 schemaManager,
                 schema,
                 manifestFileFactory(forWrite),
                 options.bucket(),
-                forWrite,
                 options.scanManifestParallelism(),
                 options.fileIndexReadEnabled());
     }
