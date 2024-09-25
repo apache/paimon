@@ -19,6 +19,8 @@
 package org.apache.paimon.client;
 
 import java.io.Closeable;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.Supplier;
 
@@ -77,18 +79,10 @@ public interface ClientPool<C, E extends Exception> {
             LinkedBlockingQueue<C> clients = this.clients;
             this.clients = null;
             if (clients != null) {
-                for (C client : clients) {
-                    close(client);
-                }
+                List<C> drain = new ArrayList<>();
+                clients.drainTo(drain);
+                drain.forEach(this::close);
             }
-        }
-
-        public LinkedBlockingQueue<C> clients() {
-            return clients;
-        }
-
-        public boolean isClosed() {
-            return clients == null;
         }
     }
 }
