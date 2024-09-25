@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.TagCreationMode;
+import org.apache.paimon.flink.compact.changelog.ChangelogCompactOperator;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -54,6 +55,7 @@ import java.util.Set;
 
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.createCommitUser;
+import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_COMPACT_PARALLELISM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.END_INPUT_WATERMARK;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_AUTO_TAG_FOR_SAVEPOINT;
@@ -226,6 +228,16 @@ public abstract class FlinkSink<T> implements Serializable {
         if (options.get(SINK_USE_MANAGED_MEMORY)) {
             declareManagedMemory(written, options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY));
         }
+
+        if (options.contains(CHANGELOG_COMPACT_PARALLELISM)) {
+            written =
+                    written.transform(
+                                    "Changelog Compactor",
+                                    new CommittableTypeInfo(),
+                                    new ChangelogCompactOperator(table))
+                            .setParallelism(options.get(CHANGELOG_COMPACT_PARALLELISM));
+        }
+
         return written;
     }
 
