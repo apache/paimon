@@ -25,6 +25,8 @@ public class FieldLastValueAgg extends FieldAggregator {
 
     public static final String NAME = "last_value";
 
+    private static final long serialVersionUID = 1L;
+
     public FieldLastValueAgg(DataType dataType) {
         super(dataType);
     }
