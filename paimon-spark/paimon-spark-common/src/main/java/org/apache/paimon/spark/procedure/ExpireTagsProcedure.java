@@ -18,6 +18,8 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.FileStore;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.tag.TagTimeExpire;
 import org.apache.paimon.utils.DateTimeUtils;
 
@@ -71,7 +73,10 @@ public class ExpireTagsProcedure extends BaseProcedure {
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
-                    TagTimeExpire tagTimeExpire = table.newExpireTags();
+                    FileStoreTable fileStoreTable = (FileStoreTable) table;
+                    FileStore fileStore = fileStoreTable.store();
+                    TagTimeExpire tagTimeExpire =
+                            fileStore.newTagCreationManager().getTagTimeExpire();
                     if (olderThanStr != null) {
                         LocalDateTime olderThanTime =
                                 DateTimeUtils.parseTimestampData(

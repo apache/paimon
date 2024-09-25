@@ -65,4 +65,8 @@ public class TagAutoManager {
     public TagAutoCreation getTagAutoCreation() {
         return tagAutoCreation;
     }
+
+    public TagTimeExpire getTagTimeExpire() {
+        return tagTimeExpire;
+    }
 }

@@ -28,7 +28,6 @@ import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.tag.TagTimeExpire;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SimpleFileReader;
 
@@ -304,11 +303,6 @@ public interface FormatTable extends Table {
 
     @Override
     default ExpireSnapshots newExpireChangelog() {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    default TagTimeExpire newExpireTags() {
         throw new UnsupportedOperationException();
     }
 

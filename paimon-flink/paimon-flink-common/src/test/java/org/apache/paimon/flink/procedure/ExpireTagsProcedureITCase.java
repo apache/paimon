@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -85,25 +86,51 @@ public class ExpireTagsProcedureITCase extends CatalogITCaseBase {
         }
         checkSnapshots(snapshotManager, 1, 5);
 
-        sql(
-                "CALL sys.create_tag(`table` => 'default.T', tag => 'tag-1', snapshot_id => 1, time_retained => '1d')");
+        sql("CALL sys.create_tag(`table` => 'default.T', tag => 'tag-1', snapshot_id => 1)");
         sql(
                 "CALL sys.create_tag(`table` => 'default.T', tag => 'tag-2', snapshot_id => 2, time_retained => '1d')");
         sql(
                 "CALL sys.create_tag(`table` => 'default.T', tag => 'tag-3', snapshot_id => 3, time_retained => '1d')");
         sql(
                 "CALL sys.create_tag(`table` => 'default.T', tag => 'tag-4', snapshot_id => 4, time_retained => '1d')");
+        List<Row> sql = sql("select count(tag_name) from `T$tags`");
+        assertThat(sql("select count(tag_name) from `T$tags`")).containsExactly(Row.of(4L));
 
-        // tag-4 as the base older_than time
-        LocalDateTime olderThanTime = table.tagManager().tag("tag-4").getTagCreateTime();
-        java.sql.Timestamp timestamp =
-                new java.sql.Timestamp(Timestamp.fromLocalDateTime(olderThanTime).getMillisecond());
+        // no tags expired
+        assertThat(sql("CALL sys.expire_tags(`table` => 'default.T')"))
+                .containsExactlyInAnyOrder(Row.of("No expired tags."));
+
+        // tag-2 as the base older_than time.
+        // tag-1 expired by its file creation time.
+        LocalDateTime olderThanTime1 = table.tagManager().tag("tag-2").getTagCreateTime();
+        java.sql.Timestamp timestamp1 =
+                new java.sql.Timestamp(
+                        Timestamp.fromLocalDateTime(olderThanTime1).getMillisecond());
         assertThat(
                         sql(
                                 "CALL sys.expire_tags(`table` => 'default.T', older_than => '"
-                                        + timestamp.toString()
+                                        + timestamp1.toString()
                                         + "')"))
-                .containsExactlyInAnyOrder(Row.of("tag-1"), Row.of("tag-2"), Row.of("tag-3"));
+                .containsExactlyInAnyOrder(Row.of("tag-1"));
+
+        sql(
+                "CALL sys.create_tag(`table` => 'default.T', tag => 'tag-5', snapshot_id => 5, time_retained => '1s')");
+        Thread.sleep(1000);
+
+        // tag-4 as the base older_than time.
+        // tag-2,tag-3,tag-5 expired, tag-5 reached its tagTimeRetained.
+        LocalDateTime olderThanTime2 = table.tagManager().tag("tag-4").getTagCreateTime();
+        java.sql.Timestamp timestamp2 =
+                new java.sql.Timestamp(
+                        Timestamp.fromLocalDateTime(olderThanTime2).getMillisecond());
+        assertThat(
+                        sql(
+                                "CALL sys.expire_tags(`table` => 'default.T', older_than => '"
+                                        + timestamp2.toString()
+                                        + "')"))
+                .containsExactlyInAnyOrder(Row.of("tag-2"), Row.of("tag-3"), Row.of("tag-5"));
+
+        assertThat(sql("select tag_name from `T$tags`")).containsExactly(Row.of("tag-4"));
     }
 
     private void checkSnapshots(SnapshotManager sm, int earliest, int latest) throws IOException {

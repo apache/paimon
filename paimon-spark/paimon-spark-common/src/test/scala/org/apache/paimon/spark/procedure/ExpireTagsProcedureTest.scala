@@ -81,8 +81,7 @@ class ExpireTagsProcedureTest extends PaimonSparkTestBase {
     }
     checkSnapshots(snapshotManager, 1, 5)
 
-    spark.sql(
-      "CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-1', snapshot => 1, time_retained => '1d')")
+    spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-1', snapshot => 1)")
     spark.sql(
       "CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-2', snapshot => 2, time_retained => '1d')")
     spark.sql(
@@ -91,15 +90,38 @@ class ExpireTagsProcedureTest extends PaimonSparkTestBase {
       "CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-4', snapshot => 4, time_retained => '1d')")
     checkAnswer(spark.sql("select count(tag_name) from `T$tags`"), Row(4) :: Nil)
 
-    // tag-4 as the base older_than time
-    val olderThanTime = table.tagManager().tag("tag-4").getTagCreateTime
-    val timestamp =
-      new java.sql.Timestamp(Timestamp.fromLocalDateTime(olderThanTime).getMillisecond)
+    // no tags expired
+    checkAnswer(
+      spark.sql("CALL paimon.sys.expire_tags(table => 'test.T')"),
+      Row("No expired tags.") :: Nil)
+
+    // tag-2 as the base older_than time.
+    // tag-1 expired by its file creation time.
+    val olderThanTime1 = table.tagManager().tag("tag-2").getTagCreateTime
+    val timestamp1 =
+      new java.sql.Timestamp(Timestamp.fromLocalDateTime(olderThanTime1).getMillisecond)
     checkAnswer(
       spark.sql(
-        s"CALL paimon.sys.expire_tags(table => 'test.T', older_than => '${timestamp.toString}')"),
-      Row("tag-1") :: Row("tag-2") :: Row("tag-3") :: Nil
+        s"CALL paimon.sys.expire_tags(table => 'test.T', older_than => '${timestamp1.toString}')"),
+      Row("tag-1") :: Nil
     )
+
+    spark.sql(
+      "CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-5', snapshot => 5, time_retained => '1s')")
+    Thread.sleep(1000)
+
+    // tag-4 as the base older_than time.
+    // tag-2,tag-3,tag-5 expired, tag-5 reached its tagTimeRetained.
+    val olderThanTime2 = table.tagManager().tag("tag-4").getTagCreateTime
+    val timestamp2 =
+      new java.sql.Timestamp(Timestamp.fromLocalDateTime(olderThanTime2).getMillisecond)
+    checkAnswer(
+      spark.sql(
+        s"CALL paimon.sys.expire_tags(table => 'test.T', older_than => '${timestamp2.toString}')"),
+      Row("tag-2") :: Row("tag-3") :: Row("tag-5") :: Nil
+    )
+
+    checkAnswer(spark.sql("select tag_name from `T$tags`"), Row("tag-4") :: Nil)
   }
 
   private def checkSnapshots(sm: SnapshotManager, earliest: Int, latest: Int): Unit = {

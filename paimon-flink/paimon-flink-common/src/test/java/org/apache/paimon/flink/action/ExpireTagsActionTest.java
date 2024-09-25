@@ -31,7 +31,7 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link ExpireTagsAction}. */
-public class ExpireTagsActionITTest extends ActionITCaseBase {
+public class ExpireTagsActionTest extends ActionITCaseBase {
 
     @BeforeEach
     public void setUp() {
@@ -101,8 +101,8 @@ public class ExpireTagsActionITTest extends ActionITCaseBase {
                         "--older_than",
                         timestamp.toString())
                 .run();
-        // tag-2 expires
-        assertThat(table.tagManager().tags().size()).isEqualTo(2);
-        assertThat(table.tagManager().tagExists("tag-2")).isFalse();
+        // tag-1,tag-2 expires. tag-1 expired by its file creation time.
+        assertThat(table.tagManager().tags().size()).isEqualTo(1);
+        assertThat(table.tagManager().tagExists("tag-3")).isTrue();
     }
 }

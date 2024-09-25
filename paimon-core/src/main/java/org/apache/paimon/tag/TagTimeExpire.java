@@ -18,8 +18,11 @@
 
 package org.apache.paimon.tag;
 
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
+import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -27,6 +30,7 @@ import org.apache.paimon.utils.TagManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -57,17 +61,24 @@ public class TagTimeExpire {
 
     public List<String> expire() {
         List<Pair<Tag, String>> tags = tagManager.tagObjects();
+        FileIO fileIO = snapshotManager.fileIO();
         List<String> expired = new ArrayList<>();
         for (Pair<Tag, String> pair : tags) {
             Tag tag = pair.getLeft();
             String tagName = pair.getRight();
             LocalDateTime createTime = tag.getTagCreateTime();
-            Duration timeRetained = tag.getTagTimeRetained();
-            if (createTime == null || timeRetained == null) {
-                continue;
+            if (createTime == null) {
+                FileStatus tagFileStatus;
+                try {
+                    tagFileStatus = fileIO.getFileStatus(tagManager.tagPath(tagName));
+                } catch (IOException e) {
+                    LOG.warn("Tag path {} not exist, skip expire it.", tagManager.tagPath(tagName));
+                    continue;
+                }
+                createTime = DateTimeUtils.toLocalDateTime(tagFileStatus.getModificationTime());
             }
-            if ((olderThanTime == null
-                            && LocalDateTime.now().isAfter(createTime.plus(timeRetained)))
+            Duration timeRetained = tag.getTagTimeRetained();
+            if ((timeRetained != null && LocalDateTime.now().isAfter(createTime.plus(timeRetained)))
                     || (olderThanTime != null && olderThanTime.isAfter(createTime))) {
                 LOG.info(
                         "Delete tag {}, because its existence time has reached its timeRetained of {}.",

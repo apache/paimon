@@ -37,7 +37,6 @@ import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
-import org.apache.paimon.tag.TagTimeExpire;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.TagManager;
@@ -193,12 +192,6 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     public ExpireSnapshots newExpireChangelog() {
         privilegeChecker.assertCanInsert(identifier);
         return wrapped.newExpireChangelog();
-    }
-
-    @Override
-    public TagTimeExpire newExpireTags() {
-        privilegeChecker.assertCanInsert(identifier);
-        return wrapped.newExpireTags();
     }
 
     @Override
