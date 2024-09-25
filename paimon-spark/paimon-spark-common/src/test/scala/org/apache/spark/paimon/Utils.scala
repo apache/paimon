@@ -18,6 +18,7 @@
 
 package org.apache.spark.paimon
 
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.util.{Utils => SparkUtils}
 
 import java.io.File
@@ -29,4 +30,7 @@ object Utils {
 
   def createTempDir: File = SparkUtils.createTempDir()
 
+  def waitUntilEventEmpty(spark: SparkSession): Unit = {
+    spark.sparkContext.listenerBus.waitUntilEmpty()
+  }
 }

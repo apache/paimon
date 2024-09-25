@@ -21,19 +21,77 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.deletionvectors.{DeletionVector, DeletionVectorsMaintainer}
 import org.apache.paimon.fs.Path
-import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.{PaimonSparkTestBase, PaimonSplitScan}
+import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.FileStoreTable
 
+import org.apache.spark.paimon.Utils
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.execution.{QueryExecution, SparkPlan}
+import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
+import org.apache.spark.sql.execution.columnar.InMemoryTableScanExec
+import org.apache.spark.sql.execution.datasources.v2.{BatchScanExec, DataSourceV2Relation}
 import org.apache.spark.sql.functions.lit
+import org.apache.spark.sql.util.QueryExecutionListener
 import org.junit.jupiter.api.Assertions
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 
-class DeletionVectorTest extends PaimonSparkTestBase {
+class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelper {
 
   import testImplicits._
+
+  private def runAndCheckSplitScan(query: String): Unit = {
+    val batchScans = new ArrayBuffer[(DataSourceV2Relation, BatchScanExec)]()
+    val listener = new QueryExecutionListener {
+      override def onFailure(f: String, qe: QueryExecution, e: Exception): Unit = {}
+
+      private def isValidSplitScan(scan: BatchScanExec): Boolean = {
+        if (!scan.scan.isInstanceOf[PaimonSplitScan]) {
+          return false
+        }
+        val splitScan = scan.scan.asInstanceOf[PaimonSplitScan]
+        assert(splitScan.table.primaryKeys().isEmpty)
+        splitScan.coreOptions.deletionVectorsEnabled() &&
+        scan.output.exists(
+          attr => PaimonMetadataColumn.SUPPORTED_METADATA_COLUMNS.contains(attr.name))
+      }
+
+      private def appendScan(qe: QueryExecution, plan: SparkPlan): Unit = {
+        plan match {
+          case memory: InMemoryTableScanExec =>
+            foreach(memory.relation.cachedPlan)(p => appendScan(qe, p))
+          case scan: BatchScanExec if isValidSplitScan(scan) =>
+            val logicalScan = qe.analyzed.find(_.isInstanceOf[DataSourceV2Relation])
+            assert(logicalScan.isDefined)
+            batchScans.append((logicalScan.get.asInstanceOf[DataSourceV2Relation], scan))
+          case _ =>
+        }
+      }
+
+      override def onSuccess(funcName: String, qe: QueryExecution, duration: Long): Unit = {
+        foreach(qe.executedPlan)(p => appendScan(qe, p))
+      }
+    }
+    spark.listenerManager.register(listener)
+
+    try {
+      val df = spark.sql(query)
+      df.collect()
+      Utils.waitUntilEventEmpty(df.sparkSession)
+      assert(batchScans.nonEmpty, query)
+      assert(
+        batchScans.forall {
+          case (logicalScan, scan) =>
+            logicalScan.output.size > scan.output.size
+        },
+        batchScans)
+    } finally {
+      spark.listenerManager.unregister(listener)
+    }
+  }
 
   bucketModes.foreach {
     bucket =>
@@ -59,21 +117,21 @@ class DeletionVectorTest extends PaimonSparkTestBase {
           val table = loadTable("target")
           val dvMaintainerFactory =
             new DeletionVectorsMaintainer.Factory(table.store().newIndexFileHandler())
-          spark.sql(s"""
-                       |MERGE INTO target
-                       |USING source
-                       |ON target.a = source.a
-                       |WHEN MATCHED AND target.a = 5 THEN
-                       |UPDATE SET b = source.b + target.b
-                       |WHEN MATCHED AND source.c > 'c2' THEN
-                       |UPDATE SET *
-                       |WHEN MATCHED THEN
-                       |DELETE
-                       |WHEN NOT MATCHED AND c > 'c9' THEN
-                       |INSERT (a, b, c) VALUES (a, b * 1.1, c)
-                       |WHEN NOT MATCHED THEN
-                       |INSERT *
-                       |""".stripMargin)
+          runAndCheckSplitScan(s"""
+                                  |MERGE INTO target
+                                  |USING source
+                                  |ON target.a = source.a
+                                  |WHEN MATCHED AND target.a = 5 THEN
+                                  |UPDATE SET b = source.b + target.b
+                                  |WHEN MATCHED AND source.c > 'c2' THEN
+                                  |UPDATE SET *
+                                  |WHEN MATCHED THEN
+                                  |DELETE
+                                  |WHEN NOT MATCHED AND c > 'c9' THEN
+                                  |INSERT (a, b, c) VALUES (a, b * 1.1, c)
+                                  |WHEN NOT MATCHED THEN
+                                  |INSERT *
+                                  |""".stripMargin)
 
           checkAnswer(
             spark.sql("SELECT * FROM target ORDER BY a, b"),
@@ -116,7 +174,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
 
           val cond1 = "id = 2"
           val rowMetaInfo1 = getFilePathAndRowIndex(cond1)
-          spark.sql(s"UPDATE T SET name = 'b_2' WHERE $cond1")
+          runAndCheckSplitScan(s"UPDATE T SET name = 'b_2' WHERE $cond1")
           checkAnswer(
             spark.sql(s"SELECT * from T ORDER BY id"),
             Row(1, "a") :: Row(2, "b_2") :: Row(3, "c") :: Nil)
@@ -136,12 +194,12 @@ class DeletionVectorTest extends PaimonSparkTestBase {
           Assertions.assertTrue(deletionVectors2 == deletionVectors3)
 
           val cond2 = "id % 2 = 1"
-          spark.sql(s"UPDATE T SET name = concat(name, '_2') WHERE $cond2")
+          runAndCheckSplitScan(s"UPDATE T SET name = concat(name, '_2') WHERE $cond2")
           checkAnswer(
             spark.sql(s"SELECT * from T ORDER BY id"),
             Row(1, "a_2") :: Row(2, "b_2") :: Row(3, "c_2") :: Row(4, "d") :: Row(5, "e_2") :: Nil)
 
-          spark.sql(s"UPDATE T SET name = '_all'")
+          runAndCheckSplitScan("UPDATE T SET name = '_all'")
           checkAnswer(
             spark.sql(s"SELECT * from T ORDER BY id"),
             Row(1, "_all") :: Row(2, "_all") :: Row(3, "_all") :: Row(4, "_all") :: Row(
@@ -188,7 +246,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
 
           val cond1 = "id = 2"
           val rowMetaInfo1 = getFilePathAndRowIndex(cond1)
-          spark.sql(s"UPDATE T SET name = 'b_2' WHERE $cond1")
+          runAndCheckSplitScan(s"UPDATE T SET name = 'b_2' WHERE $cond1")
           checkAnswer(
             spark.sql(s"SELECT * from T ORDER BY id"),
             Row(1, "a", "2024") :: Row(2, "b_2", "2024") :: Row(3, "c", "2025") :: Row(
@@ -209,7 +267,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
 
           val cond2 = "pt = '2025'"
           val rowMetaInfo2 = rowMetaInfo1 ++ getFilePathAndRowIndex(cond2)
-          spark.sql(s"UPDATE T SET name = concat(name, '_2') WHERE $cond2")
+          runAndCheckSplitScan(s"UPDATE T SET name = concat(name, '_2') WHERE $cond2")
           checkAnswer(
             spark.sql(s"SELECT * from T ORDER BY id"),
             Row(1, "a", "2024") :: Row(2, "b_2", "2024") :: Row(3, "c_2", "2025") :: Row(
@@ -273,7 +331,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
 
           val cond1 = "id = 2"
           val rowMetaInfo1 = getFilePathAndRowIndex(cond1)
-          spark.sql(s"DELETE FROM T WHERE $cond1")
+          runAndCheckSplitScan(s"DELETE FROM T WHERE $cond1")
           checkAnswer(spark.sql(s"SELECT * from T ORDER BY id"), Row(1, "a") :: Nil)
           val deletionVectors2 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
           Assertions.assertEquals(1, deletionVectors2.size)
@@ -291,7 +349,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
           Assertions.assertTrue(deletionVectors2 == deletionVectors3)
 
           val cond2 = "id % 2 = 1"
-          spark.sql(s"DELETE FROM T WHERE $cond2")
+          runAndCheckSplitScan(s"DELETE FROM T WHERE $cond2")
           checkAnswer(spark.sql(s"SELECT * from T ORDER BY id"), Row(2, "bb") :: Row(4, "d") :: Nil)
 
           spark.sql("CALL sys.compact('T')")
@@ -337,7 +395,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
 
           val cond1 = "id = 2"
           val rowMetaInfo1 = getFilePathAndRowIndex(cond1)
-          spark.sql(s"DELETE FROM T WHERE $cond1")
+          runAndCheckSplitScan(s"DELETE FROM T WHERE $cond1")
           checkAnswer(
             spark.sql(s"SELECT * from T ORDER BY id"),
             Row(1, "a", "2024") :: Row(3, "c", "2025") :: Row(4, "d", "2025") :: Nil)
@@ -351,7 +409,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
 
           val cond2 = "id = 3"
           val rowMetaInfo2 = rowMetaInfo1 ++ getFilePathAndRowIndex(cond2)
-          spark.sql(s"DELETE FROM T WHERE $cond2")
+          runAndCheckSplitScan(s"DELETE FROM T WHERE $cond2")
           checkAnswer(
             spark.sql(s"SELECT * from T ORDER BY id"),
             Row(1, "a", "2024") :: Row(4, "d", "2025") :: Nil)
