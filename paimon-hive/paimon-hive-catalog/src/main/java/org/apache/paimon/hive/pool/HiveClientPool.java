@@ -18,16 +18,15 @@
 
 package org.apache.paimon.hive.pool;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.hive.RetryingMetaStoreClientFactory;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
-import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.thrift.TException;
-import org.apache.thrift.transport.TTransportException;
+
+import java.util.function.Supplier;
 
 /**
  * Pool of Hive Metastore clients.
@@ -36,49 +35,19 @@ import org.apache.thrift.transport.TTransportException;
  */
 public class HiveClientPool extends ClientPool.ClientPoolImpl<IMetaStoreClient, TException> {
 
-    private final HiveConf hiveConf;
-    private final String clientClassName;
-
     public HiveClientPool(int poolSize, Configuration conf, String clientClassName) {
-        // Do not allow retry by default as we rely on RetryingHiveClient
-        super(poolSize, TTransportException.class, false);
-        this.hiveConf = new HiveConf(conf, HiveClientPool.class);
-        this.hiveConf.addResource(conf);
-        this.clientClassName = clientClassName;
+        super(poolSize, clientSupplier(conf, clientClassName));
     }
 
-    @Override
-    protected IMetaStoreClient newClient() {
-        return new RetryingMetaStoreClientFactory().createClient(hiveConf, clientClassName);
-    }
-
-    @Override
-    protected IMetaStoreClient reconnect(IMetaStoreClient client) {
-        try {
-            client.close();
-            client.reconnect();
-        } catch (MetaException e) {
-            throw new RuntimeException("Failed to reconnect to Hive Metastore", e);
-        }
-        return client;
-    }
-
-    @Override
-    protected boolean isConnectionException(Exception e) {
-        return super.isConnectionException(e)
-                || (e instanceof MetaException
-                        && e.getMessage()
-                                .contains(
-                                        "Got exception: org.apache.thrift.transport.TTransportException"));
+    private static Supplier<IMetaStoreClient> clientSupplier(
+            Configuration conf, String clientClassName) {
+        HiveConf hiveConf = new HiveConf(conf, HiveClientPool.class);
+        hiveConf.addResource(conf);
+        return () -> new RetryingMetaStoreClientFactory().createClient(hiveConf, clientClassName);
     }
 
     @Override
     protected void close(IMetaStoreClient client) {
         client.close();
-    }
-
-    @VisibleForTesting
-    HiveConf hiveConf() {
-        return hiveConf;
     }
 }
