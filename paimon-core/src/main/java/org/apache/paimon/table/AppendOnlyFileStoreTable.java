@@ -42,6 +42,7 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
@@ -119,8 +120,8 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
             }
 
             @Override
-            public void projection(int[][] projection) {
-                read.withProjection(projection);
+            public void applyReadType(RowType readType) {
+                read.withReadType(readType);
             }
 
             @Override

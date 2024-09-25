@@ -32,6 +32,7 @@ public interface MergeFunctionFactory<T> extends Serializable {
 
     MergeFunction<T> create(@Nullable int[][] projection);
 
+    // todo: replace projection with rowType
     default AdjustedProjection adjustProjection(@Nullable int[][] projection) {
         return new AdjustedProjection(projection, null);
     }

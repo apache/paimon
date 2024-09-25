@@ -72,7 +72,7 @@ public class StatisticTable implements ReadonlyTable {
                             new DataField(1, "schema_id", new BigIntType(false)),
                             new DataField(2, "mergedRecordCount", new BigIntType(true)),
                             new DataField(3, "mergedRecordSize", new BigIntType(true)),
-                            new DataField(2, "colstat", SerializationUtils.newStringType(true))));
+                            new DataField(4, "colstat", SerializationUtils.newStringType(true))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -164,7 +164,7 @@ public class StatisticTable implements ReadonlyTable {
     private static class StatisticRead implements InnerTableRead {
 
         private final FileIO fileIO;
-        private int[][] projection;
+        private RowType readType;
 
         private final FileStoreTable dataTable;
 
@@ -180,8 +180,8 @@ public class StatisticTable implements ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            this.projection = projection;
+        public InnerTableRead withReadType(RowType readType) {
+            this.readType = readType;
             return this;
         }
 
@@ -202,10 +202,13 @@ public class StatisticTable implements ReadonlyTable {
                 Iterator<Statistics> statisticsIterator =
                         Collections.singletonList(statistics).iterator();
                 Iterator<InternalRow> rows = Iterators.transform(statisticsIterator, this::toRow);
-                if (projection != null) {
+                if (readType != null) {
                     rows =
                             Iterators.transform(
-                                    rows, row -> ProjectedRow.from(projection).replaceRow(row));
+                                    rows,
+                                    row ->
+                                            ProjectedRow.from(readType, StatisticTable.TABLE_TYPE)
+                                                    .replaceRow(row));
                 }
                 return new IteratorRecordReader<>(rows);
             } else {

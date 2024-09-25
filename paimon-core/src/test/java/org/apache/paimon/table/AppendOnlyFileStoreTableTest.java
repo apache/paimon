@@ -905,7 +905,8 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Override
-    protected FileStoreTable createFileStoreTable(Consumer<Options> configure) throws Exception {
+    protected FileStoreTable createFileStoreTable(Consumer<Options> configure, RowType rowType)
+            throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
         configure.accept(conf);
@@ -916,7 +917,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
-                                ROW_TYPE.getFields(),
+                                rowType.getFields(),
                                 Collections.singletonList("pt"),
                                 Collections.emptyList(),
                                 conf.toMap(),

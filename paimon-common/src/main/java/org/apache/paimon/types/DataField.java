@@ -84,6 +84,10 @@ public final class DataField implements Serializable {
         return new DataField(id, newName, type, description);
     }
 
+    public DataField newType(DataType newType) {
+        return new DataField(id, name, newType, description);
+    }
+
     public DataField newDescription(String newDescription) {
         return new DataField(id, name, type, newDescription);
     }
@@ -141,6 +145,19 @@ public final class DataField implements Serializable {
         return Objects.equals(id, field.id)
                 && Objects.equals(name, field.name)
                 && Objects.equals(type, field.type)
+                && Objects.equals(description, field.description);
+    }
+
+    public boolean isPrunedFrom(DataField field) {
+        if (this == field) {
+            return true;
+        }
+        if (field == null) {
+            return false;
+        }
+        return Objects.equals(id, field.id)
+                && Objects.equals(name, field.name)
+                && type.isPrunedFrom(field.type)
                 && Objects.equals(description, field.description);
     }
 

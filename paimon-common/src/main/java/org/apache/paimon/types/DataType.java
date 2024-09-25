@@ -145,6 +145,16 @@ public abstract class DataType implements Serializable {
         return isNullable == that.isNullable && typeRoot == that.typeRoot;
     }
 
+    /**
+     * Determine whether the current type is the result of the target type after pruning (e.g.
+     * select some fields from a nested type) or just the same.
+     *
+     * @param o the target data type
+     */
+    public boolean isPrunedFrom(Object o) {
+        return equals(o);
+    }
+
     @Override
     public int hashCode() {
         return Objects.hash(isNullable, typeRoot);

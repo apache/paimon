@@ -341,9 +341,9 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            mainRead.withProjection(projection);
-            fallbackRead.withProjection(projection);
+        public InnerTableRead withReadType(RowType readType) {
+            mainRead.withReadType(readType);
+            fallbackRead.withReadType(readType);
             return this;
         }
 

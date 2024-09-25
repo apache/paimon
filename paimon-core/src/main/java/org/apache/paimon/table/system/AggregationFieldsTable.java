@@ -169,7 +169,7 @@ public class AggregationFieldsTable implements ReadonlyTable {
     private class SchemasRead implements InnerTableRead {
 
         private final FileIO fileIO;
-        private int[][] projection;
+        private RowType readType;
 
         public SchemasRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -181,8 +181,8 @@ public class AggregationFieldsTable implements ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            this.projection = projection;
+        public InnerTableRead withReadType(RowType readType) {
+            this.readType = readType;
             return this;
         }
 
@@ -199,10 +199,14 @@ public class AggregationFieldsTable implements ReadonlyTable {
             Path location = ((AggregationSplit) split).location;
             TableSchema schemas = new SchemaManager(fileIO, location, branch).latest().get();
             Iterator<InternalRow> rows = createInternalRowIterator(schemas);
-            if (projection != null) {
+            if (readType != null) {
                 rows =
                         Iterators.transform(
-                                rows, row -> ProjectedRow.from(projection).replaceRow(row));
+                                rows,
+                                row ->
+                                        ProjectedRow.from(
+                                                        readType, AggregationFieldsTable.TABLE_TYPE)
+                                                .replaceRow(row));
             }
             return new IteratorRecordReader<>(rows);
         }

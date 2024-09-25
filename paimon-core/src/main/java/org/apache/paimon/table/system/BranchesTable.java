@@ -175,7 +175,7 @@ public class BranchesTable implements ReadonlyTable {
     private static class BranchesRead implements InnerTableRead {
 
         private final FileIO fileIO;
-        private int[][] projection;
+        private RowType readType;
 
         public BranchesRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -188,8 +188,8 @@ public class BranchesTable implements ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            this.projection = projection;
+        public InnerTableRead withReadType(RowType readType) {
+            this.readType = readType;
             return this;
         }
 
@@ -213,10 +213,13 @@ public class BranchesTable implements ReadonlyTable {
                 throw new UncheckedIOException(e);
             }
 
-            if (projection != null) {
+            if (readType != null) {
                 rows =
                         Iterators.transform(
-                                rows, row -> ProjectedRow.from(projection).replaceRow(row));
+                                rows,
+                                row ->
+                                        ProjectedRow.from(readType, BranchesTable.TABLE_TYPE)
+                                                .replaceRow(row));
             }
 
             return new IteratorRecordReader<>(rows);

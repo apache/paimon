@@ -203,7 +203,7 @@ public class SnapshotsTable implements ReadonlyTable {
     private class SnapshotsRead implements InnerTableRead {
 
         private final FileIO fileIO;
-        private int[][] projection;
+        private RowType readType;
         private Optional<Long> optionalFilterSnapshotIdMax = Optional.empty();
         private Optional<Long> optionalFilterSnapshotIdMin = Optional.empty();
 
@@ -267,8 +267,8 @@ public class SnapshotsTable implements ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            this.projection = projection;
+        public InnerTableRead withReadType(RowType readType) {
+            this.readType = readType;
             return this;
         }
 
@@ -289,10 +289,13 @@ public class SnapshotsTable implements ReadonlyTable {
                             optionalFilterSnapshotIdMax, optionalFilterSnapshotIdMin);
 
             Iterator<InternalRow> rows = Iterators.transform(snapshots, this::toRow);
-            if (projection != null) {
+            if (readType != null) {
                 rows =
                         Iterators.transform(
-                                rows, row -> ProjectedRow.from(projection).replaceRow(row));
+                                rows,
+                                row ->
+                                        ProjectedRow.from(readType, SnapshotsTable.TABLE_TYPE)
+                                                .replaceRow(row));
             }
             return new IteratorRecordReader<>(rows);
         }

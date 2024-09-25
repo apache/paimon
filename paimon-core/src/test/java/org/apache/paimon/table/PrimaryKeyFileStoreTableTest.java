@@ -961,9 +961,10 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowDataToString);
         assertThat(result).containsExactlyInAnyOrder("+I[+I, 1, 10, 100]");
 
-        // Read by projection
+        // Read by requiredType
+        RowType rowType = auditLogTable.rowType();
         snapshotReader = auditLogTable.newSnapshotReader();
-        read = auditLogTable.newRead().withProjection(new int[] {2, 0, 1});
+        read = auditLogTable.newRead().withReadType(rowType.project("a", "rowkind", "pt"));
         Function<InternalRow, String> projectToString1 =
                 row ->
                         internalRowToString(
@@ -974,9 +975,9 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(result)
                 .containsExactlyInAnyOrder("+I[20, +I, 2]", "+I[30, +U, 1]", "+I[10, +I, 1]");
 
-        // Read by projection without row kind
+        // Read by requiredType without rowkind
         snapshotReader = auditLogTable.newSnapshotReader();
-        read = auditLogTable.newRead().withProjection(new int[] {2, 1});
+        read = auditLogTable.newRead().withReadType(rowType.project("a", "pt"));
         Function<InternalRow, String> projectToString2 =
                 row -> internalRowToString(row, DataTypes.ROW(DataTypes.INT(), DataTypes.INT()));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), projectToString2);
@@ -1814,11 +1815,6 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Override
-    protected FileStoreTable createFileStoreTable(Consumer<Options> configure) throws Exception {
-        return createFileStoreTable(configure, ROW_TYPE);
-    }
-
-    @Override
     protected FileStoreTable overwriteTestFileStoreTable() throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
@@ -1835,7 +1831,8 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
     }
 
-    private FileStoreTable createFileStoreTable(Consumer<Options> configure, RowType rowType)
+    @Override
+    protected FileStoreTable createFileStoreTable(Consumer<Options> configure, RowType rowType)
             throws Exception {
         Options options = new Options();
         options.set(CoreOptions.PATH, tablePath.toString());

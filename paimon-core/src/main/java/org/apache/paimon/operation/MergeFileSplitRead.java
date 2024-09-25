@@ -78,7 +78,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     private final MergeSorter mergeSorter;
     private final List<String> sequenceFields;
 
-    @Nullable private int[][] keyProjectedFields;
+    @Nullable private RowType readKeyType;
 
     @Nullable private List<Predicate> filtersForKeys;
 
@@ -108,12 +108,6 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         this.sequenceFields = options.sequenceField();
     }
 
-    public MergeFileSplitRead withKeyProjection(@Nullable int[][] projectedFields) {
-        readerFactoryBuilder.withKeyProjection(projectedFields);
-        this.keyProjectedFields = projectedFields;
-        return this;
-    }
-
     public Comparator<InternalRow> keyComparator() {
         return keyComparator;
     }
@@ -122,12 +116,26 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         return mergeSorter;
     }
 
-    @Override
-    public MergeFileSplitRead withProjection(@Nullable int[][] projectedFields) {
-        if (projectedFields == null) {
-            return this;
-        }
+    public TableSchema tableSchema() {
+        return tableSchema;
+    }
 
+    public MergeFileSplitRead withReadKeyType(RowType readKeyType) {
+        readerFactoryBuilder.withReadKeyType(readKeyType);
+        this.readKeyType = readKeyType;
+        return this;
+    }
+
+    @Override
+    public MergeFileSplitRead withReadType(RowType readType) {
+        // todo: replace projectedFields with readType
+        int[][] projectedFields =
+                Arrays.stream(
+                                tableSchema
+                                        .logicalRowType()
+                                        .getFieldIndices(readType.getFieldNames()))
+                        .mapToObj(i -> new int[] {i})
+                        .toArray(int[][]::new);
         int[][] newProjectedFields = projectedFields;
         if (sequenceFields.size() > 0) {
             // make sure projection contains sequence fields
@@ -151,8 +159,15 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         this.pushdownProjection = projection.pushdownProjection;
         this.outerProjection = projection.outerProjection;
         if (pushdownProjection != null) {
-            readerFactoryBuilder.withValueProjection(pushdownProjection);
-            mergeSorter.setProjectedValueType(readerFactoryBuilder.projectedValueType());
+            RowType pushdownRowType =
+                    tableSchema
+                            .logicalRowType()
+                            .project(
+                                    Arrays.stream(pushdownProjection)
+                                            .mapToInt(arr -> arr[0])
+                                            .toArray());
+            readerFactoryBuilder.withReadValueType(pushdownRowType);
+            mergeSorter.setProjectedValueType(pushdownRowType);
         }
 
         if (newProjectedFields != projectedFields) {
@@ -304,11 +319,11 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     }
 
     private RecordReader<KeyValue> projectKey(RecordReader<KeyValue> reader) {
-        if (keyProjectedFields == null) {
+        if (readKeyType == null) {
             return reader;
         }
 
-        ProjectedRow projectedRow = ProjectedRow.from(keyProjectedFields);
+        ProjectedRow projectedRow = ProjectedRow.from(readKeyType, tableSchema.logicalRowType());
         return reader.transform(kv -> kv.replaceKey(projectedRow.replaceRow(kv.key())));
     }
 
@@ -323,6 +338,6 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     @Nullable
     public UserDefinedSeqComparator createUdsComparator() {
         return UserDefinedSeqComparator.create(
-                readerFactoryBuilder.projectedValueType(), sequenceFields);
+                readerFactoryBuilder.readValueType(), sequenceFields);
     }
 }

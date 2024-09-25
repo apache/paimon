@@ -46,7 +46,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
@@ -59,6 +58,15 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public abstract class TableLineageTable implements ReadonlyTable {
     protected final LineageMetaFactory lineageMetaFactory;
     protected final Options options;
+
+    public static final RowType TABLE_TYPE =
+            new RowType(
+                    Arrays.asList(
+                            new DataField(
+                                    0, "database_name", new VarCharType(VarCharType.MAX_LENGTH)),
+                            new DataField(1, "table_name", new VarCharType(VarCharType.MAX_LENGTH)),
+                            new DataField(2, "job_name", new VarCharType(VarCharType.MAX_LENGTH)),
+                            new DataField(3, "create_time", new TimestampType())));
 
     protected TableLineageTable(LineageMetaFactory lineageMetaFactory, Options options) {
         this.lineageMetaFactory = lineageMetaFactory;
@@ -83,12 +91,7 @@ public abstract class TableLineageTable implements ReadonlyTable {
 
     @Override
     public RowType rowType() {
-        List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, "database_name", new VarCharType(VarCharType.MAX_LENGTH)));
-        fields.add(new DataField(1, "table_name", new VarCharType(VarCharType.MAX_LENGTH)));
-        fields.add(new DataField(2, "job_name", new VarCharType(VarCharType.MAX_LENGTH)));
-        fields.add(new DataField(3, "create_time", new TimestampType()));
-        return new RowType(fields);
+        return TABLE_TYPE;
     }
 
     @Override
@@ -103,7 +106,7 @@ public abstract class TableLineageTable implements ReadonlyTable {
         private final BiFunction<LineageMeta, Predicate, Iterator<TableLineageEntity>>
                 tableLineageQuery;
         @Nullable private Predicate predicate;
-        private int[][] projection;
+        private RowType readType;
 
         protected TableLineageRead(
                 LineageMetaFactory lineageMetaFactory,
@@ -123,8 +126,8 @@ public abstract class TableLineageTable implements ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            this.projection = projection;
+        public InnerTableRead withReadType(RowType readType) {
+            this.readType = readType;
             return this;
         }
 
@@ -149,8 +152,10 @@ public abstract class TableLineageTable implements ReadonlyTable {
                                                     BinaryString.fromString(entity.getTable()),
                                                     BinaryString.fromString(entity.getJob()),
                                                     entity.getCreateTime());
-                                    if (projection != null) {
-                                        return ProjectedRow.from(projection).replaceRow(row);
+                                    if (readType != null) {
+                                        return ProjectedRow.from(
+                                                        readType, TableLineageTable.TABLE_TYPE)
+                                                .replaceRow(row);
                                     } else {
                                         return row;
                                     }

@@ -71,6 +71,10 @@ public final class RowType extends DataType {
         this(true, fields);
     }
 
+    public RowType copy(List<DataField> newFields) {
+        return new RowType(isNullable(), newFields);
+    }
+
     public List<DataField> getFields() {
         return fields;
     }
@@ -132,6 +136,15 @@ public final class RowType extends DataType {
         throw new RuntimeException("Cannot find field: " + fieldName);
     }
 
+    public int getFieldIndexByFieldId(int fieldId) {
+        for (int i = 0; i < fields.size(); i++) {
+            if (fields.get(i).id() == fieldId) {
+                return i;
+            }
+        }
+        throw new RuntimeException("Cannot find field index by FieldId " + fieldId);
+    }
+
     @Override
     public int defaultSize() {
         return fields.stream().mapToInt(f -> f.type().defaultSize()).sum();
@@ -175,6 +188,26 @@ public final class RowType extends DataType {
         }
         RowType rowType = (RowType) o;
         return fields.equals(rowType.fields);
+    }
+
+    @Override
+    public boolean isPrunedFrom(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        if (!super.equals(o)) {
+            return false;
+        }
+        RowType rowType = (RowType) o;
+        for (DataField field : fields) {
+            if (!field.isPrunedFrom(rowType.getField(field.name()))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override
@@ -236,6 +269,19 @@ public final class RowType extends DataType {
                 names.stream()
                         .map(k -> fields.get(fieldNames.indexOf(k)))
                         .collect(Collectors.toList()));
+    }
+
+    public RowType project(String... names) {
+        return project(Arrays.asList(names));
+    }
+
+    public static RowType of() {
+        return new RowType(true, Collections.emptyList());
+    }
+
+    public static RowType of(DataField... fields) {
+        final List<DataField> fs = new ArrayList<>(Arrays.asList(fields));
+        return new RowType(true, fs);
     }
 
     public static RowType of(DataType... types) {
