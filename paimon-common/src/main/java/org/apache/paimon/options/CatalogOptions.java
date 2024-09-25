@@ -78,13 +78,6 @@ public class CatalogOptions {
                     .defaultValue(Duration.ofMinutes(8))
                     .withDescription("The maximum time to wait for acquiring the lock.");
 
-    public static final ConfigOption<Boolean> FS_ALLOW_HADOOP_FALLBACK =
-            key("fs.allow-hadoop-fallback")
-                    .booleanType()
-                    .defaultValue(true)
-                    .withDescription(
-                            "Allow to fallback to hadoop File IO when no file io found for the scheme.");
-
     public static final ConfigOption<Integer> CLIENT_POOL_SIZE =
             key("client-pool-size")
                     .intType()
