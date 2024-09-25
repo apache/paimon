@@ -44,6 +44,7 @@ import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -201,10 +202,7 @@ public abstract class SynchronizationActionBase extends ActionBase {
                                 immutableOptionKeys.contains(entry.getKey())
                                         || Objects.equals(
                                                 oldOptions.get(entry.getKey()), entry.getValue()));
-
-        if (dynamicOptions.isEmpty()) {
-            return table;
-        }
+        List<SchemaChange> tableSchemaChanges = new ArrayList<>();
 
         // alter the table dynamic options
         List<SchemaChange> optionChanges =
@@ -219,9 +217,15 @@ public abstract class SynchronizationActionBase extends ActionBase {
                         paimonSchema.fields(),
                         allowUpperCase);
 
-        optionChanges.addAll(columnChanges);
+        tableSchemaChanges.addAll(optionChanges);
+        tableSchemaChanges.addAll(columnChanges);
+
+        if (tableSchemaChanges.isEmpty()) {
+            return table;
+        }
+
         try {
-            catalog.alterTable(identifier, optionChanges, false);
+            catalog.alterTable(identifier, tableSchemaChanges, false);
         } catch (Catalog.TableNotExistException
                 | Catalog.ColumnAlreadyExistException
                 | Catalog.ColumnNotExistException e) {
