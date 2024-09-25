@@ -272,7 +272,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
 
-        // repairing that the ut don't specify the real parition of table
+        // repairing that the ut don't specify the real partition of table
         runActionForUnawareTable(true);
 
         // first compaction, snapshot will be 3
@@ -314,7 +314,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
 
-        // repairing that the ut don't specify the real parition of table
+        // repairing that the ut don't specify the real partition of table
         runActionForUnawareTable(false);
 
         // first compaction, snapshot will be 3.
@@ -366,7 +366,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                 rowData(1, 100, 15, BinaryString.fromString("20221209")));
 
         Assertions.assertThatThrownBy(() -> runAction(false))
-                .hasMessage("Only parition key can be specialized in compaction action.");
+                .hasMessage("Only partition key can be specialized in compaction action.");
     }
 
     @Test
