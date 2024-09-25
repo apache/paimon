@@ -53,7 +53,7 @@ public class IndexFileMeta {
                             new DataField(3, "_ROW_COUNT", new BigIntType(false)),
                             new DataField(
                                     4,
-                                    "_DELETION_VECTORS_RANGES",
+                                    "_DELETIONS_VECTORS_RANGES",
                                     new ArrayType(
                                             true,
                                             RowType.of(

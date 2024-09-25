@@ -56,7 +56,7 @@ public class IndexManifestEntry {
                             new DataField(6, "_ROW_COUNT", new BigIntType(false)),
                             new DataField(
                                     7,
-                                    "_DELETION_VECTORS_RANGES",
+                                    "_DELETIONS_VECTORS_RANGES",
                                     new ArrayType(
                                             true,
                                             RowType.of(
