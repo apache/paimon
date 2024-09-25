@@ -107,7 +107,7 @@ public class StatisticTable implements ReadonlyTable {
 
     @Override
     public List<String> primaryKeys() {
-        return Collections.singletonList("snapshot_id");
+        return Collections.singletonList(SNAPSHOT_ID);
     }
 
     @Override
