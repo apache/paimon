@@ -110,7 +110,8 @@ case class MergeIntoPaimonTable(
         createNewScanPlan(
           candidateDataSplits,
           targetOnlyCondition.getOrElse(TrueLiteral),
-          relation))
+          relation,
+          metadataCols))
       val ds = constructChangedRows(
         sparkSession,
         filteredRelation,

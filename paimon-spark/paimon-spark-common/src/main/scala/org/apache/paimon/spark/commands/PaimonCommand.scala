@@ -35,9 +35,10 @@ import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
+import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
-import org.apache.spark.sql.catalyst.plans.logical.{Filter => FilterLogicalNode, LogicalPlan}
+import org.apache.spark.sql.catalyst.plans.logical.{Filter => FilterLogicalNode, LogicalPlan, Project}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, EqualTo, Filter}
 
@@ -47,7 +48,7 @@ import java.util.Collections
 import scala.collection.JavaConverters._
 
 /** Helper trait for all paimon commands. */
-trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
+trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLConfHelper {
 
   /**
    * For the 'INSERT OVERWRITE' semantics of SQL, Spark DataSourceV2 will call the `truncate`
@@ -129,6 +130,21 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
       .as[String]
       .collect()
       .map(relativePath)
+  }
+
+  protected def createNewScanPlan(
+      candidateDataSplits: Seq[DataSplit],
+      condition: Expression,
+      relation: DataSourceV2Relation,
+      metadataColumns: Seq[PaimonMetadataColumn]): LogicalPlan = {
+    val newRelation = createNewScanPlan(candidateDataSplits, condition, relation)
+    val resolvedMetadataColumns = metadataColumns.map {
+      col =>
+        val attr = newRelation.resolve(col.name :: Nil, conf.resolver)
+        assert(attr.isDefined)
+        attr.get
+    }
+    Project(relation.output ++ resolvedMetadataColumns, newRelation)
   }
 
   protected def createNewScanPlan(
