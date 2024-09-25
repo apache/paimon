@@ -187,6 +187,10 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
         while (latestSnapshotId > 0) {
             Snapshot latestSnapshot = snapshotManager().snapshot(latestSnapshotId);
+            // reduce unnessary loop
+            if (latestSnapshot.id() < snapshotId) {
+                break;
+            }
             if (latestSnapshot.commitKind() == Snapshot.CommitKind.ANALYZE) {
                 Optional<Statistics> statistics =
                         store().newStatsFileHandler().readStats(latestSnapshot);
