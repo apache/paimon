@@ -69,7 +69,9 @@ public class StatisticTable implements ReadonlyTable {
 
     public static final String STATISTICS = "statistics";
 
-    public static final RowType TABLE_TYPE =
+    private static final String SNAPSHOT_ID = "snapshot_id";
+
+    private static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
                             new DataField(0, "snapshot_id", new BigIntType(false)),
@@ -156,7 +158,7 @@ public class StatisticTable implements ReadonlyTable {
 
         private final @Nullable LeafPredicate snapshotIdPredicate;
 
-        private StatisticSplit(Path location, LeafPredicate snapshotIdPredicate) {
+        private StatisticSplit(Path location, @Nullable LeafPredicate snapshotIdPredicate) {
             this.location = location;
             this.snapshotIdPredicate = snapshotIdPredicate;
         }
@@ -222,7 +224,7 @@ public class StatisticTable implements ReadonlyTable {
                         (Long)
                                 snapshotIdPredicate
                                         .visit(LeafPredicateExtractor.INSTANCE)
-                                        .get("snapshot_id")
+                                        .get(SNAPSHOT_ID)
                                         .literals()
                                         .get(0);
                 statisticsOptional = dataTable.statistics(snapshotId);

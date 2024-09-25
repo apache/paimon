@@ -177,10 +177,14 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public Optional<Statistics> statistics(Long snapshotId) {
         if (!snapshotManager().snapshotExists(snapshotId)) {
             throw new SnapshotNotExistException(
-                    String.format("snapshot id: %s is not exisit", snapshotId.toString()));
+                    String.format("snapshot id: %s is not existed", snapshotId));
         }
 
         Long latestSnapshotId = snapshotManager().latestSnapshotId();
+        if (latestSnapshotId == null) {
+            return Optional.empty();
+        }
+
         while (latestSnapshotId > 0) {
             Snapshot latestSnapshot = snapshotManager().snapshot(latestSnapshotId);
             if (latestSnapshot.commitKind() == Snapshot.CommitKind.ANALYZE) {
