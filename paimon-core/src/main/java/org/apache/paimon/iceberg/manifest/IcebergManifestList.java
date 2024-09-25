@@ -58,7 +58,7 @@ public class IcebergManifestList extends ObjectsFile<IcebergManifestFileMeta> {
                 "avro.row-name-mapping",
                 "org.apache.paimon.avro.generated.record:manifest_file,"
                         + "manifest_file_partitions:r508");
-        FileFormat manifestListAvro = FileFormat.getFileFormat(manifestListAvroOptions, "avro");
+        FileFormat manifestListAvro = FileFormat.fromIdentifier("avro", manifestListAvroOptions);
         return new IcebergManifestList(
                 table.fileIO(),
                 manifestListAvro.createReaderFactory(IcebergManifestFileMeta.schema()),

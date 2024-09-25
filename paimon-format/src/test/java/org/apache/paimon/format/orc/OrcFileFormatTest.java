@@ -38,7 +38,7 @@ public class OrcFileFormatTest {
     @Test
     public void testAbsent() {
         Options options = new Options();
-        options.setString("haha", "1");
+        options.setString("orc.haha", "1");
         OrcFileFormat orc =
                 new OrcFileFormatFactory().create(new FormatContext(options, 1024, 1024));
         assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".haha", "")).isEqualTo("1");
@@ -47,8 +47,8 @@ public class OrcFileFormatTest {
     @Test
     public void testPresent() {
         Options options = new Options();
-        options.setString("haha", "1");
-        options.setString("compress", "zlib");
+        options.setString("orc.haha", "1");
+        options.setString("orc.compress", "zlib");
         OrcFileFormat orc =
                 new OrcFileFormatFactory().create(new FormatContext(options, 1024, 1024));
         assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".haha", "")).isEqualTo("1");

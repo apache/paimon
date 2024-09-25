@@ -53,20 +53,23 @@ public class AvroFileFormat extends FileFormat {
 
     public static final String IDENTIFIER = "avro";
 
-    public static final ConfigOption<String> AVRO_OUTPUT_CODEC =
-            ConfigOptions.key("codec")
+    private static final ConfigOption<String> AVRO_OUTPUT_CODEC =
+            ConfigOptions.key("avro.codec")
                     .stringType()
                     .defaultValue(SNAPPY_CODEC)
                     .withDescription("The compression codec for avro");
 
-    public static final ConfigOption<Map<String, String>> AVRO_ROW_NAME_MAPPING =
-            ConfigOptions.key("row-name-mapping").mapType().defaultValue(new HashMap<>());
+    private static final ConfigOption<Map<String, String>> AVRO_ROW_NAME_MAPPING =
+            ConfigOptions.key("avro.row-name-mapping").mapType().defaultValue(new HashMap<>());
 
-    private final FormatContext context;
+    private final Options options;
+    private final int zstdLevel;
 
     public AvroFileFormat(FormatContext context) {
         super(IDENTIFIER);
-        this.context = context;
+
+        this.options = getIdentifierPrefixOptions(context.options());
+        this.zstdLevel = context.zstdLevel();
     }
 
     @Override
@@ -95,13 +98,12 @@ public class AvroFileFormat extends FileFormat {
     }
 
     private CodecFactory createCodecFactory(String compression) {
-        Options options = context.formatOptions();
         if (options.contains(AVRO_OUTPUT_CODEC)) {
             return CodecFactory.fromString(options.get(AVRO_OUTPUT_CODEC));
         }
 
         if (compression.equalsIgnoreCase("zstd")) {
-            return CodecFactory.zstandardCodec(context.zstdLevel());
+            return CodecFactory.zstandardCodec(zstdLevel);
         }
         return CodecFactory.fromString(options.get(AVRO_OUTPUT_CODEC));
     }
@@ -117,8 +119,7 @@ public class AvroFileFormat extends FileFormat {
                             (out, compression) -> {
                                 Schema schema =
                                         AvroSchemaConverter.convertToSchema(
-                                                rowType,
-                                                context.formatOptions().get(AVRO_ROW_NAME_MAPPING));
+                                                rowType, options.get(AVRO_ROW_NAME_MAPPING));
                                 AvroRowDatumWriter datumWriter = new AvroRowDatumWriter(rowType);
                                 DataFileWriter<InternalRow> dataFileWriter =
                                         new DataFileWriter<>(datumWriter);

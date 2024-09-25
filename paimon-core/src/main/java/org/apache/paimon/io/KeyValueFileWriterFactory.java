@@ -238,7 +238,8 @@ public class KeyValueFileWriterFactory {
                         format,
                         parentFactories.get(format).createDataFilePathFactory(partition, bucket));
 
-                FileFormat fileFormat = FileFormat.getFileFormat(options.toConfiguration(), format);
+                FileFormat fileFormat =
+                        FileFormat.fromIdentifier(format, options.toConfiguration());
                 // In avro format, minValue, maxValue, and nullCount are not counted, set
                 // StatsExtractor is Optional.empty() and will use SimpleStatsExtractor to collect
                 // stats
