@@ -82,10 +82,7 @@ public class JdbcCatalog extends AbstractCatalog {
         this.warehouse = warehouse;
         Preconditions.checkNotNull(options, "Invalid catalog properties: null");
         this.connections =
-                new JdbcClientPool(
-                        options.get(CatalogOptions.CLIENT_POOL_SIZE),
-                        options.get(CatalogOptions.URI.key()),
-                        options.toMap());
+                new JdbcClientPool(1, options.get(CatalogOptions.URI.key()), options.toMap());
         try {
             initializeCatalogTablesIfNeed();
         } catch (SQLException e) {
