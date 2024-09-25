@@ -169,7 +169,8 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
                         "default.paimontable02",
                         false,
                         catalogConf,
-                        "");
+                        "",
+                        6);
         migrateFileAction.run();
 
         tEnv.useCatalog("HIVE");

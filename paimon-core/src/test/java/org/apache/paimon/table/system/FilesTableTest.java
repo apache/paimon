@@ -159,8 +159,7 @@ public class FilesTableTest extends TableTestBase {
     }
 
     @Test
-    public void testReadFilesFromNotExistSnapshot() throws Exception {
-
+    public void testReadFilesFromNotExistSnapshot() {
         filesTable =
                 (FilesTable)
                         filesTable.copy(

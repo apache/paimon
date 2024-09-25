@@ -83,6 +83,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.CoreOptions.ChangelogProducer.FULL_COMPACTION;
@@ -99,13 +100,14 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final KeyValueFileWriterFactory.Builder writerFactoryBuilder;
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
     private final Supplier<FieldsComparator> udsComparatorSupplier;
-    private final Supplier<RecordEqualiser> valueEqualiserSupplier;
+    private final Supplier<RecordEqualiser> logDedupEqualSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final CoreOptions options;
     private final FileIO fileIO;
     private final RowType keyType;
     private final RowType valueType;
     private final RowType partitionType;
+    private final String commitUser;
     @Nullable private final RecordLevelExpire recordLevelExpire;
     @Nullable private Cache<String, LookupFile> lookupFileCache;
 
@@ -119,7 +121,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             RowType valueType,
             Supplier<Comparator<InternalRow>> keyComparatorSupplier,
             Supplier<FieldsComparator> udsComparatorSupplier,
-            Supplier<RecordEqualiser> valueEqualiserSupplier,
+            Supplier<RecordEqualiser> logDedupEqualSupplier,
             MergeFunctionFactory<KeyValue> mfFactory,
             FileStorePathFactory pathFactory,
             Map<String, FileStorePathFactory> format2PathFactory,
@@ -131,7 +133,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             KeyValueFieldsExtractor extractor,
             String tableName) {
         super(
-                commitUser,
                 snapshotManager,
                 scan,
                 options,
@@ -142,6 +143,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         this.partitionType = partitionType;
         this.keyType = keyType;
         this.valueType = valueType;
+        this.commitUser = commitUser;
+
         this.udsComparatorSupplier = udsComparatorSupplier;
         this.readerFactoryBuilder =
                 KeyValueFileReaderFactory.builder(
@@ -165,7 +168,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         format2PathFactory,
                         options.targetFileSize(true));
         this.keyComparatorSupplier = keyComparatorSupplier;
-        this.valueEqualiserSupplier = valueEqualiserSupplier;
+        this.logDedupEqualSupplier = logDedupEqualSupplier;
         this.mfFactory = mfFactory;
         this.options = options;
     }
@@ -294,8 +297,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     userDefinedSeqComparator,
                     mfFactory,
                     mergeSorter,
-                    valueEqualiserSupplier.get(),
-                    options.changelogRowDeduplicate());
+                    logDedupEqualSupplier.get());
         } else if (lookupStrategy.needLookup) {
             LookupLevels.ValueProcessor<?> processor;
             LookupMergeTreeCompactRewriter.MergeFunctionWrapperFactory<?> wrapperFactory;
@@ -323,8 +325,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                                 : new KeyValueProcessor(valueType);
                 wrapperFactory =
                         new LookupMergeFunctionWrapperFactory<>(
-                                valueEqualiserSupplier.get(),
-                                options.changelogRowDeduplicate(),
+                                logDedupEqualSupplier.get(),
                                 lookupStrategy,
                                 UserDefinedSeqComparator.create(valueType, options));
             }
@@ -389,6 +390,11 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 lookupStoreFactory,
                 bfGenerator(options),
                 lookupFileCache);
+    }
+
+    @Override
+    protected Function<WriterContainer<KeyValue>, Boolean> createWriterCleanChecker() {
+        return createConflictAwareWriterCleanChecker(commitUser, snapshotManager);
     }
 
     @Override

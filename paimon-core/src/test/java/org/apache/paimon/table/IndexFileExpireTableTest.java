@@ -190,7 +190,7 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
         assertThat(indexManifestSize()).isEqualTo(1);
     }
 
-    private void prepareExpireTable() throws Exception {
+    protected void prepareExpireTable() throws Exception {
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
         StreamTableWrite write = writeBuilder.newWrite();
         StreamTableCommit commit = writeBuilder.newCommit();

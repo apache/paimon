@@ -29,7 +29,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 /** {@link StartingScanner} for the {@link CoreOptions#SCAN_WATERMARK} of a batch read. */
-public class StaticFromWatermarkStartingScanner extends AbstractStartingScanner {
+public class StaticFromWatermarkStartingScanner extends ReadPlanStartingScanner {
 
     private static final Logger LOG =
             LoggerFactory.getLogger(StaticFromWatermarkStartingScanner.class);
@@ -51,7 +51,7 @@ public class StaticFromWatermarkStartingScanner extends AbstractStartingScanner 
     }
 
     @Override
-    public Result scan(SnapshotReader snapshotReader) {
+    public SnapshotReader configure(SnapshotReader snapshotReader) {
         if (startingSnapshotId == null) {
             LOG.warn(
                     "There is currently no snapshot later than or equal to watermark[{}]",
@@ -62,8 +62,7 @@ public class StaticFromWatermarkStartingScanner extends AbstractStartingScanner 
                                     + "watermark[%d]",
                             watermark));
         }
-        return StartingScanner.fromPlan(
-                snapshotReader.withMode(ScanMode.ALL).withSnapshot(startingSnapshotId).read());
+        return snapshotReader.withMode(ScanMode.ALL).withSnapshot(startingSnapshotId);
     }
 
     @Nullable

@@ -151,99 +151,91 @@ public class HadoopConfigLoadingTest {
 
     @Test
     public void loadOverlappingConfig() throws Exception {
-        final String k1 = "key1";
-        final String k2 = "key2";
-        final String k3 = "key3";
-        final String k4 = "key4";
-        final String k5 = "key5";
+        final String k1 = "key";
 
-        final String v1 = "from HADOOP_CONF_DIR";
-        final String v2 = "from Paimon config `hadoop-conf-dir`";
-        final String v4 = "from HADOOP_HOME/etc/hadoop";
-        final String v5 = "from HADOOP_HOME/conf";
+        final String v1 = "from HADOOP_HOME/etc/hadoop or HADOOP_HOME/conf";
+        final String v2 = "from HADOOP_CONF_DIR";
+        final String v3 = "from Paimon config hadoop-conf-dir";
+        final String v4 = "from Paimon advanced configuration";
 
-        final File hadoopConfDir = tempDir.resolve("hadoopConfDir").toFile();
-        final File hadoopConfEntryDir = tempDir.resolve("hadoopConfEntryDir").toFile();
-        final File legacyConfDir = tempDir.resolve("legacyConfDir").toFile();
         final File hadoopHome = tempDir.resolve("hadoopHome").toFile();
-
         final File hadoopHomeConf = tempDir.resolve("hadoopHome/conf").toFile();
         final File hadoopHomeEtc = tempDir.resolve("hadoopHome/etc/hadoop").toFile();
+        final File hadoopConfDir = tempDir.resolve("hadoopConfDir").toFile();
+        final File hadoopPaimonConfDir = tempDir.resolve("hadoopPaimonConfDir").toFile();
 
-        assertThat(hadoopConfDir.mkdirs()).isTrue();
-        assertThat(hadoopConfEntryDir.mkdirs()).isTrue();
-        assertThat(legacyConfDir.mkdirs()).isTrue();
         assertThat(hadoopHomeConf.mkdirs()).isTrue();
         assertThat(hadoopHomeEtc.mkdirs()).isTrue();
+        assertThat(hadoopConfDir.mkdirs()).isTrue();
+        assertThat(hadoopPaimonConfDir.mkdirs()).isTrue();
 
-        final File file1 = new File(hadoopConfDir, "core-site.xml");
-        final File file2 = new File(hadoopConfEntryDir, "core-site.xml");
-        final File file4 = new File(hadoopHomeEtc, "core-site.xml");
-        final File file5 = new File(hadoopHomeConf, "core-site.xml");
+        final File fileHomeEtc = new File(hadoopHomeEtc, "core-site.xml");
+        final File fileHomeConf = new File(hadoopHomeConf, "core-site.xml");
+        final File fileConfDir = new File(hadoopConfDir, "core-site.xml");
+        final File filePaimonConfDir = new File(hadoopPaimonConfDir, "core-site.xml");
 
-        printConfig(file1, k1, v1);
+        Map<String, String> properties1 = new HashMap<>();
+        properties1.put(k1, v1);
+        printConfigs(fileHomeEtc, properties1);
+        printConfigs(fileHomeConf, properties1);
 
         Map<String, String> properties2 = new HashMap<>();
         properties2.put(k1, v2);
-        properties2.put(k2, v2);
-        printConfigs(file2, properties2);
+        printConfigs(fileConfDir, properties2);
 
-        Map<String, String> properties4 = new HashMap<>();
-        properties4.put(k1, v4);
-        properties4.put(k2, v4);
-        properties4.put(k3, v4);
-        properties4.put(k4, v4);
-        printConfigs(file4, properties4);
-
-        Map<String, String> properties5 = new HashMap<>();
-        properties5.put(k1, v5);
-        properties5.put(k2, v5);
-        properties5.put(k3, v5);
-        properties5.put(k4, v5);
-        properties5.put(k5, v5);
-        printConfigs(file5, properties5);
+        Map<String, String> properties3 = new HashMap<>();
+        properties3.put(k1, v3);
+        printConfigs(filePaimonConfDir, properties3);
 
         final Options options = new Options();
-        options.setString(HadoopUtils.PATH_HADOOP_CONFIG, hadoopConfEntryDir.getAbsolutePath());
 
         final Configuration hadoopConf1;
         final Configuration hadoopConf2;
         final Configuration hadoopConf3;
+        final Configuration hadoopConf4;
+        final Configuration hadoopConf5;
 
         final Map<String, String> originalEnv = System.getenv();
         final Map<String, String> newEnv = new HashMap<>(originalEnv);
-        newEnv.put(HadoopUtils.HADOOP_CONF_ENV, hadoopConfDir.getAbsolutePath());
         newEnv.put(HadoopUtils.HADOOP_HOME_ENV, hadoopHome.getAbsolutePath());
+        final Map<String, String> newEnv1 = new HashMap<>(newEnv);
+        newEnv1.put(HadoopUtils.HADOOP_CONF_ENV, hadoopConfDir.getAbsolutePath());
         try {
+            options.set(HadoopUtils.HADOOP_CONF_LOADER, HadoopUtils.HadoopConfigLoader.ENV);
             CommonTestUtils.setEnv(newEnv);
             hadoopConf1 = HadoopUtils.getHadoopConfiguration(options);
 
-            options.set(HadoopUtils.HADOOP_CONF_LOADER, HadoopUtils.HadoopConfigLoader.ENV);
+            CommonTestUtils.setEnv(newEnv1);
             hadoopConf2 = HadoopUtils.getHadoopConfiguration(options);
 
             options.set(HadoopUtils.HADOOP_CONF_LOADER, HadoopUtils.HadoopConfigLoader.OPTION);
+            options.setString(
+                    HadoopUtils.PATH_HADOOP_CONFIG, hadoopPaimonConfDir.getAbsolutePath());
             hadoopConf3 = HadoopUtils.getHadoopConfiguration(options);
+
+            options.set(HadoopUtils.HADOOP_CONF_LOADER, HadoopUtils.HadoopConfigLoader.ALL);
+            hadoopConf4 = HadoopUtils.getHadoopConfiguration(options);
+
+            options.set("hadoop." + k1, v4);
+            hadoopConf5 = HadoopUtils.getHadoopConfiguration(options);
         } finally {
             CommonTestUtils.setEnv(originalEnv);
         }
 
         assertThat(hadoopConf1.get(k1, null)).isEqualTo(v1);
-        assertThat(hadoopConf1.get(k2, null)).isEqualTo(v2);
-        assertThat(hadoopConf1.get(k4, null)).isEqualTo(v4);
-        assertThat(hadoopConf1.get(k5, null)).isEqualTo(v5);
         assertThat(hadoopConf1.get(IN_CP_CONFIG_KEY, null)).isEqualTo(IN_CP_CONFIG_VALUE);
 
-        assertThat(hadoopConf2.get(k1, null)).isEqualTo("from HADOOP_CONF_DIR");
-        assertThat(hadoopConf2.get(k2, null)).isEqualTo("from HADOOP_HOME/etc/hadoop");
-        assertThat(hadoopConf2.get(k4, null)).isEqualTo("from HADOOP_HOME/etc/hadoop");
-        assertThat(hadoopConf2.get(k5, null)).isEqualTo("from HADOOP_HOME/conf");
+        assertThat(hadoopConf2.get(k1, null)).isEqualTo(v2);
         assertThat(hadoopConf2.get(IN_CP_CONFIG_KEY, null)).isEqualTo(IN_CP_CONFIG_VALUE);
 
-        assertThat(hadoopConf3.get(k1, null)).isEqualTo("from Paimon config `hadoop-conf-dir`");
-        assertThat(hadoopConf3.get(k2, null)).isEqualTo("from Paimon config `hadoop-conf-dir`");
-        assertThat(hadoopConf3.get(k4, null)).isNull();
-        assertThat(hadoopConf3.get(k5, null)).isNull();
+        assertThat(hadoopConf3.get(k1, null)).isEqualTo(v3);
         assertThat(hadoopConf3.get(IN_CP_CONFIG_KEY, null)).isEqualTo(IN_CP_CONFIG_VALUE);
+
+        assertThat(hadoopConf4.get(k1, null)).isEqualTo(v3);
+        assertThat(hadoopConf4.get(IN_CP_CONFIG_KEY, null)).isEqualTo(IN_CP_CONFIG_VALUE);
+
+        assertThat(hadoopConf5.get(k1, null)).isEqualTo(v4);
+        assertThat(hadoopConf5.get(IN_CP_CONFIG_KEY, null)).isEqualTo(IN_CP_CONFIG_VALUE);
     }
 
     @Test

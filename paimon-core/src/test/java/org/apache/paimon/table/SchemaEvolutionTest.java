@@ -57,8 +57,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 
-import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
-import static org.apache.paimon.schema.SystemColumns.SYSTEM_FIELD_NAMES;
+import static org.apache.paimon.table.SystemFields.KEY_FIELD_PREFIX;
+import static org.apache.paimon.table.SystemFields.SYSTEM_FIELD_NAMES;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -424,23 +424,6 @@ public class SchemaEvolutionTest {
 
     @Test
     public void testCreateAlterSystemField() throws Exception {
-        Schema schema1 =
-                new Schema(
-                        RowType.of(
-                                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
-                                        new String[] {"f0", "_VALUE_COUNT"})
-                                .getFields(),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        new HashMap<>(),
-                        "");
-        assertThatThrownBy(() -> schemaManager.createTable(schema1))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage(
-                        String.format(
-                                "Field name[%s] in schema cannot be exist in %s",
-                                "_VALUE_COUNT", SYSTEM_FIELD_NAMES));
-
         Schema schema2 =
                 new Schema(
                         RowType.of(

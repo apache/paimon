@@ -98,7 +98,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     public FileStoreLookupFunction(
             Table table, int[] projection, int[] joinKeyIndex, @Nullable Predicate predicate) {
-        TableScanUtils.streamingReadingValidate(table);
+        if (!TableScanUtils.supportCompactDiffStreamingReading(table)) {
+            TableScanUtils.streamingReadingValidate(table);
+        }
 
         this.table = table;
         this.partitionLoader = DynamicPartitionLoader.of(table);

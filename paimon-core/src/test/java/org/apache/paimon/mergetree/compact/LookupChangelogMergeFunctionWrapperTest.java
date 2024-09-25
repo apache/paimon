@@ -29,10 +29,12 @@ import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldLastValueAgg;
 import org.apache.paimon.mergetree.compact.aggregate.FieldSumAgg;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
+import org.apache.paimon.utils.ValueEqualiserSupplier;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -41,6 +43,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -71,8 +74,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                 RowType.of(DataTypes.INT()),
                                 RowType.of(DataTypes.INT())),
                         highLevel::get,
-                        EQUALISER,
-                        changelogRowDeduplicate,
+                        changelogRowDeduplicate ? EQUALISER : null,
                         LookupStrategy.from(false, true, false, false),
                         null,
                         null);
@@ -214,6 +216,71 @@ public class LookupChangelogMergeFunctionWrapperTest {
         assertThat(kv.value().getInt(0)).isEqualTo(2);
     }
 
+    @Test
+    public void testDeduplicateWithIgnoreFields() {
+        Map<InternalRow, KeyValue> highLevel = new HashMap<>();
+        RowType valueType =
+                RowType.builder()
+                        .fields(
+                                new DataType[] {DataTypes.INT(), DataTypes.INT()},
+                                new String[] {"f0", "f1"})
+                        .build();
+        UserDefinedSeqComparator userDefinedSeqComparator =
+                UserDefinedSeqComparator.create(
+                        valueType, CoreOptions.fromMap(ImmutableMap.of("sequence.field", "f1")));
+        assert userDefinedSeqComparator != null;
+        List<String> ignoreFields = Collections.singletonList("f1");
+        ValueEqualiserSupplier logDedupEqualSupplier =
+                ValueEqualiserSupplier.fromIgnoreFields(valueType, ignoreFields);
+        LookupChangelogMergeFunctionWrapper function =
+                new LookupChangelogMergeFunctionWrapper(
+                        LookupMergeFunction.wrap(
+                                DeduplicateMergeFunction.factory(),
+                                RowType.of(DataTypes.INT()),
+                                valueType),
+                        highLevel::get,
+                        logDedupEqualSupplier.get(),
+                        LookupStrategy.from(false, true, false, false),
+                        null,
+                        userDefinedSeqComparator);
+
+        // With level-0 'insert' record, with level-x (x > 0) same record. Notice that the specified
+        // ignored
+        // fields in records are different.
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 1, INSERT, row(1, 1)).setLevel(2));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(1, 2)).setLevel(0));
+        ChangelogResult result = function.getResult();
+        assertThat(result).isNotNull();
+        List<KeyValue> changelogs = result.changelogs();
+        assertThat(changelogs).isEmpty();
+        KeyValue kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.valueKind()).isEqualTo(INSERT);
+        assertThat(kv.value().getInt(0)).isEqualTo(1);
+        assertThat(kv.value().getInt(1)).isEqualTo(2);
+
+        // With level-0 'insert' record, with level-x (x > 0) different record.
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 1, INSERT, row(1, 1)).setLevel(1));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(2, 2)).setLevel(0));
+        result = function.getResult();
+        assertThat(result).isNotNull();
+        changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(2);
+        assertThat(changelogs.get(0).valueKind()).isEqualTo(UPDATE_BEFORE);
+        assertThat(changelogs.get(0).value().getInt(0)).isEqualTo(1);
+        assertThat(changelogs.get(0).value().getInt(1)).isEqualTo(1);
+        assertThat(changelogs.get(1).valueKind()).isEqualTo(UPDATE_AFTER);
+        assertThat(changelogs.get(1).value().getInt(0)).isEqualTo(2);
+        assertThat(changelogs.get(1).value().getInt(1)).isEqualTo(2);
+        kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.valueKind()).isEqualTo(INSERT);
+        assertThat(kv.value().getInt(0)).isEqualTo(2);
+        assertThat(kv.value().getInt(1)).isEqualTo(2);
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testSum(boolean changelogRowDeduplicate) {
@@ -231,8 +298,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                 RowType.of(DataTypes.INT()),
                                 RowType.of(DataTypes.INT())),
                         key -> null,
-                        EQUALISER,
-                        changelogRowDeduplicate,
+                        changelogRowDeduplicate ? EQUALISER : null,
                         LookupStrategy.from(false, true, false, false),
                         null,
                         null);
@@ -320,8 +386,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                 RowType.of(DataTypes.INT()),
                                 RowType.of(DataTypes.INT())),
                         highLevel::get,
-                        EQUALISER,
-                        false,
+                        null,
                         LookupStrategy.from(false, true, false, false),
                         null,
                         UserDefinedSeqComparator.create(

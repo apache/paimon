@@ -520,7 +520,9 @@ public class AppendOnlyWriterTest {
     private DataFilePathFactory createPathFactory() {
         return new DataFilePathFactory(
                 new Path(tempDir + "/dt=" + PART + "/bucket-0"),
-                CoreOptions.FILE_FORMAT.defaultValue().toString());
+                CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue());
     }
 
     private AppendOnlyWriter createEmptyWriter(long targetFileSize) {

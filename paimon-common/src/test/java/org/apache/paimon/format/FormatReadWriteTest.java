@@ -106,10 +106,6 @@ public abstract class FormatReadWriteTest {
                         GenericRow.of(1, 1L), GenericRow.of(2, 2L), GenericRow.of(3, null));
     }
 
-    /**
-     * Currently, Parquet format doesn't support nested row in array, so this test handles Parquet
-     * specially.
-     */
     @Test
     public void testFullTypes() throws IOException {
         RowType rowType = rowTypeForFullTypesTest();
@@ -131,6 +127,48 @@ public abstract class FormatReadWriteTest {
         assertThat(result.size()).isEqualTo(1);
 
         validateFullTypesResult(result.get(0), expected);
+    }
+
+    @Test
+    public void testNestedReadPruning() throws Exception {
+        FileFormat format = fileFormat();
+
+        RowType writeType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "f0", DataTypes.INT()),
+                        DataTypes.FIELD(
+                                1,
+                                "f1",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(2, "f0", DataTypes.INT()),
+                                        DataTypes.FIELD(3, "f1", DataTypes.INT()),
+                                        DataTypes.FIELD(4, "f2", DataTypes.INT()))));
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false);
+                FormatWriter writer = format.createWriterFactory(writeType).create(out, "zstd")) {
+            writer.addElement(GenericRow.of(0, GenericRow.of(10, 11, 12)));
+        }
+
+        // skip read f0, f1.f1
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                1,
+                                "f1",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(2, "f0", DataTypes.INT()),
+                                        DataTypes.FIELD(4, "f2", DataTypes.INT()))));
+
+        List<InternalRow> result = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(readType)
+                        .createReader(
+                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+            InternalRowSerializer serializer = new InternalRowSerializer(readType);
+            reader.forEachRemaining(row -> result.add(serializer.copy(row)));
+        }
+
+        assertThat(result).containsExactly(GenericRow.of(GenericRow.of(10, 12)));
     }
 
     private RowType rowTypeForFullTypesTest() {

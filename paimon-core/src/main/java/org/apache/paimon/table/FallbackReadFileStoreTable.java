@@ -25,8 +25,10 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
@@ -44,9 +46,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -58,11 +60,11 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
     private final FileStoreTable fallback;
 
-    public FallbackReadFileStoreTable(FileStoreTable main, FileStoreTable fallback) {
-        super(main);
+    public FallbackReadFileStoreTable(FileStoreTable wrapped, FileStoreTable fallback) {
+        super(wrapped);
         this.fallback = fallback;
 
-        Preconditions.checkArgument(!(main instanceof FallbackReadFileStoreTable));
+        Preconditions.checkArgument(!(wrapped instanceof FallbackReadFileStoreTable));
         Preconditions.checkArgument(!(fallback instanceof FallbackReadFileStoreTable));
     }
 
@@ -96,7 +98,25 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
     @Override
     public FileStoreTable switchToBranch(String branchName) {
-        return new FallbackReadFileStoreTable(wrapped.switchToBranch(branchName), fallback);
+        return new FallbackReadFileStoreTable(switchWrappedToBranch(branchName), fallback);
+    }
+
+    private FileStoreTable switchWrappedToBranch(String branchName) {
+        Optional<TableSchema> optionalSchema =
+                new SchemaManager(wrapped.fileIO(), wrapped.location(), branchName).latest();
+        Preconditions.checkArgument(
+                optionalSchema.isPresent(), "Branch " + branchName + " does not exist");
+
+        TableSchema branchSchema = optionalSchema.get();
+        Options branchOptions = new Options(branchSchema.options());
+        branchOptions.set(CoreOptions.BRANCH, branchName);
+        branchSchema = branchSchema.copy(branchOptions.toMap());
+        return FileStoreTableFactory.createWithoutFallbackBranch(
+                wrapped.fileIO(),
+                wrapped.location(),
+                branchSchema,
+                new Options(),
+                wrapped.catalogEnvironment());
     }
 
     private Map<String, String> rewriteFallbackOptions(Map<String, String> options) {
@@ -281,13 +301,6 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                 }
             }
             return new DataFilePlan(splits);
-        }
-
-        @Override
-        public List<BinaryRow> listPartitions() {
-            Set<BinaryRow> partitions = new LinkedHashSet<>(mainScan.listPartitions());
-            partitions.addAll(fallbackScan.listPartitions());
-            return new ArrayList<>(partitions);
         }
 
         @Override

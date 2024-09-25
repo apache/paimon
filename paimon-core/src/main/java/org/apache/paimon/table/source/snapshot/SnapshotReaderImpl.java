@@ -27,12 +27,15 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -116,8 +119,23 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public Integer parallelism() {
+        return scan.parallelism();
+    }
+
+    @Override
     public SnapshotManager snapshotManager() {
         return snapshotManager;
+    }
+
+    @Override
+    public ManifestsReader manifestsReader() {
+        return scan.manifestsReader();
+    }
+
+    @Override
+    public List<ManifestEntry> readManifest(ManifestFileMeta manifest) {
+        return scan.readManifest(manifest);
     }
 
     @Override
@@ -128,6 +146,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public SplitGenerator splitGenerator() {
         return splitGenerator;
+    }
+
+    @Override
+    public FileStorePathFactory pathFactory() {
+        return pathFactory;
     }
 
     @Override
@@ -333,6 +356,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public List<PartitionEntry> partitionEntries() {
         return scan.readPartitionEntries();
+    }
+
+    @Override
+    public List<BucketEntry> bucketEntries() {
+        return scan.readBucketEntries();
     }
 
     @Override

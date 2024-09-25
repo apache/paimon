@@ -20,6 +20,7 @@ package org.apache.paimon.types;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.table.SystemFields;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
@@ -129,6 +130,11 @@ public final class RowType extends DataType {
         }
 
         throw new RuntimeException("Cannot find field: " + fieldName);
+    }
+
+    @Override
+    public int defaultSize() {
+        return fields.stream().mapToInt(f -> f.type().defaultSize()).sum();
     }
 
     @Override
@@ -251,7 +257,10 @@ public final class RowType extends DataType {
     public static int currentHighestFieldId(List<DataField> fields) {
         Set<Integer> fieldIds = new HashSet<>();
         new RowType(fields).collectFieldIds(fieldIds);
-        return fieldIds.stream().max(Integer::compareTo).orElse(-1);
+        return fieldIds.stream()
+                .filter(i -> !SystemFields.isSystemField(i))
+                .max(Integer::compareTo)
+                .orElse(-1);
     }
 
     public static Builder builder() {

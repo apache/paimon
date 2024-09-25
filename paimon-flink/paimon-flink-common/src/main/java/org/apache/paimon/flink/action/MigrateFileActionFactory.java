@@ -35,6 +35,7 @@ public class MigrateFileActionFactory implements ActionFactory {
     private static final String DELETE_ORIGIN = "delete_origin";
 
     private static final String OPTIONS = "options";
+    private static final String PARALLELISM = "parallelism";
 
     @Override
     public String identifier() {
@@ -50,6 +51,7 @@ public class MigrateFileActionFactory implements ActionFactory {
         boolean deleteOrigin = Boolean.parseBoolean(params.get(DELETE_ORIGIN));
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
         String tableConf = params.get(OPTIONS);
+        Integer parallelism = Integer.parseInt(params.get(PARALLELISM));
 
         MigrateFileAction migrateFileAction =
                 new MigrateFileAction(
@@ -59,7 +61,8 @@ public class MigrateFileActionFactory implements ActionFactory {
                         targetTable,
                         deleteOrigin,
                         catalogConfig,
-                        tableConf);
+                        tableConf,
+                        parallelism);
         return Optional.of(migrateFileAction);
     }
 

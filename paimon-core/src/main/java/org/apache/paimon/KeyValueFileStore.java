@@ -67,7 +67,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private final RowType valueType;
     private final KeyValueFieldsExtractor keyValueFieldsExtractor;
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
-    private final Supplier<RecordEqualiser> valueEqualiserSupplier;
+    private final Supplier<RecordEqualiser> logDedupEqualSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final String tableName;
 
@@ -93,7 +93,11 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         this.keyValueFieldsExtractor = keyValueFieldsExtractor;
         this.mfFactory = mfFactory;
         this.keyComparatorSupplier = new KeyComparatorSupplier(keyType);
-        this.valueEqualiserSupplier = new ValueEqualiserSupplier(valueType);
+        List<String> logDedupIgnoreFields = options.changelogRowDeduplicateIgnoreFields();
+        this.logDedupEqualSupplier =
+                options.changelogRowDeduplicate()
+                        ? ValueEqualiserSupplier.fromIgnoreFields(valueType, logDedupIgnoreFields)
+                        : () -> null;
         this.tableName = tableName;
     }
 
@@ -174,7 +178,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 valueType,
                 keyComparatorSupplier,
                 () -> UserDefinedSeqComparator.create(valueType, options),
-                valueEqualiserSupplier,
+                logDedupEqualSupplier,
                 mfFactory,
                 pathFactory(),
                 format2PathFactory(),
@@ -199,7 +203,9 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                                         options.path(),
                                         partitionType,
                                         options.partitionDefaultName(),
-                                        format)));
+                                        format,
+                                        options.dataFilePrefix(),
+                                        options.changelogFilePrefix())));
         return pathFactoryMap;
     }
 
@@ -223,6 +229,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                     }
                 };
         return new KeyValueFileStoreScan(
+                newManifestsReader(forWrite),
                 partitionType,
                 bucketFilter,
                 snapshotManager(),
@@ -230,7 +237,6 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 schema,
                 keyValueFieldsExtractor,
                 manifestFileFactory(forWrite),
-                manifestListFactory(forWrite),
                 options.bucket(),
                 forWrite,
                 options.scanManifestParallelism(),

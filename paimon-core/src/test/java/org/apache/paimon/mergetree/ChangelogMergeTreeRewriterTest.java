@@ -28,7 +28,6 @@ import org.apache.paimon.format.FlushingFileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.FileReaderFactory;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
@@ -109,13 +108,14 @@ public class ChangelogMergeTreeRewriterTest {
     public void testRewriteFailAndCleanupFiles(boolean rewriteChangelog) throws Exception {
         List<List<SortedRun>> sections = createTestSections(2);
         Path testPath = new Path(path, UUID.randomUUID().toString());
+        CoreOptions coreOptions = new CoreOptions(new Options());
         try (ChangelogMergeTreeRewriter rewriter =
                 new TestRewriter(
                         createReaderFactory(schemaManager, tableSchema, keyType, valueType),
                         createWriterFactory(testPath, keyType, valueType),
                         comparator,
                         new MergeSorter(
-                                new CoreOptions(new Options()),
+                                coreOptions,
                                 tableSchema.logicalPrimaryKeysType(),
                                 tableSchema.logicalRowType(),
                                 null),
@@ -136,13 +136,12 @@ public class ChangelogMergeTreeRewriterTest {
                                             p.getFileName()
                                                             .toString()
                                                             .startsWith(
-                                                                    DataFilePathFactory
-                                                                            .DATA_FILE_PREFIX)
+                                                                    coreOptions.dataFilePrefix())
                                                     || p.getFileName()
                                                             .toString()
                                                             .startsWith(
-                                                                    DataFilePathFactory
-                                                                            .CHANGELOG_FILE_PREFIX))
+                                                                    coreOptions
+                                                                            .changelogFilePrefix()))
                             .collect(Collectors.toList());
             Assertions.assertEquals(0, files.size());
         }
@@ -153,13 +152,14 @@ public class ChangelogMergeTreeRewriterTest {
     public void testRewriteSuccess(boolean rewriteChangelog) throws Exception {
         List<List<SortedRun>> sections = createTestSections(2);
         Path testPath = new Path(path, UUID.randomUUID().toString());
+        CoreOptions coreOptions = new CoreOptions(new Options());
         try (ChangelogMergeTreeRewriter rewriter =
                 new TestRewriter(
                         createReaderFactory(schemaManager, tableSchema, keyType, valueType),
                         createWriterFactory(testPath, keyType, valueType),
                         comparator,
                         new MergeSorter(
-                                new CoreOptions(new Options()),
+                                coreOptions,
                                 tableSchema.logicalPrimaryKeysType(),
                                 tableSchema.logicalRowType(),
                                 null),
@@ -175,13 +175,12 @@ public class ChangelogMergeTreeRewriterTest {
                                             p.getFileName()
                                                             .toString()
                                                             .startsWith(
-                                                                    DataFilePathFactory
-                                                                            .DATA_FILE_PREFIX)
+                                                                    coreOptions.dataFilePrefix())
                                                     || p.getFileName()
                                                             .toString()
                                                             .startsWith(
-                                                                    DataFilePathFactory
-                                                                            .CHANGELOG_FILE_PREFIX))
+                                                                    coreOptions
+                                                                            .changelogFilePrefix()))
                             .collect(Collectors.toList());
             if (rewriteChangelog) {
                 Assertions.assertEquals(2, files.size()); // changelog + data file
@@ -306,8 +305,7 @@ public class ChangelogMergeTreeRewriterTest {
 
         @Override
         protected MergeFunctionWrapper<ChangelogResult> createMergeWrapper(int outputLevel) {
-            return new FullChangelogMergeFunctionWrapper(
-                    mfFactory.create(), MAX_LEVEL, null, false);
+            return new FullChangelogMergeFunctionWrapper(mfFactory.create(), MAX_LEVEL, null);
         }
 
         @Override

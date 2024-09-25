@@ -82,7 +82,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                 ActionFactory.createAction(args).get().run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.clone('%s', 'db1', 't1', '', '%s', 'mydb', 'myt')",
                                 sourceWarehouse, targetWarehouse),
@@ -90,7 +90,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                         true);
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.clone(warehouse => '%s', database => 'db1', `table` => 't1', target_warehouse => '%s', target_database => 'mydb', target_table => 'myt')",
                                 sourceWarehouse, targetWarehouse),
@@ -141,7 +141,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                 ActionFactory.createAction(args).get().run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.clone('%s', 'db1', '', '', '%s', 'mydb')",
                                 sourceWarehouse, targetWarehouse),
@@ -149,7 +149,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                         true);
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.clone(warehouse => '%s', database => 'db1', target_warehouse => '%s', target_database => 'mydb')",
                                 sourceWarehouse, targetWarehouse),
@@ -201,7 +201,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                 ActionFactory.createAction(args).get().run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.clone('%s', '', '', '', '%s')",
                                 sourceWarehouse, targetWarehouse),
@@ -209,7 +209,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                         true);
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.clone(warehouse => '%s', target_warehouse => '%s')",
                                 sourceWarehouse, targetWarehouse),
@@ -408,7 +408,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                 ActionFactory.createAction(args).get().run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.clone('%s', '', '', '', '%s')",
                                 sourceWarehouse, targetWarehouse),
@@ -416,7 +416,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                         true);
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.clone(warehouse => '%s', target_warehouse => '%s')",
                                 sourceWarehouse, targetWarehouse),

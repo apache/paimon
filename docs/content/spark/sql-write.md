@@ -136,10 +136,9 @@ DELETE FROM my_table WHERE currency = 'UNKNOWN';
 Paimon currently supports Merge Into syntax in Spark 3+, which allow a set of updates, insertions and deletions based on a source table in a single commit.
 
 {{< hint into >}}
-1. This only work with primary-key table.
-2. In update clause, to update primary key columns is not supported.
-3. `WHEN NOT MATCHED BY SOURCE` syntax is not supported.
-   {{< /hint >}}
+1. In update clause, to update primary key columns is not supported.
+2. `WHEN NOT MATCHED BY SOURCE` syntax is not supported.
+{{< /hint >}}
 
 **Example: One**
 
@@ -197,7 +196,7 @@ Paimon Structured Streaming only supports the two `append` and `complete` modes.
 // Create a paimon table if not exists.
 spark.sql(s"""
            |CREATE TABLE T (k INT, v STRING)
-           |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
+           |TBLPROPERTIES ('primary-key'='k', 'bucket'='3')
            |""".stripMargin)
 
 // Here we use MemoryStream to fake a streaming source.

@@ -45,6 +45,10 @@ public class MigrateFileProcedure extends ProcedureBase {
                 @ArgumentHint(
                         name = "delete_origin",
                         type = @DataTypeHint("BOOLEAN"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "parallelism",
+                        type = @DataTypeHint("Integer"),
                         isOptional = true)
             })
     public String[] call(
@@ -52,12 +56,14 @@ public class MigrateFileProcedure extends ProcedureBase {
             String connector,
             String sourceTablePath,
             String targetPaimonTablePath,
-            Boolean deleteOrigin)
+            Boolean deleteOrigin,
+            Integer parallelism)
             throws Exception {
         if (deleteOrigin == null) {
             deleteOrigin = true;
         }
-        migrateHandle(connector, sourceTablePath, targetPaimonTablePath, deleteOrigin);
+        Integer p = parallelism == null ? Runtime.getRuntime().availableProcessors() : parallelism;
+        migrateHandle(connector, sourceTablePath, targetPaimonTablePath, deleteOrigin, p);
         return new String[] {"Success"};
     }
 
@@ -65,7 +71,8 @@ public class MigrateFileProcedure extends ProcedureBase {
             String connector,
             String sourceTablePath,
             String targetPaimonTablePath,
-            boolean deleteOrigin)
+            boolean deleteOrigin,
+            Integer parallelism)
             throws Exception {
         Identifier sourceTableId = Identifier.fromString(sourceTablePath);
         Identifier targetTableId = Identifier.fromString(targetPaimonTablePath);
@@ -83,6 +90,7 @@ public class MigrateFileProcedure extends ProcedureBase {
                         sourceTableId.getObjectName(),
                         targetTableId.getDatabaseName(),
                         targetTableId.getObjectName(),
+                        parallelism,
                         Collections.emptyMap());
         importer.deleteOriginTable(deleteOrigin);
         importer.executeMigrate();

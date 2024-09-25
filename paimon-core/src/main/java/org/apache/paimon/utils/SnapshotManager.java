@@ -79,8 +79,7 @@ public class SnapshotManager implements Serializable {
     public SnapshotManager(FileIO fileIO, Path tablePath, String branchName) {
         this.fileIO = fileIO;
         this.tablePath = tablePath;
-        this.branch =
-                StringUtils.isNullOrWhitespaceOnly(branchName) ? DEFAULT_MAIN_BRANCH : branchName;
+        this.branch = BranchManager.normalizeBranch(branchName);
     }
 
     public SnapshotManager copyWithBranch(String branchName) {
@@ -120,6 +119,17 @@ public class SnapshotManager implements Serializable {
     public Snapshot snapshot(long snapshotId) {
         Path snapshotPath = snapshotPath(snapshotId);
         return Snapshot.fromPath(fileIO, snapshotPath);
+    }
+
+    public Snapshot tryGetSnapshot(long snapshotId) throws FileNotFoundException {
+        try {
+            Path snapshotPath = snapshotPath(snapshotId);
+            return Snapshot.fromJson(fileIO.readFileUtf8(snapshotPath));
+        } catch (FileNotFoundException fileNotFoundException) {
+            throw fileNotFoundException;
+        } catch (IOException ioException) {
+            throw new RuntimeException(ioException);
+        }
     }
 
     public Changelog changelog(long snapshotId) {
@@ -391,9 +401,16 @@ public class SnapshotManager implements Serializable {
 
     public Iterator<Snapshot> snapshots() throws IOException {
         return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
-                .map(id -> snapshot(id))
+                .map(this::snapshot)
                 .sorted(Comparator.comparingLong(Snapshot::id))
                 .iterator();
+    }
+
+    public List<Path> snapshotPaths(Predicate<Long> predicate) throws IOException {
+        return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
+                .filter(predicate)
+                .map(this::snapshotPath)
+                .collect(Collectors.toList());
     }
 
     public Iterator<Snapshot> snapshotsWithinRange(

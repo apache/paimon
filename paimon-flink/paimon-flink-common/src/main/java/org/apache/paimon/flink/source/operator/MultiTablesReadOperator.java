@@ -29,7 +29,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.table.system.BucketsTable;
+import org.apache.paimon.table.system.CompactBucketsTable;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Preconditions;
 
@@ -80,7 +80,7 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
 
     private transient Catalog catalog;
     private transient IOManager ioManager;
-    private transient Map<Identifier, BucketsTable> tablesMap;
+    private transient Map<Identifier, CompactBucketsTable> tablesMap;
     private transient Map<Identifier, TableRead> readsMap;
     private transient StreamRecord<RowData> reuseRecord;
     private transient FlinkRowData reuseRow;
@@ -132,7 +132,7 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
     }
 
     private TableRead getTableRead(Identifier tableId) {
-        BucketsTable table = tablesMap.get(tableId);
+        CompactBucketsTable table = tablesMap.get(tableId);
         if (table == null) {
             try {
                 Table newTable = catalog.getTable(tableId);
@@ -141,7 +141,7 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
                         "Only FileStoreTable supports compact action. The table type is '%s'.",
                         newTable.getClass().getName());
                 table =
-                        new BucketsTable(
+                        new CompactBucketsTable(
                                         (FileStoreTable) newTable,
                                         isStreaming,
                                         tableId.getDatabaseName())
@@ -156,7 +156,7 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
         return readsMap.get(tableId);
     }
 
-    private Map<BinaryRow, Long> getPartitionInfo(BucketsTable table) {
+    private Map<BinaryRow, Long> getPartitionInfo(CompactBucketsTable table) {
         List<PartitionEntry> partitions = table.newSnapshotReader().partitionEntries();
 
         return partitions.stream()

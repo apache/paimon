@@ -27,12 +27,10 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.SinkRecord;
 
-import org.apache.flink.api.common.state.ListState;
-import org.apache.flink.api.common.state.ListStateDescriptor;
-import org.apache.flink.runtime.io.disk.iomanager.IOManagerAsync;
-import org.apache.flink.runtime.state.StateInitializationContextImpl;
-import org.apache.flink.streaming.api.operators.collect.utils.MockOperatorStateStore;
+import org.apache.flink.api.common.ExecutionConfig;
+import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.table.data.RowData;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -50,36 +48,28 @@ public class StoreCompactOperatorTest extends TableTestBase {
 
         CompactRememberStoreWrite compactRememberStoreWrite =
                 new CompactRememberStoreWrite(streamingMode);
-        StoreCompactOperator storeCompactOperator =
+        StoreCompactOperator operator =
                 new StoreCompactOperator(
-                        (FileStoreTable) getTableDefault(),
+                        getTableDefault(),
                         (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
                                 compactRememberStoreWrite,
                         "10086");
-        storeCompactOperator.open();
-        StateInitializationContextImpl context =
-                new StateInitializationContextImpl(
-                        null,
-                        new MockOperatorStateStore() {
-                            @Override
-                            public <S> ListState<S> getUnionListState(
-                                    ListStateDescriptor<S> stateDescriptor) throws Exception {
-                                return getListState(stateDescriptor);
-                            }
-                        },
-                        null,
-                        null,
-                        null);
-        storeCompactOperator.initStateAndWriter(
-                context, (a, b, c) -> true, new IOManagerAsync(), "123");
 
-        storeCompactOperator.processElement(new StreamRecord<>(data(0)));
-        storeCompactOperator.processElement(new StreamRecord<>(data(0)));
-        storeCompactOperator.processElement(new StreamRecord<>(data(1)));
-        storeCompactOperator.processElement(new StreamRecord<>(data(1)));
-        storeCompactOperator.processElement(new StreamRecord<>(data(2)));
-        storeCompactOperator.prepareCommit(true, 1);
+        TypeSerializer<Committable> serializer =
+                new CommittableTypeInfo().createSerializer(new ExecutionConfig());
+        OneInputStreamOperatorTestHarness<RowData, Committable> harness =
+                new OneInputStreamOperatorTestHarness<>(operator);
+        harness.setup(serializer);
+        harness.initializeEmptyState();
+        harness.open();
 
+        harness.processElement(new StreamRecord<>(data(0)));
+        harness.processElement(new StreamRecord<>(data(0)));
+        harness.processElement(new StreamRecord<>(data(1)));
+        harness.processElement(new StreamRecord<>(data(1)));
+        harness.processElement(new StreamRecord<>(data(2)));
+
+        operator.prepareCommit(true, 1);
         Assertions.assertThat(compactRememberStoreWrite.compactTime).isEqualTo(3);
     }
 

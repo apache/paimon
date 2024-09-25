@@ -24,6 +24,7 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.source.DataSplit
 
+import org.apache.spark.scheduler.{SparkListener, SparkListenerJobEnd, SparkListenerStageCompleted, SparkListenerStageSubmitted}
 import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
@@ -645,6 +646,87 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
           .assertThat(dataSplit.dataFiles().size())
           .isEqualTo(1)
       }
+    }
+  }
+
+  test("Paimon Procedure: test aware-bucket compaction read parallelism") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, value STRING)
+                 |TBLPROPERTIES ('primary-key'='id', 'bucket'='3', 'write-only'='true')
+                 |""".stripMargin)
+
+    val table = loadTable("T")
+    for (i <- 1 to 10) {
+      sql(s"INSERT INTO T VALUES ($i, '$i')")
+    }
+    assertResult(10)(table.snapshotManager().snapshotCount())
+
+    val buckets = table.newSnapshotReader().bucketEntries().asScala.map(_.bucket()).distinct.size
+    assertResult(3)(buckets)
+
+    val taskBuffer = scala.collection.mutable.ListBuffer.empty[Int]
+    val listener = new SparkListener {
+      override def onStageSubmitted(stageSubmitted: SparkListenerStageSubmitted): Unit = {
+        taskBuffer += stageSubmitted.stageInfo.numTasks
+      }
+    }
+
+    try {
+      spark.sparkContext.addSparkListener(listener)
+
+      // spark.default.parallelism cannot be change in spark session
+      // sparkParallelism is 2, bucket is 3, use 2 as the read parallelism
+      spark.conf.set("spark.sql.shuffle.partitions", 2)
+      spark.sql("CALL sys.compact(table => 'T')")
+
+      // sparkParallelism is 5, bucket is 3, use 3 as the read parallelism
+      spark.conf.set("spark.sql.shuffle.partitions", 5)
+      spark.sql("CALL sys.compact(table => 'T')")
+
+      assertResult(Seq(2, 3))(taskBuffer)
+    } finally {
+      spark.sparkContext.removeSparkListener(listener)
+    }
+  }
+
+  test("Paimon Procedure: test unaware-bucket compaction read parallelism") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, value STRING)
+                 |TBLPROPERTIES ('bucket'='-1', 'write-only'='true')
+                 |""".stripMargin)
+
+    val table = loadTable("T")
+    for (i <- 1 to 12) {
+      sql(s"INSERT INTO T VALUES ($i, '$i')")
+    }
+    assertResult(12)(table.snapshotManager().snapshotCount())
+
+    val buckets = table.newSnapshotReader().bucketEntries().asScala.map(_.bucket()).distinct.size
+    // only has bucket-0
+    assertResult(1)(buckets)
+
+    val taskBuffer = scala.collection.mutable.ListBuffer.empty[Int]
+    val listener = new SparkListener {
+      override def onStageSubmitted(stageSubmitted: SparkListenerStageSubmitted): Unit = {
+        taskBuffer += stageSubmitted.stageInfo.numTasks
+      }
+    }
+
+    try {
+      spark.sparkContext.addSparkListener(listener)
+
+      // spark.default.parallelism cannot be change in spark session
+      // sparkParallelism is 2, task groups is 6, use 2 as the read parallelism
+      spark.conf.set("spark.sql.shuffle.partitions", 2)
+      spark.sql("CALL sys.compact(table => 'T', options => 'compaction.max.file-num=2')")
+
+      // sparkParallelism is 5, task groups is 3, use 3 as the read parallelism
+      spark.conf.set("spark.sql.shuffle.partitions", 5)
+      spark.sql("CALL sys.compact(table => 'T', options => 'compaction.max.file-num=2')")
+
+      assertResult(Seq(2, 3))(taskBuffer)
+    } finally {
+      spark.sparkContext.removeSparkListener(listener)
     }
   }
 

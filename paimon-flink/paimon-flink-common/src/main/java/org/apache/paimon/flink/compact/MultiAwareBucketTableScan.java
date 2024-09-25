@@ -24,7 +24,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
-import org.apache.paimon.table.system.BucketsTable;
+import org.apache.paimon.table.system.CompactBucketsTable;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 
@@ -44,7 +44,7 @@ import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.compactOpti
  */
 public class MultiAwareBucketTableScan extends MultiTableScanBase<Tuple2<Split, String>> {
 
-    protected transient Map<Identifier, BucketsTable> tablesMap;
+    protected transient Map<Identifier, CompactBucketsTable> tablesMap;
     protected transient Map<Identifier, StreamTableScan> scansMap;
 
     public MultiAwareBucketTableScan(
@@ -87,8 +87,9 @@ public class MultiAwareBucketTableScan extends MultiTableScanBase<Tuple2<Split, 
     @Override
     public void addScanTable(FileStoreTable fileStoreTable, Identifier identifier) {
         if (fileStoreTable.bucketMode() != BucketMode.BUCKET_UNAWARE) {
-            BucketsTable bucketsTable =
-                    new BucketsTable(fileStoreTable, isStreaming, identifier.getDatabaseName())
+            CompactBucketsTable bucketsTable =
+                    new CompactBucketsTable(
+                                    fileStoreTable, isStreaming, identifier.getDatabaseName())
                             .copy(compactOptions(isStreaming));
             tablesMap.put(identifier, bucketsTable);
             scansMap.put(identifier, bucketsTable.newReadBuilder().newStreamScan());

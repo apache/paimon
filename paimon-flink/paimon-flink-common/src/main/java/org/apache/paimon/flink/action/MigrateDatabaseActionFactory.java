@@ -28,6 +28,7 @@ public class MigrateDatabaseActionFactory implements ActionFactory {
 
     private static final String SOURCE_TYPE = "source_type";
     private static final String OPTIONS = "options";
+    private static final String PARALLELISM = "parallelism";
 
     @Override
     public String identifier() {
@@ -41,10 +42,16 @@ public class MigrateDatabaseActionFactory implements ActionFactory {
         String sourceHiveDatabase = params.get(DATABASE);
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
         String tableConf = params.get(OPTIONS);
+        Integer parallelism = Integer.parseInt(params.get(PARALLELISM));
 
         MigrateDatabaseAction migrateDatabaseAction =
                 new MigrateDatabaseAction(
-                        connector, warehouse, sourceHiveDatabase, catalogConfig, tableConf);
+                        connector,
+                        warehouse,
+                        sourceHiveDatabase,
+                        catalogConfig,
+                        tableConf,
+                        parallelism);
         return Optional.of(migrateDatabaseAction);
     }
 

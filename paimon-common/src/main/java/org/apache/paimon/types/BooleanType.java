@@ -41,6 +41,11 @@ public class BooleanType extends DataType {
     }
 
     @Override
+    public int defaultSize() {
+        return 1;
+    }
+
+    @Override
     public DataType copy(boolean isNullable) {
         return new BooleanType(isNullable);
     }

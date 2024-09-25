@@ -27,11 +27,13 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -56,6 +58,7 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SimpleFileReader;
@@ -234,130 +237,155 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
     private class AuditLogDataReader implements SnapshotReader {
 
-        private final SnapshotReader snapshotReader;
+        private final SnapshotReader wrapped;
 
-        private AuditLogDataReader(SnapshotReader snapshotReader) {
-            this.snapshotReader = snapshotReader;
+        private AuditLogDataReader(SnapshotReader wrapped) {
+            this.wrapped = wrapped;
+        }
+
+        @Override
+        public Integer parallelism() {
+            return wrapped.parallelism();
         }
 
         @Override
         public SnapshotManager snapshotManager() {
-            return snapshotReader.snapshotManager();
+            return wrapped.snapshotManager();
+        }
+
+        @Override
+        public ManifestsReader manifestsReader() {
+            return wrapped.manifestsReader();
+        }
+
+        @Override
+        public List<ManifestEntry> readManifest(ManifestFileMeta manifest) {
+            return wrapped.readManifest(manifest);
         }
 
         @Override
         public ConsumerManager consumerManager() {
-            return snapshotReader.consumerManager();
+            return wrapped.consumerManager();
         }
 
         @Override
         public SplitGenerator splitGenerator() {
-            return snapshotReader.splitGenerator();
+            return wrapped.splitGenerator();
+        }
+
+        @Override
+        public FileStorePathFactory pathFactory() {
+            return wrapped.pathFactory();
         }
 
         public SnapshotReader withSnapshot(long snapshotId) {
-            snapshotReader.withSnapshot(snapshotId);
+            wrapped.withSnapshot(snapshotId);
             return this;
         }
 
         public SnapshotReader withSnapshot(Snapshot snapshot) {
-            snapshotReader.withSnapshot(snapshot);
+            wrapped.withSnapshot(snapshot);
             return this;
         }
 
         public SnapshotReader withFilter(Predicate predicate) {
-            convert(predicate).ifPresent(snapshotReader::withFilter);
+            convert(predicate).ifPresent(wrapped::withFilter);
             return this;
         }
 
         @Override
         public SnapshotReader withPartitionFilter(Map<String, String> partitionSpec) {
-            snapshotReader.withPartitionFilter(partitionSpec);
+            wrapped.withPartitionFilter(partitionSpec);
             return this;
         }
 
         @Override
         public SnapshotReader withPartitionFilter(Predicate predicate) {
-            snapshotReader.withPartitionFilter(predicate);
+            wrapped.withPartitionFilter(predicate);
             return this;
         }
 
         @Override
         public SnapshotReader withPartitionFilter(List<BinaryRow> partitions) {
-            snapshotReader.withPartitionFilter(partitions);
+            wrapped.withPartitionFilter(partitions);
             return this;
         }
 
         @Override
         public SnapshotReader withMode(ScanMode scanMode) {
-            snapshotReader.withMode(scanMode);
+            wrapped.withMode(scanMode);
             return this;
         }
 
         @Override
         public SnapshotReader withLevelFilter(Filter<Integer> levelFilter) {
-            snapshotReader.withLevelFilter(levelFilter);
+            wrapped.withLevelFilter(levelFilter);
             return this;
         }
 
         @Override
         public SnapshotReader withManifestEntryFilter(Filter<ManifestEntry> filter) {
-            snapshotReader.withManifestEntryFilter(filter);
+            wrapped.withManifestEntryFilter(filter);
             return this;
         }
 
         public SnapshotReader withBucket(int bucket) {
-            snapshotReader.withBucket(bucket);
+            wrapped.withBucket(bucket);
             return this;
         }
 
         @Override
         public SnapshotReader withBucketFilter(Filter<Integer> bucketFilter) {
-            snapshotReader.withBucketFilter(bucketFilter);
+            wrapped.withBucketFilter(bucketFilter);
             return this;
         }
 
         @Override
         public SnapshotReader withDataFileNameFilter(Filter<String> fileNameFilter) {
-            snapshotReader.withDataFileNameFilter(fileNameFilter);
+            wrapped.withDataFileNameFilter(fileNameFilter);
             return this;
         }
 
         @Override
         public SnapshotReader withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
-            snapshotReader.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
+            wrapped.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
             return this;
         }
 
         @Override
         public SnapshotReader withMetricRegistry(MetricRegistry registry) {
-            snapshotReader.withMetricRegistry(registry);
+            wrapped.withMetricRegistry(registry);
             return this;
         }
 
         @Override
         public Plan read() {
-            return snapshotReader.read();
+            return wrapped.read();
         }
 
         @Override
         public Plan readChanges() {
-            return snapshotReader.readChanges();
+            return wrapped.readChanges();
         }
 
         @Override
         public Plan readIncrementalDiff(Snapshot before) {
-            return snapshotReader.readIncrementalDiff(before);
+            return wrapped.readIncrementalDiff(before);
         }
 
         @Override
         public List<BinaryRow> partitions() {
-            return snapshotReader.partitions();
+            return wrapped.partitions();
         }
 
         @Override
         public List<PartitionEntry> partitionEntries() {
-            return snapshotReader.partitionEntries();
+            return wrapped.partitionEntries();
+        }
+
+        @Override
+        public List<BucketEntry> bucketEntries() {
+            return wrapped.bucketEntries();
         }
     }
 

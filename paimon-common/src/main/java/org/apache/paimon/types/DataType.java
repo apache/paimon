@@ -104,6 +104,9 @@ public abstract class DataType implements Serializable {
         return typeRoot.getFamilies().contains(family);
     }
 
+    /** The default size of a value of this data type, used internally for size estimation. */
+    public abstract int defaultSize();
+
     /**
      * Returns a deep copy of this type with possibly different nullability.
      *

@@ -72,7 +72,7 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
 
     @BeforeAll
     public void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
-        Path warehousePath = new Path("file:///" + tempDir.toString());
+        warehousePath = new Path("file:///" + tempDir.toString());
         spark =
                 SparkSession.builder()
                         .master("local[1]")
@@ -128,7 +128,9 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                         tableRoot,
                         RowType.of(),
                         new CoreOptions(new Options()).partitionDefaultName(),
-                        CoreOptions.FILE_FORMAT.defaultValue().toString());
+                        CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue());
 
         Table table = fileSystemCatalog.getTable(Identifier.create("db", "T"));
         ReadBuilder readBuilder = table.newReadBuilder();

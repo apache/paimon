@@ -130,7 +130,7 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
             tEnv.executeSql(
                             "CALL sys.migrate_database(connector => 'hive', source_database => 'my_database', options => 'file.format="
                                     + format
-                                    + "')")
+                                    + "', parallelism => 6)")
                     .await();
         } else {
             tEnv.executeSql(
@@ -257,7 +257,8 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
                         System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
                         "my_database",
                         catalogConf,
-                        "");
+                        "",
+                        6);
         migrateDatabaseAction.run();
 
         tEnv.executeSql(

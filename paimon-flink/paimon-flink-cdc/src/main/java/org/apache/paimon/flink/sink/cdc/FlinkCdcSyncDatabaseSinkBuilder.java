@@ -180,7 +180,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     }
 
     private void buildForUnawareBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {
-        new CdcUnawareBucketSink(table, parallelism).sinkFrom(parsed);
+        // rebalance it to make sure schema change work to avoid infinite loop
+        new CdcUnawareBucketSink(table, parallelism).sinkFrom(parsed.rebalance());
     }
 
     private void buildDividedCdcSink() {

@@ -91,12 +91,12 @@ public class TagActionITCase extends ActionITCaseBase {
                         .run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.create_tag('%s.%s', 'tag2', 2)", database, tableName));
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.create_tag(`table` => '%s.%s', tag => 'tag2', snapshot_id => cast(2 as bigint))",
                                 database, tableName));
@@ -127,11 +127,11 @@ public class TagActionITCase extends ActionITCaseBase {
                         .run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format("CALL sys.delete_tag('%s.%s', 'tag2')", database, tableName));
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.delete_tag(`table` => '%s.%s', tag => 'tag2')",
                                 database, tableName));
@@ -160,12 +160,12 @@ public class TagActionITCase extends ActionITCaseBase {
                         .run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.create_tag('%s.%s', 'tag1', 1)", database, tableName));
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.create_tag(`table` => '%s.%s', tag => 'tag1', snapshot_id => cast(1 as bigint))",
                                 database, tableName));
@@ -193,12 +193,12 @@ public class TagActionITCase extends ActionITCaseBase {
                         .run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.create_tag('%s.%s', 'tag3', 3)", database, tableName));
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.create_tag(`table` => '%s.%s', tag => 'tag3', snapshot_id => cast(3 as bigint))",
                                 database, tableName));
@@ -223,12 +223,12 @@ public class TagActionITCase extends ActionITCaseBase {
                         .run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.delete_tag('%s.%s', 'tag1,tag3')", database, tableName));
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.delete_tag(`table` => '%s.%s', tag => 'tag1,tag3')",
                                 database, tableName));
@@ -284,12 +284,12 @@ public class TagActionITCase extends ActionITCaseBase {
                         .run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.create_tag('%s.%s', 'tag2',  2)", database, tableName));
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.create_tag(`table` => '%s.%s', tag => 'tag2', snapshot_id => cast(2 as bigint))",
                                 database, tableName));

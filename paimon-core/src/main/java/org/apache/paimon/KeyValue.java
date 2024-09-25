@@ -21,12 +21,9 @@ package org.apache.paimon;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.utils.InternalRowUtils;
 
 import java.util.ArrayList;
@@ -34,10 +31,9 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static org.apache.paimon.schema.SystemColumns.LEVEL;
-import static org.apache.paimon.schema.SystemColumns.SEQUENCE_NUMBER;
-import static org.apache.paimon.schema.SystemColumns.VALUE_KIND;
-import static org.apache.paimon.utils.Preconditions.checkState;
+import static org.apache.paimon.table.SystemFields.LEVEL;
+import static org.apache.paimon.table.SystemFields.SEQUENCE_NUMBER;
+import static org.apache.paimon.table.SystemFields.VALUE_KIND;
 
 /**
  * A key value, including user key, sequence number, value kind and value. This object can be
@@ -115,70 +111,29 @@ public class KeyValue {
     }
 
     public static RowType schema(RowType keyType, RowType valueType) {
-        List<DataField> fields = new ArrayList<>(keyType.getFields());
-        fields.add(new DataField(0, SEQUENCE_NUMBER, new BigIntType(false)));
-        fields.add(new DataField(1, VALUE_KIND, new TinyIntType(false)));
-        fields.addAll(valueType.getFields());
-        return new RowType(fields);
+        return new RowType(createKeyValueFields(keyType.getFields(), valueType.getFields()));
     }
 
     public static RowType schemaWithLevel(RowType keyType, RowType valueType) {
-        RowType.Builder builder = RowType.builder();
-        schema(keyType, valueType)
-                .getFields()
-                .forEach(f -> builder.field(f.name(), f.type(), f.description()));
-        builder.field(LEVEL, DataTypes.INT().notNull());
-        return builder.build();
+        List<DataField> fields = new ArrayList<>(schema(keyType, valueType).getFields());
+        fields.add(LEVEL);
+        return new RowType(fields);
     }
 
     /**
-     * Create key-value fields, we need to add a const value to the id of value field to ensure that
-     * they are consistent when compared by field id. For example, there are two table with key
-     * value fields as follows
-     *
-     * <ul>
-     *   <li>Table1 key fields: 1->a, 2->b, 3->c; value fields: 0->value_count
-     *   <li>Table2 key fields: 1->c, 3->d, 4->a, 5->b; value fields: 0->value_count
-     * </ul>
-     *
-     * <p>We will use 5 as maxKeyId, and create fields for Table1/Table2 as follows
-     *
-     * <ul>
-     *   <li>Table1 fields: 1->a, 2->b, 3->c, 6->seq, 7->kind, 8->value_count
-     *   <li>Table2 fields: 1->c, 3->d, 4->a, 5->b, 6->seq, 7->kind, 8->value_count
-     * </ul>
-     *
-     * <p>Then we can compare these two table fields with the field id.
+     * Create key-value fields.
      *
      * @param keyFields the key fields
      * @param valueFields the value fields
-     * @param maxKeyId the max key id
      * @return the table fields
      */
     public static List<DataField> createKeyValueFields(
-            List<DataField> keyFields, List<DataField> valueFields, final int maxKeyId) {
-        checkState(maxKeyId >= keyFields.stream().mapToInt(DataField::id).max().orElse(0));
-
+            List<DataField> keyFields, List<DataField> valueFields) {
         List<DataField> fields = new ArrayList<>(keyFields.size() + valueFields.size() + 2);
         fields.addAll(keyFields);
-        fields.add(
-                new DataField(
-                        maxKeyId + 1,
-                        SEQUENCE_NUMBER,
-                        new org.apache.paimon.types.BigIntType(false)));
-        fields.add(
-                new DataField(
-                        maxKeyId + 2, VALUE_KIND, new org.apache.paimon.types.TinyIntType(false)));
-        for (DataField valueField : valueFields) {
-            DataField newValueField =
-                    new DataField(
-                            valueField.id() + maxKeyId + 3,
-                            valueField.name(),
-                            valueField.type(),
-                            valueField.description());
-            fields.add(newValueField);
-        }
-
+        fields.add(SEQUENCE_NUMBER);
+        fields.add(VALUE_KIND);
+        fields.addAll(valueFields);
         return fields;
     }
 

@@ -259,4 +259,9 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
     public List<Identifier> excludedTables() {
         return excludedTables;
     }
+
+    @Override
+    protected boolean requirePrimaryKeys() {
+        return true;
+    }
 }

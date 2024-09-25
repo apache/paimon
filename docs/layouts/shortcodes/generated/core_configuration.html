@@ -63,6 +63,12 @@ under the License.
             <td>Memory page size for caching.</td>
         </tr>
         <tr>
+            <td><h5>changelog-file.prefix</h5></td>
+            <td style="word-wrap: break-word;">"changelog-"</td>
+            <td>String</td>
+            <td>Specify the file name prefix of changelog files.</td>
+        </tr>
+        <tr>
             <td><h5>changelog-producer</h5></td>
             <td style="word-wrap: break-word;">none</td>
             <td><p>Enum</p></td>
@@ -73,6 +79,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to generate -U, +U changelog for the same record. This configuration is only valid for the changelog-producer is lookup or full-compaction.</td>
+        </tr>
+        <tr>
+            <td><h5>changelog-producer.row-deduplicate-ignore-fields</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Fields that are ignored for comparison while generating -U, +U changelog for the same record. This configuration is only valid for the changelog-producer.row-deduplicate is true.</td>
         </tr>
         <tr>
             <td><h5>changelog.num-retained.max</h5></td>
@@ -199,6 +211,12 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
             <td>The TTL in rocksdb index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
+        </tr>
+        <tr>
+            <td><h5>data-file.prefix</h5></td>
+            <td style="word-wrap: break-word;">"data-"</td>
+            <td>String</td>
+            <td>Specify the file name prefix of data files.</td>
         </tr>
         <tr>
             <td><h5>delete-file.thread-num</h5></td>
@@ -863,6 +881,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">(none)</td>
             <td>MemorySize</td>
             <td>Target size of a file.<ul><li>primary key table: the default value is 128 MB.</li><li>append table: the default value is 256 MB.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>type</h5></td>
+            <td style="word-wrap: break-word;">table</td>
+            <td><p>Enum</p></td>
+            <td>Type of the table.<br /><br />Possible values:<ul><li>"table": Normal Paimon table.</li><li>"format-table": A file format table refers to a directory that contains multiple files of the same format.</li></ul></td>
         </tr>
         <tr>
             <td><h5>write-buffer-for-append</h5></td>

@@ -28,9 +28,6 @@ import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.source.DataTableSource;
 import org.apache.paimon.flink.source.SystemTableSource;
-import org.apache.paimon.flink.source.table.PushedRichTableSource;
-import org.apache.paimon.flink.source.table.PushedTableSource;
-import org.apache.paimon.flink.source.table.RichTableSource;
 import org.apache.paimon.lineage.LineageMeta;
 import org.apache.paimon.lineage.LineageMetaFactory;
 import org.apache.paimon.lineage.TableLineageEntity;
@@ -83,7 +80,6 @@ import static org.apache.paimon.CoreOptions.StartupMode.FROM_SNAPSHOT;
 import static org.apache.paimon.CoreOptions.StartupMode.FROM_SNAPSHOT_FULL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.NONE;
-import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PUSH_DOWN;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.flink.log.LogStoreTableFactory.discoverLogStoreFactory;
 
@@ -100,11 +96,10 @@ public abstract class AbstractFlinkTableFactory
                 context.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
                         == RuntimeExecutionMode.STREAMING;
         if (origin instanceof SystemCatalogTable) {
-            return new PushedTableSource(
-                    new SystemTableSource(
-                            ((SystemCatalogTable) origin).table(),
-                            isStreamingMode,
-                            context.getObjectIdentifier()));
+            return new SystemTableSource(
+                    ((SystemCatalogTable) origin).table(),
+                    isStreamingMode,
+                    context.getObjectIdentifier());
         } else {
             Table table = buildPaimonTable(context);
             if (table instanceof FileStoreTable) {
@@ -120,16 +115,12 @@ public abstract class AbstractFlinkTableFactory
                             }
                         });
             }
-            DataTableSource source =
-                    new DataTableSource(
-                            context.getObjectIdentifier(),
-                            table,
-                            isStreamingMode,
-                            context,
-                            createOptionalLogStoreFactory(context).orElse(null));
-            return new Options(table.options()).get(SCAN_PUSH_DOWN)
-                    ? new PushedRichTableSource(source)
-                    : new RichTableSource(source);
+            return new DataTableSource(
+                    context.getObjectIdentifier(),
+                    table,
+                    isStreamingMode,
+                    context,
+                    createOptionalLogStoreFactory(context).orElse(null));
         }
     }
 

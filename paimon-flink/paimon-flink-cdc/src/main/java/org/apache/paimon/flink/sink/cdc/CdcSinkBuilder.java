@@ -139,6 +139,7 @@ public class CdcSinkBuilder<T> {
 
     private DataStreamSink<?> buildForUnawareBucket(DataStream<CdcRecord> parsed) {
         FileStoreTable dataTable = (FileStoreTable) table;
-        return new CdcUnawareBucketSink(dataTable, parallelism).sinkFrom(parsed);
+        // rebalance it to make sure schema change work to avoid infinite loop
+        return new CdcUnawareBucketSink(dataTable, parallelism).sinkFrom(parsed.rebalance());
     }
 }

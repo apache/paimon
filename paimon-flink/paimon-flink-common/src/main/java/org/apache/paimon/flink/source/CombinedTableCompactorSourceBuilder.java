@@ -25,7 +25,7 @@ import org.apache.paimon.flink.source.operator.CombinedAwareBatchSourceFunction;
 import org.apache.paimon.flink.source.operator.CombinedAwareStreamingSourceFunction;
 import org.apache.paimon.flink.source.operator.CombinedUnawareBatchSourceFunction;
 import org.apache.paimon.flink.source.operator.CombinedUnawareStreamingSourceFunction;
-import org.apache.paimon.table.system.BucketsTable;
+import org.apache.paimon.table.system.CompactBucketsTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
@@ -85,7 +85,7 @@ public class CombinedTableCompactorSourceBuilder {
 
     public DataStream<RowData> buildAwareBucketTableSource() {
         Preconditions.checkArgument(env != null, "StreamExecutionEnvironment should not be null.");
-        RowType produceType = BucketsTable.getRowType();
+        RowType produceType = CompactBucketsTable.getRowType();
         if (isContinuous) {
             return CombinedAwareStreamingSourceFunction.buildSource(
                     env,

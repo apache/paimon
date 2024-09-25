@@ -232,7 +232,17 @@ Rollback a table to a specific snapshot ID.
 
 {{< tabs "rollback-to" >}}
 
-{{< tab "Flink" >}}
+{{< tab "Flink SQL" >}}
+
+Run the following command:
+
+```sql
+CALL sys.rollback_to(`table` => 'database_name.table_name', snapshot_id => <snasphot-id>);
+```
+
+{{< /tab >}}
+
+{{< tab "Flink Action" >}}
 
 Run the following command:
 
@@ -298,9 +308,9 @@ submit a `remove_orphan_files` job to clean them:
 
 {{< tab "Spark SQL/Flink SQL" >}}
 ```sql
-CALL sys.remove_orphan_files(table => "my_db.my_table", [older_than => "2023-10-31 12:00:00"])
+CALL sys.remove_orphan_files(`table` => "my_db.my_table", [older_than => "2023-10-31 12:00:00"])
 
-CALL sys.remove_orphan_files(table => "my_db.*", [older_than => "2023-10-31 12:00:00"])
+CALL sys.remove_orphan_files(`table` => "my_db.*", [older_than => "2023-10-31 12:00:00"])
 ```
 {{< /tab >}}
 
@@ -314,7 +324,8 @@ CALL sys.remove_orphan_files(table => "my_db.*", [older_than => "2023-10-31 12:0
     --database <database-name> \ 
     --table <table-name> \
     [--older_than <timestamp>] \
-    [--dry_run <false/true>] 
+    [--dry_run <false/true>] \
+    [--parallelism <parallelism>]
 ```
 
 To avoid deleting files that are newly added by other writing jobs, this action only deletes orphan files older than

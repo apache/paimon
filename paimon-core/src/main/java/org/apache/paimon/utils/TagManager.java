@@ -71,7 +71,7 @@ public class TagManager {
     public TagManager(FileIO fileIO, Path tablePath, String branch) {
         this.fileIO = fileIO;
         this.tablePath = tablePath;
-        this.branch = StringUtils.isNullOrWhitespaceOnly(branch) ? DEFAULT_MAIN_BRANCH : branch;
+        this.branch = BranchManager.normalizeBranch(branch);
     }
 
     public TagManager copyWithBranch(String branchName) {
@@ -86,6 +86,13 @@ public class TagManager {
     /** Return the path of a tag. */
     public Path tagPath(String tagName) {
         return new Path(branchPath(tablePath, branch) + "/tag/" + TAG_PREFIX + tagName);
+    }
+
+    public List<Path> tagPaths(Predicate<Path> predicate) throws IOException {
+        return listVersionedFileStatus(fileIO, tagDirectory(), TAG_PREFIX)
+                .map(FileStatus::getPath)
+                .filter(predicate)
+                .collect(Collectors.toList());
     }
 
     /** Create a tag from given snapshot and save it in the storage. */
@@ -307,10 +314,7 @@ public class TagManager {
         TreeMap<Snapshot, List<String>> tags =
                 new TreeMap<>(Comparator.comparingLong(Snapshot::id));
         try {
-            List<Path> paths =
-                    listVersionedFileStatus(fileIO, tagDirectory(), TAG_PREFIX)
-                            .map(FileStatus::getPath)
-                            .collect(Collectors.toList());
+            List<Path> paths = tagPaths(path -> true);
 
             for (Path path : paths) {
                 String tagName = path.getName().substring(TAG_PREFIX.length());
@@ -335,10 +339,7 @@ public class TagManager {
     /** Get all {@link Tag}s. */
     public List<Pair<Tag, String>> tagObjects() {
         try {
-            List<Path> paths =
-                    listVersionedFileStatus(fileIO, tagDirectory(), TAG_PREFIX)
-                            .map(FileStatus::getPath)
-                            .collect(Collectors.toList());
+            List<Path> paths = tagPaths(path -> true);
             List<Pair<Tag, String>> tags = new ArrayList<>();
             for (Path path : paths) {
                 String tagName = path.getName().substring(TAG_PREFIX.length());

@@ -90,11 +90,16 @@ public class HadoopUtils {
         // a configuration
         // file with higher priority should be added later.
 
-        // Approach 1: HADOOP_HOME environment variables
-        String[] possibleHadoopConfPaths = new String[2];
-
         HadoopConfigLoader loader = options.get(HADOOP_CONF_LOADER);
 
+        // The HDFS configuration priority from low to high is as follows:
+        // 1. HADOOP_HOME
+        // 2. HADOOP_CONF_DIR
+        // 3. Paimon catalog or paimon table configuration(hadoop-conf-dir)
+        // 4. paimon table advanced configurations
+
+        // Approach 1: HADOOP_HOME environment variables
+        String[] possibleHadoopConfPaths = new String[2];
         final String hadoopHomeDir = System.getenv(HADOOP_HOME_ENV);
         if (hadoopHomeDir != null && loader.loadEnv()) {
             LOG.debug("Searching Hadoop configuration files in HADOOP_HOME: {}", hadoopHomeDir);
@@ -109,17 +114,7 @@ public class HadoopUtils {
             }
         }
 
-        // Approach 2: Paimon Catalog Option
-        final String hadoopConfigPath = options.getString(PATH_HADOOP_CONFIG, null);
-        if (!StringUtils.isNullOrWhitespaceOnly(hadoopConfigPath) && loader.loadOption()) {
-            LOG.debug(
-                    "Searching Hadoop configuration files in Paimon config: {}", hadoopConfigPath);
-            foundHadoopConfiguration =
-                    addHadoopConfIfFound(result, hadoopConfigPath, options)
-                            || foundHadoopConfiguration;
-        }
-
-        // Approach 3: HADOOP_CONF_DIR environment variable
+        // Approach 2: HADOOP_CONF_DIR environment variable
         String hadoopConfDir = System.getenv(HADOOP_CONF_ENV);
         if (!StringUtils.isNullOrWhitespaceOnly(hadoopConfDir) && loader.loadEnv()) {
             LOG.debug("Searching Hadoop configuration files in HADOOP_CONF_DIR: {}", hadoopConfDir);
@@ -128,7 +123,16 @@ public class HadoopUtils {
                             || foundHadoopConfiguration;
         }
 
-        // Approach 4: Paimon configuration
+        // Approach 3: Paimon table or paimon catalog hadoop conf
+        hadoopConfDir = options.getString(PATH_HADOOP_CONFIG, null);
+        if (!StringUtils.isNullOrWhitespaceOnly(hadoopConfDir) && loader.loadOption()) {
+            LOG.debug("Searching Hadoop configuration files in Paimon config: {}", hadoopConfDir);
+            foundHadoopConfiguration =
+                    addHadoopConfIfFound(result, hadoopConfDir, options)
+                            || foundHadoopConfiguration;
+        }
+
+        // Approach 4: Paimon advanced configuration
         // add all configuration key with prefix 'hadoop.' in Paimon conf to hadoop conf
         for (String key : options.keySet()) {
             for (String prefix : CONFIG_PREFIXES) {
@@ -157,7 +161,7 @@ public class HadoopUtils {
      * Search Hadoop configuration files in the given path, and add them to the configuration if
      * found.
      */
-    private static boolean addHadoopConfIfFound(
+    public static boolean addHadoopConfIfFound(
             Configuration configuration, String possibleHadoopConfPath, Options options) {
         Path root = new Path(possibleHadoopConfPath);
 
@@ -183,6 +187,17 @@ public class HadoopUtils {
                             "Adding "
                                     + possibleHadoopConfPath
                                     + "/hdfs-site.xml to hadoop configuration");
+                    foundHadoopConfiguration = true;
+                }
+
+                // Add mapred-site.xml. We need to read configurations like compression codec.
+                path = new Path(possibleHadoopConfPath, "mapred-site.xml");
+                if (fileIO.exists(path)) {
+                    readHadoopXml(fileIO.readFileUtf8(path), configuration);
+                    LOG.debug(
+                            "Adding "
+                                    + possibleHadoopConfPath
+                                    + "/mapred-site.xml to hadoop configuration");
                     foundHadoopConfiguration = true;
                 }
             }
@@ -222,7 +237,7 @@ public class HadoopUtils {
     public enum HadoopConfigLoader implements DescribedEnum {
         ALL("all", "Load Hadoop conf from environment variables and catalog option.", true, true),
         ENV("env", "Load Hadoop conf from environment variables only.", true, false),
-        OPTION("option", "Load Hadoop conf from catalog option only.", false, true);
+        OPTION("option", "Load Hadoop conf from catalog or table option only.", false, true);
 
         private final String value;
         private final String description;

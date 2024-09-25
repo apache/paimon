@@ -46,7 +46,6 @@ import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
@@ -65,6 +64,7 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
@@ -95,7 +95,7 @@ public class SchemaManager implements Serializable {
     public SchemaManager(FileIO fileIO, Path tableRoot, String branch) {
         this.fileIO = fileIO;
         this.tableRoot = tableRoot;
-        this.branch = StringUtils.isNullOrWhitespaceOnly(branch) ? DEFAULT_MAIN_BRANCH : branch;
+        this.branch = BranchManager.normalizeBranch(branch);
     }
 
     public SchemaManager copyWithBranch(String branchName) {
@@ -631,6 +631,13 @@ public class SchemaManager implements Serializable {
     @VisibleForTesting
     public Path toSchemaPath(long schemaId) {
         return new Path(branchPath() + "/schema/" + SCHEMA_PREFIX + schemaId);
+    }
+
+    public List<Path> schemaPaths(Predicate<Long> predicate) throws IOException {
+        return listVersionedFiles(fileIO, schemaDirectory(), SCHEMA_PREFIX)
+                .filter(predicate)
+                .map(this::toSchemaPath)
+                .collect(Collectors.toList());
     }
 
     /**

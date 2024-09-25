@@ -40,6 +40,7 @@ class EqualiserCodeGenerator(fieldTypes: Array[DataType], fields: Array[Int]) {
     val ctx = new CodeGeneratorContext
     val className = newName(name)
 
+    val containsIgnoreFields = fieldTypes.length > fields.length
     val equalsMethodCodes = for (idx <- fields) yield generateEqualsMethod(ctx, idx)
     val equalsMethodCalls = for (idx <- fields) yield {
       val methodName = getEqualsMethodName(idx)
@@ -57,7 +58,7 @@ class EqualiserCodeGenerator(fieldTypes: Array[DataType], fields: Array[Int]) {
 
           @Override
           public boolean equals($ROW_DATA $LEFT_INPUT, $ROW_DATA $RIGHT_INPUT) {
-            if ($LEFT_INPUT instanceof $BINARY_ROW && $RIGHT_INPUT instanceof $BINARY_ROW) {
+            if ($LEFT_INPUT instanceof $BINARY_ROW && $RIGHT_INPUT instanceof $BINARY_ROW && !$containsIgnoreFields) {
               return $LEFT_INPUT.equals($RIGHT_INPUT);
             }
 

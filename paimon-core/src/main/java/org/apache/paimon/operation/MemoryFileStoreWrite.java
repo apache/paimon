@@ -59,7 +59,6 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
     private WriterBufferMetric writerBufferMetric;
 
     public MemoryFileStoreWrite(
-            String commitUser,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options,
@@ -67,7 +66,6 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
             @Nullable DeletionVectorsMaintainer.Factory dvMaintainerFactory,
             String tableName) {
         super(
-                commitUser,
                 snapshotManager,
                 scan,
                 indexFactory,

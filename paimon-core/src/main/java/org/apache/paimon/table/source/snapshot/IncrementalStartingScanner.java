@@ -22,27 +22,33 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
+import org.apache.paimon.utils.ManifestReadThreadPool;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -51,9 +57,8 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
 
     private static final Logger LOG = LoggerFactory.getLogger(IncrementalStartingScanner.class);
 
-    private long endingSnapshotId;
-
-    private ScanMode scanMode;
+    private final long endingSnapshotId;
+    private final ScanMode scanMode;
 
     public IncrementalStartingScanner(
             SnapshotManager snapshotManager, long start, long end, ScanMode scanMode) {
@@ -70,31 +75,65 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
         if (checkResult.isPresent()) {
             return checkResult.get();
         }
-        Map<SplitInfo, List<DataFileMeta>> grouped = new HashMap<>();
-        for (long i = startingSnapshotId + 1; i < endingSnapshotId + 1; i++) {
-            List<DataSplit> splits = readSplits(reader, snapshotManager.snapshot(i));
-            for (DataSplit split : splits) {
-                grouped.computeIfAbsent(
-                                new SplitInfo(
-                                        split.partition(),
-                                        split.bucket(),
-                                        // take it for false, because multiple snapshot read may
-                                        // need merge for primary key table
-                                        false,
-                                        split.bucketPath(),
-                                        split.deletionFiles().orElse(null)),
-                                k -> new ArrayList<>())
-                        .addAll(split.dataFiles());
-            }
+        Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> grouped = new ConcurrentHashMap<>();
+        ManifestsReader manifestsReader = reader.manifestsReader();
+
+        List<Long> snapshots =
+                LongStream.range(startingSnapshotId + 1, endingSnapshotId + 1)
+                        .boxed()
+                        .collect(Collectors.toList());
+
+        Iterator<ManifestFileMeta> manifests =
+                ManifestReadThreadPool.randomlyExecute(
+                        id -> {
+                            Snapshot snapshot = snapshotManager.snapshot(id);
+                            switch (scanMode) {
+                                case DELTA:
+                                    if (snapshot.commitKind() != CommitKind.APPEND) {
+                                        // ignore COMPACT and OVERWRITE
+                                        return Collections.emptyList();
+                                    }
+                                    break;
+                                case CHANGELOG:
+                                    if (snapshot.commitKind() == CommitKind.OVERWRITE) {
+                                        // ignore OVERWRITE
+                                        return Collections.emptyList();
+                                    }
+                                    break;
+                                default:
+                                    throw new UnsupportedOperationException(
+                                            "Unsupported scan mode: " + scanMode);
+                            }
+
+                            return manifestsReader.read(snapshot, scanMode).filteredManifests;
+                        },
+                        snapshots,
+                        reader.parallelism());
+
+        Iterator<ManifestEntry> entries =
+                ManifestReadThreadPool.randomlyExecute(
+                        reader::readManifest, Lists.newArrayList(manifests), reader.parallelism());
+
+        while (entries.hasNext()) {
+            ManifestEntry entry = entries.next();
+            checkArgument(
+                    entry.kind() == FileKind.ADD, "Delta or changelog should only have ADD files.");
+            grouped.compute(
+                    Pair.of(entry.partition(), entry.bucket()),
+                    (key, files) -> {
+                        if (files == null) {
+                            files = new ArrayList<>();
+                        }
+                        files.add(entry.file());
+                        return files;
+                    });
         }
 
         List<Split> result = new ArrayList<>();
-        for (Map.Entry<SplitInfo, List<DataFileMeta>> entry : grouped.entrySet()) {
-            BinaryRow partition = entry.getKey().partition;
-            int bucket = entry.getKey().bucket;
-            boolean rawConvertible = entry.getKey().rawConvertible;
-            String bucketPath = entry.getKey().bucketPath;
-            List<DeletionFile> deletionFiles = entry.getKey().deletionFiles;
+        for (Map.Entry<Pair<BinaryRow, Integer>, List<DataFileMeta>> entry : grouped.entrySet()) {
+            BinaryRow partition = entry.getKey().getLeft();
+            int bucket = entry.getKey().getRight();
+            String bucketPath = reader.pathFactory().bucketPath(partition, bucket).toString();
             for (SplitGenerator.SplitGroup splitGroup :
                     reader.splitGenerator().splitForBatch(entry.getValue())) {
                 DataSplit.Builder dataSplitBuilder =
@@ -103,11 +142,8 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                                 .withPartition(partition)
                                 .withBucket(bucket)
                                 .withDataFiles(splitGroup.files)
-                                .rawConvertible(rawConvertible)
+                                .rawConvertible(splitGroup.rawConvertible)
                                 .withBucketPath(bucketPath);
-                if (deletionFiles != null) {
-                    dataSplitBuilder.withDataDeletionFiles(deletionFiles);
-                }
                 result.add(dataSplitBuilder.build());
             }
         }
@@ -148,79 +184,5 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                 latestSnapshotId);
 
         return Optional.empty();
-    }
-
-    private List<DataSplit> readSplits(SnapshotReader reader, Snapshot s) {
-        switch (scanMode) {
-            case CHANGELOG:
-                return readChangeLogSplits(reader, s);
-            case DELTA:
-                return readDeltaSplits(reader, s);
-            default:
-                throw new UnsupportedOperationException("Unsupported scan kind: " + scanMode);
-        }
-    }
-
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    private List<DataSplit> readDeltaSplits(SnapshotReader reader, Snapshot s) {
-        if (s.commitKind() != CommitKind.APPEND) {
-            // ignore COMPACT and OVERWRITE
-            return Collections.emptyList();
-        }
-        return (List) reader.withSnapshot(s).withMode(ScanMode.DELTA).read().splits();
-    }
-
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    private List<DataSplit> readChangeLogSplits(SnapshotReader reader, Snapshot s) {
-        if (s.commitKind() == CommitKind.OVERWRITE) {
-            // ignore OVERWRITE
-            return Collections.emptyList();
-        }
-        return (List) reader.withSnapshot(s).withMode(ScanMode.CHANGELOG).read().splits();
-    }
-
-    /** Split information to pass. */
-    private static class SplitInfo {
-
-        private final BinaryRow partition;
-        private final int bucket;
-        private final boolean rawConvertible;
-        private final String bucketPath;
-        @Nullable private final List<DeletionFile> deletionFiles;
-
-        private SplitInfo(
-                BinaryRow partition,
-                int bucket,
-                boolean rawConvertible,
-                String bucketPath,
-                @Nullable List<DeletionFile> deletionFiles) {
-            this.partition = partition;
-            this.bucket = bucket;
-            this.rawConvertible = rawConvertible;
-            this.bucketPath = bucketPath;
-            this.deletionFiles = deletionFiles;
-        }
-
-        @Override
-        public int hashCode() {
-            return Arrays.hashCode(
-                    new Object[] {partition, bucket, rawConvertible, bucketPath, deletionFiles});
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-
-            if (!(obj instanceof SplitInfo)) {
-                return false;
-            }
-
-            SplitInfo that = (SplitInfo) obj;
-
-            return Objects.equals(partition, that.partition)
-                    && bucket == that.bucket
-                    && rawConvertible == that.rawConvertible
-                    && Objects.equals(bucketPath, that.bucketPath)
-                    && Objects.equals(deletionFiles, that.deletionFiles);
-        }
     }
 }
