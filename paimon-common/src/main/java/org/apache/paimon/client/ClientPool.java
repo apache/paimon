@@ -22,6 +22,7 @@ import java.io.Closeable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /** Client pool for using multiple clients to execute actions. */
@@ -54,12 +55,19 @@ public interface ClientPool<C, E extends Exception> {
 
         @Override
         public <R> R run(Action<R, C, E> action) throws E, InterruptedException {
-            C client = this.clients.take();
-            try {
-                return action.run(client);
-            } finally {
-                this.clients.add(client);
+            while (this.clients != null) {
+                C client = this.clients.poll(10, TimeUnit.SECONDS);
+                if (client == null) {
+                    continue;
+                }
+                try {
+                    return action.run(client);
+                } finally {
+                    this.clients.add(client);
+                }
             }
+
+            throw new IllegalStateException("Cannot get a client from a closed pool");
         }
 
         @Override
