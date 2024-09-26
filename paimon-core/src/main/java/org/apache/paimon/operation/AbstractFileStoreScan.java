@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.FileEntry;
+import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestEntrySerializer;
@@ -42,14 +43,18 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
+
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Consumer;
@@ -278,6 +283,21 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         return buckets.values().stream()
                 .filter(p -> p.fileCount() > 0)
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    public Iterator<ManifestEntry> readFileIterator() {
+        List<ManifestFileMeta> manifests = readManifests().filteredManifests;
+        Set<FileEntry.Identifier> deleteEntries =
+                FileEntry.readDeletedEntries(this::readSimpleEntries, manifests, parallelism);
+        Iterator<ManifestEntry> iterator =
+                sequentialBatchedExecute(this::readManifest, manifests, parallelism).iterator();
+        return Iterators.filter(
+                iterator,
+                entry ->
+                        entry != null
+                                && entry.kind() == FileKind.ADD
+                                && !deleteEntries.contains(entry.identifier()));
     }
 
     private Pair<Snapshot, List<ManifestEntry>> doPlan() {
