@@ -36,14 +36,14 @@ abstract class PaimonBaseScanBuilder(table: Table)
 
   protected var requiredSchema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType())
 
-  protected var pushed: Array[(Filter, Predicate)] = Array.empty
+  protected var pushedPredicates: Array[(Filter, Predicate)] = Array.empty
 
   protected var partitionFilter: Array[Filter] = Array.empty
 
   protected var pushDownLimit: Option[Int] = None
 
   override def build(): Scan = {
-    PaimonScan(table, requiredSchema, pushed.map(_._2), partitionFilter, pushDownLimit)
+    PaimonScan(table, requiredSchema, pushedPredicates.map(_._2), partitionFilter, pushDownLimit)
   }
 
   /**
@@ -74,7 +74,7 @@ abstract class PaimonBaseScanBuilder(table: Table)
     }
 
     if (pushable.nonEmpty) {
-      this.pushed = pushable.toArray
+      this.pushedPredicates = pushable.toArray
     }
     if (partitionFilter.nonEmpty) {
       this.partitionFilter = partitionFilter.toArray
@@ -83,7 +83,7 @@ abstract class PaimonBaseScanBuilder(table: Table)
   }
 
   override def pushedFilters(): Array[Filter] = {
-    pushed.map(_._1)
+    pushedPredicates.map(_._1)
   }
 
   override def pruneColumns(requiredSchema: StructType): Unit = {

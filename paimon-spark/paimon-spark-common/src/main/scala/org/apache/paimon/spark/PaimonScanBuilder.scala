@@ -53,24 +53,28 @@ class PaimonScanBuilder(table: Table)
     }
 
     // Only support with push down partition filter
-    if (pushed.length != partitionFilter.length) {
+    if (pushedPredicates.length != partitionFilter.length) {
       return false
     }
 
     val aggregator = new LocalAggregator(table)
-    if (!aggregator.supportAggregation(aggregation)) {
+    if (!aggregator.pushAggregation(aggregation)) {
       return false
     }
 
     val readBuilder = table.newReadBuilder
-    if (pushed.nonEmpty) {
-      val pushedPartitionPredicate = PredicateBuilder.and(pushed.map(_._2): _*)
+    if (pushedPredicates.nonEmpty) {
+      val pushedPartitionPredicate = PredicateBuilder.and(pushedPredicates.map(_._2): _*)
       readBuilder.withFilter(pushedPartitionPredicate)
     }
     val scan = readBuilder.newScan()
     scan.listPartitionEntries.asScala.foreach(aggregator.update)
     localScan = Some(
-      PaimonLocalScan(aggregator.result(), aggregator.resultSchema(), table, pushed.map(_._1)))
+      PaimonLocalScan(
+        aggregator.result(),
+        aggregator.resultSchema(),
+        table,
+        pushedPredicates.map(_._1)))
     true
   }
 

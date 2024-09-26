@@ -42,7 +42,7 @@ class LocalAggregator(table: Table) {
     }
   }
 
-  def supportAggregation(aggregation: Aggregation): Boolean = {
+  def pushAggregation(aggregation: Aggregation): Boolean = {
     if (
       !table.isInstanceOf[DataTable] ||
       !table.primaryKeys.isEmpty
