@@ -33,7 +33,7 @@ import org.slf4j.LoggerFactory;
 /** Write from {@link InternalRow} to {@link VectorSchemaRoot}. */
 public class ArrowFormatWriter implements AutoCloseable {
 
-    private final Logger LOG = LoggerFactory.getLogger(ArrowFormatWriter.class);
+    private static final Logger LOG = LoggerFactory.getLogger(ArrowFormatWriter.class);
 
     private final VectorSchemaRoot vectorSchemaRoot;
     private final ArrowFieldWriter[] fieldWriters;
