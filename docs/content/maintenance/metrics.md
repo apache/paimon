@@ -73,11 +73,6 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
             <td>Skipped table files by partition filter and value / key stats information in the last scan.</td>
         </tr>
         <tr>
-            <td>lastSkippedByBucketAndLevelFilter</td>
-            <td>Gauge</td>
-            <td>Skipped table files by bucket, bucket key and level filter in the last scan.</td>
-        </tr>
-        <tr>
             <td>lastSkippedByWholeBucketFilesFilter</td>
             <td>Gauge</td>
             <td>Skipped table files by bucket level value filter (only primary key table) in the last scan.</td>
