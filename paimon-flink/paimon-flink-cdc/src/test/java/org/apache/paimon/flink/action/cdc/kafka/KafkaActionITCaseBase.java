@@ -227,7 +227,8 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
         }
     }
 
-    private synchronized void logTopicPartitionStatus(Map<String, TopicDescription> topicDescriptions) {
+    private synchronized void logTopicPartitionStatus(
+            Map<String, TopicDescription> topicDescriptions) {
         List<TopicPartition> partitions = new ArrayList<>();
         topicDescriptions.forEach(
                 (topic, description) ->
