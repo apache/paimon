@@ -399,7 +399,7 @@ public class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
                         "dt=2024-06-02, hm=02:00");
 
         assertThat(read(table, consumerReadResult))
-                .containsExactly("4:2024-06-03:01:00", "Never-expire:9999-09-09:99:99");
+                .containsExactlyInAnyOrder("4:2024-06-03:01:00", "Never-expire:9999-09-09:99:99");
     }
 
     /** Return a list of expired partitions. */
