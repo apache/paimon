@@ -73,7 +73,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     private String createCatalogSql(String catalogName, String warehouse) {
         String defaultPropertyString = "";
-        if (tableDefaultProperties.size() > 0) {
+        if (!tableDefaultProperties.isEmpty()) {
             defaultPropertyString = ", ";
             defaultPropertyString +=
                     tableDefaultProperties.entrySet().stream()
@@ -95,7 +95,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     // ------------------------------------------------------------------------
 
     @Test
-    @Timeout(1200)
+    @Timeout(180)
     public void testFullCompactionTriggerInterval() throws Exception {
         innerTestChangelogProducing(
                 Arrays.asList(
@@ -104,7 +104,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    @Timeout(1200)
+    @Timeout(180)
     public void testFullCompactionWithLongCheckpointInterval() throws Exception {
         // create table
         TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().parallelism(1).build();
@@ -163,7 +163,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    @Timeout(1200)
+    @Timeout(180)
     public void testLookupChangelog() throws Exception {
         innerTestChangelogProducing(Collections.singletonList("'changelog-producer' = 'lookup'"));
     }
@@ -221,6 +221,9 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         }
         assertThat(actualBranch)
                 .containsExactlyInAnyOrder("+I[1, A]", "+I[10, v10]", "+I[11, v11]", "+I[12, v12]");
+
+        it.close();
+        branchIt.close();
     }
 
     private void innerTestChangelogProducing(List<String> options) throws Exception {
@@ -237,7 +240,10 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                 "CREATE TABLE T ( k INT, v STRING, PRIMARY KEY (k) NOT ENFORCED ) "
                         + "WITH ( "
                         + "'bucket' = '2', "
-                        + String.join(",", options)
+                        // producers will very quickly produce snapshots,
+                        // so consumers should also discover new snapshots quickly
+                        + "'continuous.discovery-interval' = '1ms', "
+                        + String.join(", ", options)
                         + ")");
 
         Path inputPath = new Path(path, "input");
@@ -334,14 +340,14 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     // ------------------------------------------------------------------------
 
     @Test
-    @Timeout(1200)
+    @Timeout(180)
     public void testNoChangelogProducerBatchRandom() throws Exception {
         TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
         testNoChangelogProducerRandom(bEnv, 1, false);
     }
 
     @Test
-    @Timeout(1200)
+    @Timeout(180)
     public void testNoChangelogProducerStreamingRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv =
@@ -354,14 +360,14 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    @Timeout(1200)
+    @Timeout(180)
     public void testFullCompactionChangelogProducerBatchRandom() throws Exception {
         TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
         testFullCompactionChangelogProducerRandom(bEnv, 1, false);
     }
 
     @Test
-    @Timeout(1200)
+    @Timeout(180)
     public void testFullCompactionChangelogProducerStreamingRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv =
@@ -374,7 +380,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    @Timeout(1200)
+    @Timeout(180)
     public void testStandAloneFullCompactJobRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv =
@@ -387,14 +393,14 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    @Timeout(1200)
+    @Timeout(180)
     public void testLookupChangelogProducerBatchRandom() throws Exception {
         TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
         testLookupChangelogProducerRandom(bEnv, 1, false);
     }
 
     @Test
-    @Timeout(1200)
+    @Timeout(180)
     public void testLookupChangelogProducerStreamingRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv =
@@ -407,7 +413,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    @Timeout(1200)
+    @Timeout(180)
     public void testStandAloneLookupJobRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv =
@@ -458,10 +464,10 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                 enableFailure,
                 "'bucket' = '4',"
                         + String.format(
-                                "'write-buffer-size' = '%s',",
-                                random.nextBoolean() ? "512kb" : "1mb")
-                        + "'changelog-producer' = 'full-compaction',"
-                        + "'full-compaction.delta-commits' = '3'");
+                                "'write-buffer-size' = '%s',"
+                                        + "'changelog-producer' = 'full-compaction',"
+                                        + "'full-compaction.delta-commits' = '3'",
+                                random.nextBoolean() ? "4mb" : "8mb"));
 
         // sleep for a random amount of time to check
         // if we can first read complete records then read incremental records correctly
@@ -484,12 +490,13 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                 enableFailure,
                 "'bucket' = '4',"
                         + String.format(
-                                "'write-buffer-size' = '%s',",
-                                random.nextBoolean() ? "512kb" : "1mb")
-                        + "'changelog-producer' = 'lookup',"
-                        + String.format("'lookup-wait' = '%s',", random.nextBoolean())
-                        + String.format(
-                                "'deletion-vectors.enabled' = '%s'", enableDeletionVectors));
+                                "'write-buffer-size' = '%s',"
+                                        + "'changelog-producer' = 'lookup',"
+                                        + "'lookup-wait' = '%s',"
+                                        + "'deletion-vectors.enabled' = '%s'",
+                                random.nextBoolean() ? "4mb" : "8mb",
+                                random.nextBoolean(),
+                                enableDeletionVectors));
 
         // sleep for a random amount of time to check
         // if we can first read complete records then read incremental records correctly
@@ -508,11 +515,11 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                 false,
                 "'bucket' = '4',"
                         + String.format(
-                                "'write-buffer-size' = '%s',",
-                                random.nextBoolean() ? "512kb" : "1mb")
-                        + "'changelog-producer' = 'full-compaction',"
-                        + "'full-compaction.delta-commits' = '3',"
-                        + "'write-only' = 'true'");
+                                "'write-buffer-size' = '%s',"
+                                        + "'changelog-producer' = 'full-compaction',"
+                                        + "'full-compaction.delta-commits' = '3',"
+                                        + "'write-only' = 'true'",
+                                random.nextBoolean() ? "4mb" : "8mb"));
 
         // sleep for a random amount of time to check
         // if dedicated compactor job can find first snapshot to compact correctly
@@ -547,11 +554,11 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                 false,
                 "'bucket' = '4',"
                         + String.format(
-                                "'write-buffer-size' = '%s',",
-                                random.nextBoolean() ? "512kb" : "1mb")
-                        + "'changelog-producer' = 'lookup',"
-                        + String.format("'lookup-wait' = '%s',", random.nextBoolean())
-                        + "'write-only' = 'true'");
+                                "'write-buffer-size' = '%s',"
+                                        + "'changelog-producer' = 'lookup',"
+                                        + "'lookup-wait' = '%s',"
+                                        + "'write-only' = 'true'",
+                                random.nextBoolean() ? "4mb" : "8mb", random.nextBoolean()));
 
         // sleep for a random amount of time to check
         // if dedicated compactor job can find first snapshot to compact correctly
@@ -616,6 +623,10 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     private List<TableResult> testRandom(
             TableEnvironment tEnv, int numProducers, boolean enableFailure, String tableProperties)
             throws Exception {
+        // producers will very quickly produce snapshots,
+        // so consumers should also discover new snapshots quickly
+        tableProperties += ",'continuous.discovery-interval' = '1ms'";
+
         String failingName = UUID.randomUUID().toString();
         String failingPath = FailingFileIO.getFailingPath(failingName, path);
 
