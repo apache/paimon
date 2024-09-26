@@ -122,6 +122,15 @@ public final class RowType extends DataType {
         return false;
     }
 
+    public boolean containsField(int fieldId) {
+        for (DataField field : fields) {
+            if (field.id() == fieldId) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public boolean notContainsField(String fieldName) {
         return !containsField(fieldName);
     }
@@ -134,6 +143,15 @@ public final class RowType extends DataType {
         }
 
         throw new RuntimeException("Cannot find field: " + fieldName);
+    }
+
+    public DataField getField(int fieldId) {
+        for (DataField field : fields) {
+            if (field.id() == fieldId) {
+                return field;
+            }
+        }
+        throw new RuntimeException("Cannot find field by field id: " + fieldId);
     }
 
     public int getFieldIndexByFieldId(int fieldId) {

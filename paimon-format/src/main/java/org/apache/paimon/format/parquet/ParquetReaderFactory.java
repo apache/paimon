@@ -33,7 +33,10 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pool;
 
@@ -45,6 +48,7 @@ import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetInputFormat;
 import org.apache.parquet.io.ColumnIOFactory;
 import org.apache.parquet.io.MessageColumnIO;
+import org.apache.parquet.schema.ConversionPatterns;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.Type;
@@ -55,11 +59,17 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import static org.apache.paimon.format.parquet.ParquetSchemaConverter.LIST_ELEMENT_NAME;
+import static org.apache.paimon.format.parquet.ParquetSchemaConverter.LIST_NAME;
+import static org.apache.paimon.format.parquet.ParquetSchemaConverter.MAP_KEY_NAME;
+import static org.apache.paimon.format.parquet.ParquetSchemaConverter.MAP_REPEATED_NAME;
+import static org.apache.paimon.format.parquet.ParquetSchemaConverter.MAP_VALUE_NAME;
 import static org.apache.paimon.format.parquet.reader.ParquetSplitReaderUtil.buildFieldsList;
 import static org.apache.paimon.format.parquet.reader.ParquetSplitReaderUtil.createColumnReader;
 import static org.apache.paimon.format.parquet.reader.ParquetSplitReaderUtil.createWritableColumnVector;
@@ -155,11 +165,57 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                         ParquetSchemaConverter.convertToParquetType(fieldName, projectedTypes[i]);
                 unknownFieldsIndices.add(i);
             } else {
-                types[i] = parquetSchema.getType(fieldName);
+                Type parquetType = parquetSchema.getType(fieldName);
+                types[i] = clipParquetType(projectedTypes[i], parquetType);
             }
         }
 
         return Types.buildMessage().addFields(types).named("paimon-parquet");
+    }
+
+    /** Clips `parquetType` by `readType`. */
+    private Type clipParquetType(DataType readType, Type parquetType) {
+        switch (readType.getTypeRoot()) {
+            case ROW:
+                RowType rowType = (RowType) readType;
+                GroupType rowGroup = (GroupType) parquetType;
+                List<Type> rowGroupFields = new ArrayList<>();
+                for (DataField field : rowType.getFields()) {
+                    String fieldName = field.name();
+                    if (rowGroup.containsField(fieldName)) {
+                        Type type = rowGroup.getType(fieldName);
+                        rowGroupFields.add(clipParquetType(field.type(), type));
+                    } else {
+                        // todo: support nested field missing
+                        throw new RuntimeException("field " + fieldName + " is missing");
+                    }
+                }
+                return rowGroup.withNewFields(rowGroupFields);
+            case MAP:
+                MapType mapType = (MapType) readType;
+                GroupType mapGroup = (GroupType) parquetType;
+                GroupType keyValue = mapGroup.getType(MAP_REPEATED_NAME).asGroupType();
+                return ConversionPatterns.mapType(
+                        mapGroup.getRepetition(),
+                        mapGroup.getName(),
+                        MAP_REPEATED_NAME,
+                        keyValue.getType(MAP_KEY_NAME),
+                        keyValue.containsField(MAP_VALUE_NAME)
+                                ? clipParquetType(
+                                        mapType.getValueType(), keyValue.getType(MAP_VALUE_NAME))
+                                : null);
+            case ARRAY:
+                ArrayType arrayType = (ArrayType) readType;
+                GroupType arrayGroup = (GroupType) parquetType;
+                GroupType list = arrayGroup.getType(LIST_NAME).asGroupType();
+                return ConversionPatterns.listOfElements(
+                        arrayGroup.getRepetition(),
+                        arrayGroup.getName(),
+                        clipParquetType(
+                                arrayType.getElementType(), list.getType(LIST_ELEMENT_NAME)));
+            default:
+                return parquetType;
+        }
     }
 
     private void checkSchema(MessageType fileSchema, MessageType requestedSchema)

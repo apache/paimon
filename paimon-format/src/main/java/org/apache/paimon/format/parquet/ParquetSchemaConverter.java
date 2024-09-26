@@ -47,6 +47,9 @@ import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT64;
 public class ParquetSchemaConverter {
 
     static final String MAP_REPEATED_NAME = "key_value";
+    static final String MAP_KEY_NAME = "key";
+    static final String MAP_VALUE_NAME = "value";
+    static final String LIST_NAME = "list";
     static final String LIST_ELEMENT_NAME = "element";
 
     public static MessageType convertToParquetMessageType(String name, RowType rowType) {
@@ -149,8 +152,8 @@ public class ParquetSchemaConverter {
                         repetition,
                         name,
                         MAP_REPEATED_NAME,
-                        convertToParquetType("key", keyType),
-                        convertToParquetType("value", mapType.getValueType()));
+                        convertToParquetType(MAP_KEY_NAME, keyType),
+                        convertToParquetType(MAP_VALUE_NAME, mapType.getValueType()));
             case MULTISET:
                 MultisetType multisetType = (MultisetType) type;
                 DataType elementType = multisetType.getElementType();
@@ -163,8 +166,8 @@ public class ParquetSchemaConverter {
                         repetition,
                         name,
                         MAP_REPEATED_NAME,
-                        convertToParquetType("key", elementType),
-                        convertToParquetType("value", new IntType(false)));
+                        convertToParquetType(MAP_KEY_NAME, elementType),
+                        convertToParquetType(MAP_VALUE_NAME, new IntType(false)));
             case ROW:
                 RowType rowType = (RowType) type;
                 return new GroupType(repetition, name, convertToParquetTypes(rowType));

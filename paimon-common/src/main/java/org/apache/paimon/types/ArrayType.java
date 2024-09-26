@@ -57,6 +57,10 @@ public final class ArrayType extends DataType {
         return elementType;
     }
 
+    public DataType newElementType(DataType newElementType) {
+        return new ArrayType(isNullable(), newElementType);
+    }
+
     @Override
     public int defaultSize() {
         return elementType.defaultSize();
@@ -94,6 +98,21 @@ public final class ArrayType extends DataType {
         }
         ArrayType arrayType = (ArrayType) o;
         return elementType.equals(arrayType.elementType);
+    }
+
+    @Override
+    public boolean isPrunedFrom(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        if (!super.equals(o)) {
+            return false;
+        }
+        ArrayType arrayType = (ArrayType) o;
+        return elementType.isPrunedFrom(arrayType.elementType);
     }
 
     @Override

@@ -74,6 +74,10 @@ public class MapType extends DataType {
         return new MapType(isNullable, keyType.copy(), valueType.copy());
     }
 
+    public DataType newValueType(DataType valueType) {
+        return new MapType(isNullable(), keyType, valueType);
+    }
+
     @Override
     public String asSQLString() {
         return withNullability(FORMAT, keyType.asSQLString(), valueType.asSQLString());
@@ -103,6 +107,21 @@ public class MapType extends DataType {
         }
         MapType mapType = (MapType) o;
         return keyType.equals(mapType.keyType) && valueType.equals(mapType.valueType);
+    }
+
+    @Override
+    public boolean isPrunedFrom(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        if (!super.equals(o)) {
+            return false;
+        }
+        MapType mapType = (MapType) o;
+        return keyType.equals(mapType.keyType) && valueType.isPrunedFrom(mapType.valueType);
     }
 
     @Override

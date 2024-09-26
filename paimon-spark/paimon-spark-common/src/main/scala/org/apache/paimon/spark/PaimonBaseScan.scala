@@ -60,7 +60,8 @@ abstract class PaimonBaseScan(
   private lazy val paimonMetricsRegistry: SparkMetricRegistry = SparkMetricRegistry()
 
   lazy val requiredStatsSchema: StructType = {
-    val fieldNames = requiredTableFields.map(_.name) ++ reservedFilters.flatMap(_.references)
+    val fieldNames =
+      readTableRowType.getFields.asScala.map(_.name) ++ reservedFilters.flatMap(_.references)
     StructType(tableSchema.filter(field => fieldNames.contains(field.name)))
   }
 

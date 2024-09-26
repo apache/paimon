@@ -23,38 +23,40 @@ import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.Table
 import org.apache.paimon.table.source.ReadBuilder
 import org.apache.paimon.types.RowType
+import org.apache.paimon.utils.Preconditions.checkState
 
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.types.StructType
 
-trait ColumnPruningAndPushDown extends Scan {
+trait ColumnPruningAndPushDown extends Scan with Logging {
   def table: Table
   def requiredSchema: StructType
   def filters: Seq[Predicate]
   def pushDownLimit: Option[Int] = None
 
-  val tableRowType: RowType = table.rowType
-  val tableSchema: StructType = SparkTypeUtils.fromPaimonRowType(tableRowType)
+  lazy val tableRowType: RowType = table.rowType
+  lazy val tableSchema: StructType = SparkTypeUtils.fromPaimonRowType(tableRowType)
 
   final def partitionType: StructType = {
     SparkTypeUtils.toSparkPartitionType(table)
   }
 
-  private[paimon] val (requiredTableFields, metadataFields) = {
-    val nameToField = tableSchema.map(field => (field.name, field)).toMap
-    val _tableFields = requiredSchema.flatMap(field => nameToField.get(field.name))
-    val _metadataFields =
-      requiredSchema
-        .filterNot(field => tableSchema.fieldNames.contains(field.name))
-        .filter(field => PaimonMetadataColumn.SUPPORTED_METADATA_COLUMNS.contains(field.name))
-    (_tableFields, _metadataFields)
+  private[paimon] val (readTableRowType, metadataFields) = {
+    checkState(
+      requiredSchema.fields.forall(
+        field =>
+          tableRowType.containsField(field.name) ||
+            PaimonMetadataColumn.SUPPORTED_METADATA_COLUMNS.contains(field.name)))
+    val (_requiredTableFields, _metadataFields) =
+      requiredSchema.fields.partition(field => tableRowType.containsField(field.name))
+    val _readTableRowType =
+      SparkTypeUtils.prunePaimonRowType(StructType(_requiredTableFields), tableRowType)
+    (_readTableRowType, _metadataFields)
   }
 
   lazy val readBuilder: ReadBuilder = {
-    val _readBuilder = table.newReadBuilder()
-    val projection =
-      requiredTableFields.map(field => tableSchema.fieldNames.indexOf(field.name)).toArray
-    _readBuilder.withProjection(projection)
+    val _readBuilder = table.newReadBuilder().withReadType(readTableRowType)
     if (filters.nonEmpty) {
       val pushedPredicate = PredicateBuilder.and(filters: _*)
       _readBuilder.withFilter(pushedPredicate)
@@ -68,6 +70,12 @@ trait ColumnPruningAndPushDown extends Scan {
   }
 
   override def readSchema(): StructType = {
-    StructType(requiredTableFields ++ metadataFields)
+    val _readSchema = StructType(
+      SparkTypeUtils.fromPaimonRowType(readTableRowType).fields ++ metadataFields)
+    if (!_readSchema.equals(requiredSchema)) {
+      logInfo(
+        s"Actual readSchema: ${_readSchema} is not equal to spark pushed requiredSchema: $requiredSchema")
+    }
+    _readSchema
   }
 }
