@@ -44,6 +44,8 @@ public class PartitionExpire {
 
     private static final Logger LOG = LoggerFactory.getLogger(PartitionExpire.class);
 
+    private static final String DELIMITER = ",";
+
     private final Duration expirationTime;
     private final Duration checkInterval;
     private final FileStoreScan scan;
@@ -133,16 +135,18 @@ public class PartitionExpire {
 
     private List<Map<String, String>> doExpire(
             LocalDateTime expireDateTime, long commitIdentifier) {
-        List<List<String>> partValues = new ArrayList<>();
-        for (PartitionEntry partition : strategy.selectExpiredPartitions(scan, expireDateTime)) {
+        List<PartitionEntry> partitionEntries =
+                strategy.selectExpiredPartitions(scan, expireDateTime);
+        List<List<String>> expiredPartValues = new ArrayList<>(partitionEntries.size());
+        for (PartitionEntry partition : partitionEntries) {
             Object[] array = strategy.convertPartition(partition.partition());
-            partValues.add(strategy.toPartitionValue(array));
+            expiredPartValues.add(strategy.toPartitionValue(array));
         }
 
         List<Map<String, String>> expired = new ArrayList<>();
-        if (!partValues.isEmpty()) {
-            expired = convertToPartitionString(partValues);
-            LOG.info("Expire Partition: {}", expired);
+        if (!expiredPartValues.isEmpty()) {
+            expired = convertToPartitionString(expiredPartValues);
+            LOG.info("Expire Partitions: {}", expired);
             if (metastoreClient != null) {
                 deleteMetastorePartitions(expired);
             }
@@ -164,13 +168,14 @@ public class PartitionExpire {
         }
     }
 
-    private List<Map<String, String>> convertToPartitionString(List<List<String>> partValues) {
-        return partValues.stream()
-                .map(values -> String.join(",", values))
+    private List<Map<String, String>> convertToPartitionString(
+            List<List<String>> expiredPartValues) {
+        return expiredPartValues.stream()
+                .map(values -> String.join(DELIMITER, values))
                 .sorted()
-                .map(s -> s.split(","))
+                .map(s -> s.split(DELIMITER))
                 .map(strategy::toPartitionString)
-                .limit(Math.min(partValues.size(), maxExpires))
+                .limit(Math.min(expiredPartValues.size(), maxExpires))
                 .collect(Collectors.toList());
     }
 }
