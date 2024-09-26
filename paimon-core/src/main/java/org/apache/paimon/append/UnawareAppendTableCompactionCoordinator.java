@@ -30,12 +30,10 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -45,13 +43,15 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
-import static java.util.Collections.emptyList;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Compact coordinator for append only tables.
@@ -70,19 +70,18 @@ import static java.util.Collections.emptyList;
  */
 public class UnawareAppendTableCompactionCoordinator {
 
+    private static final int FILES_BATCH = 100_000;
+
     protected static final int REMOVE_AGE = 10;
     protected static final int COMPACT_AGE = 5;
 
     private final SnapshotManager snapshotManager;
-    private final SnapshotReader snapshotReader;
     private final long targetFileSize;
     private final long compactionFileSize;
     private final int minFileNum;
     private final int maxFileNum;
-    private final boolean streamingMode;
     private final DvMaintainerCache dvMaintainerCache;
-
-    @Nullable private Long nextSnapshot = null;
+    private final FilesIterator filesIterator;
 
     final Map<BinaryRow, PartitionCompactCoordinator> partitionCompactCoordinators =
             new HashMap<>();
@@ -97,13 +96,8 @@ public class UnawareAppendTableCompactionCoordinator {
 
     public UnawareAppendTableCompactionCoordinator(
             FileStoreTable table, boolean isStreaming, @Nullable Predicate filter) {
-        Preconditions.checkArgument(table.primaryKeys().isEmpty());
+        checkArgument(table.primaryKeys().isEmpty());
         this.snapshotManager = table.snapshotManager();
-        this.snapshotReader = table.newSnapshotReader();
-        if (filter != null) {
-            snapshotReader.withFilter(filter);
-        }
-        this.streamingMode = isStreaming;
         CoreOptions options = table.coreOptions();
         this.targetFileSize = options.targetFileSize(false);
         this.compactionFileSize = options.compactionFileSize(false);
@@ -114,6 +108,7 @@ public class UnawareAppendTableCompactionCoordinator {
                 options.deletionVectorsEnabled()
                         ? new DvMaintainerCache(table.store().newIndexFileHandler())
                         : null;
+        this.filesIterator = new FilesIterator(table, isStreaming, filter);
     }
 
     public List<UnawareAppendCompactionTask> run() {
@@ -126,64 +121,28 @@ public class UnawareAppendTableCompactionCoordinator {
         return Collections.emptyList();
     }
 
-    @VisibleForTesting
-    boolean scan() {
-        List<DataSplit> splits;
-        boolean hasResult = false;
-        while (!(splits = plan()).isEmpty()) {
-            hasResult = true;
-            splits.forEach(split -> notifyNewFiles(split.partition(), split.dataFiles()));
-            // batch mode, we don't do continuous scanning
-            if (!streamingMode) {
+    public boolean scan() {
+        Map<BinaryRow, List<DataFileMeta>> files = new HashMap<>();
+        for (int i = 0; i < FILES_BATCH; i++) {
+            ManifestEntry entry = filesIterator.next();
+            if (entry == null) {
                 break;
             }
+            BinaryRow partition = entry.partition();
+            files.computeIfAbsent(partition, k -> new ArrayList<>()).add(entry.file());
         }
-        return hasResult;
+
+        if (files.isEmpty()) {
+            return false;
+        }
+
+        files.forEach(this::notifyNewFiles);
+        return true;
     }
 
     @VisibleForTesting
-    List<DataSplit> plan() {
-        if (nextSnapshot == null) {
-            nextSnapshot = snapshotManager.latestSnapshotId();
-            if (nextSnapshot == null) {
-                return emptyList();
-            }
-            snapshotReader.withMode(ScanMode.ALL);
-        } else {
-            if (!streamingMode) {
-                throw new EndOfScanException();
-            }
-            snapshotReader.withMode(ScanMode.DELTA);
-        }
-
-        if (!snapshotManager.snapshotExists(nextSnapshot)) {
-            return emptyList();
-        }
-
-        Snapshot snapshot = snapshotManager.snapshot(nextSnapshot);
-        nextSnapshot++;
-
-        if (dvMaintainerCache != null) {
-            dvMaintainerCache.refresh();
-        }
-        Filter<ManifestEntry> entryFilter =
-                entry -> {
-                    if (entry.file().fileSize() < compactionFileSize) {
-                        return true;
-                    }
-
-                    if (dvMaintainerCache != null) {
-                        return dvMaintainerCache
-                                .dvMaintainer(entry.partition())
-                                .hasDeletionFile(entry.fileName());
-                    }
-                    return false;
-                };
-        return snapshotReader
-                .withManifestEntryFilter(entryFilter)
-                .withSnapshot(snapshot)
-                .read()
-                .dataSplits();
+    FilesIterator filesIterator() {
+        return filesIterator;
     }
 
     @VisibleForTesting
@@ -393,6 +352,87 @@ public class UnawareAppendTableCompactionCoordinator {
                 cache.put(partition, maintainer);
             }
             return maintainer;
+        }
+    }
+
+    /** Iterator to read files. */
+    class FilesIterator {
+
+        private final SnapshotReader snapshotReader;
+        private final boolean streamingMode;
+
+        @Nullable private Long nextSnapshot = null;
+        @Nullable private Iterator<ManifestEntry> currentIterator;
+
+        public FilesIterator(
+                FileStoreTable table, boolean isStreaming, @Nullable Predicate filter) {
+            this.snapshotReader = table.newSnapshotReader();
+            if (filter != null) {
+                snapshotReader.withFilter(filter);
+            }
+            this.streamingMode = isStreaming;
+        }
+
+        private void assignNewIterator() {
+            currentIterator = null;
+            if (nextSnapshot == null) {
+                nextSnapshot = snapshotManager.latestSnapshotId();
+                if (nextSnapshot == null) {
+                    return;
+                }
+                snapshotReader.withMode(ScanMode.ALL);
+            } else {
+                if (!streamingMode) {
+                    throw new EndOfScanException();
+                }
+                snapshotReader.withMode(ScanMode.DELTA);
+            }
+
+            if (!snapshotManager.snapshotExists(nextSnapshot)) {
+                return;
+            }
+
+            Snapshot snapshot = snapshotManager.snapshot(nextSnapshot);
+            nextSnapshot++;
+
+            if (dvMaintainerCache != null) {
+                dvMaintainerCache.refresh();
+            }
+            Filter<ManifestEntry> entryFilter =
+                    entry -> {
+                        if (entry.file().fileSize() < compactionFileSize) {
+                            return true;
+                        }
+
+                        if (dvMaintainerCache != null) {
+                            return dvMaintainerCache
+                                    .dvMaintainer(entry.partition())
+                                    .hasDeletionFile(entry.fileName());
+                        }
+                        return false;
+                    };
+            currentIterator =
+                    snapshotReader
+                            .withManifestEntryFilter(entryFilter)
+                            .withSnapshot(snapshot)
+                            .readFileIterator();
+        }
+
+        @Nullable
+        public ManifestEntry next() {
+            while (true) {
+                if (currentIterator == null || !currentIterator.hasNext()) {
+                    assignNewIterator();
+                }
+                if (currentIterator == null) {
+                    return null;
+                }
+                try {
+                    return currentIterator.next();
+                } catch (NoSuchElementException e) {
+                    currentIterator = null;
+                }
+            }
         }
     }
 }

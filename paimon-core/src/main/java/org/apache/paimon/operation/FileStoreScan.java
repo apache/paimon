@@ -38,6 +38,7 @@ import org.apache.paimon.utils.Filter;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -110,6 +111,8 @@ public interface FileStoreScan {
     List<PartitionEntry> readPartitionEntries();
 
     List<BucketEntry> readBucketEntries();
+
+    Iterator<ManifestEntry> readFileIterator();
 
     default List<BinaryRow> listPartitions() {
         return readPartitionEntries().stream()

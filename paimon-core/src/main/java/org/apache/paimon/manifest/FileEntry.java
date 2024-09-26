@@ -211,20 +211,28 @@ public interface FileEntry {
             ManifestFile manifestFile,
             List<ManifestFileMeta> manifestFiles,
             @Nullable Integer manifestReadParallelism) {
+        return readDeletedEntries(
+                m ->
+                        manifestFile.read(
+                                m.fileName(), m.fileSize(), Filter.alwaysTrue(), deletedFilter()),
+                manifestFiles,
+                manifestReadParallelism);
+    }
+
+    static <T extends FileEntry> Set<Identifier> readDeletedEntries(
+            Function<ManifestFileMeta, List<T>> manifestReader,
+            List<ManifestFileMeta> manifestFiles,
+            @Nullable Integer manifestReadParallelism) {
         manifestFiles =
                 manifestFiles.stream()
                         .filter(file -> file.numDeletedFiles() > 0)
                         .collect(Collectors.toList());
         Function<ManifestFileMeta, List<Identifier>> processor =
                 file ->
-                        manifestFile
-                                .read(
-                                        file.fileName(),
-                                        file.fileSize(),
-                                        Filter.alwaysTrue(),
-                                        deletedFilter())
-                                .stream()
-                                .map(ManifestEntry::identifier)
+                        manifestReader.apply(file).stream()
+                                // filter again, ensure is delete
+                                .filter(e -> e.kind() == FileKind.DELETE)
+                                .map(FileEntry::identifier)
                                 .collect(Collectors.toList());
         Iterable<Identifier> identifiers =
                 sequentialBatchedExecute(processor, manifestFiles, manifestReadParallelism);
