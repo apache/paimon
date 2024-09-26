@@ -348,9 +348,7 @@ public class JdbcCatalog extends AbstractCatalog {
 
     @Override
     public void close() throws Exception {
-        if (!connections.isClosed()) {
-            connections.close();
-        }
+        connections.close();
     }
 
     private SchemaManager getSchemaManager(Identifier identifier) {
