@@ -18,13 +18,20 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.predicate.PredicateBuilder
+import org.apache.paimon.spark.aggregate.LocalAggregator
 import org.apache.paimon.table.Table
 
-import org.apache.spark.sql.connector.read.SupportsPushDownLimit
+import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
+import org.apache.spark.sql.connector.read.{Scan, SupportsPushDownAggregates, SupportsPushDownLimit}
+
+import scala.collection.JavaConverters._
 
 class PaimonScanBuilder(table: Table)
   extends PaimonBaseScanBuilder(table)
-  with SupportsPushDownLimit {
+  with SupportsPushDownLimit
+  with SupportsPushDownAggregates {
+  private var localScan: Option[Scan] = None
 
   override def pushLimit(limit: Int): Boolean = {
     if (table.primaryKeys().isEmpty) {
@@ -32,5 +39,50 @@ class PaimonScanBuilder(table: Table)
     }
     // just make a best effort to push down limit
     false
+  }
+
+  override def supportCompletePushDown(aggregation: Aggregation): Boolean = {
+    // for now we only support complete push down, so there is no difference with `pushAggregation`
+    pushAggregation(aggregation)
+  }
+
+  // Spark does not support push down aggregation for streaming scan.
+  override def pushAggregation(aggregation: Aggregation): Boolean = {
+    if (localScan.isDefined) {
+      return true
+    }
+
+    // Only support with push down partition filter
+    if (postScanFilters.nonEmpty) {
+      return false
+    }
+
+    val aggregator = new LocalAggregator(table)
+    if (!aggregator.pushAggregation(aggregation)) {
+      return false
+    }
+
+    val readBuilder = table.newReadBuilder
+    if (pushedPredicates.nonEmpty) {
+      val pushedPartitionPredicate = PredicateBuilder.and(pushedPredicates.map(_._2): _*)
+      readBuilder.withFilter(pushedPartitionPredicate)
+    }
+    val scan = readBuilder.newScan()
+    scan.listPartitionEntries.asScala.foreach(aggregator.update)
+    localScan = Some(
+      PaimonLocalScan(
+        aggregator.result(),
+        aggregator.resultSchema(),
+        table,
+        pushedPredicates.map(_._1)))
+    true
+  }
+
+  override def build(): Scan = {
+    if (localScan.isDefined) {
+      localScan.get
+    } else {
+      super.build()
+    }
   }
 }
