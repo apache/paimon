@@ -217,7 +217,7 @@ public interface FormatTable extends Table {
     }
 
     @Override
-    default Optional<Statistics> statistics(Long snapshotId) {
+    default Optional<Statistics> statistics(long snapshotId) {
         return Optional.empty();
     }
 

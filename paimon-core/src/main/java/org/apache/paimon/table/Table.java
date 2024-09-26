@@ -75,7 +75,7 @@ public interface Table extends Serializable {
     Optional<Statistics> statistics();
 
     @Experimental
-    Optional<Statistics> statistics(Long snapshotId);
+    Optional<Statistics> statistics(long snapshotId);
 
     // ================= Table Operations ====================
 

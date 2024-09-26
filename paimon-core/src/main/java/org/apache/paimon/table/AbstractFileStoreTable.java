@@ -166,6 +166,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public Optional<Statistics> statistics() {
+        // todo: support time travel
         Snapshot latestSnapshot = snapshotManager().latestSnapshot();
         if (latestSnapshot != null) {
             return store().newStatsFileHandler().readStats(latestSnapshot);
@@ -174,15 +175,14 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public Optional<Statistics> statistics(Long snapshotId) {
-        if (!snapshotManager().snapshotExists(snapshotId)) {
-            throw new SnapshotNotExistException(
-                    String.format("snapshot id: %s is not existed", snapshotId));
-        }
-
+    public Optional<Statistics> statistics(long snapshotId) {
         Long latestSnapshotId = snapshotManager().latestSnapshotId();
         if (latestSnapshotId == null) {
             return Optional.empty();
+        }
+
+        if (!snapshotManager().snapshotExists(snapshotId)) {
+            return store().newStatsFileHandler().readStats(snapshotManager().latestSnapshot());
         }
 
         while (latestSnapshotId > 0) {
