@@ -1004,7 +1004,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite("");
         StreamTableCommit commit = table.newCommit("");
-        // 1. inserts
+        // 1. Inserts
         write.write(GenericRow.of(1, 1, 3, 3));
         write.write(GenericRow.of(1, 1, 1, 1));
         write.write(GenericRow.of(1, 1, 2, 2));
@@ -1030,6 +1030,13 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         commit.commit(3, write.prepareCommit(true, 3));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
         assertThat(result).isEmpty();
+
+        // 5. Inserts
+        write.write(GenericRow.of(1, 1, 2, 2));
+        commit.commit(4, write.prepareCommit(true, 4));
+        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 2, 2]");
+
         write.close();
         commit.close();
     }
