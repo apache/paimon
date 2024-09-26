@@ -41,6 +41,7 @@ import java.util.Map;
 /** {@link FileStoreScan} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
+    private final BucketSelectConverter bucketSelectConverter;
     private final SimpleStatsConverters simpleStatsConverters;
 
     private final boolean fileIndexReadEnabled;
@@ -52,27 +53,21 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
     public AppendOnlyFileStoreScan(
             ManifestsReader manifestsReader,
-            RowType partitionType,
-            ScanBucketFilter bucketFilter,
+            BucketSelectConverter bucketSelectConverter,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
             TableSchema schema,
             ManifestFile.Factory manifestFileFactory,
-            int numOfBuckets,
-            boolean checkNumOfBuckets,
             Integer scanManifestParallelism,
             boolean fileIndexReadEnabled) {
         super(
                 manifestsReader,
-                partitionType,
-                bucketFilter,
                 snapshotManager,
                 schemaManager,
                 schema,
                 manifestFileFactory,
-                numOfBuckets,
-                checkNumOfBuckets,
                 scanManifestParallelism);
+        this.bucketSelectConverter = bucketSelectConverter;
         this.simpleStatsConverters =
                 new SimpleStatsConverters(sid -> scanTableSchema(sid).fields(), schema.id());
         this.fileIndexReadEnabled = fileIndexReadEnabled;
@@ -80,7 +75,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
     public AppendOnlyFileStoreScan withFilter(Predicate predicate) {
         this.filter = predicate;
-        this.bucketKeyFilter.pushdown(predicate);
+        this.bucketSelectConverter.convert(predicate).ifPresent(this::withTotalAwareBucketFilter);
         return this;
     }
 

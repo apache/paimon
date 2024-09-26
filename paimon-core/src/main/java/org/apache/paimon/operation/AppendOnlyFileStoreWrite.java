@@ -80,13 +80,14 @@ public abstract class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<Inte
             RawFileSplitRead read,
             long schemaId,
             RowType rowType,
+            RowType partitionType,
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options,
             @Nullable DeletionVectorsMaintainer.Factory dvMaintainerFactory,
             String tableName) {
-        super(snapshotManager, scan, options, null, dvMaintainerFactory, tableName);
+        super(snapshotManager, scan, options, partitionType, null, dvMaintainerFactory, tableName);
         this.fileIO = fileIO;
         this.read = read;
         this.schemaId = schemaId;

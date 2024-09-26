@@ -31,7 +31,6 @@ import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.stats.SimpleStatsConverters;
 import org.apache.paimon.table.source.ScanMode;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.ArrayList;
@@ -47,6 +46,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     private final SimpleStatsConverters fieldKeyStatsConverters;
     private final SimpleStatsConverters fieldValueStatsConverters;
+    private final BucketSelectConverter bucketSelectConverter;
 
     private Predicate keyFilter;
     private Predicate valueFilter;
@@ -56,30 +56,24 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     public KeyValueFileStoreScan(
             ManifestsReader manifestsReader,
-            RowType partitionType,
-            ScanBucketFilter bucketFilter,
+            BucketSelectConverter bucketSelectConverter,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
             TableSchema schema,
             KeyValueFieldsExtractor keyValueFieldsExtractor,
             ManifestFile.Factory manifestFileFactory,
-            int numOfBuckets,
-            boolean checkNumOfBuckets,
             Integer scanManifestParallelism,
             boolean deletionVectorsEnabled,
             MergeEngine mergeEngine,
             ChangelogProducer changelogProducer) {
         super(
                 manifestsReader,
-                partitionType,
-                bucketFilter,
                 snapshotManager,
                 schemaManager,
                 schema,
                 manifestFileFactory,
-                numOfBuckets,
-                checkNumOfBuckets,
                 scanManifestParallelism);
+        this.bucketSelectConverter = bucketSelectConverter;
         this.fieldKeyStatsConverters =
                 new SimpleStatsConverters(
                         sid -> keyValueFieldsExtractor.keyFields(scanTableSchema(sid)),
@@ -95,7 +89,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     public KeyValueFileStoreScan withKeyFilter(Predicate predicate) {
         this.keyFilter = predicate;
-        this.bucketKeyFilter.pushdown(predicate);
+        this.bucketSelectConverter.convert(predicate).ifPresent(this::withTotalAwareBucketFilter);
         return this;
     }
 

@@ -136,6 +136,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 snapshotManager,
                 scan,
                 options,
+                partitionType,
                 indexFactory,
                 deletionVectorsMaintainerFactory,
                 tableName);
