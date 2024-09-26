@@ -37,6 +37,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
@@ -67,16 +68,15 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private final ManifestsReader manifestsReader;
     private final SnapshotManager snapshotManager;
     private final ManifestFile.Factory manifestFileFactory;
-    private final int numOfBuckets;
     private final Integer parallelism;
 
     private final ConcurrentMap<Long, TableSchema> tableSchemas;
     private final SchemaManager schemaManager;
     private final TableSchema schema;
-    protected final ScanBucketFilter bucketKeyFilter;
 
     private Snapshot specifiedSnapshot = null;
     private Filter<Integer> bucketFilter = null;
+    private BiFilter<Integer, Integer> totalAwareBucketFilter = null;
     private List<ManifestFileMeta> specifiedManifests = null;
     protected ScanMode scanMode = ScanMode.ALL;
     private Filter<Integer> levelFilter = null;
@@ -88,20 +88,16 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     public AbstractFileStoreScan(
             ManifestsReader manifestsReader,
-            ScanBucketFilter bucketKeyFilter,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
             TableSchema schema,
             ManifestFile.Factory manifestFileFactory,
-            int numOfBuckets,
             @Nullable Integer parallelism) {
         this.manifestsReader = manifestsReader;
-        this.bucketKeyFilter = bucketKeyFilter;
         this.snapshotManager = snapshotManager;
         this.schemaManager = schemaManager;
         this.schema = schema;
         this.manifestFileFactory = manifestFileFactory;
-        this.numOfBuckets = numOfBuckets;
         this.tableSchemas = new ConcurrentHashMap<>();
         this.parallelism = parallelism;
     }
@@ -133,6 +129,13 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withBucketFilter(Filter<Integer> bucketFilter) {
         this.bucketFilter = bucketFilter;
+        return this;
+    }
+
+    @Override
+    public FileStoreScan withTotalAwareBucketFilter(
+            BiFilter<Integer, Integer> totalAwareBucketFilter) {
+        this.totalAwareBucketFilter = totalAwareBucketFilter;
         return this;
     }
 
@@ -408,15 +411,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         Function<InternalRow, BinaryRow> partitionGetter =
                 ManifestEntrySerializer.partitionGetter();
         Function<InternalRow, Integer> bucketGetter = ManifestEntrySerializer.bucketGetter();
-        Function<InternalRow, Integer> totalBucketGetter =
-                ManifestEntrySerializer.totalBucketGetter();
-        return row -> {
-            if (numOfBuckets != totalBucketGetter.apply(row)) {
-                return true;
-            }
-
-            return manifestCacheFilter.test(partitionGetter.apply(row), bucketGetter.apply(row));
-        };
+        return row -> manifestCacheFilter.test(partitionGetter.apply(row), bucketGetter.apply(row));
     }
 
     /**
@@ -439,12 +434,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             }
 
             int bucket = bucketGetter.apply(row);
-            int totalBucket = totalBucketGetter.apply(row);
-            if (bucketFilter != null && numOfBuckets == totalBucket && !bucketFilter.test(bucket)) {
+            if (bucketFilter != null && !bucketFilter.test(bucket)) {
                 return false;
             }
 
-            if (!bucketKeyFilter.select(bucket, totalBucket)) {
+            if (totalAwareBucketFilter != null
+                    && !totalAwareBucketFilter.test(bucket, totalBucketGetter.apply(row))) {
                 return false;
             }
 

@@ -28,6 +28,7 @@ import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BiFilter;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableSet;
 
@@ -47,30 +48,14 @@ import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 import static org.apache.paimon.predicate.PredicateBuilder.splitOr;
 
 /** Bucket filter push down in scan to skip files. */
-public abstract class ScanBucketFilter {
+public interface BucketSelectConverter {
 
-    public static final int MAX_VALUES = 1000;
+    int MAX_VALUES = 1000;
 
-    private final RowType bucketKeyType;
+    Optional<BiFilter<Integer, Integer>> convert(Predicate predicate);
 
-    private ScanBucketSelector selector;
-
-    public ScanBucketFilter(RowType bucketKeyType) {
-        this.bucketKeyType = bucketKeyType;
-    }
-
-    public abstract void pushdown(Predicate predicate);
-
-    public void setBucketKeyFilter(Predicate predicate) {
-        this.selector = create(predicate, bucketKeyType).orElse(null);
-    }
-
-    public boolean select(int bucket, int numBucket) {
-        return selector == null || selector.select(bucket, numBucket);
-    }
-
-    @VisibleForTesting
-    static Optional<ScanBucketSelector> create(Predicate bucketPredicate, RowType bucketKeyType) {
+    static Optional<BiFilter<Integer, Integer>> create(
+            Predicate bucketPredicate, RowType bucketKeyType) {
         @SuppressWarnings("unchecked")
         List<Object>[] bucketValues = new List[bucketKeyType.getFieldCount()];
 
@@ -127,15 +112,15 @@ public abstract class ScanBucketFilter {
                 new ArrayList<>(),
                 0);
 
-        return Optional.of(new ScanBucketSelector(hashCodes.stream().mapToInt(i -> i).toArray()));
+        return Optional.of(new Selector(hashCodes.stream().mapToInt(i -> i).toArray()));
     }
 
-    private static int hash(List<Object> columns, InternalRowSerializer serializer) {
+    static int hash(List<Object> columns, InternalRowSerializer serializer) {
         BinaryRow binaryRow = serializer.toBinaryRow(GenericRow.of(columns.toArray()));
         return KeyAndBucketExtractor.bucketKeyHashCode(binaryRow);
     }
 
-    private static void assembleRows(
+    static void assembleRows(
             List<Object>[] rowValues,
             Consumer<List<Object>> consumer,
             List<Object> stack,
@@ -155,18 +140,18 @@ public abstract class ScanBucketFilter {
 
     /** Selector to select bucket from {@link Predicate}. */
     @ThreadSafe
-    public static class ScanBucketSelector {
+    class Selector implements BiFilter<Integer, Integer> {
 
         private final int[] hashCodes;
 
         private final Map<Integer, Set<Integer>> buckets = new ConcurrentHashMap<>();
 
-        public ScanBucketSelector(int[] hashCodes) {
+        public Selector(int[] hashCodes) {
             this.hashCodes = hashCodes;
         }
 
-        @VisibleForTesting
-        boolean select(int bucket, int numBucket) {
+        @Override
+        public boolean test(Integer bucket, Integer numBucket) {
             return buckets.computeIfAbsent(numBucket, k -> createBucketSet(numBucket))
                     .contains(bucket);
         }

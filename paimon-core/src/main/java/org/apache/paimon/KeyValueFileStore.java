@@ -28,11 +28,11 @@ import org.apache.paimon.index.IndexMaintainer;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
+import org.apache.paimon.operation.BucketSelectConverter;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreWrite;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.RawFileSplitRead;
-import org.apache.paimon.operation.ScanBucketFilter;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
@@ -50,6 +50,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -210,33 +211,30 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     }
 
     private KeyValueFileStoreScan newScan(boolean forWrite) {
-        ScanBucketFilter bucketFilter =
-                new ScanBucketFilter(bucketKeyType) {
-                    @Override
-                    public void pushdown(Predicate keyFilter) {
-                        if (bucketMode() != BucketMode.HASH_FIXED) {
-                            return;
-                        }
-
-                        List<Predicate> bucketFilters =
-                                pickTransformFieldMapping(
-                                        splitAnd(keyFilter),
-                                        keyType.getFieldNames(),
-                                        bucketKeyType.getFieldNames());
-                        if (bucketFilters.size() > 0) {
-                            setBucketKeyFilter(and(bucketFilters));
-                        }
+        BucketSelectConverter bucketSelectConverter =
+                keyFilter -> {
+                    if (bucketMode() != BucketMode.HASH_FIXED) {
+                        return Optional.empty();
                     }
+
+                    List<Predicate> bucketFilters =
+                            pickTransformFieldMapping(
+                                    splitAnd(keyFilter),
+                                    keyType.getFieldNames(),
+                                    bucketKeyType.getFieldNames());
+                    if (bucketFilters.size() > 0) {
+                        return BucketSelectConverter.create(and(bucketFilters), bucketKeyType);
+                    }
+                    return Optional.empty();
                 };
         return new KeyValueFileStoreScan(
                 newManifestsReader(forWrite),
-                bucketFilter,
+                bucketSelectConverter,
                 snapshotManager(),
                 schemaManager,
                 schema,
                 keyValueFieldsExtractor,
                 manifestFileFactory(forWrite),
-                options.bucket(),
                 options.scanManifestParallelism(),
                 options.deletionVectorsEnabled(),
                 options.mergeEngine(),

@@ -46,6 +46,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     private final SimpleStatsConverters fieldKeyStatsConverters;
     private final SimpleStatsConverters fieldValueStatsConverters;
+    private final BucketSelectConverter bucketSelectConverter;
 
     private Predicate keyFilter;
     private Predicate valueFilter;
@@ -55,26 +56,24 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     public KeyValueFileStoreScan(
             ManifestsReader manifestsReader,
-            ScanBucketFilter bucketFilter,
+            BucketSelectConverter bucketSelectConverter,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
             TableSchema schema,
             KeyValueFieldsExtractor keyValueFieldsExtractor,
             ManifestFile.Factory manifestFileFactory,
-            int numOfBuckets,
             Integer scanManifestParallelism,
             boolean deletionVectorsEnabled,
             MergeEngine mergeEngine,
             ChangelogProducer changelogProducer) {
         super(
                 manifestsReader,
-                bucketFilter,
                 snapshotManager,
                 schemaManager,
                 schema,
                 manifestFileFactory,
-                numOfBuckets,
                 scanManifestParallelism);
+        this.bucketSelectConverter = bucketSelectConverter;
         this.fieldKeyStatsConverters =
                 new SimpleStatsConverters(
                         sid -> keyValueFieldsExtractor.keyFields(scanTableSchema(sid)),
@@ -90,7 +89,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     public KeyValueFileStoreScan withKeyFilter(Predicate predicate) {
         this.keyFilter = predicate;
-        this.bucketKeyFilter.pushdown(predicate);
+        this.bucketSelectConverter.convert(predicate).ifPresent(this::withTotalAwareBucketFilter);
         return this;
     }
 
