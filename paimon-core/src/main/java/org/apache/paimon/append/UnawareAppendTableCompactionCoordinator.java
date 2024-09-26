@@ -120,10 +120,20 @@ public class UnawareAppendTableCompactionCoordinator {
         return Collections.emptyList();
     }
 
-    public boolean scan() {
+    @VisibleForTesting
+    boolean scan() {
         Map<BinaryRow, List<DataFileMeta>> files = new HashMap<>();
         for (int i = 0; i < FILES_BATCH; i++) {
-            ManifestEntry entry = filesIterator.next();
+            ManifestEntry entry;
+            try {
+                entry = filesIterator.next();
+            } catch (EndOfScanException e) {
+                if (!files.isEmpty()) {
+                    files.forEach(this::notifyNewFiles);
+                    return true;
+                }
+                throw e;
+            }
             if (entry == null) {
                 break;
             }
