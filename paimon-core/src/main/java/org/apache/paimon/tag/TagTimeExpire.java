@@ -67,7 +67,7 @@ public class TagTimeExpire {
             Tag tag = pair.getLeft();
             String tagName = pair.getRight();
             LocalDateTime createTime = tag.getTagCreateTime();
-            if (createTime == null) {
+            if (createTime == null && olderThanTime != null) {
                 FileStatus tagFileStatus;
                 try {
                     tagFileStatus = fileIO.getFileStatus(tagManager.tagPath(tagName));
