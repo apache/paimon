@@ -21,7 +21,7 @@ package org.apache.paimon.client;
 import java.io.Closeable;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -44,10 +44,10 @@ public interface ClientPool<C, E extends Exception> {
     /** Default implementation for {@link ClientPool}. */
     abstract class ClientPoolImpl<C, E extends Exception> implements Closeable, ClientPool<C, E> {
 
-        private volatile LinkedBlockingQueue<C> clients;
+        private volatile LinkedBlockingDeque<C> clients;
 
         protected ClientPoolImpl(int poolSize, Supplier<C> supplier) {
-            this.clients = new LinkedBlockingQueue<>();
+            this.clients = new LinkedBlockingDeque<>();
             for (int i = 0; i < poolSize; i++) {
                 this.clients.add(supplier.get());
             }
@@ -55,19 +55,21 @@ public interface ClientPool<C, E extends Exception> {
 
         @Override
         public <R> R run(Action<R, C, E> action) throws E, InterruptedException {
-            while (this.clients != null) {
-                C client = this.clients.poll(10, TimeUnit.SECONDS);
+            while (true) {
+                LinkedBlockingDeque<C> clients = this.clients;
+                if (clients == null) {
+                    throw new IllegalStateException("Cannot get a client from a closed pool");
+                }
+                C client = clients.pollFirst(10, TimeUnit.SECONDS);
                 if (client == null) {
                     continue;
                 }
                 try {
                     return action.run(client);
                 } finally {
-                    this.clients.add(client);
+                    clients.addFirst(client);
                 }
             }
-
-            throw new IllegalStateException("Cannot get a client from a closed pool");
         }
 
         @Override
@@ -84,7 +86,7 @@ public interface ClientPool<C, E extends Exception> {
 
         @Override
         public void close() {
-            LinkedBlockingQueue<C> clients = this.clients;
+            LinkedBlockingDeque<C> clients = this.clients;
             this.clients = null;
             if (clients != null) {
                 List<C> drain = new ArrayList<>();
