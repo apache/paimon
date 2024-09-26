@@ -190,7 +190,7 @@ public abstract class E2eTestBase {
                 "cat >" + TEST_DATA_DIR + "/" + filename + " <<EOF\n" + content + "EOF\n");
     }
 
-    protected void createKafkaTopic(String topicName, int partitionNum)
+    protected synchronized void createKafkaTopic(String topicName, int partitionNum)
             throws IOException, InterruptedException {
         assert withKafka;
         ContainerState kafka = environment.getContainerByServiceName("kafka-1").get();
