@@ -53,7 +53,7 @@ class PaimonScanBuilder(table: Table)
     }
 
     // Only support with push down partition filter
-    if (pushedPredicates.length != partitionFilter.length) {
+    if (postScanFilters.nonEmpty) {
       return false
     }
 

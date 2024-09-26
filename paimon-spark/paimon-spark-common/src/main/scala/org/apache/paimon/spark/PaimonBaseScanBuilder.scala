@@ -38,12 +38,14 @@ abstract class PaimonBaseScanBuilder(table: Table)
 
   protected var pushedPredicates: Array[(Filter, Predicate)] = Array.empty
 
-  protected var partitionFilter: Array[Filter] = Array.empty
+  protected var partitionFilters: Array[Filter] = Array.empty
+
+  protected var postScanFilters: Array[Filter] = Array.empty
 
   protected var pushDownLimit: Option[Int] = None
 
   override def build(): Scan = {
-    PaimonScan(table, requiredSchema, pushedPredicates.map(_._2), partitionFilter, pushDownLimit)
+    PaimonScan(table, requiredSchema, pushedPredicates.map(_._2), partitionFilters, pushDownLimit)
   }
 
   /**
@@ -77,7 +79,10 @@ abstract class PaimonBaseScanBuilder(table: Table)
       this.pushedPredicates = pushable.toArray
     }
     if (partitionFilter.nonEmpty) {
-      this.partitionFilter = partitionFilter.toArray
+      this.partitionFilters = partitionFilter.toArray
+    }
+    if (postScan.nonEmpty) {
+      this.postScanFilters = postScan.toArray
     }
     postScan.toArray
   }
