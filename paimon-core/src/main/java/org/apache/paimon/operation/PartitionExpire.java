@@ -37,6 +37,7 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /** Expire partitions. */
 public class PartitionExpire {
@@ -51,6 +52,7 @@ public class PartitionExpire {
     private LocalDateTime lastCheck;
     private final PartitionExpireStrategy strategy;
     private final boolean endInputCheckPartitionExpire;
+    private int maxExpires;
 
     public PartitionExpire(
             Duration expirationTime,
@@ -68,6 +70,7 @@ public class PartitionExpire {
         this.metastoreClient = metastoreClient;
         this.lastCheck = LocalDateTime.now();
         this.endInputCheckPartitionExpire = endInputCheckPartitionExpire;
+        this.maxExpires = Integer.MAX_VALUE;
     }
 
     public PartitionExpire(
@@ -82,6 +85,11 @@ public class PartitionExpire {
 
     public PartitionExpire withLock(Lock lock) {
         this.commit.withLock(lock);
+        return this;
+    }
+
+    public PartitionExpire withMaxExpires(int maxExpires) {
+        this.maxExpires = maxExpires;
         return this;
     }
 
@@ -125,14 +133,16 @@ public class PartitionExpire {
 
     private List<Map<String, String>> doExpire(
             LocalDateTime expireDateTime, long commitIdentifier) {
-        List<Map<String, String>> expired = new ArrayList<>();
+        List<List<String>> partValues = new ArrayList<>();
         for (PartitionEntry partition : strategy.selectExpiredPartitions(scan, expireDateTime)) {
             Object[] array = strategy.convertPartition(partition.partition());
-            Map<String, String> partString = strategy.toPartitionString(array);
-            expired.add(partString);
-            LOG.info("Expire Partition: {}", partString);
+            partValues.add(strategy.toPartitionValue(array));
         }
-        if (!expired.isEmpty()) {
+
+        List<Map<String, String>> expired = new ArrayList<>();
+        if (!partValues.isEmpty()) {
+            expired = convertToPartitionString(partValues);
+            LOG.info("Expire Partition: {}", expired);
             if (metastoreClient != null) {
                 deleteMetastorePartitions(expired);
             }
@@ -152,5 +162,15 @@ public class PartitionExpire {
                         }
                     });
         }
+    }
+
+    private List<Map<String, String>> convertToPartitionString(List<List<String>> partValues) {
+        return partValues.stream()
+                .map(values -> String.join(",", values))
+                .sorted()
+                .map(s -> s.split(","))
+                .map(strategy::toPartitionString)
+                .limit(Math.min(partValues.size(), maxExpires))
+                .collect(Collectors.toList());
     }
 }

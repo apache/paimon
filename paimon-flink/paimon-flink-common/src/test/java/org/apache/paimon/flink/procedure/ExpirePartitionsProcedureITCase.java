@@ -347,6 +347,61 @@ public class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder("Never-expire:9999-09-09:99:99");
     }
 
+    @Test
+    public void testSortAndLimitExpirePartition() throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " k STRING,"
+                        + " dt STRING,"
+                        + " hm STRING,"
+                        + " PRIMARY KEY (k, dt, hm) NOT ENFORCED"
+                        + ") PARTITIONED BY (dt, hm) WITH ("
+                        + " 'bucket' = '1'"
+                        + ")");
+        FileStoreTable table = paimonTable("T");
+        // Test there are no expired partitions.
+        assertThat(
+                        callExpirePartitions(
+                                "CALL sys.expire_partitions("
+                                        + "`table` => 'default.T'"
+                                        + ", expiration_time => '1 d'"
+                                        + ", timestamp_formatter => 'yyyy-MM-dd')"))
+                .containsExactlyInAnyOrder("No expired partitions.");
+
+        sql("INSERT INTO T VALUES ('3', '2024-06-02', '02:00')");
+        sql("INSERT INTO T VALUES ('2', '2024-06-02', '01:00')");
+        sql("INSERT INTO T VALUES ('4', '2024-06-03', '01:00')");
+        sql("INSERT INTO T VALUES ('1', '2024-06-01', '01:00')");
+        // This partition never expires.
+        sql("INSERT INTO T VALUES ('Never-expire', '9999-09-09', '99:99')");
+
+        Function<InternalRow, String> consumerReadResult =
+                (InternalRow row) ->
+                        row.getString(0) + ":" + row.getString(1) + ":" + row.getString(2);
+        assertThat(read(table, consumerReadResult))
+                .containsExactlyInAnyOrder(
+                        "1:2024-06-01:01:00",
+                        "2:2024-06-02:01:00",
+                        "3:2024-06-02:02:00",
+                        "4:2024-06-03:01:00",
+                        "Never-expire:9999-09-09:99:99");
+
+        // Show a list of expired partitions.
+        assertThat(
+                        callExpirePartitions(
+                                "CALL sys.expire_partitions("
+                                        + "`table` => 'default.T'"
+                                        + ", expiration_time => '1 d'"
+                                        + ", timestamp_formatter => 'yyyy-MM-dd', max_expires => 3)"))
+                .containsExactly(
+                        "dt=2024-06-01, hm=01:00",
+                        "dt=2024-06-02, hm=01:00",
+                        "dt=2024-06-02, hm=02:00");
+
+        assertThat(read(table, consumerReadResult))
+                .containsExactly("4:2024-06-03:01:00", "Never-expire:9999-09-09:99:99");
+    }
+
     /** Return a list of expired partitions. */
     public List<String> callExpirePartitions(String callSql) {
         return sql(callSql).stream()
