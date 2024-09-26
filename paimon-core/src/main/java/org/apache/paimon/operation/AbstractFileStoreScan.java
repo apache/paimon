@@ -228,22 +228,65 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public Plan plan() {
-        Pair<Snapshot, List<ManifestEntry>> planResult = doPlan();
+        long started = System.nanoTime();
+        ManifestsReader.Result manifestsResult = readManifests();
+        Snapshot snapshot = manifestsResult.snapshot;
+        List<ManifestFileMeta> manifests = manifestsResult.filteredManifests;
 
-        final Snapshot readSnapshot = planResult.getLeft();
-        final List<ManifestEntry> files = planResult.getRight();
+        long startDataFiles =
+                manifestsResult.allManifests.stream()
+                        .mapToLong(f -> f.numAddedFiles() - f.numDeletedFiles())
+                        .sum();
+
+        Collection<ManifestEntry> mergedEntries =
+                readAndMergeFileEntries(manifests, this::readManifest);
+
+        long skippedByPartitionAndStats = startDataFiles - mergedEntries.size();
+
+        // We group files by bucket here, and filter them by the whole bucket filter.
+        // Why do this: because in primary key table, we can't just filter the value
+        // by the stat in files (see `PrimaryKeyFileStoreTable.nonPartitionFilterConsumer`),
+        // but we can do this by filter the whole bucket files
+        List<ManifestEntry> files =
+                mergedEntries.stream()
+                        .collect(
+                                Collectors.groupingBy(
+                                        // we use LinkedHashMap to avoid disorder
+                                        file -> Pair.of(file.partition(), file.bucket()),
+                                        LinkedHashMap::new,
+                                        Collectors.toList()))
+                        .values()
+                        .stream()
+                        .map(this::filterWholeBucketByStats)
+                        .flatMap(Collection::stream)
+                        .collect(Collectors.toList());
+
+        long skippedByWholeBucketFiles = mergedEntries.size() - files.size();
+        long scanDuration = (System.nanoTime() - started) / 1_000_000;
+        checkState(
+                startDataFiles - skippedByPartitionAndStats - skippedByWholeBucketFiles
+                        == files.size());
+        if (scanMetrics != null) {
+            scanMetrics.reportScan(
+                    new ScanStats(
+                            scanDuration,
+                            manifests.size(),
+                            skippedByPartitionAndStats,
+                            skippedByWholeBucketFiles,
+                            files.size()));
+        }
 
         return new Plan() {
             @Nullable
             @Override
             public Long watermark() {
-                return readSnapshot == null ? null : readSnapshot.watermark();
+                return snapshot == null ? null : snapshot.watermark();
             }
 
             @Nullable
             @Override
             public Snapshot snapshot() {
-                return readSnapshot;
+                return snapshot;
             }
 
             @Override
@@ -298,57 +341,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         entry != null
                                 && entry.kind() == FileKind.ADD
                                 && !deleteEntries.contains(entry.identifier()));
-    }
-
-    private Pair<Snapshot, List<ManifestEntry>> doPlan() {
-        long started = System.nanoTime();
-        ManifestsReader.Result manifestsResult = readManifests();
-        Snapshot snapshot = manifestsResult.snapshot;
-        List<ManifestFileMeta> manifests = manifestsResult.filteredManifests;
-
-        long startDataFiles =
-                manifestsResult.allManifests.stream()
-                        .mapToLong(f -> f.numAddedFiles() - f.numDeletedFiles())
-                        .sum();
-
-        Collection<ManifestEntry> mergedEntries =
-                readAndMergeFileEntries(manifests, this::readManifest);
-
-        long skippedByPartitionAndStats = startDataFiles - mergedEntries.size();
-
-        // We group files by bucket here, and filter them by the whole bucket filter.
-        // Why do this: because in primary key table, we can't just filter the value
-        // by the stat in files (see `PrimaryKeyFileStoreTable.nonPartitionFilterConsumer`),
-        // but we can do this by filter the whole bucket files
-        List<ManifestEntry> files =
-                mergedEntries.stream()
-                        .collect(
-                                Collectors.groupingBy(
-                                        // we use LinkedHashMap to avoid disorder
-                                        file -> Pair.of(file.partition(), file.bucket()),
-                                        LinkedHashMap::new,
-                                        Collectors.toList()))
-                        .values()
-                        .stream()
-                        .map(this::filterWholeBucketByStats)
-                        .flatMap(Collection::stream)
-                        .collect(Collectors.toList());
-
-        long skippedByWholeBucketFiles = mergedEntries.size() - files.size();
-        long scanDuration = (System.nanoTime() - started) / 1_000_000;
-        checkState(
-                startDataFiles - skippedByPartitionAndStats - skippedByWholeBucketFiles
-                        == files.size());
-        if (scanMetrics != null) {
-            scanMetrics.reportScan(
-                    new ScanStats(
-                            scanDuration,
-                            manifests.size(),
-                            skippedByPartitionAndStats,
-                            skippedByWholeBucketFiles,
-                            files.size()));
-        }
-        return Pair.of(snapshot, files);
     }
 
     public <T extends FileEntry> Collection<T> readAndMergeFileEntries(
