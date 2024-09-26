@@ -46,7 +46,6 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -421,17 +420,17 @@ public class UnawareAppendTableCompactionCoordinator {
         @Nullable
         public ManifestEntry next() {
             while (true) {
-                if (currentIterator == null || !currentIterator.hasNext()) {
-                    assignNewIterator();
-                }
                 if (currentIterator == null) {
-                    return null;
+                    assignNewIterator();
+                    if (currentIterator == null) {
+                        return null;
+                    }
                 }
-                try {
+
+                if (currentIterator.hasNext()) {
                     return currentIterator.next();
-                } catch (NoSuchElementException e) {
-                    currentIterator = null;
                 }
+                currentIterator = null;
             }
         }
     }
