@@ -16,23 +16,6 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.sql
 
-import org.apache.spark.sql.catalyst.plans.logical.{BinaryCommand, LeafCommand, LeafParsedStatement, UnaryCommand}
-import org.apache.spark.sql.execution.command.LeafRunnableCommand
-import org.apache.spark.sql.execution.datasources.v2.LeafV2CommandExec
-
-package object leafnode {
-
-  trait PaimonLeafParsedStatement extends LeafParsedStatement
-
-  trait PaimonLeafRunnableCommand extends LeafRunnableCommand
-
-  trait PaimonLeafCommand extends LeafCommand
-
-  trait PaimonUnaryCommand extends UnaryCommand
-
-  trait PaimonBinaryCommand extends BinaryCommand
-
-  trait PaimonLeafV2CommandExec extends LeafV2CommandExec
-}
+class PaimonViewTest extends PaimonViewTestBase {}

@@ -16,23 +16,26 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.utils;
 
-import org.apache.spark.sql.catalyst.plans.logical.{BinaryCommand, LeafCommand, LeafParsedStatement, UnaryCommand}
-import org.apache.spark.sql.execution.command.LeafRunnableCommand
-import org.apache.spark.sql.execution.datasources.v2.LeafV2CommandExec
+import org.apache.spark.sql.connector.catalog.Identifier;
 
-package object leafnode {
+import java.util.Arrays;
 
-  trait PaimonLeafParsedStatement extends LeafParsedStatement
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-  trait PaimonLeafRunnableCommand extends LeafRunnableCommand
+/** Utils of catalog. */
+public class CatalogUtils {
 
-  trait PaimonLeafCommand extends LeafCommand
+    public static void checkNamespace(String[] namespace) {
+        checkArgument(
+                namespace.length == 1,
+                "Paimon only support single namespace, but got %s",
+                Arrays.toString(namespace));
+    }
 
-  trait PaimonUnaryCommand extends UnaryCommand
-
-  trait PaimonBinaryCommand extends BinaryCommand
-
-  trait PaimonLeafV2CommandExec extends LeafV2CommandExec
+    public static org.apache.paimon.catalog.Identifier toIdentifier(Identifier ident) {
+        checkNamespace(ident.namespace());
+        return new org.apache.paimon.catalog.Identifier(ident.namespace()[0], ident.name());
+    }
 }
