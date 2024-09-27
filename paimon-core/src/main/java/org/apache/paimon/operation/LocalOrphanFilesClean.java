@@ -40,18 +40,21 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecute;
+import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
 
 /**
  * Local {@link OrphanFilesClean}, it will use thread pool to execute deletion.
@@ -113,31 +116,52 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         return deleteFiles;
     }
 
-    private List<String> getUsedFiles(String branch) {
-        List<String> usedFiles = new ArrayList<>();
+    protected void collectWithoutDataFile(
+            String branch, Consumer<String> usedFileConsumer, Consumer<String> manifestConsumer)
+            throws IOException {
+        randomlyOnlyExecute(
+                executor,
+                snapshot -> {
+                    try {
+                        collectWithoutDataFile(
+                                branch, snapshot, usedFileConsumer, manifestConsumer);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                },
+                safelyGetAllSnapshots(branch));
+    }
+
+    private Set<String> getUsedFiles(String branch) {
+        Set<String> usedFiles = ConcurrentHashMap.newKeySet();
         ManifestFile manifestFile =
                 table.switchToBranch(branch).store().manifestFileFactory().create();
         try {
-            Set<String> manifests = new HashSet<>();
+            Set<String> manifests = ConcurrentHashMap.newKeySet();
             collectWithoutDataFile(branch, usedFiles::add, manifests::add);
-            List<String> dataFiles = new ArrayList<>();
-            for (String manifestName : manifests) {
-                retryReadingFiles(
-                                () -> manifestFile.readWithIOException(manifestName),
-                                Collections.<ManifestEntry>emptyList())
-                        .stream()
-                        .map(ManifestEntry::file)
-                        .forEach(
-                                f -> {
-                                    if (candidateDeletes.contains(f.fileName())) {
-                                        dataFiles.add(f.fileName());
-                                    }
-                                    f.extraFiles().stream()
-                                            .filter(candidateDeletes::contains)
-                                            .forEach(dataFiles::add);
-                                });
-            }
-            usedFiles.addAll(dataFiles);
+            randomlyOnlyExecute(
+                    executor,
+                    manifestName -> {
+                        try {
+                            retryReadingFiles(
+                                            () -> manifestFile.readWithIOException(manifestName),
+                                            Collections.<ManifestEntry>emptyList())
+                                    .stream()
+                                    .map(ManifestEntry::file)
+                                    .forEach(
+                                            f -> {
+                                                if (candidateDeletes.contains(f.fileName())) {
+                                                    usedFiles.add(f.fileName());
+                                                }
+                                                f.extraFiles().stream()
+                                                        .filter(candidateDeletes::contains)
+                                                        .forEach(usedFiles::add);
+                                            });
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    },
+                    manifests);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

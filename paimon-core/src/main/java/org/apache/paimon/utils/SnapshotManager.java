@@ -42,8 +42,11 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -52,6 +55,7 @@ import java.util.stream.LongStream;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
+import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
 
 /** Manager for {@link Snapshot}, providing utility methods related to paths and snapshot hints. */
 public class SnapshotManager implements Serializable {
@@ -472,13 +476,18 @@ public class SnapshotManager implements Serializable {
                         .map(id -> snapshotPath(id))
                         .collect(Collectors.toList());
 
-        List<Snapshot> snapshots = new ArrayList<>();
-        for (Path path : paths) {
-            try {
-                snapshots.add(Snapshot.fromJson(fileIO.readFileUtf8(path)));
-            } catch (FileNotFoundException ignored) {
-            }
-        }
+        List<Snapshot> snapshots = Collections.synchronizedList(new ArrayList<>());
+        collectSnapshots(
+                path -> {
+                    try {
+                        snapshots.add(Snapshot.fromJson(fileIO.readFileUtf8(path)));
+                    } catch (IOException e) {
+                        if (!(e instanceof FileNotFoundException)) {
+                            throw new RuntimeException(e);
+                        }
+                    }
+                },
+                paths);
 
         return snapshots;
     }
@@ -489,16 +498,34 @@ public class SnapshotManager implements Serializable {
                         .map(id -> longLivedChangelogPath(id))
                         .collect(Collectors.toList());
 
-        List<Changelog> changelogs = new ArrayList<>();
-        for (Path path : paths) {
-            try {
-                String json = fileIO.readFileUtf8(path);
-                changelogs.add(Changelog.fromJson(json));
-            } catch (FileNotFoundException ignored) {
-            }
-        }
+        List<Changelog> changelogs = Collections.synchronizedList(new ArrayList<>());
+        collectSnapshots(
+                path -> {
+                    try {
+                        changelogs.add(Changelog.fromJson(fileIO.readFileUtf8(path)));
+                    } catch (IOException e) {
+                        if (!(e instanceof FileNotFoundException)) {
+                            throw new RuntimeException(e);
+                        }
+                    }
+                },
+                paths);
 
         return changelogs;
+    }
+
+    private void collectSnapshots(Consumer<Path> pathConsumer, List<Path> paths)
+            throws IOException {
+        ExecutorService executor =
+                Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+
+        try {
+            randomlyOnlyExecute(executor, pathConsumer, paths);
+        } catch (RuntimeException e) {
+            throw new IOException(e);
+        } finally {
+            executor.shutdown();
+        }
     }
 
     /**
