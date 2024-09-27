@@ -272,8 +272,10 @@ public class OrcReaderFactory implements FormatReaderFactory {
                             .tolerateMissingSchema(
                                     OrcConf.TOLERATE_MISSING_SCHEMA.getBoolean(conf));
             if (!conjunctPredicates.isEmpty()) {
-                options.useSelected(true);
-                options.allowSARGToFilter(true);
+                // TODO fix it , if open this option,future deletion vectors would not work,
+                //  cased by getRowNumber would be changed .
+                options.useSelected(OrcConf.READER_USE_SELECTED.getBoolean(conf));
+                options.allowSARGToFilter(OrcConf.ALLOW_SARG_TO_FILTER.getBoolean(conf));
             }
             // configure filters
             if (!conjunctPredicates.isEmpty()) {
