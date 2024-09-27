@@ -35,6 +35,7 @@ import org.slf4j.LoggerFactory;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -213,8 +214,25 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         List<Snapshot> skippingSnapshots =
                 SnapshotManager.findOverlappedSnapshots(
                         taggedSnapshots, beginInclusiveId, endExclusiveId);
-        skippingSnapshots.add(snapshotManager.snapshot(endExclusiveId));
-        Set<String> skippingSet = snapshotDeletion.manifestSkippingSet(skippingSnapshots);
+
+        try {
+            skippingSnapshots.add(snapshotManager.tryGetSnapshot(endExclusiveId));
+        } catch (FileNotFoundException e) {
+            // the end exclusive snapshot is gone
+            // there is no need to proceed
+            return 0;
+        }
+
+        Set<String> skippingSet = new HashSet<>();
+        try {
+            skippingSet.addAll(snapshotDeletion.manifestSkippingSet(skippingSnapshots));
+        } catch (Exception e) {
+            // mayby snapshot been deleted by other jobs.
+            if (e.getCause() == null || !(e.getCause() instanceof FileNotFoundException)) {
+                throw e;
+            }
+        }
+
         for (long id = beginInclusiveId; id < endExclusiveId; id++) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Ready to delete manifests in snapshot #" + id);
