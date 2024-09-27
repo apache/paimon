@@ -62,11 +62,6 @@ public interface ReadonlyTable extends InnerTable {
     }
 
     @Override
-    default Optional<Statistics> statistics(long snapshotId) {
-        return Optional.empty();
-    }
-
-    @Override
     default BatchWriteBuilder newBatchWriteBuilder() {
         throw new UnsupportedOperationException(
                 String.format(

@@ -52,14 +52,9 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 
+import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing statistic of table. */
@@ -227,7 +222,9 @@ public class StatisticTable implements ReadonlyTable {
                                         .get(SNAPSHOT_ID)
                                         .literals()
                                         .get(0);
-                statisticsOptional = dataTable.statistics(snapshotId);
+                HashMap<String, String> snapshotIdMap = new HashMap<>();
+                snapshotIdMap.put(SCAN_SNAPSHOT_ID.key(), snapshotId.toString());
+                statisticsOptional = dataTable.copy(snapshotIdMap).statistics();
             } else {
                 statisticsOptional = dataTable.statistics();
             }

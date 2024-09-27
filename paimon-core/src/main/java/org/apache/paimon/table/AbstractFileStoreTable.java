@@ -166,16 +166,20 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public Optional<Statistics> statistics() {
-        // todo: support time travel
-        Snapshot latestSnapshot = snapshotManager().latestSnapshot();
+        Snapshot latestSnapshot;
+        Long snapshotId = coreOptions().scanSnapshotId();
+        if (snapshotId != null) {
+            return readStatisticsBySnapshotId(snapshotId);
+        } else {
+            latestSnapshot = snapshotManager().latestSnapshot();
+        }
         if (latestSnapshot != null) {
             return store().newStatsFileHandler().readStats(latestSnapshot);
         }
         return Optional.empty();
     }
 
-    @Override
-    public Optional<Statistics> statistics(long snapshotId) {
+    public Optional<Statistics> readStatisticsBySnapshotId(Long snapshotId) {
         Long latestSnapshotId = snapshotManager().latestSnapshotId();
         if (latestSnapshotId == null) {
             return Optional.empty();

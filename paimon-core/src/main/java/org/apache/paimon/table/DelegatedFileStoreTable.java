@@ -129,11 +129,6 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public Optional<Statistics> statistics(long snapshotId) {
-        return wrapped.statistics(snapshotId);
-    }
-
-    @Override
     public OptionalLong latestSnapshotId() {
         return wrapped.latestSnapshotId();
     }
