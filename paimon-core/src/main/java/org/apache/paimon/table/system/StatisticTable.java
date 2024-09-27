@@ -52,7 +52,14 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
