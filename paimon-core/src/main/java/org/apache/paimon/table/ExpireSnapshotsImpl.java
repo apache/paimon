@@ -227,7 +227,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         try {
             skippingSet.addAll(snapshotDeletion.manifestSkippingSet(skippingSnapshots));
         } catch (Exception e) {
-            // mayby snapshot been deleted by other jobs.
+            // maybe snapshot been deleted by other jobs.
             if (e.getCause() == null || !(e.getCause() instanceof FileNotFoundException)) {
                 throw e;
             }
