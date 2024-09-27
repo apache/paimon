@@ -24,8 +24,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.predicate.LeafPredicate;
-import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.EmptyRecordReader;
 import org.apache.paimon.reader.RecordReader;
@@ -49,19 +47,15 @@ import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing statistic of table. */
@@ -129,26 +123,15 @@ public class StatisticTable implements ReadonlyTable {
 
     private class StatisticScan extends ReadOnceTableScan {
 
-        private @Nullable LeafPredicate snapshotIdPredicate;
-
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
-            if (predicate == null) {
-                return this;
-            }
-
-            Map<String, LeafPredicate> leafPredicates =
-                    predicate.visit(LeafPredicateExtractor.INSTANCE);
-            snapshotIdPredicate = leafPredicates.get("snapshot_id");
-
+            // TODO
             return this;
         }
 
         @Override
         public Plan innerPlan() {
-            return () ->
-                    Collections.singletonList(
-                            new StatisticTable.StatisticSplit(location, snapshotIdPredicate));
+            return () -> Collections.singletonList(new StatisticTable.StatisticSplit(location));
         }
     }
 
@@ -158,11 +141,8 @@ public class StatisticTable implements ReadonlyTable {
 
         private final Path location;
 
-        private final @Nullable LeafPredicate snapshotIdPredicate;
-
-        private StatisticSplit(Path location, @Nullable LeafPredicate snapshotIdPredicate) {
+        private StatisticSplit(Path location) {
             this.location = location;
-            this.snapshotIdPredicate = snapshotIdPredicate;
         }
 
         @Override
@@ -174,8 +154,7 @@ public class StatisticTable implements ReadonlyTable {
                 return false;
             }
             StatisticTable.StatisticSplit that = (StatisticTable.StatisticSplit) o;
-            return Objects.equals(location, that.location)
-                    && Objects.equals(snapshotIdPredicate, that.snapshotIdPredicate);
+            return Objects.equals(location, that.location);
         }
 
         @Override
@@ -218,24 +197,8 @@ public class StatisticTable implements ReadonlyTable {
             if (!(split instanceof StatisticTable.StatisticSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
-            StatisticSplit statisticSplit = (StatisticSplit) split;
-            LeafPredicate snapshotIdPredicate = statisticSplit.snapshotIdPredicate;
-            Optional<Statistics> statisticsOptional;
-            if (snapshotIdPredicate != null) {
-                Long snapshotId =
-                        (Long)
-                                snapshotIdPredicate
-                                        .visit(LeafPredicateExtractor.INSTANCE)
-                                        .get(SNAPSHOT_ID)
-                                        .literals()
-                                        .get(0);
-                HashMap<String, String> snapshotIdMap = new HashMap<>();
-                snapshotIdMap.put(SCAN_SNAPSHOT_ID.key(), snapshotId.toString());
-                statisticsOptional = dataTable.copy(snapshotIdMap).statistics();
-            } else {
-                statisticsOptional = dataTable.statistics();
-            }
 
+            Optional<Statistics> statisticsOptional = dataTable.statistics();
             if (statisticsOptional.isPresent()) {
                 Statistics statistics = statisticsOptional.get();
                 Iterator<Statistics> statisticsIterator =

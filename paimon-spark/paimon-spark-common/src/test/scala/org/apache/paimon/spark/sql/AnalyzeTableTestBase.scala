@@ -73,7 +73,7 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
       Row(2, 0, 2, "{ }"))
   }
 
-  test("Paimon analyze: test statistic system table with predicate") {
+  test("Paimon analyze: test statistic system table with snapshot") {
     spark.sql(s"""
                  |CREATE TABLE T (id STRING, name STRING, i INT, l LONG)
                  |USING PAIMON
@@ -91,28 +91,30 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
 
     spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
 
-    checkAnswer(
-      spark.sql(
-        "SELECT snapshot_id, schema_id, mergedRecordCount, colstat from `T$statistics` where snapshot_id=3"),
-      Nil)
+    withSQLConf("spark.paimon.scan.snapshot-id" -> "3") {
+      checkAnswer(
+        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
+        Row(2, 0, 2, "{ }"))
+    }
 
-    checkAnswer(
-      spark.sql(
-        "SELECT snapshot_id, schema_id, mergedRecordCount, colstat from `T$statistics` where snapshot_id=2"),
-      Row(2, 0, 2, "{ }"))
+    withSQLConf("spark.paimon.scan.snapshot-id" -> "4") {
+      checkAnswer(
+        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
+        Row(2, 0, 2, "{ }"))
+    }
 
-    checkAnswer(
-      spark.sql(
-        "SELECT snapshot_id, schema_id, mergedRecordCount, colstat from `T$statistics` where snapshot_id=5"),
-      Row(5, 0, 4, "{ }"))
+    withSQLConf("spark.paimon.scan.snapshot-id" -> "6") {
+      checkAnswer(
+        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
+        Row(5, 0, 4, "{ }"))
+    }
 
-    // this case indicator that statistic can get the latest analyzed snapshot by snapshot_id
-    spark.sql(s"INSERT INTO T VALUES ('5', 'bbb', 3, 2)")
+    withSQLConf("spark.paimon.scan.snapshot-id" -> "100") {
+      checkAnswer(
+        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
+        Row(5, 0, 4, "{ }"))
+    }
 
-    checkAnswer(
-      spark.sql(
-        "SELECT snapshot_id, schema_id, mergedRecordCount, colstat from `T$statistics` where snapshot_id=5"),
-      Row(5, 0, 4, "{ }"))
   }
 
   test("Paimon analyze: analyze table without snapshot") {

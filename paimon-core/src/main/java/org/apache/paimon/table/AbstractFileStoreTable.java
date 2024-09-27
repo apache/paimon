@@ -168,42 +168,19 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public Optional<Statistics> statistics() {
         Snapshot latestSnapshot;
         Long snapshotId = coreOptions().scanSnapshotId();
-        if (snapshotId != null) {
-            return readStatisticsBySnapshotId(snapshotId);
+        if (snapshotId == null) {
+            snapshotId = snapshotManager().latestSnapshotId();
+        }
+
+        if (snapshotManager().snapshotExists(snapshotId)) {
+            latestSnapshot = snapshotManager().snapshot(snapshotId);
         } else {
             latestSnapshot = snapshotManager().latestSnapshot();
         }
+
         if (latestSnapshot != null) {
             return store().newStatsFileHandler().readStats(latestSnapshot);
         }
-        return Optional.empty();
-    }
-
-    public Optional<Statistics> readStatisticsBySnapshotId(Long snapshotId) {
-        Long latestSnapshotId = snapshotManager().latestSnapshotId();
-        if (latestSnapshotId == null) {
-            return Optional.empty();
-        }
-
-        if (!snapshotManager().snapshotExists(snapshotId)) {
-            return store().newStatsFileHandler().readStats(snapshotManager().latestSnapshot());
-        }
-
-        Long startSnapshotId = snapshotId;
-
-        while (startSnapshotId <= latestSnapshotId) {
-            Snapshot startSnapshot = snapshotManager().snapshot(startSnapshotId);
-            if (startSnapshot.commitKind() == Snapshot.CommitKind.ANALYZE) {
-                Optional<Statistics> statistics =
-                        store().newStatsFileHandler().readStats(startSnapshot);
-                if (statistics.isPresent() && statistics.get().snapshotId() == snapshotId) {
-                    return statistics;
-                }
-                break;
-            }
-            startSnapshotId++;
-        }
-
         return Optional.empty();
     }
 
