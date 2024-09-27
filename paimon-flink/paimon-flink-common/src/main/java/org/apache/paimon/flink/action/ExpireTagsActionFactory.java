@@ -24,7 +24,7 @@ import java.util.Optional;
 /** Factory to create {@link ExpireTagsAction}. */
 public class ExpireTagsActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "expire_tags";
+    private static final String IDENTIFIER = "expire_tags";
 
     private static final String OLDER_THAN = "older_than";
 

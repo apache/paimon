@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.tag.TagTimeExpire;
@@ -39,7 +38,7 @@ import java.util.TimeZone;
 /** A procedure to expire tags by time. */
 public class ExpireTagsProcedure extends ProcedureBase {
 
-    public static final String IDENTIFIER = "expire_tags";
+    private static final String IDENTIFIER = "expire_tags";
 
     @ProcedureHint(
             argument = {
@@ -53,8 +52,8 @@ public class ExpireTagsProcedure extends ProcedureBase {
             ProcedureContext procedureContext, String tableId, @Nullable String olderThanStr)
             throws Catalog.TableNotExistException {
         FileStoreTable fileStoreTable = (FileStoreTable) table(tableId);
-        FileStore fileStore = fileStoreTable.store();
-        TagTimeExpire tagTimeExpire = fileStore.newTagCreationManager().getTagTimeExpire();
+        TagTimeExpire tagTimeExpire =
+                fileStoreTable.store().newTagCreationManager().getTagTimeExpire();
         if (olderThanStr != null) {
             LocalDateTime olderThanTime =
                     DateTimeUtils.parseTimestampData(olderThanStr, 3, TimeZone.getDefault())
@@ -64,7 +63,7 @@ public class ExpireTagsProcedure extends ProcedureBase {
         List<String> expired = tagTimeExpire.expire();
         return expired.isEmpty()
                 ? new Row[] {Row.of("No expired tags.")}
-                : expired.stream().map(x -> Row.of(x)).toArray(Row[]::new);
+                : expired.stream().map(Row::of).toArray(Row[]::new);
     }
 
     @Override
