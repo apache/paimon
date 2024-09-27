@@ -65,8 +65,6 @@ public class StatisticTable implements ReadonlyTable {
 
     public static final String STATISTICS = "statistics";
 
-    private static final String SNAPSHOT_ID = "snapshot_id";
-
     private static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
@@ -103,7 +101,7 @@ public class StatisticTable implements ReadonlyTable {
 
     @Override
     public List<String> primaryKeys() {
-        return Collections.singletonList(SNAPSHOT_ID);
+        return Collections.singletonList("snapshot_id");
     }
 
     @Override
