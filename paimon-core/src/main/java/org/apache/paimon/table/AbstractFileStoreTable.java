@@ -172,7 +172,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             snapshotId = snapshotManager().latestSnapshotId();
         }
 
-        if (snapshotManager().snapshotExists(snapshotId)) {
+        if (snapshotId != null && snapshotManager().snapshotExists(snapshotId)) {
             latestSnapshot = snapshotManager().snapshot(snapshotId);
         } else {
             latestSnapshot = snapshotManager().latestSnapshot();
