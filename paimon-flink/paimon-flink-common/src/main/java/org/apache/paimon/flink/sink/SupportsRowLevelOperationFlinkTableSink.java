@@ -185,11 +185,18 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
                             table.getClass().getName()));
         }
 
-        MergeEngine mergeEngine = CoreOptions.fromMap(table.options()).mergeEngine();
-        if (mergeEngine != DEDUPLICATE) {
-            throw new UnsupportedOperationException(
-                    String.format("Merge engine %s can not support batch delete.", mergeEngine));
+        CoreOptions coreOptions = CoreOptions.fromMap(table.options());
+        if (coreOptions.mergeEngine() == DEDUPLICATE
+                || coreOptions.ignoreDelete()
+                || (coreOptions.mergeEngine() == PARTIAL_UPDATE
+                        && coreOptions.partialUpdateRemoveRecordOnDelete())) {
+            return;
         }
+
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Merge engine %s can not support batch delete.",
+                        coreOptions.mergeEngine()));
     }
 
     private boolean canPushDownDeleteFilter() {

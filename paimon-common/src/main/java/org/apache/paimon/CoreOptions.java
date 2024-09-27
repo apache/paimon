@@ -1942,6 +1942,10 @@ public class CoreOptions implements Serializable {
                 .orElse(Collections.emptyList());
     }
 
+    public boolean partialUpdateRemoveRecordOnDelete() {
+        return options.get(PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE);
+    }
+
     public Optional<String> rowkindField() {
         return options.getOptional(ROWKIND_FIELD);
     }
