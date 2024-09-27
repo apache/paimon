@@ -105,6 +105,14 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
       spark.sql(
         "SELECT snapshot_id, schema_id, mergedRecordCount, colstat from `T$statistics` where snapshot_id=5"),
       Row(5, 0, 4, "{ }"))
+
+    // this case indicator that statistic can get the latest analyzed snapshot by snapshot_id
+    spark.sql(s"INSERT INTO T VALUES ('5', 'bbb', 3, 2)")
+
+    checkAnswer(
+      spark.sql(
+        "SELECT snapshot_id, schema_id, mergedRecordCount, colstat from `T$statistics` where snapshot_id=5"),
+      Row(5, 0, 4, "{ }"))
   }
 
   test("Paimon analyze: analyze table without snapshot") {
