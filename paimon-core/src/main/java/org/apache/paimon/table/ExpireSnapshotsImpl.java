@@ -231,7 +231,6 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             if (e.getCause() == null || !(e.getCause() instanceof FileNotFoundException)) {
                 throw e;
             }
-            LOG.info("Snapshot is deleted while expiring, skip.");
         }
 
         for (long id = beginInclusiveId; id < endExclusiveId; id++) {
