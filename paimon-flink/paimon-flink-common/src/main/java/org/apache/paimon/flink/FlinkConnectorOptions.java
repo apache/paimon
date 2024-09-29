@@ -404,77 +404,6 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Optional endInput watermark used in case of batch mode or bounded stream.");
 
-    @ExcludeFromDocumentation("Only used internally to support materialized table")
-    public static final ConfigOption<Long> CATALOG_MATERIALIZED_TABLE_SNAPSHOT =
-            key("materialized-table.snapshot")
-                    .longType()
-                    .noDefaultValue()
-                    .withDescription("The snapshot specified for the materialized table");
-
-    @ExcludeFromDocumentation("Only used internally to support materialized table")
-    public static final ConfigOption<String> CATALOG_MATERIALIZED_TABLE_DEFINITION_QUERY =
-            key("materialized-table.definition-query")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "The definition query text of materialized table, text is expanded in contrast to the original SQL.");
-
-    @ExcludeFromDocumentation("Only used internally to support materialized table")
-    public static final ConfigOption<String> CATALOG_MATERIALIZED_TABLE_INTERVAL_FRESHNESS =
-            key("materialized-table.interval-freshness")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "the freshness interval of materialized table which is used to determine the physical refresh mode.");
-
-    @ExcludeFromDocumentation("Only used internally to support materialized table")
-    public static final ConfigOption<MaterializedTableIntervalFreshnessTimeUnit>
-            CATALOG_MATERIALIZED_TABLE_INTERVAL_FRESHNESS_TIME_UNIT =
-                    key("materialized-table.interval-freshness.time-unit")
-                            .enumType(MaterializedTableIntervalFreshnessTimeUnit.class)
-                            .noDefaultValue()
-                            .withDescription("The time unit of freshness interval.");
-
-    @ExcludeFromDocumentation("Only used internally to support materialized table")
-    public static final ConfigOption<MaterializedTableRefreshMode>
-            CATALOG_MATERIALIZED_TABLE_LOGICAL_REFRESH_MODE =
-                    key("materialized-table.logical-refresh-mode")
-                            .enumType(MaterializedTableRefreshMode.class)
-                            .noDefaultValue()
-                            .withDescription("the logical refresh mode of materialized table.");
-
-    @ExcludeFromDocumentation("Only used internally to support materialized table")
-    public static final ConfigOption<MaterializedTableRefreshMode>
-            CATALOG_MATERIALIZED_TABLE_REFRESH_MODE =
-                    key("materialized-table.refresh-mode")
-                            .enumType(MaterializedTableRefreshMode.class)
-                            .noDefaultValue()
-                            .withDescription("the physical refresh mode of materialized table.");
-
-    @ExcludeFromDocumentation("Only used internally to support materialized table")
-    public static final ConfigOption<MaterializedTableRefreshStatus>
-            CATALOG_MATERIALIZED_TABLE_REFRESH_STATUS =
-                    key("materialized-table.refresh-status")
-                            .enumType(MaterializedTableRefreshStatus.class)
-                            .noDefaultValue()
-                            .withDescription("the refresh status of materialized table.");
-
-    @ExcludeFromDocumentation("Only used internally to support materialized table")
-    public static final ConfigOption<String>
-            CATALOG_MATERIALIZED_TABLE_REFRESH_HANDLER_DESCRIPTION =
-                    key("materialized-table.refresh-handler-description")
-                            .stringType()
-                            .noDefaultValue()
-                            .withDescription(
-                                    "The summary description of materialized table's refresh handler");
-
-    @ExcludeFromDocumentation("Only used internally to support materialized table")
-    public static final ConfigOption<String> CATALOG_MATERIALIZED_TABLE_REFRESH_HANDLER_BYTES =
-            key("materialized-table.refresh-handler-bytes")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("The serialized refresh handler of materialized table.");
-
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);
@@ -488,36 +417,6 @@ public class FlinkConnectorOptions {
             }
         }
         return list;
-    }
-
-    /** The time unit of materialized table freshness. */
-    public enum MaterializedTableIntervalFreshnessTimeUnit {
-        SECOND,
-        MINUTE,
-        HOUR,
-        DAY
-    }
-
-    /** The refresh mode of materialized table. */
-    public enum MaterializedTableRefreshMode {
-        /** The refresh pipeline will be executed in continuous mode. */
-        CONTINUOUS,
-
-        /** The refresh pipeline will be executed in full mode. */
-        FULL,
-
-        /**
-         * The refresh pipeline mode is determined by freshness of materialized table, either {@link
-         * #FULL} or {@link #CONTINUOUS}.
-         */
-        AUTOMATIC
-    }
-
-    /** The refresh status of materialized table. */
-    public enum MaterializedTableRefreshStatus {
-        INITIALIZING,
-        ACTIVATED,
-        SUSPENDED
     }
 
     /** The mode of lookup cache. */

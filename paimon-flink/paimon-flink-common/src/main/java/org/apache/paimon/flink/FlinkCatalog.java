@@ -22,9 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.FlinkConnectorOptions.MaterializedTableIntervalFreshnessTimeUnit;
-import org.apache.paimon.flink.FlinkConnectorOptions.MaterializedTableRefreshMode;
-import org.apache.paimon.flink.FlinkConnectorOptions.MaterializedTableRefreshStatus;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
 import org.apache.paimon.fs.Path;
@@ -123,19 +120,19 @@ import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 import static org.apache.flink.table.utils.EncodingUtils.decodeBase64ToBytes;
 import static org.apache.flink.table.utils.EncodingUtils.encodeBytesToBase64;
+import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_DEFINITION_QUERY;
+import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_INTERVAL_FRESHNESS;
+import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_INTERVAL_FRESHNESS_TIME_UNIT;
+import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_LOGICAL_REFRESH_MODE;
+import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_REFRESH_HANDLER_BYTES;
+import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_REFRESH_HANDLER_DESCRIPTION;
+import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_REFRESH_MODE;
+import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_REFRESH_STATUS;
+import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_SNAPSHOT;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.apache.paimon.flink.FlinkCatalogOptions.REGISTER_TIMEOUT;
-import static org.apache.paimon.flink.FlinkConnectorOptions.CATALOG_MATERIALIZED_TABLE_DEFINITION_QUERY;
-import static org.apache.paimon.flink.FlinkConnectorOptions.CATALOG_MATERIALIZED_TABLE_INTERVAL_FRESHNESS;
-import static org.apache.paimon.flink.FlinkConnectorOptions.CATALOG_MATERIALIZED_TABLE_INTERVAL_FRESHNESS_TIME_UNIT;
-import static org.apache.paimon.flink.FlinkConnectorOptions.CATALOG_MATERIALIZED_TABLE_LOGICAL_REFRESH_MODE;
-import static org.apache.paimon.flink.FlinkConnectorOptions.CATALOG_MATERIALIZED_TABLE_REFRESH_HANDLER_BYTES;
-import static org.apache.paimon.flink.FlinkConnectorOptions.CATALOG_MATERIALIZED_TABLE_REFRESH_HANDLER_DESCRIPTION;
-import static org.apache.paimon.flink.FlinkConnectorOptions.CATALOG_MATERIALIZED_TABLE_REFRESH_MODE;
-import static org.apache.paimon.flink.FlinkConnectorOptions.CATALOG_MATERIALIZED_TABLE_REFRESH_STATUS;
-import static org.apache.paimon.flink.FlinkConnectorOptions.CATALOG_MATERIALIZED_TABLE_SNAPSHOT;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.flink.log.LogStoreRegister.registerLogSystem;
@@ -372,34 +369,33 @@ public class FlinkCatalog extends AbstractCatalog {
             CatalogMaterializedTable mt, Map<String, String> options) {
         Options mtOptions = new Options();
         mtOptions.set(CoreOptions.TYPE, TableType.FLINK_MATERIALIZED_TABLE);
-        mt.getSnapshot().ifPresent(x -> mtOptions.set(CATALOG_MATERIALIZED_TABLE_SNAPSHOT, x));
-        mtOptions.set(CATALOG_MATERIALIZED_TABLE_DEFINITION_QUERY, mt.getDefinitionQuery());
+        mt.getSnapshot().ifPresent(x -> mtOptions.set(MATERIALIZED_TABLE_SNAPSHOT, x));
+        mtOptions.set(MATERIALIZED_TABLE_DEFINITION_QUERY, mt.getDefinitionQuery());
         mtOptions.set(
-                CATALOG_MATERIALIZED_TABLE_INTERVAL_FRESHNESS,
-                mt.getDefinitionFreshness().getInterval());
+                MATERIALIZED_TABLE_INTERVAL_FRESHNESS, mt.getDefinitionFreshness().getInterval());
         mtOptions.set(
-                CATALOG_MATERIALIZED_TABLE_INTERVAL_FRESHNESS_TIME_UNIT,
-                MaterializedTableIntervalFreshnessTimeUnit.valueOf(
+                MATERIALIZED_TABLE_INTERVAL_FRESHNESS_TIME_UNIT,
+                CoreOptions.MaterializedTableIntervalFreshnessTimeUnit.valueOf(
                         mt.getDefinitionFreshness().getTimeUnit().name()));
         mtOptions.set(
-                CATALOG_MATERIALIZED_TABLE_LOGICAL_REFRESH_MODE,
-                MaterializedTableRefreshMode.valueOf(mt.getLogicalRefreshMode().name()));
+                MATERIALIZED_TABLE_LOGICAL_REFRESH_MODE,
+                CoreOptions.MaterializedTableRefreshMode.valueOf(
+                        mt.getLogicalRefreshMode().name()));
         mtOptions.set(
-                CATALOG_MATERIALIZED_TABLE_REFRESH_MODE,
-                MaterializedTableRefreshMode.valueOf(mt.getRefreshMode().name()));
+                MATERIALIZED_TABLE_REFRESH_MODE,
+                CoreOptions.MaterializedTableRefreshMode.valueOf(mt.getRefreshMode().name()));
         mtOptions.set(
-                CATALOG_MATERIALIZED_TABLE_REFRESH_STATUS,
-                MaterializedTableRefreshStatus.valueOf(mt.getRefreshStatus().name()));
+                MATERIALIZED_TABLE_REFRESH_STATUS,
+                CoreOptions.MaterializedTableRefreshStatus.valueOf(mt.getRefreshStatus().name()));
         mt.getRefreshHandlerDescription()
                 .ifPresent(
                         desc ->
                                 mtOptions.set(
-                                        CATALOG_MATERIALIZED_TABLE_REFRESH_HANDLER_DESCRIPTION,
-                                        desc));
+                                        MATERIALIZED_TABLE_REFRESH_HANDLER_DESCRIPTION, desc));
         byte[] serializedRefreshHandler = mt.getSerializedRefreshHandler();
         if (serializedRefreshHandler != null) {
             mtOptions.set(
-                    CATALOG_MATERIALIZED_TABLE_REFRESH_HANDLER_BYTES,
+                    MATERIALIZED_TABLE_REFRESH_HANDLER_BYTES,
                     encodeBytesToBase64(serializedRefreshHandler));
         }
         options.putAll(mtOptions.toMap());
@@ -589,8 +585,7 @@ public class FlinkCatalog extends AbstractCatalog {
                     modifyRefreshStatus.getRefreshStatus();
             schemaChanges.add(
                     SchemaChange.setOption(
-                            CATALOG_MATERIALIZED_TABLE_REFRESH_STATUS.key(),
-                            newRefreshStatus.name()));
+                            MATERIALIZED_TABLE_REFRESH_STATUS.key(), newRefreshStatus.name()));
             return true;
         } else if (change instanceof ModifyRefreshHandler) {
             ModifyRefreshHandler modifyRefreshHandler = (ModifyRefreshHandler) change;
@@ -598,11 +593,10 @@ public class FlinkCatalog extends AbstractCatalog {
             byte[] newHandlerBytes = modifyRefreshHandler.getRefreshHandlerBytes();
             schemaChanges.add(
                     SchemaChange.setOption(
-                            CATALOG_MATERIALIZED_TABLE_REFRESH_HANDLER_DESCRIPTION.key(),
-                            newHandlerDesc));
+                            MATERIALIZED_TABLE_REFRESH_HANDLER_DESCRIPTION.key(), newHandlerDesc));
             schemaChanges.add(
                     SchemaChange.setOption(
-                            CATALOG_MATERIALIZED_TABLE_REFRESH_HANDLER_BYTES.key(),
+                            MATERIALIZED_TABLE_REFRESH_HANDLER_BYTES.key(),
                             encodeBytesToBase64(newHandlerBytes)));
             return true;
         }
@@ -899,28 +893,27 @@ public class FlinkCatalog extends AbstractCatalog {
 
     private CatalogMaterializedTable buildMaterializedTable(
             Table table, Map<String, String> newOptions, TableSchema schema, Options options) {
-        Long snapshot = options.get(CATALOG_MATERIALIZED_TABLE_SNAPSHOT);
-        String definitionQuery = options.get(CATALOG_MATERIALIZED_TABLE_DEFINITION_QUERY);
+        Long snapshot = options.get(MATERIALIZED_TABLE_SNAPSHOT);
+        String definitionQuery = options.get(MATERIALIZED_TABLE_DEFINITION_QUERY);
         IntervalFreshness freshness =
                 IntervalFreshness.of(
-                        options.get(CATALOG_MATERIALIZED_TABLE_INTERVAL_FRESHNESS),
+                        options.get(MATERIALIZED_TABLE_INTERVAL_FRESHNESS),
                         IntervalFreshness.TimeUnit.valueOf(
-                                options.get(CATALOG_MATERIALIZED_TABLE_INTERVAL_FRESHNESS_TIME_UNIT)
+                                options.get(MATERIALIZED_TABLE_INTERVAL_FRESHNESS_TIME_UNIT)
                                         .name()));
         CatalogMaterializedTable.LogicalRefreshMode logicalRefreshMode =
                 CatalogMaterializedTable.LogicalRefreshMode.valueOf(
-                        options.get(CATALOG_MATERIALIZED_TABLE_LOGICAL_REFRESH_MODE).name());
+                        options.get(MATERIALIZED_TABLE_LOGICAL_REFRESH_MODE).name());
         CatalogMaterializedTable.RefreshMode refreshMode =
                 CatalogMaterializedTable.RefreshMode.valueOf(
-                        options.get(CATALOG_MATERIALIZED_TABLE_REFRESH_MODE).name());
+                        options.get(MATERIALIZED_TABLE_REFRESH_MODE).name());
         CatalogMaterializedTable.RefreshStatus refreshStatus =
                 CatalogMaterializedTable.RefreshStatus.valueOf(
-                        options.get(CATALOG_MATERIALIZED_TABLE_REFRESH_STATUS).name());
+                        options.get(MATERIALIZED_TABLE_REFRESH_STATUS).name());
         String refreshHandlerDescription =
-                options.get(CATALOG_MATERIALIZED_TABLE_REFRESH_HANDLER_DESCRIPTION);
+                options.get(MATERIALIZED_TABLE_REFRESH_HANDLER_DESCRIPTION);
         byte[] serializedRefreshHandler =
-                decodeRefreshHandlerBytes(
-                        options.get(CATALOG_MATERIALIZED_TABLE_REFRESH_HANDLER_BYTES));
+                decodeRefreshHandlerBytes(options.get(MATERIALIZED_TABLE_REFRESH_HANDLER_BYTES));
         // remove materialized table related options
         allMaterializedTableAttributes().forEach(newOptions::remove);
         return CatalogMaterializedTable.newBuilder()
@@ -1312,14 +1305,14 @@ public class FlinkCatalog extends AbstractCatalog {
 
     private List<String> allMaterializedTableAttributes() {
         return Arrays.asList(
-                CATALOG_MATERIALIZED_TABLE_SNAPSHOT.key(),
-                CATALOG_MATERIALIZED_TABLE_DEFINITION_QUERY.key(),
-                CATALOG_MATERIALIZED_TABLE_INTERVAL_FRESHNESS.key(),
-                CATALOG_MATERIALIZED_TABLE_INTERVAL_FRESHNESS_TIME_UNIT.key(),
-                CATALOG_MATERIALIZED_TABLE_REFRESH_MODE.key(),
-                CATALOG_MATERIALIZED_TABLE_LOGICAL_REFRESH_MODE.key(),
-                CATALOG_MATERIALIZED_TABLE_REFRESH_STATUS.key(),
-                CATALOG_MATERIALIZED_TABLE_REFRESH_HANDLER_DESCRIPTION.key(),
-                CATALOG_MATERIALIZED_TABLE_REFRESH_HANDLER_BYTES.key());
+                MATERIALIZED_TABLE_SNAPSHOT.key(),
+                MATERIALIZED_TABLE_DEFINITION_QUERY.key(),
+                MATERIALIZED_TABLE_INTERVAL_FRESHNESS.key(),
+                MATERIALIZED_TABLE_INTERVAL_FRESHNESS_TIME_UNIT.key(),
+                MATERIALIZED_TABLE_REFRESH_MODE.key(),
+                MATERIALIZED_TABLE_LOGICAL_REFRESH_MODE.key(),
+                MATERIALIZED_TABLE_REFRESH_STATUS.key(),
+                MATERIALIZED_TABLE_REFRESH_HANDLER_DESCRIPTION.key(),
+                MATERIALIZED_TABLE_REFRESH_HANDLER_BYTES.key());
     }
 }
