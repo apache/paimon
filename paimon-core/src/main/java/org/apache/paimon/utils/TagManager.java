@@ -147,11 +147,14 @@ public class TagManager {
     public void renameTag(String tagName, String targetTagName) {
         try {
             if (!tagExists(tagName)) {
-                throw new RuntimeException(String.format("tag: %s is not exists", tagName));
+                throw new RuntimeException(
+                        String.format("The specified tag name [%s] does not exist.", tagName));
             }
             if (tagExists(targetTagName)) {
                 throw new RuntimeException(
-                        String.format("The specified tag name [%s] does not exist.", tagName));
+                        String.format(
+                                "The specified target tag name [%s] does not exist.",
+                                targetTagName));
             }
             fileIO.rename(tagPath(tagName), tagPath(targetTagName));
         } catch (IOException e) {
