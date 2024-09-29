@@ -305,7 +305,8 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
         @Override
         public List<PartitionEntry> listPartitionEntries() {
-            List<PartitionEntry> partitionEntries = mainScan.listPartitionEntries();
+            List<PartitionEntry> partitionEntries =
+                    new ArrayList<>(mainScan.listPartitionEntries());
             Set<BinaryRow> partitions =
                     partitionEntries.stream()
                             .map(PartitionEntry::partition)
