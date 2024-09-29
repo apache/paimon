@@ -119,9 +119,7 @@ This section introduce all available spark procedures about paimon.
       </td>
       <td>
          -- based on snapshot 10 with 1d <br/>
-         CALL sys.create_tag(table => 'default.T', tag => 'my_tag', snapshot => 10, time_retained => '1 d') <br/><br/>
-         -- based on the latest snapshot <br/>
-         CALL sys.create_tag(table => 'default.T', tag => 'my_tag')
+         CALL sys.rename_tag(table => 'default.T', tag_name => 'tag1', new_tag_name => 'tag2')
       </td>
     </tr>
     <tr>
