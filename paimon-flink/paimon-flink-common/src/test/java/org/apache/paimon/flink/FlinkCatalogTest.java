@@ -787,7 +787,7 @@ public class FlinkCatalogTest {
         if (t1.getTableKind() == CatalogBaseTable.TableKind.TABLE) {
             t1 = ((ResolvedCatalogTable) t1).copy(options);
         } else {
-            options.put(CoreOptions.TYPE.key(), TableType.FLINK_MATERIALIZED_TABLE.toString());
+            options.put(CoreOptions.TYPE.key(), TableType.MATERIALIZED_TABLE.toString());
             t1 = ((ResolvedCatalogMaterializedTable) t1).copy(options);
         }
         checkEquals(t1, t2);

@@ -29,7 +29,7 @@ public enum TableType implements DescribedEnum {
     FORMAT_TABLE(
             "format-table",
             "A file format table refers to a directory that contains multiple files of the same format."),
-    FLINK_MATERIALIZED_TABLE("flink-materialized-table", "A Flink materialized table.");
+    MATERIALIZED_TABLE("materialized-table", "A materialized table.");
     private final String value;
     private final String description;
 

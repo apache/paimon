@@ -368,7 +368,7 @@ public class FlinkCatalog extends AbstractCatalog {
     private static void fillOptionsForMaterializedTable(
             CatalogMaterializedTable mt, Map<String, String> options) {
         Options mtOptions = new Options();
-        mtOptions.set(CoreOptions.TYPE, TableType.FLINK_MATERIALIZED_TABLE);
+        mtOptions.set(CoreOptions.TYPE, TableType.MATERIALIZED_TABLE);
         mt.getSnapshot().ifPresent(x -> mtOptions.set(MATERIALIZED_TABLE_SNAPSHOT, x));
         mtOptions.set(MATERIALIZED_TABLE_DEFINITION_QUERY, mt.getDefinitionQuery());
         mtOptions.set(
@@ -879,7 +879,7 @@ public class FlinkCatalog extends AbstractCatalog {
         removeProperties.asMap().keySet().forEach(newOptions::remove);
 
         Options options = Options.fromMap(newOptions);
-        if (TableType.FLINK_MATERIALIZED_TABLE == options.get(CoreOptions.TYPE)) {
+        if (TableType.MATERIALIZED_TABLE == options.get(CoreOptions.TYPE)) {
             return buildMaterializedTable(table, newOptions, schema, options);
         }
         return new DataCatalogTable(
