@@ -190,6 +190,14 @@ public interface ReadonlyTable extends InnerTable {
     }
 
     @Override
+    default void renameTag(String tagName, String newTagName) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support renameTag.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
     default void deleteTag(String tagName) {
         throw new UnsupportedOperationException(
                 String.format(

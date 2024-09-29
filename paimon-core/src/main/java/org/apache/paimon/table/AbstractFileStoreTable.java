@@ -572,6 +572,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void renameTag(String tagName, String newTagName) {
+        tagManager().renameTag(tagName, newTagName);
+    }
+
+    @Override
     public void deleteTag(String tagName) {
         tagManager()
                 .deleteTag(

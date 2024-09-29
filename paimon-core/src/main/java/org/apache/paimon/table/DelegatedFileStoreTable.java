@@ -183,6 +183,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void renameTag(String tagName, String newTagName) {
+        wrapped.renameTag(tagName, newTagName);
+    }
+
+    @Override
     public void deleteTag(String tagName) {
         wrapped.deleteTag(tagName);
     }
