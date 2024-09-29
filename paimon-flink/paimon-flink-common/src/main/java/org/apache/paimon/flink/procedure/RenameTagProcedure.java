@@ -48,7 +48,8 @@ public class RenameTagProcedure extends ProcedureBase {
             throws Catalog.TableNotExistException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
         table.renameTag(tagName, targetTagName);
-        return new String[] {"Success"};
+        String ret = String.format("Rename [%s] to [%s] successfully.", tagName, targetTagName);
+        return new String[] {ret};
     }
 
     @Override

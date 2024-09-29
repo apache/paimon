@@ -42,7 +42,10 @@ public class RenameTagAction extends TableActionBase {
     @Override
     public void run() throws Exception {
         if (StringUtils.isEmpty(tagName) || StringUtils.isEmpty(targetTagName)) {
-            throw new RuntimeException(String.format("tagName or targetTagName can not be empty"));
+            throw new RuntimeException(
+                    String.format(
+                            "The specified tag name [%s] or target tag name [%s] cannot be empty.",
+                            tagName, targetTagName));
         }
         table.renameTag(tagName, targetTagName);
     }

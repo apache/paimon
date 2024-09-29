@@ -151,8 +151,7 @@ public class TagManager {
             }
             if (tagExists(targetTagName)) {
                 throw new RuntimeException(
-                        String.format(
-                                "tag: %s existed, please set a non-existent tag name", tagName));
+                        String.format("The specified tag name [%s] does not exist.", tagName));
             }
             fileIO.rename(tagPath(tagName), tagPath(targetTagName));
         } catch (IOException e) {
