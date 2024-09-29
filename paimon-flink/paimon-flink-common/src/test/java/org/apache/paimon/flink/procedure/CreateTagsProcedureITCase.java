@@ -27,7 +27,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatException;
 
-/** IT Case for {@link CreateTagProcedure}. */
+/** IT Case for {@link CreateTagsProcedureITCase}. */
 public class CreateTagsProcedureITCase extends CatalogITCaseBase {
 
     @Test
@@ -56,6 +56,30 @@ public class CreateTagsProcedureITCase extends CatalogITCaseBase {
                         sql("select * from T /*+ OPTIONS('scan.tag-name'='tag2') */").stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder("+I[k, 2024-01-01]");
+    }
+
+    @Test
+    public void testRenameTag() {
+        sql(
+                "CREATE TABLE T ("
+                        + " k STRING,"
+                        + " dt STRING,"
+                        + " PRIMARY KEY (k, dt) NOT ENFORCED"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + " 'bucket' = '1'"
+                        + ")");
+        sql("insert into T values('k', '2024-01-01')");
+        sql("insert into T values('k2', '2024-01-02')");
+
+        sql("CALL sys.create_tag('default.T', 'tag1')");
+
+        assertThat(sql("select tag_name from `T$tags`").stream().map(Row::toString))
+                .containsExactlyInAnyOrder("+I[tag1]");
+
+        sql("CALL sys.rename_tag('default.T', 'tag1', 'tag2')");
+
+        assertThat(sql("select tag_name from `T$tags`").stream().map(Row::toString))
+                .containsExactlyInAnyOrder("+I[tag2]");
     }
 
     @Test
