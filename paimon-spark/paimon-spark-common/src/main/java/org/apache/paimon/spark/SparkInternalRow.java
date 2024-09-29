@@ -59,6 +59,8 @@ import org.apache.spark.sql.types.VarcharType;
 import org.apache.spark.unsafe.types.CalendarInterval;
 import org.apache.spark.unsafe.types.UTF8String;
 
+import java.util.Objects;
+
 import static org.apache.paimon.utils.InternalRowUtils.copyInternalRow;
 
 /** Spark {@link org.apache.spark.sql.catalyst.InternalRow} to wrap {@link InternalRow}. */
@@ -244,6 +246,25 @@ public class SparkInternalRow extends org.apache.spark.sql.catalyst.InternalRow 
 
         throw new UnsupportedOperationException("Unsupported data type " + dataType.simpleString());
     }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        SparkInternalRow that = (SparkInternalRow) o;
+        return Objects.equals(rowType, that.rowType) && Objects.equals(row, that.row);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(rowType, row);
+    }
+
+    // ================== static methods =========================================
 
     public static Object fromPaimon(Object o, DataType type) {
         if (o == null) {

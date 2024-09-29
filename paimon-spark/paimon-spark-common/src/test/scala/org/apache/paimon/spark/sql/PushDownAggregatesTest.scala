@@ -78,6 +78,43 @@ class PushDownAggregatesTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
     }
   }
 
+  test("Push down aggregate - group by partition column") {
+    withTable("T") {
+      spark.sql("CREATE TABLE T (c1 INT) PARTITIONED BY(day STRING, hour INT)")
+
+      runAndCheckAggregate("SELECT COUNT(*) FROM T GROUP BY day", Nil, 0)
+      runAndCheckAggregate("SELECT day, COUNT(*) as c FROM T GROUP BY day, hour", Nil, 0)
+      runAndCheckAggregate("SELECT day, COUNT(*), hour FROM T GROUP BY day, hour", Nil, 0)
+      runAndCheckAggregate(
+        "SELECT day, COUNT(*), hour FROM T WHERE day='x' GROUP BY day, hour",
+        Nil,
+        0)
+      // This query does not contain aggregate due to AQE optimize it to empty relation.
+      runAndCheckAggregate("SELECT day, COUNT(*) FROM T GROUP BY c1, day", Nil, 0)
+
+      spark.sql(
+        "INSERT INTO T VALUES(1, 'x', 1), (2, 'x', 1), (3, 'x', 2), (3, 'x', 3), (null, 'y', null)")
+
+      runAndCheckAggregate("SELECT COUNT(*) FROM T GROUP BY day", Row(1) :: Row(4) :: Nil, 0)
+      runAndCheckAggregate(
+        "SELECT day, COUNT(*) as c FROM T GROUP BY day, hour",
+        Row("x", 1) :: Row("x", 1) :: Row("x", 2) :: Row("y", 1) :: Nil,
+        0)
+      runAndCheckAggregate(
+        "SELECT day, COUNT(*), hour FROM T GROUP BY day, hour",
+        Row("x", 1, 2) :: Row("y", 1, null) :: Row("x", 2, 1) :: Row("x", 1, 3) :: Nil,
+        0)
+      runAndCheckAggregate(
+        "SELECT day, COUNT(*), hour FROM T WHERE day='x' GROUP BY day, hour",
+        Row("x", 1, 2) :: Row("x", 1, 3) :: Row("x", 2, 1) :: Nil,
+        0)
+      runAndCheckAggregate(
+        "SELECT day, COUNT(*) FROM T GROUP BY c1, day",
+        Row("x", 1) :: Row("x", 1) :: Row("x", 2) :: Row("y", 1) :: Nil,
+        2)
+    }
+  }
+
   test("Push down aggregate - primary table") {
     withTable("T") {
       spark.sql("CREATE TABLE T (c1 INT, c2 STRING) TBLPROPERTIES ('primary-key' = 'c1')")
