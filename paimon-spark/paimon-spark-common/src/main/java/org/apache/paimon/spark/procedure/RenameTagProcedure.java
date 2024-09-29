@@ -32,7 +32,7 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  * Rename Tag Procedure. Usage:
  *
  * <pre><code>
- *  CALL sys.rename_tag(tag => 'tag0', new_tag => 'tag1')
+ *  CALL sys.rename_tag(tag => 'tag0', target_tag => 'tag1')
  * </code></pre>
  */
 public class RenameTagProcedure extends BaseProcedure {
@@ -41,7 +41,7 @@ public class RenameTagProcedure extends BaseProcedure {
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
                 ProcedureParameter.required("tag", StringType),
-                ProcedureParameter.required("new_tag", StringType)
+                ProcedureParameter.required("target_tag", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -68,12 +68,12 @@ public class RenameTagProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String tag = args.getString(1);
-        String newTag = args.getString(2);
+        String targetTag = args.getString(2);
 
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
-                    table.renameTag(tag, newTag);
+                    table.renameTag(tag, targetTag);
                     InternalRow outputRow = newInternalRow(true);
                     return new InternalRow[] {outputRow};
                 });

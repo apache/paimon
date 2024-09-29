@@ -267,7 +267,7 @@ public interface FormatTable extends Table {
     }
 
     @Override
-    default void renameTag(String tagName, String newTagName) {
+    default void renameTag(String tagName, String targetTagName) {
         throw new UnsupportedOperationException();
     }
 

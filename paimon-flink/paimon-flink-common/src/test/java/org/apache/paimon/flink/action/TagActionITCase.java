@@ -311,7 +311,7 @@ public class TagActionITCase extends ActionITCaseBase {
                                 tableName,
                                 "--tag_name",
                                 "tag2",
-                                "--new_tag_name",
+                                "--target_tag_name",
                                 "tag3")
                         .run();
                 break;
@@ -324,7 +324,7 @@ public class TagActionITCase extends ActionITCaseBase {
             case "procedure_named":
                 executeSQL(
                         String.format(
-                                "CALL sys.rename_tag(`table` => '%s.%s', tagName => 'tag2', newTagName => 'tag3')",
+                                "CALL sys.rename_tag(`table` => '%s.%s', tagName => 'tag2', targetTagName => 'tag3')",
                                 database, tableName));
                 break;
             default:

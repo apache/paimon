@@ -25,7 +25,7 @@ import java.util.Map;
 /** Rename Tag action for Flink. */
 public class RenameTagAction extends TableActionBase {
     private final String tagName;
-    private final String newTagName;
+    private final String targetTagName;
 
     public RenameTagAction(
             String warehouse,
@@ -33,17 +33,17 @@ public class RenameTagAction extends TableActionBase {
             String tableName,
             Map<String, String> catalogConfig,
             String tagName,
-            String newTagName) {
+            String targetTagName) {
         super(warehouse, databaseName, tableName, catalogConfig);
         this.tagName = tagName;
-        this.newTagName = newTagName;
+        this.targetTagName = targetTagName;
     }
 
     @Override
     public void run() throws Exception {
-        if (StringUtils.isEmpty(tagName) || StringUtils.isEmpty(newTagName)) {
-            throw new RuntimeException(String.format("tagName or newTagName can not be empty"));
+        if (StringUtils.isEmpty(tagName) || StringUtils.isEmpty(targetTagName)) {
+            throw new RuntimeException(String.format("tagName or targetTagName can not be empty"));
         }
-        table.renameTag(tagName, newTagName);
+        table.renameTag(tagName, targetTagName);
     }
 }

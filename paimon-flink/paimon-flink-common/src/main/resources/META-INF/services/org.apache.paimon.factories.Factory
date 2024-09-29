@@ -36,7 +36,7 @@ org.apache.paimon.flink.action.MarkPartitionDoneActionFactory
 org.apache.paimon.flink.action.CreateBranchActionFactory
 org.apache.paimon.flink.action.DeleteBranchActionFactory
 org.apache.paimon.flink.action.FastForwardActionFactory
-org.apache.paimon.flink.action.RenameActionFactory
+org.apache.paimon.flink.action.RenameActionTagFactory
 org.apache.paimon.flink.action.RepairActionFactory
 org.apache.paimon.flink.action.RewriteFileIndexActionFactory
 org.apache.paimon.flink.action.ExpireSnapshotsActionFactory

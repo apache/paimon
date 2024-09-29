@@ -115,10 +115,10 @@ This section introduce all available spark procedures about paimon.
          Rename tag to new tag name. Arguments:
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>tag_name: name of the tag. Cannot be empty.</li>
-            <li>new_tag_name: the new tag name to rename.</li>
+            <li>target_tag_name: the new tag name to rename.</li>
       </td>
       <td>
-         CALL sys.rename_tag(table => 'default.T', tag_name => 'tag1', new_tag_name => 'tag2')
+         CALL sys.rename_tag(table => 'default.T', tag_name => 'tag1', target_tag_name => 'tag2')
       </td>
     </tr>
     <tr>

@@ -23,13 +23,13 @@ import org.apache.flink.api.java.tuple.Tuple3;
 import java.util.Map;
 import java.util.Optional;
 
-/** Factory to create {@link RenameActionFactory}. */
-public class RenameActionFactory implements ActionFactory {
+/** Factory to create {@link RenameActionTagFactory}. */
+public class RenameActionTagFactory implements ActionFactory {
 
     public static final String IDENTIFIER = "rename_tag";
 
     private static final String TAG_NAME = "tag_name";
-    private static final String NEW_TAG_NAME = "new_tag_name";
+    private static final String TARGET_TAG_NAME = "target_tag_name";
 
     @Override
     public String identifier() {
@@ -39,12 +39,12 @@ public class RenameActionFactory implements ActionFactory {
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
         checkRequiredArgument(params, TAG_NAME);
-        checkRequiredArgument(params, NEW_TAG_NAME);
+        checkRequiredArgument(params, TARGET_TAG_NAME);
 
         Tuple3<String, String, String> tablePath = getTablePath(params);
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
         String tagName = params.get(TAG_NAME);
-        String newTagName = params.get(NEW_TAG_NAME);
+        String targetTagName = params.get(TARGET_TAG_NAME);
 
         RenameTagAction action =
                 new RenameTagAction(
@@ -53,7 +53,7 @@ public class RenameActionFactory implements ActionFactory {
                         tablePath.f2,
                         catalogConfig,
                         tagName,
-                        newTagName);
+                        targetTagName);
         return Optional.of(action);
     }
 
@@ -65,7 +65,7 @@ public class RenameActionFactory implements ActionFactory {
         System.out.println("Syntax:");
         System.out.println(
                 "  rename_tag --warehouse <warehouse_path> --tag_name <tag_name> "
-                        + "--new_tag_name <new_tag_name>");
+                        + "--target_tag_name <target_tag_name>");
         System.out.println();
     }
 }

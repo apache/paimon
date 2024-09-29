@@ -31,7 +31,7 @@ import org.apache.flink.table.procedure.ProcedureContext;
  * Create tag procedure. Usage:
  *
  * <pre><code>
- *  CALL sys.rename_tag('tableId', 'tagName', 'newTagName')
+ *  CALL sys.rename_tag('tableId', 'tagName', 'targetTagName')
  * </code></pre>
  */
 public class RenameTagProcedure extends ProcedureBase {
@@ -41,13 +41,13 @@ public class RenameTagProcedure extends ProcedureBase {
             argument = {
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "tagName", type = @DataTypeHint("STRING")),
-                @ArgumentHint(name = "newTagName", type = @DataTypeHint("STRING"))
+                @ArgumentHint(name = "targetTagName", type = @DataTypeHint("STRING"))
             })
     public String[] call(
-            ProcedureContext procedureContext, String tableId, String tagName, String newTagName)
+            ProcedureContext procedureContext, String tableId, String tagName, String targetTagName)
             throws Catalog.TableNotExistException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
-        table.renameTag(tagName, newTagName);
+        table.renameTag(tagName, targetTagName);
         return new String[] {"Success"};
     }
 
