@@ -118,7 +118,6 @@ This section introduce all available spark procedures about paimon.
             <li>new_tag_name: the new tag name to rename.</li>
       </td>
       <td>
-         -- based on snapshot 10 with 1d <br/>
          CALL sys.rename_tag(table => 'default.T', tag_name => 'tag1', new_tag_name => 'tag2')
       </td>
     </tr>
