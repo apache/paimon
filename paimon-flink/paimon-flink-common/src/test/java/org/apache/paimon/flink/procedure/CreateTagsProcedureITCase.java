@@ -27,7 +27,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatException;
 
-/** IT Case for {@link CreateTagsProcedureITCase}. */
+/** IT Case for {@link CreateTagProcedure}. */
 public class CreateTagsProcedureITCase extends CatalogITCaseBase {
 
     @Test
