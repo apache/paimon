@@ -24,15 +24,19 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
+import org.apache.paimon.flink.utils.TableStatsUtil;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
@@ -107,6 +111,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.descriptors.DescriptorProperties.COMMENT;
@@ -1239,8 +1244,26 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public final void alterTableStatistics(
             ObjectPath tablePath, CatalogTableStatistics tableStatistics, boolean ignoreIfNotExists)
-            throws CatalogException {
-        throw new UnsupportedOperationException();
+            throws CatalogException, TableNotExistException {
+        try {
+            Table table = catalog.getTable(toIdentifier(tablePath));
+            Preconditions.checkArgument(
+                    table instanceof FileStoreTable, "Can't analyze system table.");
+            if (!table.latestSnapshotId().isPresent()) {
+                return;
+            }
+            Statistics tableStats =
+                    TableStatsUtil.createTableStats((FileStoreTable) table, tableStatistics);
+
+            FileStoreCommit commit =
+                    ((FileStoreTable) table).store().newCommit(UUID.randomUUID().toString());
+            commit.commitStatistics(tableStats, BatchWriteBuilder.COMMIT_IDENTIFIER);
+
+        } catch (Catalog.TableNotExistException e) {
+            if (!ignoreIfNotExists) {
+                throw new TableNotExistException(getName(), tablePath);
+            }
+        }
     }
 
     @Override
@@ -1248,8 +1271,28 @@ public class FlinkCatalog extends AbstractCatalog {
             ObjectPath tablePath,
             CatalogColumnStatistics columnStatistics,
             boolean ignoreIfNotExists)
-            throws CatalogException {
-        throw new UnsupportedOperationException();
+            throws CatalogException, TableNotExistException {
+        try {
+            Table table = catalog.getTable(toIdentifier(tablePath));
+            Preconditions.checkArgument(
+                    table instanceof FileStoreTable, "Can't analyze system table.");
+
+            if (!table.latestSnapshotId().isPresent()) {
+                return;
+            }
+            Statistics tableStats =
+                    TableStatsUtil.createTableColumnStats(
+                            ((FileStoreTable) table), columnStatistics);
+
+            FileStoreCommit commit =
+                    ((FileStoreTable) table).store().newCommit(UUID.randomUUID().toString());
+            commit.commitStatistics(tableStats, BatchWriteBuilder.COMMIT_IDENTIFIER);
+
+        } catch (Catalog.TableNotExistException e) {
+            if (!ignoreIfNotExists) {
+                throw new TableNotExistException(getName(), tablePath);
+            }
+        }
     }
 
     @Override
