@@ -22,12 +22,11 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
-
 import org.apache.paimon.utils.DateTimeUtils;
+
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import java.sql.Timestamp;
 import java.util.Map;
 
 /** IT cases for analyze table. */
