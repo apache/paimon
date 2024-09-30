@@ -23,6 +23,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
 
+import org.apache.paimon.utils.DateTimeUtils;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -131,10 +132,8 @@ public class FlinkAnalyzeTableITCase extends CatalogITCaseBase {
                 ColStats.newColStats(
                         10,
                         3L,
-                        org.apache.paimon.data.Timestamp.fromSQLTimestamp(
-                                new Timestamp(1704038400000L)),
-                        org.apache.paimon.data.Timestamp.fromSQLTimestamp(
-                                new Timestamp(1704142800000L)),
+                        DateTimeUtils.parseTimestampData("2024-01-01 00:00:00", 0),
+                        DateTimeUtils.parseTimestampData("2024-01-02 05:00:00", 0),
                         1L,
                         null,
                         null),
