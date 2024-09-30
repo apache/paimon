@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.operation.LocalOrphanFilesClean;
 import org.apache.paimon.operation.OrphanFilesClean;
 import org.apache.paimon.spark.catalog.WithPaimonCatalog;
 import org.apache.paimon.spark.orphan.SparkOrphanFilesClean;
@@ -31,6 +32,8 @@ import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.Locale;
 
 import static org.apache.spark.sql.types.DataTypes.BooleanType;
 import static org.apache.spark.sql.types.DataTypes.IntegerType;
@@ -56,7 +59,8 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
                 ProcedureParameter.required("table", StringType),
                 ProcedureParameter.optional("older_than", StringType),
                 ProcedureParameter.optional("dry_run", BooleanType),
-                ProcedureParameter.optional("parallelism", IntegerType)
+                ProcedureParameter.optional("parallelism", IntegerType),
+                ProcedureParameter.optional("mode", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -98,18 +102,42 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
         LOG.info("identifier is {}.", identifier);
 
         Catalog catalog = ((WithPaimonCatalog) tableCatalog()).paimonCatalog();
-        long deletedFiles =
-                SparkOrphanFilesClean.executeDatabaseOrphanFiles(
-                        catalog,
-                        identifier.getDatabaseName(),
-                        identifier.getTableName(),
-                        OrphanFilesClean.olderThanMillis(
-                                args.isNullAt(1) ? null : args.getString(1)),
-                        OrphanFilesClean.createFileCleaner(
-                                catalog, !args.isNullAt(2) && args.getBoolean(2)),
-                        args.isNullAt(3) ? null : args.getInt(3));
+        String mode = args.isNullAt(4) ? "DISTRIBUTED" : args.getString(4);
 
-        return new InternalRow[] {newInternalRow(deletedFiles)};
+        long deletedFiles;
+        try {
+            switch (mode.toUpperCase(Locale.ROOT)) {
+                case "LOCAL":
+                    deletedFiles =
+                            LocalOrphanFilesClean.executeDatabaseOrphanFiles(
+                                    catalog,
+                                    identifier.getDatabaseName(),
+                                    identifier.getTableName(),
+                                    OrphanFilesClean.olderThanMillis(
+                                            args.isNullAt(1) ? null : args.getString(1)),
+                                    OrphanFilesClean.createFileCleaner(
+                                            catalog, !args.isNullAt(2) && args.getBoolean(2)),
+                                    args.isNullAt(3) ? null : args.getInt(3));
+                    break;
+                case "DISTRIBUTED":
+                    deletedFiles =
+                            SparkOrphanFilesClean.executeDatabaseOrphanFiles(
+                                    catalog,
+                                    identifier.getDatabaseName(),
+                                    identifier.getTableName(),
+                                    OrphanFilesClean.olderThanMillis(
+                                            args.isNullAt(1) ? null : args.getString(1)),
+                                    OrphanFilesClean.createFileCleaner(
+                                            catalog, !args.isNullAt(2) && args.getBoolean(2)),
+                                    args.isNullAt(3) ? null : args.getInt(3));
+                    break;
+                default:
+                    throw new IllegalArgumentException("Unsupported mode: " + mode);
+            }
+            return new InternalRow[] {newInternalRow(deletedFiles)};
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public static ProcedureBuilder builder() {
