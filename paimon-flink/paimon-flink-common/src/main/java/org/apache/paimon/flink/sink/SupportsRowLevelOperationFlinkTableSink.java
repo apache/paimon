@@ -187,7 +187,6 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
 
         CoreOptions coreOptions = CoreOptions.fromMap(table.options());
         if (coreOptions.mergeEngine() == DEDUPLICATE
-                || coreOptions.ignoreDelete()
                 || (coreOptions.mergeEngine() == PARTIAL_UPDATE
                         && coreOptions.partialUpdateRemoveRecordOnDelete())) {
             return;
