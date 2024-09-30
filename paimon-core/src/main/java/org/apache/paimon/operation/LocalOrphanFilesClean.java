@@ -106,7 +106,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         // delete unused files
         candidateDeletes.removeAll(usedFiles);
         candidateDeletes.stream().map(candidates::get).forEach(fileCleaner);
-        deleteFiles.addAll(candidateDeletes.stream().map(candidates::get).collect(Collectors.toList()));
+        deleteFiles.addAll(
+                candidateDeletes.stream().map(candidates::get).collect(Collectors.toList()));
 
         return deleteFiles;
     }
@@ -161,8 +162,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                                     dataFiles.add(f.fileName());
                                 }
                                 f.extraFiles().stream()
-                                    .filter(candidateDeletes::contains)
-                                    .forEach(dataFiles::add);
+                                        .filter(candidateDeletes::contains)
+                                        .forEach(dataFiles::add);
                             });
         }
         return dataFiles;
