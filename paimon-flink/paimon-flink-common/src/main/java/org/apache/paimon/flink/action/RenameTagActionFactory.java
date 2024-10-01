@@ -23,10 +23,10 @@ import org.apache.flink.api.java.tuple.Tuple3;
 import java.util.Map;
 import java.util.Optional;
 
-/** Factory to create {@link RenameActionTagFactory}. */
-public class RenameActionTagFactory implements ActionFactory {
+/** Factory to create {@link RenameTagActionFactory}. */
+public class RenameTagActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "rename_tag";
+    private static final String IDENTIFIER = "rename_tag";
 
     private static final String TAG_NAME = "tag_name";
     private static final String TARGET_TAG_NAME = "target_tag_name";
@@ -59,7 +59,7 @@ public class RenameActionTagFactory implements ActionFactory {
 
     @Override
     public void printHelp() {
-        System.out.println("Action \"rename_tag\" rename a tag with a new tagname.");
+        System.out.println("Action \"rename_tag\" rename a tag with a new tag name.");
         System.out.println();
 
         System.out.println("Syntax:");

@@ -35,7 +35,7 @@ import org.apache.flink.table.procedure.ProcedureContext;
  * </code></pre>
  */
 public class RenameTagProcedure extends ProcedureBase {
-    public static final String IDENTIFIER = "rename_tag";
+    private static final String IDENTIFIER = "rename_tag";
 
     @ProcedureHint(
             argument = {
