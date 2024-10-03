@@ -105,8 +105,7 @@ public class FlinkAnalyzeTableITCase extends CatalogITCaseBase {
                 colStats.get("bytes_col"));
 
         Assertions.assertEquals(
-                ColStats.newColStats(3, 2L, 1, 4, 0L, null, null),
-                colStats.get("int_col"));
+                ColStats.newColStats(3, 2L, 1, 4, 0L, null, null), colStats.get("int_col"));
 
         Assertions.assertEquals(
                 ColStats.newColStats(4, 2L, 1L, 19L, 0L, null, null), colStats.get("long_col"));

@@ -40,7 +40,6 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.api.TableSchema;
@@ -459,8 +458,12 @@ public class FlinkCatalog extends AbstractCatalog {
                 schemaChanges.add(
                         SchemaChange.addColumn(
                                 add.getColumn().getName(),
+<<<<<<< HEAD
                                 LogicalTypeConversion.toDataType(
                                         add.getColumn().getDataType().getLogicalType()),
+=======
+                                toDataType(add.getColumn().getDataType().getLogicalType()),
+>>>>>>> b5f198307 (format)
                                 comment,
                                 move));
             }
@@ -509,8 +512,12 @@ public class FlinkCatalog extends AbstractCatalog {
                 }
                 schemaChanges.add(
                         SchemaChange.updateColumnType(
+<<<<<<< HEAD
                                 modify.getOldColumn().getName(),
                                 LogicalTypeConversion.toDataType(newColumnType)));
+=======
+                                modify.getOldColumn().getName(), toDataType(newColumnType)));
+>>>>>>> b5f198307 (format)
             }
             return schemaChanges;
         } else if (change instanceof ModifyColumnPosition) {
@@ -748,8 +755,12 @@ public class FlinkCatalog extends AbstractCatalog {
         return compoundKey(watermarkPrefix, WATERMARK_STRATEGY_DATA_TYPE);
     }
 
+<<<<<<< HEAD
     private void setWatermarkOptions(
             org.apache.flink.table.catalog.WatermarkSpec wms, List<SchemaChange> schemaChanges) {
+=======
+    private void setWatermarkOptions(WatermarkSpec wms, List<SchemaChange> schemaChanges) {
+>>>>>>> b5f198307 (format)
         String watermarkPrefix = getWatermarkKeyPrefix();
         schemaChanges.add(
                 SchemaChange.setOption(
@@ -1256,7 +1267,9 @@ public class FlinkCatalog extends AbstractCatalog {
         alterTableStatisticsInternal(tablePath, columnStatistics, ignoreIfNotExists);
     }
 
-    private void alterTableStatisticsInternal(ObjectPath tablePath, Object statistics, boolean ignoreIfNotExists) throws TableNotExistException {
+    private void alterTableStatisticsInternal(
+            ObjectPath tablePath, Object statistics, boolean ignoreIfNotExists)
+            throws TableNotExistException {
         try {
             Table table = catalog.getTable(toIdentifier(tablePath));
             checkArgument(
@@ -1270,17 +1283,21 @@ public class FlinkCatalog extends AbstractCatalog {
             if (statistics instanceof CatalogColumnStatistics) {
                 tableStats =
                         TableStatsUtil.createTableColumnStats(
-                                ((FileStoreTable) table), (CatalogColumnStatistics)statistics);
+                                ((FileStoreTable) table), (CatalogColumnStatistics) statistics);
             } else if (statistics instanceof CatalogTableStatistics) {
                 tableStats =
                         TableStatsUtil.createTableStats(
-                                ((FileStoreTable) table), (CatalogTableStatistics)statistics);
+                                ((FileStoreTable) table), (CatalogTableStatistics) statistics);
             }
 
             if (tableStats != null) {
                 FileStoreTable fileStoreTable = (FileStoreTable) table;
                 FileStoreCommit commit =
-                        fileStoreTable.store().newCommit(CoreOptions.createCommitUser(fileStoreTable.coreOptions().toConfiguration()));
+                        fileStoreTable
+                                .store()
+                                .newCommit(
+                                        CoreOptions.createCommitUser(
+                                                fileStoreTable.coreOptions().toConfiguration()));
                 commit.commitStatistics(tableStats, BatchWriteBuilder.COMMIT_IDENTIFIER);
             }
         } catch (Catalog.TableNotExistException e) {
