@@ -20,6 +20,7 @@ package org.apache.paimon.flink.utils;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.FileStoreTable;
@@ -39,20 +40,25 @@ import org.apache.flink.table.catalog.stats.CatalogColumnStatisticsDataLong;
 import org.apache.flink.table.catalog.stats.CatalogColumnStatisticsDataString;
 import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 
+import javax.annotation.Nullable;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Utility methods for analysis table. */
 public class TableStatsUtil {
 
     /** create Paimon statistics. */
+    @Nullable
     public static Statistics createTableStats(
             FileStoreTable table, CatalogTableStatistics catalogTableStatistics) {
-
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         long mergedRecordCount = catalogTableStatistics.getRowCount();
+        if (snapshot.totalRecordCount() == null) {
+            return null;
+        }
         long totalRecordCount = snapshot.totalRecordCount();
         Preconditions.checkState(
                 totalRecordCount >= mergedRecordCount,
@@ -60,7 +66,7 @@ public class TableStatsUtil {
         long totalSize =
                 table.newScan().plan().splits().stream()
                         .flatMap(split -> ((DataSplit) split).dataFiles().stream())
-                        .mapToLong(dataFile -> dataFile.fileSize())
+                        .mapToLong(DataFileMeta::fileSize)
                         .sum();
         long mergedRecordSize =
                 (long) (totalSize * ((double) mergedRecordCount / totalRecordCount));
@@ -71,12 +77,15 @@ public class TableStatsUtil {
     }
 
     /** Create Paimon statistics from given Flink columnStatistics. */
+    @Nullable
     public static Statistics createTableColumnStats(
             FileStoreTable table, CatalogColumnStatistics columnStatistics) {
-
+        if (!table.statistics().isPresent()) {
+            return null;
+        }
         Statistics statistics = table.statistics().get();
-        HashMap<String, ColStats<?>> tableColumnStatsMap = new HashMap<>();
         List<DataField> fields = table.schema().fields();
+        Map<String, ColStats<?>> tableColumnStatsMap = new HashMap<>(fields.size());
         for (DataField field : fields) {
             CatalogColumnStatisticsDataBase catalogColumnStatisticsDataBase =
                     columnStatistics.getColumnStatisticsData().get(field.name());
@@ -91,7 +100,7 @@ public class TableStatsUtil {
     }
 
     /** Convert Flink ColumnStats to Paimon ColStats according to Paimon column type. */
-    private static ColStats getPaimonColStats(
+    private static ColStats<?> getPaimonColStats(
             DataField field, CatalogColumnStatisticsDataBase colStat) {
         DataTypeRoot typeRoot = field.type().getTypeRoot();
         if (colStat instanceof CatalogColumnStatisticsDataString) {
@@ -116,7 +125,7 @@ public class TableStatsUtil {
                 return ColStats.newColStats(
                         field.id(),
                         (booleanColStat.getFalseCount() > 0 ? 1L : 0)
-                                + (booleanColStat.getTrueCount() > 0 ? 1 : 0),
+                                + (booleanColStat.getTrueCount() > 0 ? 1L : 0),
                         null,
                         null,
                         booleanColStat.getNullCount(),
@@ -278,7 +287,7 @@ public class TableStatsUtil {
         }
         throw new CatalogException(
                 String.format(
-                        "Flink does not support converting ColumnStats '%s' for Paimon column "
+                        "Flink does not support convert ColumnStats '%s' for Paimon column "
                                 + "type '%s' yet",
                         colStat, field.type()));
     }

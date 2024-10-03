@@ -28,6 +28,9 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for analyze table. */
 public class FlinkAnalyzeTableITCase extends CatalogITCaseBase {
@@ -47,16 +50,20 @@ public class FlinkAnalyzeTableITCase extends CatalogITCaseBase {
         sql("INSERT INTO T VALUES ('1', 'a', 1, 1)");
         sql("INSERT INTO T VALUES ('2', 'aaa', 1, 2)");
         sql("ANALYZE TABLE T COMPUTE STATISTICS");
-        Statistics stats = paimonTable("T").statistics().get();
 
+        Optional<Statistics> statisticsOpt = paimonTable("T").statistics();
+        assertThat(statisticsOpt.isPresent()).isTrue();
+        Statistics stats = statisticsOpt.get();
+
+        assertThat(stats.mergedRecordCount().isPresent()).isTrue();
         Assertions.assertEquals(2L, stats.mergedRecordCount().getAsLong());
+
         Assertions.assertTrue(stats.mergedRecordSize().isPresent());
         Assertions.assertTrue(stats.colStats().isEmpty());
     }
 
     @Test
     public void testAnalyzeTableColumn() throws Catalog.TableNotExistException {
-
         sql(
                 "CREATE TABLE T ("
                         + "id STRING, name STRING, bytes_col BYTES, int_col INT, long_col bigint,\n"
@@ -80,8 +87,11 @@ public class FlinkAnalyzeTableITCase extends CatalogITCaseBase {
 
         sql("ANALYZE TABLE T COMPUTE STATISTICS FOR ALL COLUMNS");
 
-        Statistics stats = paimonTable("T").statistics().get();
+        Optional<Statistics> statisticsOpt = paimonTable("T").statistics();
+        assertThat(statisticsOpt.isPresent()).isTrue();
+        Statistics stats = statisticsOpt.get();
 
+        assertThat(stats.mergedRecordCount().isPresent()).isTrue();
         Assertions.assertEquals(4L, stats.mergedRecordCount().getAsLong());
 
         Map<String, ColStats<?>> colStats = stats.colStats();
@@ -95,7 +105,7 @@ public class FlinkAnalyzeTableITCase extends CatalogITCaseBase {
                 colStats.get("bytes_col"));
 
         Assertions.assertEquals(
-                ColStats.newColStats(3, 2L, new Integer(1), new Integer(4), 0L, null, null),
+                ColStats.newColStats(3, 2L, 1, 4, 0L, null, null),
                 colStats.get("int_col"));
 
         Assertions.assertEquals(

@@ -111,7 +111,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.descriptors.DescriptorProperties.COMMENT;
@@ -561,9 +560,9 @@ public class FlinkCatalog extends AbstractCatalog {
         } else if (change instanceof TableChange.ModifyColumn) {
             // let non-physical column handle by option
             if (oldTableNonPhysicalColumnIndex.containsKey(
-                            ((TableChange.ModifyColumn) change).getOldColumn().getName())
+                    ((TableChange.ModifyColumn) change).getOldColumn().getName())
                     && !(((TableChange.ModifyColumn) change).getNewColumn()
-                            instanceof Column.PhysicalColumn)) {
+                    instanceof Column.PhysicalColumn)) {
                 return schemaChanges;
             } else {
                 throw new UnsupportedOperationException(
@@ -717,8 +716,8 @@ public class FlinkCatalog extends AbstractCatalog {
         try {
             catalog.alterTable(toIdentifier(tablePath), changes, ignoreIfNotExists);
         } catch (Catalog.TableNotExistException
-                | Catalog.ColumnAlreadyExistException
-                | Catalog.ColumnNotExistException e) {
+                 | Catalog.ColumnAlreadyExistException
+                 | Catalog.ColumnNotExistException e) {
             throw new CatalogException(e);
         }
     }
@@ -788,11 +787,11 @@ public class FlinkCatalog extends AbstractCatalog {
             if (ts1.getPrimaryKey().isPresent() && ts2.getPrimaryKey().isPresent()) {
                 pkEquality =
                         Objects.equals(
-                                        ts1.getPrimaryKey().get().getType(),
-                                        ts2.getPrimaryKey().get().getType())
+                                ts1.getPrimaryKey().get().getType(),
+                                ts2.getPrimaryKey().get().getType())
                                 && Objects.equals(
-                                        ts1.getPrimaryKey().get().getColumns(),
-                                        ts2.getPrimaryKey().get().getColumns());
+                                ts1.getPrimaryKey().get().getColumns(),
+                                ts2.getPrimaryKey().get().getColumns());
             } else if (!ts1.getPrimaryKey().isPresent() && !ts2.getPrimaryKey().isPresent()) {
                 pkEquality = true;
             }
@@ -1245,25 +1244,7 @@ public class FlinkCatalog extends AbstractCatalog {
     public final void alterTableStatistics(
             ObjectPath tablePath, CatalogTableStatistics tableStatistics, boolean ignoreIfNotExists)
             throws CatalogException, TableNotExistException {
-        try {
-            Table table = catalog.getTable(toIdentifier(tablePath));
-            Preconditions.checkArgument(
-                    table instanceof FileStoreTable, "Can't analyze system table.");
-            if (!table.latestSnapshotId().isPresent()) {
-                return;
-            }
-            Statistics tableStats =
-                    TableStatsUtil.createTableStats((FileStoreTable) table, tableStatistics);
-
-            FileStoreCommit commit =
-                    ((FileStoreTable) table).store().newCommit(UUID.randomUUID().toString());
-            commit.commitStatistics(tableStats, BatchWriteBuilder.COMMIT_IDENTIFIER);
-
-        } catch (Catalog.TableNotExistException e) {
-            if (!ignoreIfNotExists) {
-                throw new TableNotExistException(getName(), tablePath);
-            }
-        }
+        alterTableStatisticsInternal(tablePath, tableStatistics, ignoreIfNotExists);
     }
 
     @Override
@@ -1272,22 +1253,36 @@ public class FlinkCatalog extends AbstractCatalog {
             CatalogColumnStatistics columnStatistics,
             boolean ignoreIfNotExists)
             throws CatalogException, TableNotExistException {
+        alterTableStatisticsInternal(tablePath, columnStatistics, ignoreIfNotExists);
+    }
+
+    private void alterTableStatisticsInternal(ObjectPath tablePath, Object statistics, boolean ignoreIfNotExists) throws TableNotExistException {
         try {
             Table table = catalog.getTable(toIdentifier(tablePath));
-            Preconditions.checkArgument(
-                    table instanceof FileStoreTable, "Can't analyze system table.");
-
+            checkArgument(
+                    table instanceof FileStoreTable, "Now only support analyze FileStoreTable.");
             if (!table.latestSnapshotId().isPresent()) {
+                LOG.info("Skipping analyze table because the snapshot is null.");
                 return;
             }
-            Statistics tableStats =
-                    TableStatsUtil.createTableColumnStats(
-                            ((FileStoreTable) table), columnStatistics);
 
-            FileStoreCommit commit =
-                    ((FileStoreTable) table).store().newCommit(UUID.randomUUID().toString());
-            commit.commitStatistics(tableStats, BatchWriteBuilder.COMMIT_IDENTIFIER);
+            Statistics tableStats = null;
+            if (statistics instanceof CatalogColumnStatistics) {
+                tableStats =
+                        TableStatsUtil.createTableColumnStats(
+                                ((FileStoreTable) table), (CatalogColumnStatistics)statistics);
+            } else if (statistics instanceof CatalogTableStatistics) {
+                tableStats =
+                        TableStatsUtil.createTableStats(
+                                ((FileStoreTable) table), (CatalogTableStatistics)statistics);
+            }
 
+            if (tableStats != null) {
+                FileStoreTable fileStoreTable = (FileStoreTable) table;
+                FileStoreCommit commit =
+                        fileStoreTable.store().newCommit(CoreOptions.createCommitUser(fileStoreTable.coreOptions().toConfiguration()));
+                commit.commitStatistics(tableStats, BatchWriteBuilder.COMMIT_IDENTIFIER);
+            }
         } catch (Catalog.TableNotExistException e) {
             if (!ignoreIfNotExists) {
                 throw new TableNotExistException(getName(), tablePath);
