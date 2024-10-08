@@ -45,6 +45,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.flink.table.hive.LegacyHiveClasses;
 import org.apache.hadoop.conf.Configuration;
@@ -398,8 +399,12 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public boolean tableExists(Identifier identifier) {
+        return getHiveTable(identifier).getKey();
+    }
+
+    private Pair<Boolean, Table> getHiveTable(Identifier identifier) {
         if (isSystemTable(identifier)) {
-            return super.tableExists(identifier);
+            return Pair.of(super.tableExists(identifier), null);
         }
 
         Table table;
@@ -411,7 +416,7 @@ public class HiveCatalog extends AbstractCatalog {
                                             identifier.getDatabaseName(),
                                             identifier.getTableName()));
         } catch (NoSuchObjectException e) {
-            return false;
+            return Pair.of(false, null);
         } catch (TException e) {
             throw new RuntimeException(
                     "Cannot determine if table " + identifier.getFullName() + " is a paimon table.",
@@ -429,19 +434,19 @@ public class HiveCatalog extends AbstractCatalog {
                                         identifier.getBranchNameOrDefault())
                                 .isPresent();
         if (isDataTable) {
-            return true;
+            return Pair.of(true, table);
         }
 
         if (formatTableEnabled()) {
             try {
                 HiveFormatTableUtils.convertToFormatTable(table);
-                return true;
+                return Pair.of(true, table);
             } catch (UnsupportedOperationException e) {
-                return false;
+                return Pair.of(false, null);
             }
         }
 
-        return false;
+        return Pair.of(false, null);
     }
 
     private static boolean isPaimonTable(Table table) {
@@ -452,14 +457,23 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
-        if (!tableExists(identifier)) {
+    protected TableMeta getDataTableMeta(Identifier identifier) throws TableNotExistException {
+        Pair<Boolean, Table> tablePair = getHiveTable(identifier);
+        if (!tablePair.getKey()) {
             throw new TableNotExistException(identifier);
         }
 
-        return tableSchemaInFileSystem(
-                        getTableLocation(identifier), identifier.getBranchNameOrDefault())
-                .orElseThrow(() -> new TableNotExistException(identifier));
+        TableSchema schema =
+                tableSchemaInFileSystem(
+                                getTableLocation(identifier), identifier.getBranchNameOrDefault())
+                        .orElseThrow(() -> new TableNotExistException(identifier));
+        Table table = tablePair.getValue();
+        return new TableMeta(schema, identifier.getFullName() + "." + table.getCreateTime());
+    }
+
+    @Override
+    protected TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
+        return getDataTableMeta(identifier).schema();
     }
 
     @Override
