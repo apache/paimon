@@ -59,7 +59,13 @@ import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanner;
 import org.apache.paimon.tag.TagPreview;
-import org.apache.paimon.utils.*;
+import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.SegmentsCache;
+import org.apache.paimon.utils.SimpleFileReader;
+import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.SnapshotNotExistException;
+import org.apache.paimon.utils.TagManager;
 
 import javax.annotation.Nullable;
 
