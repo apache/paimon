@@ -336,11 +336,11 @@ public class BinaryStringUtils {
                 break;
             case 6: // microseconds
                 millis = epoch / 1000;
-                nanosOfMillis = (int)((epoch % 1000) * 1000);
+                nanosOfMillis = (int) ((epoch % 1000) * 1000);
                 break;
             case 9: // nanoseconds
                 millis = epoch / 1_000_000;
-                nanosOfMillis = (int)(epoch % 1_000_000);
+                nanosOfMillis = (int) (epoch % 1_000_000);
                 break;
             default:
                 throw new RuntimeException("Unsupported precision: " + precision);
