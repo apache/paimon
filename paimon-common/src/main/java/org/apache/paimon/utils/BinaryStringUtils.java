@@ -25,8 +25,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
 
 import java.time.DateTimeException;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
 import java.util.TimeZone;
@@ -34,7 +32,6 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.apache.paimon.data.BinaryString.fromString;
-import static org.apache.paimon.data.Timestamp.fromLocalDateTime;
 import static org.apache.paimon.types.DataTypeRoot.BINARY;
 import static org.apache.paimon.types.DataTypeRoot.CHAR;
 
@@ -310,8 +307,8 @@ public class BinaryStringUtils {
     public static Timestamp toTimestamp(BinaryString input, int precision)
             throws DateTimeException {
         if (StringUtils.isNumeric(input.toString())) {
-            long millis = toLong(input);
-            return fromMillisToTimestamp(millis, precision);
+            long epoch = toLong(input);
+            return fromMillisToTimestamp(epoch, precision);
         }
         return DateTimeUtils.parseTimestampData(input.toString(), precision);
     }
@@ -323,22 +320,32 @@ public class BinaryStringUtils {
     }
 
     // Helper method to convert milliseconds to Timestamp with the provided precision.
-    private static Timestamp fromMillisToTimestamp(long millis, int precision) {
-        // Calculate seconds and nanoseconds from the millis
-        long seconds = millis / 1000;
-        int nanos = (int) ((millis % 1000) * 1_000_000);
+    private static Timestamp fromMillisToTimestamp(long epoch, int precision) {
+        // Calculate milliseconds and nanoseconds from epoch based on precision
+        long millis;
+        int nanosOfMillis;
 
-        // Adjust the nanoseconds to the specified precision
-        if (precision < 9) {
-            nanos =
-                    (int)
-                            (Math.floor(nanos / Math.pow(10, 9 - precision))
-                                    * Math.pow(10, 9 - precision));
+        switch (precision) {
+            case 0: // seconds
+                millis = epoch * 1000;
+                nanosOfMillis = 0;
+                break;
+            case 3: // milliseconds
+                millis = epoch;
+                nanosOfMillis = 0;
+                break;
+            case 6: // microseconds
+                millis = epoch / 1000;
+                nanosOfMillis = (int)((epoch % 1000) * 1000);
+                break;
+            case 9: // nanoseconds
+                millis = epoch / 1_000_000;
+                nanosOfMillis = (int)(epoch % 1_000_000);
+                break;
+            default:
+                throw new RuntimeException("Unsupported precision: " + precision);
         }
-
-        // Create a LocalDateTime from the seconds and nanoseconds
-        LocalDateTime dateTime = LocalDateTime.ofEpochSecond(seconds, nanos, ZoneOffset.UTC);
-        return fromLocalDateTime(dateTime);
+        return Timestamp.fromEpochMillis(millis, nanosOfMillis);
     }
 
     public static BinaryString toCharacterString(BinaryString strData, DataType type) {
