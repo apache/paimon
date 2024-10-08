@@ -238,6 +238,8 @@ public class FileStoreCommitTest {
 
         testRandomConcurrent(
                 dataPerThread,
+                // overwrite cannot produce changelog
+                // so only enable it when changelog producer is none
                 changelogProducer == CoreOptions.ChangelogProducer.NONE,
                 failing,
                 changelogProducer);
