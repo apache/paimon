@@ -319,7 +319,7 @@ public class BinaryStringUtils {
         return DateTimeUtils.parseTimestampData(input.toString(), precision, timeZone);
     }
 
-    // Helper method to convert milliseconds to Timestamp with the provided precision.
+    // Helper method to convert epoch to Timestamp with the provided precision.
     private static Timestamp fromMillisToTimestamp(long epoch, int precision) {
         // Calculate milliseconds and nanoseconds from epoch based on precision
         long millis;
