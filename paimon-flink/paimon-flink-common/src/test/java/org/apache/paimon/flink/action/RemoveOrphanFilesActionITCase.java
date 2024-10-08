@@ -308,8 +308,8 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
         String withLocalMode =
                 String.format(
                         isNamedArgument
-                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59', dry_run => true, mode => 'local')"
-                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true, 'local')",
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59', dry_run => true, parallelism => 5, mode => 'local')"
+                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true, 5, 'local')",
                         database,
                         tableName);
         ImmutableList<Row> actualLocalRunDeleteFile =
@@ -319,8 +319,8 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
         String withDistributedMode =
                 String.format(
                         isNamedArgument
-                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59', dry_run => true, mode => 'distributed')"
-                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true, 'distributed')",
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59', dry_run => true, parallelism => 5, mode => 'distributed')"
+                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true, 5, 'distributed')",
                         database,
                         tableName);
         ImmutableList<Row> actualDistributedRunDeleteFile =
@@ -330,8 +330,8 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
         String withInvalidMode =
                 String.format(
                         isNamedArgument
-                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59', dry_run => true, mode => 'unknown')"
-                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true, 'unknown')",
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59', dry_run => true, parallelism => 5, mode => 'unknown')"
+                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true, 5, 'unknown')",
                         database,
                         tableName);
         assertThatCode(() -> executeSQL(withInvalidMode))
