@@ -117,6 +117,9 @@ public interface Table extends Serializable {
     @Experimental
     void createTag(String tagName, Duration timeRetained);
 
+    @Experimental
+    void renameTag(String tagName, String targetTagName);
+
     /** Delete a tag by name. */
     @Experimental
     void deleteTag(String tagName);

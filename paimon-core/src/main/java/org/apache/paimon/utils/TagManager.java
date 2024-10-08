@@ -144,6 +144,24 @@ public class TagManager {
         }
     }
 
+    public void renameTag(String tagName, String targetTagName) {
+        try {
+            if (!tagExists(tagName)) {
+                throw new RuntimeException(
+                        String.format("The specified tag name [%s] does not exist.", tagName));
+            }
+            if (tagExists(targetTagName)) {
+                throw new RuntimeException(
+                        String.format(
+                                "The specified target tag name [%s] existed, please set a  non-existent tag name.",
+                                targetTagName));
+            }
+            fileIO.rename(tagPath(tagName), tagPath(targetTagName));
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     /** Make sure the tagNames are ALL tags of one snapshot. */
     public void deleteAllTagsOfOneSnapshot(
             List<String> tagNames, TagDeletion tagDeletion, SnapshotManager snapshotManager) {

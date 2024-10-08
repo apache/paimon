@@ -122,6 +122,12 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
+    public void renameTag(String tagName, String targetTagName) {
+        privilegeChecker.assertCanInsert(identifier);
+        wrapped.renameTag(tagName, targetTagName);
+    }
+
+    @Override
     public void createTag(String tagName, long fromSnapshotId, Duration timeRetained) {
         privilegeChecker.assertCanInsert(identifier);
         wrapped.createTag(tagName, fromSnapshotId, timeRetained);
