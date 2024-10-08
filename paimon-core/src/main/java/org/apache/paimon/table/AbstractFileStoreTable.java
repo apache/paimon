@@ -65,6 +65,7 @@ import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.SnapshotNotExistException;
+import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.utils.TagManager;
 
 import javax.annotation.Nullable;
