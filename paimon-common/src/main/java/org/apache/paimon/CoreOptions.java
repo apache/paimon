@@ -1342,14 +1342,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "When need to lookup, commit will wait for compaction by lookup.");
 
-    public static final ConfigOption<Boolean> METADATA_ICEBERG_COMPATIBLE =
-            key("metadata.iceberg-compatible")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "When set to true, produce Iceberg metadata after a snapshot is committed, "
-                                    + "so that Iceberg readers can read Paimon's raw files.");
-
     public static final ConfigOption<Integer> DELETE_FILE_THREAD_NUM =
             key("delete-file.thread-num")
                     .intType()
@@ -2083,7 +2075,7 @@ public class CoreOptions implements Serializable {
         Map<String, String> result = new HashMap<>();
         for (String className : options.get(callbacks).split(",")) {
             className = className.trim();
-            if (className.length() == 0) {
+            if (className.isEmpty()) {
                 continue;
             }
 
@@ -2166,10 +2158,6 @@ public class CoreOptions implements Serializable {
 
     public boolean asyncFileWrite() {
         return options.get(ASYNC_FILE_WRITE);
-    }
-
-    public boolean metadataIcebergCompatible() {
-        return options.get(METADATA_ICEBERG_COMPATIBLE);
     }
 
     /** Specifies the merge engine for table with primary key. */

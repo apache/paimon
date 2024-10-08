@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.AppendOnlyIcebergCommitCallback;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
@@ -165,7 +166,7 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
         List<CommitCallback> callbacks = super.createCommitCallbacks(commitUser);
         CoreOptions options = coreOptions();
 
-        if (options.metadataIcebergCompatible()) {
+        if (options.toConfiguration().contains(IcebergOptions.METADATA_ICEBERG_STORAGE)) {
             callbacks.add(new AppendOnlyIcebergCommitCallback(this, commitUser));
         }
 

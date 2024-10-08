@@ -31,6 +31,7 @@ import org.apache.paimon.iceberg.manifest.IcebergManifestFile;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta;
 import org.apache.paimon.iceberg.manifest.IcebergManifestList;
 import org.apache.paimon.iceberg.manifest.IcebergPartitionSummary;
+import org.apache.paimon.iceberg.metadata.IcebergDataField;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.iceberg.metadata.IcebergPartitionField;
 import org.apache.paimon.iceberg.metadata.IcebergPartitionSpec;
@@ -40,8 +41,6 @@ import org.apache.paimon.iceberg.metadata.IcebergSnapshotSummary;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.options.ConfigOption;
-import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -52,7 +51,6 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.RawFile;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -85,15 +83,6 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
     // see org.apache.iceberg.hadoop.Util
     private static final String VERSION_HINT_FILENAME = "version-hint.text";
 
-    static final ConfigOption<Integer> COMPACT_MIN_FILE_NUM =
-            ConfigOptions.key("metadata.iceberg.compaction.min.file-num")
-                    .intType()
-                    .defaultValue(10);
-    static final ConfigOption<Integer> COMPACT_MAX_FILE_NUM =
-            ConfigOptions.key("metadata.iceberg.compaction.max.file-num")
-                    .intType()
-                    .defaultValue(50);
-
     protected final FileStoreTable table;
     private final String commitUser;
     private final IcebergPathFactory pathFactory;
@@ -109,7 +98,37 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
     public AbstractIcebergCommitCallback(FileStoreTable table, String commitUser) {
         this.table = table;
         this.commitUser = commitUser;
-        this.pathFactory = new IcebergPathFactory(table.location());
+
+        IcebergOptions.StorageType storageType =
+                table.coreOptions().toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
+        switch (storageType) {
+            case PER_TABLE:
+                this.pathFactory = new IcebergPathFactory(new Path(table.location(), "metadata"));
+                break;
+            case ICEBERG_WAREHOUSE:
+                String tableName = table.location().getName();
+                Path dbPath = table.location().getParent();
+                if (dbPath.getName().endsWith(".db")) {
+                    Path separatePath =
+                            new Path(
+                                    dbPath.getParent(),
+                                    "iceberg/"
+                                            + dbPath.getName()
+                                                    .substring(0, dbPath.getName().length() - 3)
+                                            + "/"
+                                            + tableName
+                                            + "/metadata");
+                    this.pathFactory = new IcebergPathFactory(separatePath);
+                } else {
+                    throw new UnsupportedOperationException(
+                            "Storage type ICEBERG_WAREHOUSE can only be used on Paimon tables in a Paimon warehouse.");
+                }
+                break;
+            default:
+                throw new UnsupportedOperationException(
+                        "Unknown storage type " + storageType.name());
+        }
+
         this.fileStorePathFactory = table.store().pathFactory();
         this.manifestFile = IcebergManifestFile.create(table, pathFactory);
         this.manifestList = IcebergManifestList.create(table, pathFactory);
@@ -183,8 +202,9 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                 manifestFile.rollingWrite(entryIterator, snapshotId);
         String manifestListFileName = manifestList.writeWithoutRolling(manifestFileMetas);
 
+        IcebergSchema icebergSchema = IcebergSchema.create(table.schema());
         List<IcebergPartitionField> partitionFields =
-                getPartitionFields(table.schema().logicalPartitionType());
+                getPartitionFields(table.schema().partitionKeys(), icebergSchema);
         int schemaId = (int) table.schema().id();
         IcebergSnapshot snapshot =
                 new IcebergSnapshot(
@@ -202,7 +222,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                         table.location().toString(),
                         snapshotId,
                         table.schema().highestFieldId(),
-                        Collections.singletonList(new IcebergSchema(table.schema())),
+                        Collections.singletonList(icebergSchema),
                         schemaId,
                         Collections.singletonList(new IcebergPartitionSpec(partitionFields)),
                         partitionFields.stream()
@@ -250,11 +270,17 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
         return result;
     }
 
-    private List<IcebergPartitionField> getPartitionFields(RowType partitionType) {
+    private List<IcebergPartitionField> getPartitionFields(
+            List<String> partitionKeys, IcebergSchema icebergSchema) {
+        Map<String, IcebergDataField> fields = new HashMap<>();
+        for (IcebergDataField field : icebergSchema.fields()) {
+            fields.put(field.name(), field);
+        }
+
         List<IcebergPartitionField> result = new ArrayList<>();
         int fieldId = IcebergPartitionField.FIRST_FIELD_ID;
-        for (DataField field : partitionType.getFields()) {
-            result.add(new IcebergPartitionField(field, fieldId));
+        for (String partitionKey : partitionKeys) {
+            result.add(new IcebergPartitionField(fields.get(partitionKey), fieldId));
             fieldId++;
         }
         return result;
@@ -311,7 +337,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
         List<IcebergSchema> schemas = baseMetadata.schemas();
         if (baseMetadata.currentSchemaId() != schemaId) {
             schemas = new ArrayList<>(schemas);
-            schemas.add(new IcebergSchema(table.schema()));
+            schemas.add(IcebergSchema.create(table.schema()));
         }
 
         List<IcebergSnapshot> snapshots = new ArrayList<>(baseMetadata.snapshots());
@@ -562,10 +588,10 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
         }
 
         Options options = new Options(table.options());
-        if (candidates.size() < options.get(COMPACT_MIN_FILE_NUM)) {
+        if (candidates.size() < options.get(IcebergOptions.COMPACT_MIN_FILE_NUM)) {
             return toCompact;
         }
-        if (candidates.size() < options.get(COMPACT_MAX_FILE_NUM)
+        if (candidates.size() < options.get(IcebergOptions.COMPACT_MAX_FILE_NUM)
                 && totalSizeInBytes < targetSizeInBytes) {
             return toCompact;
         }

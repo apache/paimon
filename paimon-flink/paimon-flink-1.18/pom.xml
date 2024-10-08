@@ -35,6 +35,8 @@ under the License.
 
     <properties>
         <flink.version>1.18.1</flink.version>
+        <iceberg.flink.version>1.18</iceberg.flink.version>
+        <iceberg.version>1.6.1</iceberg.version>
     </properties>
 
     <dependencies>
@@ -98,6 +100,19 @@ under the License.
             <artifactId>flink-connector-files</artifactId>
             <version>${flink.version}</version>
             <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-flink-${iceberg.flink.version}</artifactId>
+            <version>${iceberg.version}</version>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.orc</groupId>
+                    <artifactId>orc-core</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
     </dependencies>
 

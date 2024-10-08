@@ -199,7 +199,8 @@ public class IcebergCompatibilityTest {
         commit.commit(2, commitMessages2);
         assertThat(table.latestSnapshotId()).hasValue(3L);
 
-        IcebergPathFactory pathFactory = new IcebergPathFactory(table.location());
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
         Path metadata3Path = pathFactory.toMetadataPath(3);
         assertThat(table.fileIO().exists(metadata3Path)).isTrue();
 
@@ -296,7 +297,8 @@ public class IcebergCompatibilityTest {
         // Number of snapshots will become 5 with the next commit, however only 3 Iceberg snapshots
         // are kept. So the first 2 Iceberg snapshots will be expired.
 
-        IcebergPathFactory pathFactory = new IcebergPathFactory(table.location());
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
         IcebergManifestList manifestList = IcebergManifestList.create(table, pathFactory);
         Set<String> usingManifests = new HashSet<>();
         for (IcebergManifestFileMeta fileMeta :
@@ -689,11 +691,11 @@ public class IcebergCompatibilityTest {
 
         Options options = new Options(customOptions);
         options.set(CoreOptions.BUCKET, numBuckets);
-        options.set(CoreOptions.METADATA_ICEBERG_COMPATIBLE, true);
+        options.set(IcebergOptions.METADATA_ICEBERG_STORAGE, IcebergOptions.StorageType.PER_TABLE);
         options.set(CoreOptions.FILE_FORMAT, "avro");
         options.set(CoreOptions.TARGET_FILE_SIZE, MemorySize.ofKibiBytes(32));
-        options.set(AbstractIcebergCommitCallback.COMPACT_MIN_FILE_NUM, 4);
-        options.set(AbstractIcebergCommitCallback.COMPACT_MIN_FILE_NUM, 8);
+        options.set(IcebergOptions.COMPACT_MIN_FILE_NUM, 4);
+        options.set(IcebergOptions.COMPACT_MIN_FILE_NUM, 8);
         options.set(CoreOptions.MANIFEST_TARGET_FILE_SIZE, MemorySize.ofKibiBytes(8));
         Schema schema =
                 new Schema(rowType.getFields(), partitionKeys, primaryKeys, options.toMap(), "");
