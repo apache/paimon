@@ -56,14 +56,12 @@ import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecute;
 /**
  * Local {@link OrphanFilesClean}, it will use thread pool to execute deletion.
  *
- * <p>Note that, this class is not used any more since each engine should implement its own
- * distributed one. See `FlinkOrphanFilesClean` and `SparkOrphanFilesClean`.
+ * <p>Note that, this class will be used when the orphan clean mode is local, else orphan clean will
+ * use distributed one. See `FlinkOrphanFilesClean` and `SparkOrphanFilesClean`.
  */
 public class LocalOrphanFilesClean extends OrphanFilesClean {
 
     private final ThreadPoolExecutor executor;
-
-    private static final int SHOW_LIMIT = 200;
 
     private final List<Path> deleteFiles;
 
@@ -220,7 +218,23 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         return orphanFilesCleans;
     }
 
-    public static String[] executeOrphanFilesClean(List<LocalOrphanFilesClean> tableCleans) {
+    public static long executeDatabaseOrphanFiles(
+            Catalog catalog,
+            String databaseName,
+            @Nullable String tableName,
+            long olderThanMillis,
+            SerializableConsumer<Path> fileCleaner,
+            @Nullable Integer parallelism)
+            throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
+        List<LocalOrphanFilesClean> tableCleans =
+                createOrphanFilesCleans(
+                        catalog,
+                        databaseName,
+                        tableName,
+                        olderThanMillis,
+                        fileCleaner,
+                        parallelism);
+
         ExecutorService executorService =
                 Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
         List<Future<List<Path>>> tasks = new ArrayList<>();
@@ -241,6 +255,6 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         }
 
         executorService.shutdownNow();
-        return showDeletedFiles(cleanOrphanFiles, SHOW_LIMIT).toArray(new String[0]);
+        return cleanOrphanFiles.size();
     }
 }
