@@ -35,7 +35,7 @@ jobs:
       - name: Set JDK
         uses: actions/setup-java@v2
         with:
-          java-version: 8
+          java-version: 11
           distribution: 'adopt'
       - name: Build
         run: |
