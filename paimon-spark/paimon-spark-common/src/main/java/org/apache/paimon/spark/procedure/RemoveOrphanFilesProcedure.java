@@ -132,7 +132,10 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
                                     args.isNullAt(3) ? null : args.getInt(3));
                     break;
                 default:
-                    throw new IllegalArgumentException("Unsupported mode: " + mode);
+                    throw new IllegalArgumentException(
+                            "Unknown mode: "
+                                    + mode
+                                    + ". Only 'DISTRIBUTED' and 'LOCAL' are supported.");
             }
             return new InternalRow[] {newInternalRow(deletedFiles)};
         } catch (Exception e) {

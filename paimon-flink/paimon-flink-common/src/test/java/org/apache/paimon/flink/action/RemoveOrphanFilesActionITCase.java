@@ -271,4 +271,71 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
         ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(executeSQL(procedure));
         assertThat(actualDeleteFile).containsOnly(Row.of("4"));
     }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testRunWithMode(boolean isNamedArgument) throws Exception {
+        createTableAndWriteData(tableName);
+
+        List<String> args =
+                new ArrayList<>(
+                        Arrays.asList(
+                                "remove_orphan_files",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName));
+        RemoveOrphanFilesAction action1 = createAction(RemoveOrphanFilesAction.class, args);
+        assertThatCode(action1::run).doesNotThrowAnyException();
+
+        args.add("--older_than");
+        args.add("2023-12-31 23:59:59");
+        RemoveOrphanFilesAction action2 = createAction(RemoveOrphanFilesAction.class, args);
+        assertThatCode(action2::run).doesNotThrowAnyException();
+
+        String withoutOlderThan =
+                String.format(
+                        isNamedArgument
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s')"
+                                : "CALL sys.remove_orphan_files('%s.%s')",
+                        database,
+                        tableName);
+        CloseableIterator<Row> withoutOlderThanCollect = executeSQL(withoutOlderThan);
+        assertThat(ImmutableList.copyOf(withoutOlderThanCollect)).containsOnly(Row.of("0"));
+
+        String withLocalMode =
+                String.format(
+                        isNamedArgument
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59', dry_run => true, mode => 'local')"
+                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true, 'local')",
+                        database,
+                        tableName);
+        ImmutableList<Row> actualLocalRunDeleteFile =
+                ImmutableList.copyOf(executeSQL(withLocalMode));
+        assertThat(actualLocalRunDeleteFile).containsOnly(Row.of("2"));
+
+        String withDistributedMode =
+                String.format(
+                        isNamedArgument
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59', dry_run => true, mode => 'distributed')"
+                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true, 'distributed')",
+                        database,
+                        tableName);
+        ImmutableList<Row> actualDistributedRunDeleteFile =
+                ImmutableList.copyOf(executeSQL(withDistributedMode));
+        assertThat(actualDistributedRunDeleteFile).containsOnly(Row.of("2"));
+
+        String withInvalidMode =
+                String.format(
+                        isNamedArgument
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59', dry_run => true, mode => 'unknown')"
+                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true, 'unknown')",
+                        database,
+                        tableName);
+        assertThatCode(() -> executeSQL(withInvalidMode))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Unknown mode");
+    }
 }
