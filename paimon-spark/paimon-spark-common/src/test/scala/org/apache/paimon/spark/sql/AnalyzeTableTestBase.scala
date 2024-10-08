@@ -91,6 +91,27 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
 
     spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
 
+    // create tag
+    checkAnswer(
+      spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 'test_tag5', snapshot => 5)"),
+      Row(true) :: Nil)
+
+    checkAnswer(
+      spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 'test_tag6', snapshot => 6)"),
+      Row(true) :: Nil)
+
+    withSQLConf("spark.paimon.scan.tag-name" -> "test_tag5") {
+      checkAnswer(
+        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
+        Row(2, 0, 2, "{ }"))
+    }
+
+    withSQLConf("spark.paimon.scan.tag-name" -> "test_tag6") {
+      checkAnswer(
+        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
+        Row(5, 0, 4, "{ }"))
+    }
+
     withSQLConf("spark.paimon.scan.snapshot-id" -> "3") {
       checkAnswer(
         sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),

@@ -59,13 +59,7 @@ import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanner;
 import org.apache.paimon.tag.TagPreview;
-import org.apache.paimon.utils.BranchManager;
-import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.SegmentsCache;
-import org.apache.paimon.utils.SimpleFileReader;
-import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.SnapshotNotExistException;
-import org.apache.paimon.utils.TagManager;
+import org.apache.paimon.utils.*;
 
 import javax.annotation.Nullable;
 
@@ -170,8 +164,15 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public Optional<Statistics> statistics() {
         Snapshot latestSnapshot;
         Long snapshotId = coreOptions().scanSnapshotId();
+        String tagName = coreOptions().scanTagName();
+
         if (snapshotId == null) {
-            snapshotId = snapshotManager().latestSnapshotId();
+            if (!StringUtils.isEmpty(tagName) && tagManager().tagExists(tagName)) {
+                return store().newStatsFileHandler()
+                        .readStats(tagManager().tag(tagName).trimToSnapshot());
+            } else {
+                snapshotId = snapshotManager().latestSnapshotId();
+            }
         }
 
         if (snapshotId != null && snapshotManager().snapshotExists(snapshotId)) {

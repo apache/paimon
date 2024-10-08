@@ -40,12 +40,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.IteratorRecordReader;
-import org.apache.paimon.utils.ProjectedRow;
-import org.apache.paimon.utils.SerializationUtils;
-import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.SnapshotNotExistException;
+import org.apache.paimon.utils.*;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
@@ -198,6 +193,7 @@ public class ManifestsTable implements ReadonlyTable {
         CoreOptions coreOptions = CoreOptions.fromMap(dataTable.options());
         SnapshotManager snapshotManager = dataTable.snapshotManager();
         Long snapshotId = coreOptions.scanSnapshotId();
+        String tagName = coreOptions.scanTagName();
         Snapshot snapshot = null;
         if (snapshotId != null) {
             // reminder user with snapshot id range
@@ -211,7 +207,11 @@ public class ManifestsTable implements ReadonlyTable {
             }
             snapshot = snapshotManager.snapshot(snapshotId);
         } else if (snapshotId == null) {
-            snapshot = snapshotManager.latestSnapshot();
+            if (!StringUtils.isEmpty(tagName) && dataTable.tagManager().tagExists(tagName)) {
+                snapshot = dataTable.tagManager().tag(tagName).trimToSnapshot();
+            } else {
+                snapshot = snapshotManager.latestSnapshot();
+            }
         }
 
         if (snapshot == null) {

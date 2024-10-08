@@ -115,6 +115,27 @@ public class ManifestsTableTest extends TableTestBase {
     }
 
     @Test
+    public void testReadManifestsFromSpecifiedTagName() throws Exception {
+        List<InternalRow> expectedRow = getExpectedResult(1L);
+        table.createTag("tag1", 1L);
+        manifestsTable =
+                (ManifestsTable)
+                        manifestsTable.copy(
+                                Collections.singletonMap(CoreOptions.SCAN_TAG_NAME.key(), "tag1"));
+        List<InternalRow> result = read(manifestsTable);
+        assertThat(result).containsExactlyElementsOf(expectedRow);
+
+        expectedRow = getExpectedResult(2L);
+        table.createTag("tag2", 2L);
+        manifestsTable =
+                (ManifestsTable)
+                        manifestsTable.copy(
+                                Collections.singletonMap(CoreOptions.SCAN_TAG_NAME.key(), "tag2"));
+        result = read(manifestsTable);
+        assertThat(result).containsExactlyElementsOf(expectedRow);
+    }
+
+    @Test
     public void testReadManifestsFromNotExistSnapshot() throws Exception {
         manifestsTable =
                 (ManifestsTable)
