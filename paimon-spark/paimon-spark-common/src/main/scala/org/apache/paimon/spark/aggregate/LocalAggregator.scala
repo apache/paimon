@@ -18,26 +18,60 @@
 
 package org.apache.paimon.spark.aggregate
 
+import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.manifest.PartitionEntry
+import org.apache.paimon.spark.{SparkInternalRow, SparkTypeUtils}
 import org.apache.paimon.table.{DataTable, Table}
+import org.apache.paimon.utils.{InternalRowUtils, ProjectedRow}
 
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.expressions.JoinedRow
+import org.apache.spark.sql.connector.expressions.{Expression, NamedReference}
 import org.apache.spark.sql.connector.expressions.aggregate.{AggregateFunc, Aggregation, CountStar}
 import org.apache.spark.sql.types.{DataType, LongType, StructField, StructType}
 
+import scala.collection.mutable
+
 class LocalAggregator(table: Table) {
-  private var aggFuncEvaluator: Seq[AggFuncEvaluator[_]] = _
+  private val partitionType = SparkTypeUtils.toPartitionType(table)
+  private val groupByEvaluatorMap = new mutable.HashMap[InternalRow, Seq[AggFuncEvaluator[_]]]()
+  private var requiredGroupByType: Seq[DataType] = _
+  private var requiredGroupByIndexMapping: Seq[Int] = _
+  private var aggFuncEvaluatorGetter: () => Seq[AggFuncEvaluator[_]] = _
+  private var isInitialized = false
 
   private def initialize(aggregation: Aggregation): Unit = {
-    aggFuncEvaluator = aggregation.aggregateExpressions().map {
-      case _: CountStar => new CountStarEvaluator()
-      case _ => throw new UnsupportedOperationException()
+    aggFuncEvaluatorGetter = () =>
+      aggregation.aggregateExpressions().map {
+        case _: CountStar => new CountStarEvaluator()
+        case _ => throw new UnsupportedOperationException()
+      }
+
+    requiredGroupByType = aggregation.groupByExpressions().map {
+      case r: NamedReference =>
+        SparkTypeUtils.fromPaimonType(partitionType.getField(r.fieldNames().head).`type`())
     }
+
+    requiredGroupByIndexMapping = aggregation.groupByExpressions().map {
+      case r: NamedReference =>
+        partitionType.getFieldIndex(r.fieldNames().head)
+    }
+
+    isInitialized = true
   }
 
   private def supportAggregateFunction(func: AggregateFunc): Boolean = {
     func match {
       case _: CountStar => true
+      case _ => false
+    }
+  }
+
+  private def supportGroupByExpressions(exprs: Array[Expression]): Boolean = {
+    // Support empty group by keys or group by partition column
+    exprs.forall {
+      case r: NamedReference =>
+        r.fieldNames.length == 1 && table.partitionKeys().contains(r.fieldNames().head)
       case _ => false
     }
   }
@@ -54,7 +88,7 @@ class LocalAggregator(table: Table) {
     }
 
     if (
-      aggregation.groupByExpressions().nonEmpty ||
+      !supportGroupByExpressions(aggregation.groupByExpressions()) ||
       aggregation.aggregateExpressions().isEmpty ||
       aggregation.aggregateExpressions().exists(!supportAggregateFunction(_))
     ) {
@@ -65,25 +99,49 @@ class LocalAggregator(table: Table) {
     true
   }
 
+  private def requiredGroupByRow(partitionRow: BinaryRow): InternalRow = {
+    val projectedRow =
+      ProjectedRow.from(requiredGroupByIndexMapping.toArray).replaceRow(partitionRow)
+    // `ProjectedRow` does not support `hashCode`, so do a deep copy
+    val genericRow = InternalRowUtils.copyInternalRow(projectedRow, partitionType)
+    new SparkInternalRow(partitionType).replace(genericRow)
+  }
+
   def update(partitionEntry: PartitionEntry): Unit = {
-    assert(aggFuncEvaluator != null)
+    assert(isInitialized)
+    val groupByRow = requiredGroupByRow(partitionEntry.partition())
+    val aggFuncEvaluator =
+      groupByEvaluatorMap.getOrElseUpdate(groupByRow, aggFuncEvaluatorGetter())
     aggFuncEvaluator.foreach(_.update(partitionEntry))
   }
 
   def result(): Array[InternalRow] = {
-    assert(aggFuncEvaluator != null)
-    Array(InternalRow.fromSeq(aggFuncEvaluator.map(_.result())))
+    assert(isInitialized)
+    if (groupByEvaluatorMap.isEmpty && requiredGroupByType.isEmpty) {
+      // Always return one row for global aggregate
+      Array(InternalRow.fromSeq(aggFuncEvaluatorGetter().map(_.result())))
+    } else {
+      groupByEvaluatorMap.map {
+        case (partitionRow, aggFuncEvaluator) =>
+          new JoinedRow(partitionRow, InternalRow.fromSeq(aggFuncEvaluator.map(_.result())))
+      }.toArray
+    }
   }
 
   def resultSchema(): StructType = {
-    assert(aggFuncEvaluator != null)
-    val fields = aggFuncEvaluator.zipWithIndex.map {
+    assert(isInitialized)
+    // Always put the group by keys before the aggregate function result
+    val groupByFields = requiredGroupByType.zipWithIndex.map {
+      case (dt, i) =>
+        StructField(s"groupby_$i", dt)
+    }
+    val aggResultFields = aggFuncEvaluatorGetter().zipWithIndex.map {
       case (evaluator, i) =>
         // Note that, Spark will re-assign the attribute name to original name,
         // so here we just return an arbitrary name
         StructField(s"${evaluator.prettyName}_$i", evaluator.resultType)
     }
-    StructType.apply(fields)
+    StructType.apply(groupByFields ++ aggResultFields)
   }
 }
 

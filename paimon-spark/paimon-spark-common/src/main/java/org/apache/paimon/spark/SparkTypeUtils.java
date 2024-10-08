@@ -60,13 +60,17 @@ public class SparkTypeUtils {
 
     private SparkTypeUtils() {}
 
-    public static StructType toSparkPartitionType(Table table) {
+    public static RowType toPartitionType(Table table) {
         int[] projections = table.rowType().getFieldIndices(table.partitionKeys());
         List<DataField> partitionTypes = new ArrayList<>();
         for (int i : projections) {
             partitionTypes.add(table.rowType().getFields().get(i));
         }
-        return (StructType) SparkTypeUtils.fromPaimonType(new RowType(false, partitionTypes));
+        return new RowType(false, partitionTypes);
+    }
+
+    public static StructType toSparkPartitionType(Table table) {
+        return (StructType) SparkTypeUtils.fromPaimonType(toPartitionType(table));
     }
 
     public static StructType fromPaimonRowType(RowType type) {
