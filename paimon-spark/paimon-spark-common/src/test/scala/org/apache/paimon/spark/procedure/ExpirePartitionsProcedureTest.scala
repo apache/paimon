@@ -474,4 +474,81 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
       }
     }
   }
+
+  test("Paimon procedure : sorted the expired partitions with max_expires.") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql(s"""
+                       |CREATE TABLE T (k STRING, pt STRING, hm STRING)
+                       |TBLPROPERTIES ('primary-key'='k,pt,hm', 'bucket'='1')
+                       | PARTITIONED BY (pt,hm)
+                       |""".stripMargin)
+          val location = loadTable("T").location().toString
+
+          val inputData = MemoryStream[(String, String, String)]
+          val stream = inputData
+            .toDS()
+            .toDF("k", "pt", "hm")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], _: Long) =>
+                batch.write.format("paimon").mode("append").save(location)
+            }
+            .start()
+
+          val query = () => spark.sql("SELECT * FROM T")
+
+          try {
+            // Show results : There are no expired partitions.
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.expire_partitions(table => 'test.T', expiration_time => '1 d'" +
+                  ", timestamp_formatter => 'yyyy-MM-dd')"),
+              Row("No expired partitions.") :: Nil
+            )
+
+            inputData.addData(("a", "2024-06-02", "02:00"))
+            stream.processAllAvailable()
+            inputData.addData(("b", "2024-06-02", "01:00"))
+            stream.processAllAvailable()
+            inputData.addData(("d", "2024-06-03", "01:00"))
+            stream.processAllAvailable()
+            inputData.addData(("c", "2024-06-01", "01:00"))
+            stream.processAllAvailable()
+            // this snapshot never expires.
+            inputData.addData(("Never-expire", "9999-09-09", "99:99"))
+            stream.processAllAvailable()
+
+            checkAnswer(
+              query(),
+              Row("a", "2024-06-02", "02:00") :: Row("b", "2024-06-02", "01:00") :: Row(
+                "d",
+                "2024-06-03",
+                "01:00") :: Row("c", "2024-06-01", "01:00") :: Row(
+                "Never-expire",
+                "9999-09-09",
+                "99:99") :: Nil
+            )
+
+            // sorted result of limited expired partitions.
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.expire_partitions(table => 'test.T'" +
+                  ", expiration_time => '1 d'" +
+                  ", timestamp_formatter => 'yyyy-MM-dd', max_expires => 3)"),
+              Row("pt=2024-06-01, hm=01:00") :: Row("pt=2024-06-02, hm=01:00") :: Row(
+                "pt=2024-06-02, hm=02:00") :: Nil
+            )
+
+            checkAnswer(
+              query(),
+              Row("d", "2024-06-03", "01:00") :: Row("Never-expire", "9999-09-09", "99:99") :: Nil)
+          } finally {
+            stream.stop()
+          }
+      }
+    }
+  }
 }

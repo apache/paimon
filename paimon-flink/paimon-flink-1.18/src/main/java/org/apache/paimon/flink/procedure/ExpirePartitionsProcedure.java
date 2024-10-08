@@ -26,11 +26,7 @@ import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.TimeUtils;
 
-import org.apache.flink.table.annotation.ArgumentHint;
-import org.apache.flink.table.annotation.DataTypeHint;
-import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
-import org.apache.flink.types.Row;
 
 import java.time.Duration;
 import java.util.HashMap;
@@ -42,33 +38,33 @@ import static org.apache.paimon.partition.PartitionExpireStrategy.createPartitio
 
 /** A procedure to expire partitions. */
 public class ExpirePartitionsProcedure extends ProcedureBase {
+
+    public static final String IDENTIFIER = "expire_partitions";
+
     @Override
     public String identifier() {
-        return "expire_partitions";
+        return IDENTIFIER;
     }
 
-    @ProcedureHint(
-            argument = {
-                @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
-                @ArgumentHint(name = "expiration_time", type = @DataTypeHint(value = "STRING")),
-                @ArgumentHint(
-                        name = "timestamp_formatter",
-                        type = @DataTypeHint("STRING"),
-                        isOptional = true),
-                @ArgumentHint(
-                        name = "timestamp_pattern",
-                        type = @DataTypeHint("STRING"),
-                        isOptional = true),
-                @ArgumentHint(
-                        name = "expire_strategy",
-                        type = @DataTypeHint("STRING"),
-                        isOptional = true),
-                @ArgumentHint(
-                        name = "max_expires",
-                        type = @DataTypeHint("INTEGER"),
-                        isOptional = true)
-            })
-    public @DataTypeHint("ROW< expired_partitions STRING>") Row[] call(
+    public String[] call(
+            ProcedureContext procedureContext,
+            String tableId,
+            String expirationTime,
+            String timestampFormatter,
+            String timestampPattern,
+            String expireStrategy)
+            throws Catalog.TableNotExistException {
+        return call(
+                procedureContext,
+                tableId,
+                expirationTime,
+                timestampFormatter,
+                timestampPattern,
+                expireStrategy,
+                null);
+    }
+
+    public String[] call(
             ProcedureContext procedureContext,
             String tableId,
             String expirationTime,
@@ -103,13 +99,13 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
         }
         List<Map<String, String>> expired = partitionExpire.expire(Long.MAX_VALUE);
         return expired == null || expired.isEmpty()
-                ? new Row[] {Row.of("No expired partitions.")}
+                ? new String[] {"No expired partitions."}
                 : expired.stream()
                         .map(
                                 x -> {
                                     String r = x.toString();
-                                    return Row.of(r.substring(1, r.length() - 1));
+                                    return r.substring(1, r.length() - 1);
                                 })
-                        .toArray(Row[]::new);
+                        .toArray(String[]::new);
     }
 }

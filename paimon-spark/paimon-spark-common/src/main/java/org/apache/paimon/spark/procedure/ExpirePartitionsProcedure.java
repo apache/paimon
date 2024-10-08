@@ -40,6 +40,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.partition.PartitionExpireStrategy.createPartitionExpireStrategy;
+import static org.apache.spark.sql.types.DataTypes.IntegerType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /** A procedure to expire partitions. */
@@ -51,7 +52,8 @@ public class ExpirePartitionsProcedure extends BaseProcedure {
                 ProcedureParameter.required("expiration_time", StringType),
                 ProcedureParameter.optional("timestamp_formatter", StringType),
                 ProcedureParameter.optional("timestamp_pattern", StringType),
-                ProcedureParameter.optional("expire_strategy", StringType)
+                ProcedureParameter.optional("expire_strategy", StringType),
+                ProcedureParameter.optional("max_expires", IntegerType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -81,6 +83,7 @@ public class ExpirePartitionsProcedure extends BaseProcedure {
         String timestampFormatter = args.isNullAt(2) ? null : args.getString(2);
         String timestampPattern = args.isNullAt(3) ? null : args.getString(3);
         String expireStrategy = args.isNullAt(4) ? null : args.getString(4);
+        Integer maxExpires = args.isNullAt(5) ? null : args.getInt(5);
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
@@ -105,6 +108,9 @@ public class ExpirePartitionsProcedure extends BaseProcedure {
                                                             .metastoreClientFactory())
                                             .map(MetastoreClient.Factory::create)
                                             .orElse(null));
+                    if (maxExpires != null) {
+                        partitionExpire.withMaxExpires(maxExpires);
+                    }
                     List<Map<String, String>> expired = partitionExpire.expire(Long.MAX_VALUE);
                     return expired == null || expired.isEmpty()
                             ? new InternalRow[] {
