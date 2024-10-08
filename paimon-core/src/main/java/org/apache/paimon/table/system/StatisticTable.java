@@ -65,7 +65,7 @@ public class StatisticTable implements ReadonlyTable {
 
     public static final String STATISTICS = "statistics";
 
-    public static final RowType TABLE_TYPE =
+    private static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
                             new DataField(0, "snapshot_id", new BigIntType(false)),

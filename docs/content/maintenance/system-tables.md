@@ -369,3 +369,19 @@ SELECT * FROM sys.catalog_options;
 */
 ```
 
+### Statistic Table
+You can query the statistic information through statistic table.
+
+```sql
+SELECT * FROM T$statistics;
+
+/*
++--------------+------------+-----------------------+------------------+----------+
+|  snapshot_id |  schema_id |     mergedRecordCount | mergedRecordSize |  colstat |
++--------------+------------+-----------------------+------------------+----------+
+|            2 |          0 |              2        |         2        |    {}    |
++--------------+------------+-----------------------+------------------+----------+
+1 rows in set
+*/
+```
+
