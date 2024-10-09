@@ -86,6 +86,22 @@ class PaimonPushDownTest extends PaimonSparkTestBase {
     checkAnswer(spark.sql(q), Row(1, "a", "p1") :: Row(2, "b", "p1") :: Row(3, "c", "p2") :: Nil)
   }
 
+  test("Paimon pushDown: limit for append-only tables with deletion vector") {
+    withTable("dv_test") {
+      spark.sql(
+        """
+          |CREATE TABLE dv_test (c1 INT, c2 STRING)
+          |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'source.split.target-size' = '1')
+          |""".stripMargin)
+
+      spark.sql("insert into table dv_test values(1, 'a'),(2, 'b'),(3, 'c')")
+      assert(spark.sql("select * from dv_test limit 2").count() == 2)
+
+      spark.sql("delete from dv_test where c1 = 1")
+      assert(spark.sql("select * from dv_test limit 2").count() == 2)
+    }
+  }
+
   test("Paimon pushDown: limit for append-only tables") {
     spark.sql(s"""
                  |CREATE TABLE T (a INT, b STRING, c STRING)

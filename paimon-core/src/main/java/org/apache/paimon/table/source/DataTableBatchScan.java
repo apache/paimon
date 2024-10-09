@@ -28,6 +28,7 @@ import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 
@@ -114,10 +115,14 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     }
 
     /**
-     * 0 represents that we can't compute the row count of this split, 'cause this split needs to be
-     * merged.
+     * 0 represents that we can't compute the row count of this split: 1. the split needs to be
+     * merged; 2. the table enabled deletion vector and there are some deletion files.
      */
     private long getRowCountForSplit(DataSplit split) {
+        if (split.deletionFiles().isPresent()
+                && split.deletionFiles().get().stream().anyMatch(Objects::nonNull)) {
+            return 0L;
+        }
         return split.convertToRawFiles()
                 .map(files -> files.stream().map(RawFile::rowCount).reduce(Long::sum).orElse(0L))
                 .orElse(0L);
