@@ -166,7 +166,8 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
         List<CommitCallback> callbacks = super.createCommitCallbacks(commitUser);
         CoreOptions options = coreOptions();
 
-        if (options.toConfiguration().contains(IcebergOptions.METADATA_ICEBERG_STORAGE)) {
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                != IcebergOptions.StorageType.DISABLED) {
             callbacks.add(new AppendOnlyIcebergCommitCallback(this, commitUser));
         }
 

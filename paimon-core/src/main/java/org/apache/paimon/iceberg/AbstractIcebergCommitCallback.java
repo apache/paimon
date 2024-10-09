@@ -102,10 +102,10 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
         IcebergOptions.StorageType storageType =
                 table.coreOptions().toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
         switch (storageType) {
-            case PER_TABLE:
+            case TABLE_LOCATION:
                 this.pathFactory = new IcebergPathFactory(new Path(table.location(), "metadata"));
                 break;
-            case ICEBERG_WAREHOUSE:
+            case HADOOP_CATALOG:
                 String tableName = table.location().getName();
                 Path dbPath = table.location().getParent();
                 if (dbPath.getName().endsWith(".db")) {

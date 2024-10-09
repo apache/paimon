@@ -691,7 +691,8 @@ public class IcebergCompatibilityTest {
 
         Options options = new Options(customOptions);
         options.set(CoreOptions.BUCKET, numBuckets);
-        options.set(IcebergOptions.METADATA_ICEBERG_STORAGE, IcebergOptions.StorageType.PER_TABLE);
+        options.set(
+                IcebergOptions.METADATA_ICEBERG_STORAGE, IcebergOptions.StorageType.TABLE_LOCATION);
         options.set(CoreOptions.FILE_FORMAT, "avro");
         options.set(CoreOptions.TARGET_FILE_SIZE, MemorySize.ofKibiBytes(32));
         options.set(IcebergOptions.COMPACT_MIN_FILE_NUM, 4);

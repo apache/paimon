@@ -20,6 +20,9 @@ package org.apache.paimon.iceberg;
 
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.description.DescribedEnum;
+import org.apache.paimon.options.description.InlineElement;
+import org.apache.paimon.options.description.TextElement;
 
 import static org.apache.paimon.options.ConfigOptions.key;
 
@@ -29,13 +32,10 @@ public class IcebergOptions {
     public static final ConfigOption<StorageType> METADATA_ICEBERG_STORAGE =
             key("metadata.iceberg.storage")
                     .enumType(StorageType.class)
-                    .noDefaultValue()
+                    .defaultValue(StorageType.DISABLED)
                     .withDescription(
                             "When set, produce Iceberg metadata after a snapshot is committed, "
-                                    + "so that Iceberg readers can read Paimon's raw files.\n"
-                                    + "PER_TABLE: Store Iceberg metadata with each table.\n"
-                                    + "ICEBERG_WAREHOUSE: Store Iceberg metadata in a separate directory. "
-                                    + "This directory can be specified as the Iceberg warehouse directory.");
+                                    + "so that Iceberg readers can read Paimon's raw data files.");
 
     public static final ConfigOption<Integer> COMPACT_MIN_FILE_NUM =
             ConfigOptions.key("metadata.iceberg.compaction.min.file-num")
@@ -48,11 +48,22 @@ public class IcebergOptions {
                     .defaultValue(50);
 
     /** Where to store Iceberg metadata. */
-    public enum StorageType {
-        // Store Iceberg metadata with each table.
-        PER_TABLE,
-        // Store Iceberg metadata in a separate directory.
-        // This directory can be specified as the Iceberg warehouse directory.
-        ICEBERG_WAREHOUSE
+    public enum StorageType implements DescribedEnum {
+        DISABLED("Disable Iceberg compatibility support."),
+        TABLE_LOCATION("Store Iceberg metadata with each table."),
+        HADOOP_CATALOG(
+                "Store Iceberg metadata in a separate directory. "
+                        + "This directory can be specified as the warehouse directory of an Iceberg Hadoop catalog.");
+
+        private final String description;
+
+        StorageType(String description) {
+            this.description = description;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return TextElement.text(description);
+        }
     }
 }
