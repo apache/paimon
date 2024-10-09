@@ -65,6 +65,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
 
     private final List<Path> deleteFiles;
 
+    private Set<String> candidateDeletes;
+
     public LocalOrphanFilesClean(FileStoreTable table) {
         this(table, System.currentTimeMillis() - TimeUnit.DAYS.toMillis(1));
     }
@@ -93,6 +95,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         if (candidates.isEmpty()) {
             return deleteFiles;
         }
+        candidateDeletes = new HashSet<>(candidates.keySet());
 
         // find used files
         Set<String> usedFiles =
@@ -101,10 +104,11 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                         .collect(Collectors.toSet());
 
         // delete unused files
-        Set<String> deleted = new HashSet<>(candidates.keySet());
-        deleted.removeAll(usedFiles);
-        deleted.stream().map(candidates::get).forEach(fileCleaner);
-        deleteFiles.addAll(deleted.stream().map(candidates::get).collect(Collectors.toList()));
+        candidateDeletes.removeAll(usedFiles);
+        candidateDeletes.stream().map(candidates::get).forEach(fileCleaner);
+        deleteFiles.addAll(
+                candidateDeletes.stream().map(candidates::get).collect(Collectors.toList()));
+        candidateDeletes.clear();
 
         return deleteFiles;
     }
@@ -114,7 +118,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         ManifestFile manifestFile =
                 table.switchToBranch(branch).store().manifestFileFactory().create();
         try {
-            List<String> manifests = new ArrayList<>();
+            Set<String> manifests = new HashSet<>();
             collectWithoutDataFile(branch, usedFiles::add, manifests::add);
             usedFiles.addAll(retryReadingDataFiles(manifestFile, manifests));
         } catch (IOException e) {
@@ -144,8 +148,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         return result;
     }
 
-    private List<String> retryReadingDataFiles(
-            ManifestFile manifestFile, List<String> manifestNames) throws IOException {
+    private List<String> retryReadingDataFiles(ManifestFile manifestFile, Set<String> manifestNames)
+            throws IOException {
         List<String> dataFiles = new ArrayList<>();
         for (String manifestName : manifestNames) {
             retryReadingFiles(
@@ -155,8 +159,12 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                     .map(ManifestEntry::file)
                     .forEach(
                             f -> {
-                                dataFiles.add(f.fileName());
-                                dataFiles.addAll(f.extraFiles());
+                                if (candidateDeletes.contains(f.fileName())) {
+                                    dataFiles.add(f.fileName());
+                                }
+                                f.extraFiles().stream()
+                                        .filter(candidateDeletes::contains)
+                                        .forEach(dataFiles::add);
                             });
         }
         return dataFiles;
