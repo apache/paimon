@@ -118,7 +118,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         ManifestFile manifestFile =
                 table.switchToBranch(branch).store().manifestFileFactory().create();
         try {
-            List<String> manifests = new ArrayList<>();
+            Set<String> manifests = new HashSet<>();
             collectWithoutDataFile(branch, usedFiles::add, manifests::add);
             usedFiles.addAll(retryReadingDataFiles(manifestFile, manifests));
         } catch (IOException e) {
@@ -148,8 +148,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         return result;
     }
 
-    private List<String> retryReadingDataFiles(
-            ManifestFile manifestFile, List<String> manifestNames) throws IOException {
+    private List<String> retryReadingDataFiles(ManifestFile manifestFile, Set<String> manifestNames)
+            throws IOException {
         List<String> dataFiles = new ArrayList<>();
         for (String manifestName : manifestNames) {
             retryReadingFiles(
