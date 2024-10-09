@@ -54,9 +54,14 @@ public class IcebergSchema {
     public static IcebergSchema create(TableSchema tableSchema) {
         int bias;
         if (new CoreOptions(tableSchema.options()).formatType().equals("parquet")) {
-            // data files start with trimmed primary keys + sequence number + value kind
-            // also ParquetSchemaUtil.addFallbackIds starts enumerating id from 1 instead of 0
-            bias = tableSchema.trimmedPrimaryKeys().size() + 3;
+            if (tableSchema.primaryKeys().isEmpty()) {
+                // ParquetSchemaUtil.addFallbackIds starts enumerating id from 1 instead of 0
+                bias = 1;
+            } else {
+                // data files start with trimmed primary keys + sequence number + value kind
+                // also ParquetSchemaUtil.addFallbackIds starts enumerating id from 1 instead of 0
+                bias = tableSchema.trimmedPrimaryKeys().size() + 3;
+            }
         } else {
             bias = 0;
         }
