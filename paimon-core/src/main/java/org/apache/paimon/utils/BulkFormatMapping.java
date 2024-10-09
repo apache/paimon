@@ -178,7 +178,10 @@ public class BulkFormatMapping {
                     return d.copy(newFields);
                 case MAP:
                     return ((MapType) dataType)
-                            .newValueType(
+                            .newKeyValueType(
+                                    pruneDataType(
+                                            ((MapType) readType).getKeyType(),
+                                            ((MapType) dataType).getKeyType()),
                                     pruneDataType(
                                             ((MapType) readType).getValueType(),
                                             ((MapType) dataType).getValueType()));

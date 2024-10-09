@@ -74,8 +74,8 @@ public class MapType extends DataType {
         return new MapType(isNullable, keyType.copy(), valueType.copy());
     }
 
-    public DataType newValueType(DataType valueType) {
-        return new MapType(isNullable(), keyType, valueType);
+    public DataType newKeyValueType(DataType newKeyType, DataType newValueType) {
+        return new MapType(isNullable(), newKeyType, newValueType);
     }
 
     @Override
@@ -121,7 +121,7 @@ public class MapType extends DataType {
             return false;
         }
         MapType mapType = (MapType) o;
-        return keyType.equals(mapType.keyType) && valueType.isPrunedFrom(mapType.valueType);
+        return keyType.isPrunedFrom(mapType.keyType) && valueType.isPrunedFrom(mapType.valueType);
     }
 
     @Override

@@ -199,7 +199,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                         mapGroup.getRepetition(),
                         mapGroup.getName(),
                         MAP_REPEATED_NAME,
-                        keyValue.getType(MAP_KEY_NAME),
+                        clipParquetType(mapType.getKeyType(), keyValue.getType(MAP_KEY_NAME)),
                         keyValue.containsField(MAP_VALUE_NAME)
                                 ? clipParquetType(
                                         mapType.getValueType(), keyValue.getType(MAP_VALUE_NAME))

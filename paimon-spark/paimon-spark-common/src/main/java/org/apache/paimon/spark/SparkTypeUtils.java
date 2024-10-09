@@ -104,7 +104,9 @@ public class SparkTypeUtils {
             org.apache.spark.sql.types.MapType s =
                     (org.apache.spark.sql.types.MapType) sparkDataType;
             MapType p = (MapType) paimonDataType;
-            return p.newValueType(prunePaimonType(s.valueType(), p.getValueType()));
+            return p.newKeyValueType(
+                    prunePaimonType(s.keyType(), p.getKeyType()),
+                    prunePaimonType(s.valueType(), p.getValueType()));
         } else if (sparkDataType instanceof org.apache.spark.sql.types.ArrayType) {
             org.apache.spark.sql.types.ArrayType s =
                     (org.apache.spark.sql.types.ArrayType) sparkDataType;
