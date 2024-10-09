@@ -3,7 +3,7 @@ title: "Aggregation"
 weight: 3
 type: docs
 aliases:
-- /cdc-ingestion/merge-engin/aggregation.html
+- /primary-key-table/merge-engin/aggregation.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

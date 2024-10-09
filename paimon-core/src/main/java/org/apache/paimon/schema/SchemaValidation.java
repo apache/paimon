@@ -180,7 +180,7 @@ public class SchemaValidation {
             if (options.changelogProducer() != ChangelogProducer.LOOKUP
                     && options.changelogProducer() != ChangelogProducer.NONE) {
                 throw new IllegalArgumentException(
-                        "Only support 'none' and 'lookup' changelog-producer on FIRST_MERGE merge engine");
+                        "Only support 'none' and 'lookup' changelog-producer on FIRST_ROW merge engine");
             }
         }
 
@@ -540,7 +540,7 @@ public class SchemaValidation {
 
             if (options.mergeEngine() == MergeEngine.FIRST_ROW) {
                 throw new IllegalArgumentException(
-                        "Do not support use sequence field on FIRST_MERGE merge engine.");
+                        "Do not support use sequence field on FIRST_ROW merge engine.");
             }
 
             if (schema.crossPartitionUpdate()) {
