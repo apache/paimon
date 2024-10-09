@@ -1442,6 +1442,12 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("The serialized refresh handler of materialized table.");
 
+    public static final ConfigOption<Integer> TABLE_CLOSE_WRITERS_THREAD_NUMBER =
+            key("table.close-writers-thread-number")
+                    .intType()
+                    .defaultValue(4)
+                    .withDescription("The thread number for closing one table's writers");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1815,6 +1821,10 @@ public class CoreOptions implements Serializable {
 
     public int numSortedRunCompactionTrigger() {
         return options.get(NUM_SORTED_RUNS_COMPACTION_TRIGGER);
+    }
+
+    public int tableCloseWritersThreadNumber() {
+        return options.get(TABLE_CLOSE_WRITERS_THREAD_NUMBER);
     }
 
     @Nullable

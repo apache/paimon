@@ -37,6 +37,7 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
+import org.apache.paimon.utils.ExecutorUtils;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -48,12 +49,17 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.Iterator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
@@ -88,6 +94,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     protected CompactionMetrics compactionMetrics = null;
     protected final String tableName;
     private boolean isInsertOnly;
+    private final ExecutorService closeWritersExecutor;
 
     protected AbstractFileStoreWrite(
             SnapshotManager snapshotManager,
@@ -97,7 +104,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             String tableName,
             int totalBuckets,
             RowType partitionType,
-            int writerNumberMax) {
+            int writerNumberMax,
+            int tableCloseWritersThreadNumber) {
         this.snapshotManager = snapshotManager;
         this.scan = scan;
         this.indexFactory = indexFactory;
@@ -107,6 +115,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         this.writers = new HashMap<>();
         this.tableName = tableName;
         this.writerNumberMax = writerNumberMax;
+        this.closeWritersExecutor =
+                Executors.newFixedThreadPool(
+                        tableCloseWritersThreadNumber,
+                        new ExecutorThreadFactory("table-close-writers-thread-" + tableName));
     }
 
     @Override
@@ -190,68 +202,108 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             writerCleanChecker = createWriterCleanChecker();
         }
 
-        List<CommitMessage> result = new ArrayList<>();
+        List<CompletableFuture<CommitMessage>> futures = new ArrayList<>();
+        Set<BinaryRow> partitionsToRemove = new HashSet<>();
+        Map<BinaryRow, Set<Integer>> bucketsToRemovePerPartition = new HashMap<>();
 
-        Iterator<Map.Entry<BinaryRow, Map<Integer, WriterContainer<T>>>> partIter =
-                writers.entrySet().iterator();
-        while (partIter.hasNext()) {
-            Map.Entry<BinaryRow, Map<Integer, WriterContainer<T>>> partEntry = partIter.next();
-            BinaryRow partition = partEntry.getKey();
-            Iterator<Map.Entry<Integer, WriterContainer<T>>> bucketIter =
-                    partEntry.getValue().entrySet().iterator();
-            while (bucketIter.hasNext()) {
-                Map.Entry<Integer, WriterContainer<T>> entry = bucketIter.next();
-                int bucket = entry.getKey();
-                WriterContainer<T> writerContainer = entry.getValue();
+        writers.forEach(
+                (partition, bucketMap) -> {
+                    Set<Integer> bucketsToRemove = new ConcurrentSkipListSet<>();
+                    bucketMap.forEach(
+                            (bucket, writerContainer) -> {
+                                CompletableFuture<CommitMessage> future =
+                                        CompletableFuture.supplyAsync(
+                                                () -> {
+                                                    try {
+                                                        return closeWriterContainer(
+                                                                partition,
+                                                                bucket,
+                                                                writerContainer,
+                                                                waitCompaction,
+                                                                writerCleanChecker,
+                                                                commitIdentifier,
+                                                                bucketsToRemove);
+                                                    } catch (Exception e) {
+                                                        throw new RuntimeException(e);
+                                                    }
+                                                },
+                                                closeWritersExecutor);
+                                futures.add(future);
+                            });
+                    bucketsToRemovePerPartition.put(partition, bucketsToRemove);
+                });
 
-                CommitIncrement increment = writerContainer.writer.prepareCommit(waitCompaction);
-                List<IndexFileMeta> newIndexFiles = new ArrayList<>();
-                if (writerContainer.indexMaintainer != null) {
-                    newIndexFiles.addAll(writerContainer.indexMaintainer.prepareCommit());
-                }
-                CompactDeletionFile compactDeletionFile = increment.compactDeletionFile();
-                if (compactDeletionFile != null) {
-                    compactDeletionFile.getOrCompute().ifPresent(newIndexFiles::add);
-                }
-                CommitMessageImpl committable =
-                        new CommitMessageImpl(
-                                partition,
-                                bucket,
-                                increment.newFilesIncrement(),
-                                increment.compactIncrement(),
-                                new IndexIncrement(newIndexFiles));
-                result.add(committable);
+        CompletableFuture<Void> allTasksDone =
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+        allTasksDone.get();
 
-                if (committable.isEmpty()) {
-                    if (writerCleanChecker.apply(writerContainer)) {
-                        // Clear writer if no update, and if its latest modification has committed.
-                        //
-                        // We need a mechanism to clear writers, otherwise there will be more and
-                        // more such as yesterday's partition that no longer needs to be written.
-                        if (LOG.isDebugEnabled()) {
-                            LOG.debug(
-                                    "Closing writer for partition {}, bucket {}. "
-                                            + "Writer's last modified identifier is {}, "
-                                            + "while current commit identifier is {}.",
-                                    partition,
-                                    bucket,
-                                    writerContainer.lastModifiedCommitIdentifier,
-                                    commitIdentifier);
+        List<CommitMessage> results =
+                futures.stream().map(CompletableFuture::join).collect(Collectors.toList());
+
+        bucketsToRemovePerPartition.forEach(
+                (partition, buckets) -> {
+                    if (!buckets.isEmpty()) {
+                        buckets.forEach(bucket -> writers.get(partition).remove(bucket));
+                        if (writers.get(partition).isEmpty()) {
+                            partitionsToRemove.add(partition);
                         }
-                        writerContainer.writer.close();
-                        bucketIter.remove();
                     }
-                } else {
-                    writerContainer.lastModifiedCommitIdentifier = commitIdentifier;
-                }
-            }
+                });
 
-            if (partEntry.getValue().isEmpty()) {
-                partIter.remove();
-            }
+        partitionsToRemove.forEach(writers::remove);
+        return results;
+    }
+
+    @VisibleForTesting
+    public CommitMessage closeWriterContainer(
+            BinaryRow partition,
+            int bucket,
+            WriterContainer<T> writerContainer,
+            boolean waitCompaction,
+            Function<WriterContainer<T>, Boolean> writerCleanChecker,
+            long commitIdentifier,
+            Set<Integer> bucketsToRemove)
+            throws Exception {
+        CommitIncrement increment = writerContainer.writer.prepareCommit(waitCompaction);
+        List<IndexFileMeta> newIndexFiles = new ArrayList<>();
+        if (writerContainer.indexMaintainer != null) {
+            newIndexFiles.addAll(writerContainer.indexMaintainer.prepareCommit());
         }
+        CompactDeletionFile compactDeletionFile = increment.compactDeletionFile();
+        if (compactDeletionFile != null) {
+            compactDeletionFile.getOrCompute().ifPresent(newIndexFiles::add);
+        }
+        CommitMessageImpl committable =
+                new CommitMessageImpl(
+                        partition,
+                        bucket,
+                        increment.newFilesIncrement(),
+                        increment.compactIncrement(),
+                        new IndexIncrement(newIndexFiles));
 
-        return result;
+        if (committable.isEmpty()) {
+            if (writerCleanChecker.apply(writerContainer)) {
+                // Clear writer if no update, and if its latest modification has committed.
+                //
+                // We need a mechanism to clear writers, otherwise there will be more and
+                // more such as yesterday's partition that no longer needs to be written.
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug(
+                            "Closing writer for partition {}, bucket {}. "
+                                    + "Writer's last modified identifier is {}, "
+                                    + "while current commit identifier is {}.",
+                            partition,
+                            bucket,
+                            writerContainer.lastModifiedCommitIdentifier,
+                            commitIdentifier);
+                }
+                writerContainer.writer.close();
+                bucketsToRemove.add(bucket);
+            }
+        } else {
+            writerContainer.lastModifiedCommitIdentifier = commitIdentifier;
+        }
+        return committable;
     }
 
     // This abstract function returns a whole function (instead of just a boolean value),
@@ -291,11 +343,33 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     @Override
     public void close() throws Exception {
-        for (Map<Integer, WriterContainer<T>> bucketWriters : writers.values()) {
-            for (WriterContainer<T> writerContainer : bucketWriters.values()) {
-                writerContainer.writer.close();
-            }
-        }
+        List<CompletableFuture<Void>> futures =
+                writers.values().stream()
+                        .flatMap(
+                                bucketWriters ->
+                                        bucketWriters.values().stream()
+                                                .map(
+                                                        writerContainer ->
+                                                                CompletableFuture.runAsync(
+                                                                        () -> {
+                                                                            try {
+                                                                                writerContainer
+                                                                                        .writer
+                                                                                        .close();
+                                                                            } catch (Exception e) {
+                                                                                LOG.error(
+                                                                                        "Failed to close writer: ",
+                                                                                        e);
+                                                                            }
+                                                                        },
+                                                                        closeWritersExecutor)))
+                        .collect(Collectors.toList());
+
+        CompletableFuture<Void> allTasksDone =
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+        allTasksDone.get();
+        ExecutorUtils.gracefulShutdown(1, TimeUnit.MINUTES, closeWritersExecutor);
+
         writers.clear();
         if (lazyCompactExecutor != null && closeCompactExecutorWhenLeaving) {
             lazyCompactExecutor.shutdownNow();

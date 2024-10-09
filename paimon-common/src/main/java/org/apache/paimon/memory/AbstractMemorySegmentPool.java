@@ -37,8 +37,8 @@ public abstract class AbstractMemorySegmentPool implements MemorySegmentPool {
     }
 
     @Override
-    public MemorySegment nextSegment() {
-        if (this.segments.size() > 0) {
+    public synchronized MemorySegment nextSegment() {
+        if (!this.segments.isEmpty()) {
             return this.segments.poll();
         } else if (numPage < maxPages) {
             numPage++;
@@ -56,7 +56,7 @@ public abstract class AbstractMemorySegmentPool implements MemorySegmentPool {
     }
 
     @Override
-    public void returnAll(List<MemorySegment> memory) {
+    public synchronized void returnAll(List<MemorySegment> memory) {
         segments.addAll(memory);
     }
 
