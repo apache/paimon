@@ -63,6 +63,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.FILE_FORMAT;
+import static org.apache.paimon.CoreOptions.TYPE;
+import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.options.CatalogOptions.ALLOW_UPPER_CASE;
 import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
@@ -315,9 +318,9 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
             String provider = properties.get(TableCatalog.PROP_PROVIDER);
             if ((!usePaimon(provider))
                     && SparkSource.FORMAT_NAMES().contains(provider.toLowerCase())) {
-                Map<String, String> newProperties = new HashMap<String, String>(properties);
-                newProperties.put("type", "format-table");
-                newProperties.put("file.format", provider.toLowerCase());
+                Map<String, String> newProperties = new HashMap<>(properties);
+                newProperties.put(TYPE.key(), FORMAT_TABLE.toString());
+                newProperties.put(FILE_FORMAT.key(), provider.toLowerCase());
                 catalog.createTable(
                         toIdentifier(ident),
                         toInitialSchema(schema, partitions, newProperties),

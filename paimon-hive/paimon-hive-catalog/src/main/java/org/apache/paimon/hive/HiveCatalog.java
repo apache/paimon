@@ -85,6 +85,9 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTOREWAREHOUSE;
+import static org.apache.paimon.CoreOptions.FILE_FORMAT;
+import static org.apache.paimon.CoreOptions.TYPE;
+import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
 import static org.apache.paimon.hive.HiveCatalogOptions.FORMAT_TABLE_ENABLED;
@@ -598,8 +601,8 @@ public class HiveCatalog extends AbstractCatalog {
     private Table createHiveTable(Identifier identifier, TableSchema tableSchema) {
         Map<String, String> tblProperties;
         String provider = "paimon";
-        if (tableSchema.options().getOrDefault("type", "table").equalsIgnoreCase("format-table")) {
-            provider = tableSchema.options().get("file.format");
+        if (Options.fromMap(tableSchema.options()).get(TYPE) == FORMAT_TABLE) {
+            provider = tableSchema.options().get(FILE_FORMAT.key());
         }
         if (syncAllProperties() || !provider.equals("paimon")) {
             tblProperties = new HashMap<>(tableSchema.options());
@@ -831,8 +834,8 @@ public class HiveCatalog extends AbstractCatalog {
             table.getParameters()
                     .put(hive_metastoreConstants.META_TABLE_STORAGE, STORAGE_HANDLER_CLASS_NAME);
         } else {
-            table.getParameters().put("file.format", provider.toLowerCase());
-            table.getParameters().put("type", "format-table");
+            table.getParameters().put(FILE_FORMAT.key(), provider.toLowerCase());
+            table.getParameters().put(TYPE.key(), FORMAT_TABLE.toString());
         }
         if (CatalogTableType.EXTERNAL.equals(tableType)) {
             table.getParameters().put("EXTERNAL", "TRUE");

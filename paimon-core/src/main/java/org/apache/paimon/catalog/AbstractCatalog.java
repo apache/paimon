@@ -51,7 +51,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.CoreOptions.createCommitUser;
+import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.options.CatalogOptions.ALLOW_UPPER_CASE;
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
@@ -244,7 +246,7 @@ public abstract class AbstractCatalog implements Catalog {
 
         copyTableDefaultOptions(schema.options());
 
-        if (schema.options().getOrDefault("type", "table").equalsIgnoreCase("format-table")) {
+        if (Options.fromMap(schema.options()).get(TYPE) == FORMAT_TABLE) {
             createFormatTable(identifier, schema);
         } else {
             createTableImpl(identifier, schema);

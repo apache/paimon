@@ -19,6 +19,7 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.FormatTable.Format;
 import org.apache.paimon.types.DataType;
@@ -37,6 +38,9 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.hadoop.hive.serde.serdeConstants.FIELD_DELIM;
+import static org.apache.paimon.CoreOptions.FILE_FORMAT;
+import static org.apache.paimon.CoreOptions.TYPE;
+import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
 import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
 
@@ -54,8 +58,8 @@ class HiveFormatTableUtils {
         String comment = options.remove(COMMENT_PROP);
         String location = hiveTable.getSd().getLocation();
         Format format;
-        if (options.getOrDefault("type", "table").equals("format-table")) {
-            format = Format.valueOf(options.get("file.format").toUpperCase());
+        if (Options.fromMap(options).get(TYPE) == FORMAT_TABLE) {
+            format = Format.valueOf(options.get(FILE_FORMAT.key()).toUpperCase());
             // field delimiter for csv leaves untouched
         } else {
             SerDeInfo serdeInfo = hiveTable.getSd().getSerdeInfo();
