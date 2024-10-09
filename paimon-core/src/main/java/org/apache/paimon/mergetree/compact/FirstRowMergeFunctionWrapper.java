@@ -66,11 +66,7 @@ public class FirstRowMergeFunctionWrapper implements MergeFunctionWrapper<Change
             return reusedResult;
         }
 
-        reusedResult.setResult(result);
-        if (result.level() == 0) {
-            // new record, output changelog
-            return reusedResult.addChangelog(result);
-        }
-        return reusedResult;
+        // new record, output changelog
+        return reusedResult.setResult(result).addChangelog(result);
     }
 }
