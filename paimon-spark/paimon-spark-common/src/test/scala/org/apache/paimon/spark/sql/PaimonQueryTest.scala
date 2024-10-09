@@ -326,6 +326,39 @@ class PaimonQueryTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon Query: query nested array cols") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            | id INT,
+            | array_array ARRAY<ARRAY<INT>>,
+            | array_map ARRAY<MAP<STRING, STRING>>,
+            | array_struct ARRAY<STRUCT<s1: INT, s2: STRING>>
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO t VALUES (
+            | 1,
+            | array(array(1, 3)),
+            | array(map('k1', 'v1'), map('k2', 'v2')),
+            | array(struct(1, 's1'), struct(2, 's2'))
+            |)
+            |""".stripMargin)
+
+      checkAnswer(
+        sql(s"""
+               |SELECT
+               |  array_array[0][1],
+               |  array_map[0]['k1'],
+               |  array_struct[1].s2
+               |FROM t
+               |""".stripMargin),
+        Row(3, "v1", "s2")
+      )
+    }
+  }
+
   private def getAllFiles(
       tableName: String,
       partitions: Seq[String],
