@@ -107,12 +107,6 @@ under the License.
             <artifactId>iceberg-flink-${iceberg.flink.version}</artifactId>
             <version>${iceberg.version}</version>
             <scope>test</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.apache.orc</groupId>
-                    <artifactId>orc-core</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
     </dependencies>
 

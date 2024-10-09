@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
 
     @ParameterizedTest
-    @ValueSource(strings = {"parquet", "avro"})
+    @ValueSource(strings = {"orc", "parquet", "avro"})
     public void testIcebergWarehouse(String format) throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().parallelism(2).build();
