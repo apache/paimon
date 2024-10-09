@@ -49,6 +49,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOUtils;
@@ -774,6 +775,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 List<ManifestEntry> currentEntries =
                         scan.withSnapshot(latestSnapshot)
                                 .withPartitionFilter(partitionFilter)
+                                .withKind(ScanMode.ALL)
                                 .plan()
                                 .files();
                 for (ManifestEntry entry : currentEntries) {
@@ -858,11 +860,33 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
+        List<SimpleFileEntry> baseDataFiles = new ArrayList<>();
         if (latestSnapshot != null && conflictCheck.shouldCheck(latestSnapshot.id())) {
             // latestSnapshotId is different from the snapshot id we've checked for conflicts,
             // so we have to check again
             try {
-                noConflictsOrFail(latestSnapshot.commitUser(), latestSnapshot, deltaFiles);
+                List<BinaryRow> changedPartitions =
+                        deltaFiles.stream()
+                                .map(ManifestEntry::partition)
+                                .distinct()
+                                .collect(Collectors.toList());
+                if (retryResult != null && retryResult.latestSnapshot != null) {
+                    baseDataFiles = new ArrayList<>(retryResult.baseDataFiles);
+                    List<SimpleFileEntry> incremental =
+                            readIncrementalChanges(
+                                    retryResult.latestSnapshot, latestSnapshot, changedPartitions);
+                    if (!incremental.isEmpty()) {
+                        baseDataFiles.addAll(incremental);
+                        baseDataFiles = new ArrayList<>(FileEntry.mergeEntries(baseDataFiles));
+                    }
+                } else {
+                    baseDataFiles =
+                            readAllEntriesFromChangedPartitions(latestSnapshot, changedPartitions);
+                }
+                noConflictsOrFail(
+                        latestSnapshot.commitUser(),
+                        baseDataFiles,
+                        SimpleFileEntry.from(deltaFiles));
             } catch (Exception e) {
                 if (retryResult != null) {
                     retryResult.cleanAll();
@@ -903,37 +927,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
 
             // try to merge old manifest files to create base manifest list
-            boolean needsManifestMerge = true;
-            if (retryResult != null) {
-                Set<String> retryMergeBefore =
-                        retryResult.mergeBeforeManifests.stream()
-                                .map(ManifestFileMeta::fileName)
-                                .collect(Collectors.toSet());
-                List<ManifestFileMeta> manifestsFromOther =
-                        mergeBeforeManifests.stream()
-                                .filter(m -> !retryMergeBefore.remove(m.fileName()))
-                                .collect(Collectors.toList());
-                if (retryMergeBefore.isEmpty()) {
-                    needsManifestMerge = false;
-                    // copy this to avoid wrong clean for retryResult
-                    mergeAfterManifests = new ArrayList<>(retryResult.mergeAfterManifests);
-                    mergeAfterManifests.addAll(manifestsFromOther);
-                    LOG.info("Reusing manifest merging for retry.");
-                } else {
-                    retryResult.cleanManifestMerge();
-                }
-            }
-            if (needsManifestMerge) {
-                mergeAfterManifests =
-                        ManifestFileMerger.merge(
-                                mergeBeforeManifests,
-                                manifestFile,
-                                manifestTargetSize.getBytes(),
-                                manifestMergeMinCount,
-                                manifestFullCompactionSize.getBytes(),
-                                partitionType,
-                                manifestReadParallelism);
-            }
+            mergeAfterManifests =
+                    ManifestFileMerger.merge(
+                            mergeBeforeManifests,
+                            manifestFile,
+                            manifestTargetSize.getBytes(),
+                            manifestMergeMinCount,
+                            manifestFullCompactionSize.getBytes(),
+                            partitionType,
+                            manifestReadParallelism);
             baseManifestList = manifestList.write(mergeAfterManifests);
 
             // the added records subtract the deleted records from
@@ -962,7 +964,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     indexManifest = retryResult.newIndexManifest;
                     LOG.info("Reusing index manifest {} for retry.", indexManifest);
                 } else {
-                    retryResult.cleanIndexManifest();
+                    cleanIndexManifest(retryResult.oldIndexManifest, retryResult.newIndexManifest);
                 }
             }
 
@@ -1012,18 +1014,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (retryResult != null) {
                 retryResult.cleanAll();
             }
-            RetryResult newResult =
-                    new RetryResult(
-                            deltaManifestList,
-                            changelogManifestList,
-                            oldIndexManifest,
-                            indexManifest,
-                            mergeBeforeManifests,
-                            mergeAfterManifests);
-            newResult.cleanAll();
-            if (baseManifestList != null) {
-                manifestList.delete(baseManifestList);
-            }
+            cleanUpReuseTmpManifests(
+                    deltaManifestList, changelogManifestList, oldIndexManifest, indexManifest);
+            cleanUpNoReuseTmpManifests(baseManifestList, mergeBeforeManifests, mergeAfterManifests);
             throw new RuntimeException(
                     String.format(
                             "Exception occurs when preparing snapshot #%d (path %s) by user %s "
@@ -1105,16 +1098,28 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         identifier,
                         commitKind.name(),
                         commitTime));
-        if (baseManifestList != null) {
-            manifestList.delete(baseManifestList);
-        }
+        cleanUpNoReuseTmpManifests(baseManifestList, mergeBeforeManifests, mergeAfterManifests);
         return new RetryResult(
                 deltaManifestList,
                 changelogManifestList,
                 oldIndexManifest,
                 indexManifest,
-                mergeBeforeManifests,
-                mergeAfterManifests);
+                latestSnapshot,
+                baseDataFiles);
+    }
+
+    private List<SimpleFileEntry> readIncrementalChanges(
+            Snapshot from, Snapshot to, List<BinaryRow> changedPartitions) {
+        List<SimpleFileEntry> entries = new ArrayList<>();
+        for (long i = from.id() + 1; i <= to.id(); i++) {
+            List<SimpleFileEntry> delta =
+                    scan.withSnapshot(i)
+                            .withKind(ScanMode.DELTA)
+                            .withPartitionFilter(changedPartitions)
+                            .readSimpleEntries();
+            entries.addAll(delta);
+        }
+        return entries;
     }
 
     @SafeVarargs
@@ -1126,21 +1131,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         .map(ManifestEntry::partition)
                         .distinct()
                         .collect(Collectors.toList());
+        return readAllEntriesFromChangedPartitions(snapshot, changedPartitions);
+    }
+
+    private List<SimpleFileEntry> readAllEntriesFromChangedPartitions(
+            Snapshot snapshot, List<BinaryRow> changedPartitions) {
         try {
             return scan.withSnapshot(snapshot)
+                    .withKind(ScanMode.ALL)
                     .withPartitionFilter(changedPartitions)
                     .readSimpleEntries();
         } catch (Throwable e) {
             throw new RuntimeException("Cannot read manifest entries from changed partitions.", e);
         }
-    }
-
-    private void noConflictsOrFail(
-            String baseCommitUser, Snapshot latestSnapshot, List<ManifestEntry> deltaFiles) {
-        noConflictsOrFail(
-                baseCommitUser,
-                readAllEntriesFromChangedPartitions(latestSnapshot, deltaFiles),
-                SimpleFileEntry.from(deltaFiles));
     }
 
     private void noConflictsOrFail(
@@ -1342,6 +1345,52 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
     }
 
+    private void cleanUpNoReuseTmpManifests(
+            String baseManifestList,
+            List<ManifestFileMeta> mergeBeforeManifests,
+            List<ManifestFileMeta> mergeAfterManifests) {
+        if (baseManifestList != null) {
+            manifestList.delete(baseManifestList);
+        }
+        Set<String> oldMetaSet =
+                mergeBeforeManifests.stream()
+                        .map(ManifestFileMeta::fileName)
+                        .collect(Collectors.toSet());
+        for (ManifestFileMeta suspect : mergeAfterManifests) {
+            if (!oldMetaSet.contains(suspect.fileName())) {
+                manifestFile.delete(suspect.fileName());
+            }
+        }
+    }
+
+    private void cleanUpReuseTmpManifests(
+            String deltaManifestList,
+            String changelogManifestList,
+            String oldIndexManifest,
+            String newIndexManifest) {
+        if (deltaManifestList != null) {
+            for (ManifestFileMeta manifest : manifestList.read(deltaManifestList)) {
+                manifestFile.delete(manifest.fileName());
+            }
+            manifestList.delete(deltaManifestList);
+        }
+
+        if (changelogManifestList != null) {
+            for (ManifestFileMeta manifest : manifestList.read(changelogManifestList)) {
+                manifestFile.delete(manifest.fileName());
+            }
+            manifestList.delete(changelogManifestList);
+        }
+
+        cleanIndexManifest(oldIndexManifest, newIndexManifest);
+    }
+
+    private void cleanIndexManifest(String oldIndexManifest, String newIndexManifest) {
+        if (newIndexManifest != null && !Objects.equals(oldIndexManifest, newIndexManifest)) {
+            indexManifestFile.delete(newIndexManifest);
+        }
+    }
+
     @Override
     public void close() {
         for (CommitCallback callback : commitCallbacks) {
@@ -1416,83 +1465,32 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         private final String oldIndexManifest;
         private final String newIndexManifest;
 
-        private final List<ManifestFileMeta> mergeBeforeManifests;
-        private final List<ManifestFileMeta> mergeAfterManifests;
+        private final Snapshot latestSnapshot;
+        private final List<SimpleFileEntry> baseDataFiles;
 
         private RetryResult(
                 String deltaManifestList,
                 String changelogManifestList,
                 String oldIndexManifest,
                 String newIndexManifest,
-                List<ManifestFileMeta> mergeBeforeManifests,
-                List<ManifestFileMeta> mergeAfterManifests) {
+                Snapshot latestSnapshot,
+                List<SimpleFileEntry> baseDataFiles) {
             this.deltaManifestList = deltaManifestList;
             this.changelogManifestList = changelogManifestList;
             this.oldIndexManifest = oldIndexManifest;
             this.newIndexManifest = newIndexManifest;
-            this.mergeBeforeManifests = mergeBeforeManifests;
-            this.mergeAfterManifests = mergeAfterManifests;
+            this.latestSnapshot = latestSnapshot;
+            this.baseDataFiles = baseDataFiles;
         }
 
         private void cleanAll() {
-            cleanManifestList(deltaManifestList);
-            cleanManifestList(changelogManifestList);
-            cleanIndexManifest();
-            cleanManifestMerge();
-        }
-
-        private void cleanManifestList(String toBeDelete) {
-            if (toBeDelete != null) {
-                for (ManifestFileMeta manifest : manifestList.read(toBeDelete)) {
-                    manifestFile.delete(manifest.fileName());
-                }
-                manifestList.delete(toBeDelete);
-            }
-        }
-
-        private void cleanIndexManifest() {
-            if (newIndexManifest != null && !Objects.equals(oldIndexManifest, newIndexManifest)) {
-                indexManifestFile.delete(newIndexManifest);
-            }
-        }
-
-        private void cleanManifestMerge() {
-            Set<String> oldMetaSet =
-                    mergeBeforeManifests.stream()
-                            .map(ManifestFileMeta::fileName)
-                            .collect(Collectors.toSet());
-            for (ManifestFileMeta suspect : mergeAfterManifests) {
-                if (!oldMetaSet.contains(suspect.fileName())) {
-                    manifestFile.delete(suspect.fileName());
-                }
-            }
+            cleanUpReuseTmpManifests(
+                    deltaManifestList, changelogManifestList, oldIndexManifest, newIndexManifest);
         }
 
         @Override
         public boolean isSuccess() {
             return false;
-        }
-
-        @Override
-        public String toString() {
-            return "{"
-                    + "deltaManifestList='"
-                    + deltaManifestList
-                    + '\''
-                    + ", changelogManifestList='"
-                    + changelogManifestList
-                    + '\''
-                    + ", oldIndexManifest='"
-                    + oldIndexManifest
-                    + '\''
-                    + ", newIndexManifest='"
-                    + newIndexManifest
-                    + '\''
-                    + ", mergeBeforeManifests="
-                    + mergeBeforeManifests
-                    + ", mergeAfterManifests="
-                    + mergeAfterManifests
-                    + '}';
         }
     }
 }
