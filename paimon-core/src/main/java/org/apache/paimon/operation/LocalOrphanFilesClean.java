@@ -108,6 +108,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         candidateDeletes.stream().map(candidates::get).forEach(fileCleaner);
         deleteFiles.addAll(
                 candidateDeletes.stream().map(candidates::get).collect(Collectors.toList()));
+        candidateDeletes.clear();
 
         return deleteFiles;
     }
