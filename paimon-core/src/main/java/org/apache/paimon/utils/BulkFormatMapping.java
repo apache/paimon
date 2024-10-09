@@ -26,7 +26,10 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.schema.SchemaEvolutionUtil;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -37,7 +40,6 @@ import java.util.List;
 import java.util.function.Function;
 
 import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
-import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Class with index mapping and bulk format. */
 public class BulkFormatMapping {
@@ -152,25 +154,46 @@ public class BulkFormatMapping {
                         .filter(f -> f.id() == dataField.id())
                         .findFirst()
                         .ifPresent(
-                                f -> {
-                                    if (f.type() instanceof RowType) {
-                                        RowType tableFieldType = (RowType) f.type();
-                                        RowType dataFieldType = (RowType) dataField.type();
-                                        checkState(tableFieldType.isPrunedFrom(dataFieldType));
-                                        // Since the nested type schema evolution is not supported,
-                                        // directly copy the fields from tableField's type to
-                                        // dataField's type.
-                                        // todo: support nested type schema evolutions.
+                                field ->
                                         readDataFields.add(
                                                 dataField.newType(
-                                                        dataFieldType.copy(
-                                                                tableFieldType.getFields())));
-                                    } else {
-                                        readDataFields.add(dataField);
-                                    }
-                                });
+                                                        pruneDataType(
+                                                                field.type(), dataField.type()))));
             }
             return readDataFields;
+        }
+
+        private DataType pruneDataType(DataType readType, DataType dataType) {
+            switch (readType.getTypeRoot()) {
+                case ROW:
+                    RowType r = (RowType) readType;
+                    RowType d = (RowType) dataType;
+                    ArrayList<DataField> newFields = new ArrayList<>();
+                    for (DataField rf : r.getFields()) {
+                        if (d.containsField(rf.id())) {
+                            DataField df = d.getField(rf.id());
+                            newFields.add(df.newType(pruneDataType(rf.type(), df.type())));
+                        }
+                    }
+                    return d.copy(newFields);
+                case MAP:
+                    return ((MapType) dataType)
+                            .newKeyValueType(
+                                    pruneDataType(
+                                            ((MapType) readType).getKeyType(),
+                                            ((MapType) dataType).getKeyType()),
+                                    pruneDataType(
+                                            ((MapType) readType).getValueType(),
+                                            ((MapType) dataType).getValueType()));
+                case ARRAY:
+                    return ((ArrayType) dataType)
+                            .newElementType(
+                                    pruneDataType(
+                                            ((ArrayType) readType).getElementType(),
+                                            ((ArrayType) dataType).getElementType()));
+                default:
+                    return dataType;
+            }
         }
 
         private List<Predicate> readFilters(

@@ -218,6 +218,114 @@ class PaimonQueryTest extends PaimonSparkTestBase {
       }
   }
 
+  test("Paimon Query: query nested cols") {
+    fileFormats.foreach {
+      fileFormat =>
+        bucketModes.foreach {
+          bucketMode =>
+            val bucketProp = if (bucketMode != -1) {
+              s", 'bucket-key'='name', 'bucket' = '$bucketMode' "
+            } else {
+              ""
+            }
+            withTable("students") {
+              sql(s"""
+                     |CREATE TABLE students (
+                     |  name STRING,
+                     |  course STRUCT<course_name: STRING, grade: DOUBLE>,
+                     |  teacher STRUCT<name: STRING, address: STRUCT<street: STRING, city: STRING>>,
+                     |  m MAP<STRING, STRUCT<s:STRING, i INT, d: DOUBLE>>,
+                     |  l ARRAY<STRUCT<s:STRING, i INT, d: DOUBLE>>,
+                     |  s STRUCT<s1: STRING, s2: MAP<STRING, STRUCT<s:STRING, i INT, a: ARRAY<STRUCT<s:STRING, i INT, d: DOUBLE>>>>>,
+                     |  m2 MAP<STRUCT<s:STRING, i INT, d: DOUBLE>, STRUCT<s:STRING, i INT, d: DOUBLE>>
+                     |) USING paimon
+                     |TBLPROPERTIES ('file.format'='$fileFormat' $bucketProp)
+                     |""".stripMargin)
+
+              sql(s"""
+                     |INSERT INTO students VALUES (
+                     |  'Alice',
+                     |  STRUCT('Math', 85.0),
+                     |  STRUCT('John', STRUCT('Street 1', 'City 1')),
+                     |  MAP('k1', STRUCT('s1', 1, 1.0), 'k2', STRUCT('s11', 11, 11.0)),
+                     |  ARRAY(STRUCT('s1', 1, 1.0), STRUCT('s11', 11, 11.0)),
+                     |  STRUCT('a', MAP('k1', STRUCT('s1', 1, ARRAY(STRUCT('s1', 1, 1.0))), 'k3', STRUCT('s11', 11, ARRAY(STRUCT('s11', 11, 11.0))))),
+                     |  MAP(STRUCT('k1', 1, 1.0), STRUCT('s1', 1, 1.0), STRUCT('k2', 1, 1.0), STRUCT('s11', 11, 11.0)))
+                     |""".stripMargin)
+
+              sql(s"""
+                     |INSERT INTO students VALUES (
+                     |  'Bob',
+                     |  STRUCT('Biology', 92.0),
+                     |  STRUCT('Jane', STRUCT('Street 2', 'City 2')),
+                     |  MAP('k2', STRUCT('s2', 2, 2.0)),
+                     |  ARRAY(STRUCT('s2', 2, 2.0), STRUCT('s22', 22, 22.0)),
+                     |  STRUCT('b', MAP('k2', STRUCT('s22', 22, ARRAY(STRUCT('s22', 22, 22.0))))),
+                     |  MAP(STRUCT('k2', 2, 2.0), STRUCT('s22', 22, 22.0)))
+                     |""".stripMargin)
+
+              sql(s"""
+                     |INSERT INTO students VALUES (
+                     |  'Cathy',
+                     |  STRUCT('History', 95.0),
+                     |  STRUCT('Jane', STRUCT('Street 3', 'City 3')),
+                     |  MAP('k1', STRUCT('s3', 3, 3.0), 'k2', STRUCT('s33', 33, 33.0)),
+                     |  ARRAY(STRUCT('s3', 3, 3.0)),
+                     |  STRUCT('c', MAP('k1', STRUCT('s3', 3, ARRAY(STRUCT('s3', 3, 3.0))), 'k2', STRUCT('s33', 33, ARRAY(STRUCT('s33', 33, 33.0))))),
+                     |  MAP(STRUCT('k1', 3, 3.0), STRUCT('s3', 3, 3.0), STRUCT('k2', 3, 3.0), STRUCT('s33', 33, 33.0)))
+                     |""".stripMargin)
+
+              checkAnswer(
+                sql(s"""
+                       |SELECT
+                       |  course.grade, name, teacher.address, course.course_name,
+                       |  m['k1'].d, m['k1'].s,
+                       |  l[1].d, l[1].s,
+                       |  s.s2['k2'].a[0].i,
+                       |  map_keys(m2).i
+                       |FROM students ORDER BY name
+                       |""".stripMargin),
+                Seq(
+                  Row(
+                    85.0,
+                    "Alice",
+                    Row("Street 1", "City 1"),
+                    "Math",
+                    1.0,
+                    "s1",
+                    11.0,
+                    "s11",
+                    null,
+                    Seq(1, 1)),
+                  Row(
+                    92.0,
+                    "Bob",
+                    Row("Street 2", "City 2"),
+                    "Biology",
+                    null,
+                    null,
+                    22.0,
+                    "s22",
+                    22,
+                    Seq(2)),
+                  Row(
+                    95.0,
+                    "Cathy",
+                    Row("Street 3", "City 3"),
+                    "History",
+                    3.0,
+                    "s3",
+                    null,
+                    null,
+                    33,
+                    Seq(3, 3))
+                )
+              )
+            }
+        }
+    }
+  }
+
   private def getAllFiles(
       tableName: String,
       partitions: Seq[String],
