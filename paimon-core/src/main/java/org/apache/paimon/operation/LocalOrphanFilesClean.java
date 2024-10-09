@@ -120,7 +120,24 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         try {
             Set<String> manifests = new HashSet<>();
             collectWithoutDataFile(branch, usedFiles::add, manifests::add);
-            usedFiles.addAll(retryReadingDataFiles(manifestFile, manifests));
+            List<String> dataFiles = new ArrayList<>();
+            for (String manifestName : manifests) {
+                retryReadingFiles(
+                                () -> manifestFile.readWithIOException(manifestName),
+                                Collections.<ManifestEntry>emptyList())
+                        .stream()
+                        .map(ManifestEntry::file)
+                        .forEach(
+                                f -> {
+                                    if (candidateDeletes.contains(f.fileName())) {
+                                        dataFiles.add(f.fileName());
+                                    }
+                                    f.extraFiles().stream()
+                                            .filter(candidateDeletes::contains)
+                                            .forEach(dataFiles::add);
+                                });
+            }
+            usedFiles.addAll(dataFiles);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -144,43 +161,6 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         while (allPaths.hasNext()) {
             Path next = allPaths.next();
             result.put(next.getName(), next);
-        }
-        return result;
-    }
-
-    private List<String> retryReadingDataFiles(ManifestFile manifestFile, Set<String> manifestNames)
-            throws IOException {
-        List<String> dataFiles = new ArrayList<>();
-        for (String manifestName : manifestNames) {
-            retryReadingFiles(
-                            () -> manifestFile.readWithIOException(manifestName),
-                            Collections.<ManifestEntry>emptyList())
-                    .stream()
-                    .map(ManifestEntry::file)
-                    .forEach(
-                            f -> {
-                                if (candidateDeletes.contains(f.fileName())) {
-                                    dataFiles.add(f.fileName());
-                                }
-                                f.extraFiles().stream()
-                                        .filter(candidateDeletes::contains)
-                                        .forEach(dataFiles::add);
-                            });
-        }
-        return dataFiles;
-    }
-
-    public static List<String> showDeletedFiles(List<Path> deleteFiles, int showLimit) {
-        int showSize = Math.min(deleteFiles.size(), showLimit);
-        List<String> result = new ArrayList<>();
-        if (deleteFiles.size() > showSize) {
-            result.add(
-                    String.format(
-                            "Total %s files, only %s lines are displayed.",
-                            deleteFiles.size(), showSize));
-        }
-        for (int i = 0; i < showSize; i++) {
-            result.add(deleteFiles.get(i).toUri().getPath());
         }
         return result;
     }
