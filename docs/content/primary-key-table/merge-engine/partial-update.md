@@ -3,7 +3,7 @@ title: "Partial Update"
 weight: 2
 type: docs
 aliases:
-  - /cdc-ingestion/merge-engin/partial-update.html
+- /primary-key-table/merge-engin/partial-update.html
 ---
 
 <!--
