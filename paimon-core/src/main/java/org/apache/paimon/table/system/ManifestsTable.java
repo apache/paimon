@@ -46,6 +46,7 @@ import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.SnapshotNotExistException;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
@@ -198,6 +199,7 @@ public class ManifestsTable implements ReadonlyTable {
         CoreOptions coreOptions = CoreOptions.fromMap(dataTable.options());
         SnapshotManager snapshotManager = dataTable.snapshotManager();
         Long snapshotId = coreOptions.scanSnapshotId();
+        String tagName = coreOptions.scanTagName();
         Snapshot snapshot = null;
         if (snapshotId != null) {
             // reminder user with snapshot id range
@@ -210,8 +212,12 @@ public class ManifestsTable implements ReadonlyTable {
                                 snapshotId, earliestSnapshotId, latestSnapshotId));
             }
             snapshot = snapshotManager.snapshot(snapshotId);
-        } else if (snapshotId == null) {
-            snapshot = snapshotManager.latestSnapshot();
+        } else {
+            if (!StringUtils.isEmpty(tagName) && dataTable.tagManager().tagExists(tagName)) {
+                snapshot = dataTable.tagManager().tag(tagName).trimToSnapshot();
+            } else {
+                snapshot = snapshotManager.latestSnapshot();
+            }
         }
 
         if (snapshot == null) {
