@@ -205,7 +205,17 @@ public final class RowType extends DataType {
             return false;
         }
         RowType rowType = (RowType) o;
-        return fields.equals(rowType.fields);
+        // For nested RowTypes e.g. DataField.dataType = RowType we need to ignoreIds as they can be
+        // different
+        if (fields.size() != rowType.fields.size()) {
+            return false;
+        }
+        for (int i = 0; i < fields.size(); ++i) {
+            if (!DataField.dataFieldEqualsIgnoreId(fields.get(i), rowType.fields.get(i))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override
