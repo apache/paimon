@@ -40,6 +40,7 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.api.TableSchema;
@@ -458,12 +459,8 @@ public class FlinkCatalog extends AbstractCatalog {
                 schemaChanges.add(
                         SchemaChange.addColumn(
                                 add.getColumn().getName(),
-<<<<<<< HEAD
                                 LogicalTypeConversion.toDataType(
                                         add.getColumn().getDataType().getLogicalType()),
-=======
-                                toDataType(add.getColumn().getDataType().getLogicalType()),
->>>>>>> b5f198307 (format)
                                 comment,
                                 move));
             }
@@ -512,12 +509,8 @@ public class FlinkCatalog extends AbstractCatalog {
                 }
                 schemaChanges.add(
                         SchemaChange.updateColumnType(
-<<<<<<< HEAD
                                 modify.getOldColumn().getName(),
                                 LogicalTypeConversion.toDataType(newColumnType)));
-=======
-                                modify.getOldColumn().getName(), toDataType(newColumnType)));
->>>>>>> b5f198307 (format)
             }
             return schemaChanges;
         } else if (change instanceof ModifyColumnPosition) {
@@ -567,9 +560,9 @@ public class FlinkCatalog extends AbstractCatalog {
         } else if (change instanceof TableChange.ModifyColumn) {
             // let non-physical column handle by option
             if (oldTableNonPhysicalColumnIndex.containsKey(
-                    ((TableChange.ModifyColumn) change).getOldColumn().getName())
+                            ((TableChange.ModifyColumn) change).getOldColumn().getName())
                     && !(((TableChange.ModifyColumn) change).getNewColumn()
-                    instanceof Column.PhysicalColumn)) {
+                            instanceof Column.PhysicalColumn)) {
                 return schemaChanges;
             } else {
                 throw new UnsupportedOperationException(
@@ -723,8 +716,8 @@ public class FlinkCatalog extends AbstractCatalog {
         try {
             catalog.alterTable(toIdentifier(tablePath), changes, ignoreIfNotExists);
         } catch (Catalog.TableNotExistException
-                 | Catalog.ColumnAlreadyExistException
-                 | Catalog.ColumnNotExistException e) {
+                | Catalog.ColumnAlreadyExistException
+                | Catalog.ColumnNotExistException e) {
             throw new CatalogException(e);
         }
     }
@@ -755,12 +748,8 @@ public class FlinkCatalog extends AbstractCatalog {
         return compoundKey(watermarkPrefix, WATERMARK_STRATEGY_DATA_TYPE);
     }
 
-<<<<<<< HEAD
     private void setWatermarkOptions(
             org.apache.flink.table.catalog.WatermarkSpec wms, List<SchemaChange> schemaChanges) {
-=======
-    private void setWatermarkOptions(WatermarkSpec wms, List<SchemaChange> schemaChanges) {
->>>>>>> b5f198307 (format)
         String watermarkPrefix = getWatermarkKeyPrefix();
         schemaChanges.add(
                 SchemaChange.setOption(
@@ -798,11 +787,11 @@ public class FlinkCatalog extends AbstractCatalog {
             if (ts1.getPrimaryKey().isPresent() && ts2.getPrimaryKey().isPresent()) {
                 pkEquality =
                         Objects.equals(
-                                ts1.getPrimaryKey().get().getType(),
-                                ts2.getPrimaryKey().get().getType())
+                                        ts1.getPrimaryKey().get().getType(),
+                                        ts2.getPrimaryKey().get().getType())
                                 && Objects.equals(
-                                ts1.getPrimaryKey().get().getColumns(),
-                                ts2.getPrimaryKey().get().getColumns());
+                                        ts1.getPrimaryKey().get().getColumns(),
+                                        ts2.getPrimaryKey().get().getColumns());
             } else if (!ts1.getPrimaryKey().isPresent() && !ts2.getPrimaryKey().isPresent()) {
                 pkEquality = true;
             }
