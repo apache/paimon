@@ -821,6 +821,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 break;
             }
 
+            // TODO optimize OVERWRITE too
             RetryResult retryResult = (RetryResult) result;
             retryResult.cleanAll();
         }
@@ -942,29 +943,24 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long deltaRecordCount = recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles);
             long totalRecordCount = previousTotalRecordCount + deltaRecordCount;
 
-            // write new delta files into manifest files
-            deltaManifestList =
-                    retryResult == null
-                            ? manifestList.write(manifestFile.write(deltaFiles))
-                            : retryResult.deltaManifestList;
-
-            // write changelog into manifest files
-            if (!changelogFiles.isEmpty()) {
-                changelogManifestList =
-                        retryResult == null
-                                ? manifestList.write(manifestFile.write(changelogFiles))
-                                : retryResult.changelogManifestList;
-            }
-
-            // write new index manifest
             boolean rewriteIndexManifest = true;
             if (retryResult != null) {
+                deltaManifestList = retryResult.deltaManifestList;
+                changelogManifestList = retryResult.changelogManifestList;
                 if (Objects.equals(oldIndexManifest, retryResult.oldIndexManifest)) {
                     rewriteIndexManifest = false;
                     indexManifest = retryResult.newIndexManifest;
                     LOG.info("Reusing index manifest {} for retry.", indexManifest);
                 } else {
                     cleanIndexManifest(retryResult.oldIndexManifest, retryResult.newIndexManifest);
+                }
+            } else {
+                // write new delta files into manifest files
+                deltaManifestList = manifestList.write(manifestFile.write(deltaFiles));
+
+                // write changelog into manifest files
+                if (!changelogFiles.isEmpty()) {
+                    changelogManifestList = manifestList.write(manifestFile.write(changelogFiles));
                 }
             }
 
