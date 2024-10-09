@@ -1425,10 +1425,7 @@ public abstract class FileStoreTableTestBase {
         table.createTag("tag1", 1);
         table.deleteTag("tag1");
 
-        assertThatThrownBy(() -> table.deleteTag("tag1"))
-                .satisfies(
-                        anyCauseMatches(
-                                IllegalArgumentException.class, "Tag 'tag1' doesn't exist."));
+        assertThat(table.tagManager().tags().containsValue("tag1")).isFalse();
     }
 
     @Test
