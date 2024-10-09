@@ -212,7 +212,7 @@ public class ManifestsTable implements ReadonlyTable {
                                 snapshotId, earliestSnapshotId, latestSnapshotId));
             }
             snapshot = snapshotManager.snapshot(snapshotId);
-        } else if (snapshotId == null) {
+        } else {
             if (!StringUtils.isEmpty(tagName) && dataTable.tagManager().tagExists(tagName)) {
                 snapshot = dataTable.tagManager().tag(tagName).trimToSnapshot();
             } else {
