@@ -48,7 +48,23 @@ public class CdcRecordStoreWriteOperator extends TableWriteOperator<CdcRecord> {
                     .durationType()
                     .defaultValue(Duration.ofMillis(500));
 
+    public static final ConfigOption<Integer> MAX_RETRY_NUM_TIMES =
+            ConfigOptions.key("cdc.max-retry-num-times")
+                    .intType()
+                    .defaultValue(100)
+                    .withDescription("Max retry count for updating table before failing loudly");
+
+    public static final ConfigOption<Boolean> SKIP_CORRUPT_RECORD =
+            ConfigOptions.key("cdc.skip-corrupt-record")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Skip corrupt record if we fail to parse it");
+
     private final long retrySleepMillis;
+
+    private final int maxRetryNumTimes;
+
+    private final boolean skipCorruptRecord;
 
     public CdcRecordStoreWriteOperator(
             FileStoreTable table,
@@ -57,6 +73,8 @@ public class CdcRecordStoreWriteOperator extends TableWriteOperator<CdcRecord> {
         super(table, storeSinkWriteProvider, initialCommitUser);
         this.retrySleepMillis =
                 table.coreOptions().toConfiguration().get(RETRY_SLEEP_TIME).toMillis();
+        this.maxRetryNumTimes = table.coreOptions().toConfiguration().get(MAX_RETRY_NUM_TIMES);
+        this.skipCorruptRecord = table.coreOptions().toConfiguration().get(SKIP_CORRUPT_RECORD);
     }
 
     @Override
@@ -75,7 +93,7 @@ public class CdcRecordStoreWriteOperator extends TableWriteOperator<CdcRecord> {
         CdcRecord record = element.getValue();
         Optional<GenericRow> optionalConverted = toGenericRow(record, table.schema().fields());
         if (!optionalConverted.isPresent()) {
-            while (true) {
+            for (int retry = 0; retry < maxRetryNumTimes; ++retry) {
                 table = table.copyWithLatestSchema();
                 optionalConverted = toGenericRow(record, table.schema().fields());
                 if (optionalConverted.isPresent()) {
@@ -86,10 +104,18 @@ public class CdcRecordStoreWriteOperator extends TableWriteOperator<CdcRecord> {
             write.replace(table);
         }
 
-        try {
-            write.write(optionalConverted.get());
-        } catch (Exception e) {
-            throw new IOException(e);
+        if (!optionalConverted.isPresent()) {
+            if (skipCorruptRecord) {
+                LOG.warn("Skipping corrupt or unparsable record {}", record);
+            } else {
+                throw new RuntimeException("Unable to process element. Possibly a corrupt record");
+            }
+        } else {
+            try {
+                write.write(optionalConverted.get());
+            } catch (Exception e) {
+                throw new IOException(e);
+            }
         }
     }
 }
