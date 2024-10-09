@@ -45,6 +45,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.apache.flink.table.hive.LegacyHiveClasses;
 import org.apache.hadoop.conf.Configuration;
@@ -491,6 +492,35 @@ public class HiveCatalog extends AbstractCatalog {
         }
     }
 
+    public void createFormatTable(Identifier identifier, Schema schema) {
+        if (!formatTableEnabled()) {
+            throw new UnsupportedOperationException(
+                    "Format table is not enabled for " + identifier);
+        }
+        List<DataField> fields = schema.fields();
+        List<String> partitionKeys = schema.partitionKeys();
+        List<String> primaryKeys = schema.primaryKeys();
+        Map<String, String> options = schema.options();
+        int highestFieldId = RowType.currentHighestFieldId(fields);
+
+        TableSchema newSchema =
+                new TableSchema(
+                        0,
+                        fields,
+                        highestFieldId,
+                        partitionKeys,
+                        primaryKeys,
+                        options,
+                        schema.comment());
+        try {
+            Table hiveTable = createHiveTable(identifier, newSchema);
+            clients.execute(client -> client.createTable(hiveTable));
+        } catch (Exception e) {
+            // we don't need to delete directories since HMS will roll back db and fs if failed.
+            throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
+        }
+    }
+
     private boolean usingExternalTable() {
         CatalogTableType tableType =
                 OptionsUtils.convertToEnum(
@@ -567,7 +597,11 @@ public class HiveCatalog extends AbstractCatalog {
 
     private Table createHiveTable(Identifier identifier, TableSchema tableSchema) {
         Map<String, String> tblProperties;
-        if (syncAllProperties()) {
+        String provider = "paimon";
+        if (tableSchema.options().getOrDefault("type", "table").equalsIgnoreCase("format-table")) {
+            provider = tableSchema.options().get("file.format");
+        }
+        if (syncAllProperties() || !provider.equals("paimon")) {
             tblProperties = new HashMap<>(tableSchema.options());
 
             // add primary-key, partition-key to tblproperties
@@ -576,8 +610,8 @@ public class HiveCatalog extends AbstractCatalog {
             tblProperties = convertToPropertiesPrefixKey(tableSchema.options(), HIVE_PREFIX);
         }
 
-        Table table = newHmsTable(identifier, tblProperties);
-        updateHmsTable(table, identifier, tableSchema);
+        Table table = newHmsTable(identifier, tblProperties, provider);
+        updateHmsTable(table, identifier, tableSchema, provider);
         return table;
     }
 
@@ -649,7 +683,7 @@ public class HiveCatalog extends AbstractCatalog {
     private void alterTableToHms(Table table, Identifier identifier, TableSchema newSchema)
             throws TException, InterruptedException {
         updateHmsTablePars(table, newSchema);
-        updateHmsTable(table, identifier, newSchema);
+        updateHmsTable(table, identifier, newSchema, newSchema.options().get("provider"));
         clients.execute(
                 client ->
                         client.alter_table(
@@ -767,12 +801,16 @@ public class HiveCatalog extends AbstractCatalog {
         return warehouse;
     }
 
-    private Table newHmsTable(Identifier identifier, Map<String, String> tableParameters) {
+    private Table newHmsTable(
+            Identifier identifier, Map<String, String> tableParameters, String provider) {
         long currentTimeMillis = System.currentTimeMillis();
         CatalogTableType tableType =
                 OptionsUtils.convertToEnum(
                         hiveConf.get(TABLE_TYPE.key(), CatalogTableType.MANAGED.toString()),
                         CatalogTableType.class);
+        if (provider == null) {
+            provider = "paimon";
+        }
         Table table =
                 new Table(
                         identifier.getTableName(),
@@ -788,24 +826,72 @@ public class HiveCatalog extends AbstractCatalog {
                         null,
                         null,
                         tableType.toString().toUpperCase(Locale.ROOT) + "_TABLE");
-        table.getParameters().put(TABLE_TYPE_PROP, PAIMON_TABLE_TYPE_VALUE.toUpperCase());
-        table.getParameters()
-                .put(hive_metastoreConstants.META_TABLE_STORAGE, STORAGE_HANDLER_CLASS_NAME);
+        table.getParameters().put(TABLE_TYPE_PROP, provider.toUpperCase());
+        if ("paimon".equalsIgnoreCase(provider)) {
+            table.getParameters()
+                    .put(hive_metastoreConstants.META_TABLE_STORAGE, STORAGE_HANDLER_CLASS_NAME);
+        } else {
+            table.getParameters().put("file.format", provider.toLowerCase());
+            table.getParameters().put("type", "format-table");
+        }
         if (CatalogTableType.EXTERNAL.equals(tableType)) {
             table.getParameters().put("EXTERNAL", "TRUE");
         }
         return table;
     }
 
-    private void updateHmsTable(Table table, Identifier identifier, TableSchema schema) {
+    private String getSerdeClassName(String provider) {
+        if (provider == null || provider.equalsIgnoreCase("paimon")) {
+            return SERDE_CLASS_NAME;
+        } else if (provider.equalsIgnoreCase("csv")) {
+            return "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe";
+        } else if (provider.equalsIgnoreCase("parquet")) {
+            return "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe";
+        } else if (provider.equalsIgnoreCase("orc")) {
+            return "org.apache.hadoop.hive.ql.io.orc.OrcSerde";
+        } else {
+            return SERDE_CLASS_NAME;
+        }
+    }
+
+    private String getInputFormatName(String provider) {
+        if (provider == null || provider.equalsIgnoreCase("paimon")) {
+            return INPUT_FORMAT_CLASS_NAME;
+        } else if (provider.equalsIgnoreCase("csv")) {
+            return "org.apache.hadoop.mapred.TextInputFormat";
+        } else if (provider.equalsIgnoreCase("parquet")) {
+            return "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat";
+        } else if (provider.equalsIgnoreCase("orc")) {
+            return "org.apache.hadoop.hive.ql.io.orc.OrcInputFormat";
+        } else {
+            return INPUT_FORMAT_CLASS_NAME;
+        }
+    }
+
+    private String getOutputFormatClassName(String provider) {
+        if (provider == null || provider.equalsIgnoreCase("paimon")) {
+            return OUTPUT_FORMAT_CLASS_NAME;
+        } else if (provider.equalsIgnoreCase("csv")) {
+            return "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat";
+        } else if (provider.equalsIgnoreCase("parquet")) {
+            return "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat";
+        } else if (provider.equalsIgnoreCase("orc")) {
+            return "org.apache.hadoop.hive.ql.io.orc.OrcOutputFormat";
+        } else {
+            return OUTPUT_FORMAT_CLASS_NAME;
+        }
+    }
+
+    private void updateHmsTable(
+            Table table, Identifier identifier, TableSchema schema, String provider) {
         StorageDescriptor sd = table.getSd() != null ? table.getSd() : new StorageDescriptor();
 
-        sd.setInputFormat(INPUT_FORMAT_CLASS_NAME);
-        sd.setOutputFormat(OUTPUT_FORMAT_CLASS_NAME);
+        sd.setInputFormat(getInputFormatName(provider));
+        sd.setOutputFormat(getOutputFormatClassName(provider));
 
         SerDeInfo serDeInfo = sd.getSerdeInfo() != null ? sd.getSerdeInfo() : new SerDeInfo();
         serDeInfo.setParameters(new HashMap<>());
-        serDeInfo.setSerializationLib(SERDE_CLASS_NAME);
+        serDeInfo.setSerializationLib(getSerdeClassName(provider));
         sd.setSerdeInfo(serDeInfo);
 
         CoreOptions options = new CoreOptions(schema.options());

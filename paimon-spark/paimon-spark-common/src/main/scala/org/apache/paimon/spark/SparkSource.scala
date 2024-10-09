@@ -110,6 +110,8 @@ object SparkSource {
 
   val NAME = "paimon"
 
+  val FORMAT_NAMES = Seq("csv", "orc", "parquet")
+
   def toBaseRelation(table: FileStoreTable, _sqlContext: SQLContext): BaseRelation = {
     new BaseRelation {
       override def sqlContext: SQLContext = _sqlContext

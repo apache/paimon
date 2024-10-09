@@ -54,21 +54,26 @@ class HiveFormatTableUtils {
         String comment = options.remove(COMMENT_PROP);
         String location = hiveTable.getSd().getLocation();
         Format format;
-        SerDeInfo serdeInfo = hiveTable.getSd().getSerdeInfo();
-        String serLib = serdeInfo.getSerializationLib().toLowerCase();
-        String inputFormat = hiveTable.getSd().getInputFormat();
-        if (serLib.contains("parquet")) {
-            format = Format.PARQUET;
-        } else if (serLib.contains("orc")) {
-            format = Format.ORC;
-        } else if (inputFormat.contains("Text")) {
-            format = Format.CSV;
-            // hive default field delimiter is '\u0001'
-            options.put(
-                    FIELD_DELIMITER.key(),
-                    serdeInfo.getParameters().getOrDefault(FIELD_DELIM, "\u0001"));
+        if (options.getOrDefault("type", "table").equals("format-table")) {
+            format = Format.valueOf(options.get("file.format").toUpperCase());
+            // field delimiter for csv leaves untouched
         } else {
-            throw new UnsupportedOperationException("Unsupported table: " + hiveTable);
+            SerDeInfo serdeInfo = hiveTable.getSd().getSerdeInfo();
+            String serLib = serdeInfo.getSerializationLib().toLowerCase();
+            String inputFormat = hiveTable.getSd().getInputFormat();
+            if (serLib.contains("parquet")) {
+                format = Format.PARQUET;
+            } else if (serLib.contains("orc")) {
+                format = Format.ORC;
+            } else if (inputFormat.contains("Text")) {
+                format = Format.CSV;
+                // hive default field delimiter is '\u0001'
+                options.put(
+                        FIELD_DELIMITER.key(),
+                        serdeInfo.getParameters().getOrDefault(FIELD_DELIM, "\u0001"));
+            } else {
+                throw new UnsupportedOperationException("Unsupported table: " + hiveTable);
+            }
         }
         return FormatTable.builder()
                 .identifier(identifier)

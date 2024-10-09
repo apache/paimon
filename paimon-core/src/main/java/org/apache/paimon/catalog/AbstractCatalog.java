@@ -244,7 +244,11 @@ public abstract class AbstractCatalog implements Catalog {
 
         copyTableDefaultOptions(schema.options());
 
-        createTableImpl(identifier, schema);
+        if (schema.options().getOrDefault("type", "table").equalsIgnoreCase("format-table")) {
+            createFormatTable(identifier, schema);
+        } else {
+            createTableImpl(identifier, schema);
+        }
     }
 
     protected abstract void createTableImpl(Identifier identifier, Schema schema);
@@ -369,6 +373,17 @@ public abstract class AbstractCatalog implements Catalog {
      */
     public FormatTable getFormatTable(Identifier identifier) throws Catalog.TableNotExistException {
         throw new Catalog.TableNotExistException(identifier);
+    }
+
+    /**
+     * Create a {@link FormatTable} identified by the given {@link Identifier}.
+     *
+     * @param identifier Path of the table
+     * @param schema Schema of the table
+     */
+    public void createFormatTable(Identifier identifier, Schema schema) {
+        throw new UnsupportedOperationException(
+                this.getClass().getName() + " currently does not support format table");
     }
 
     /**
