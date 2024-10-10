@@ -106,18 +106,17 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                 this.pathFactory = new IcebergPathFactory(new Path(table.location(), "metadata"));
                 break;
             case HADOOP_CATALOG:
-                String tableName = table.location().getName();
                 Path dbPath = table.location().getParent();
-                if (dbPath.getName().endsWith(".db")) {
+                final String dbSuffix = ".db";
+                if (dbPath.getName().endsWith(dbSuffix)) {
+                    String dbName =
+                            dbPath.getName()
+                                    .substring(0, dbPath.getName().length() - dbSuffix.length());
+                    String tableName = table.location().getName();
                     Path separatePath =
                             new Path(
                                     dbPath.getParent(),
-                                    "iceberg/"
-                                            + dbPath.getName()
-                                                    .substring(0, dbPath.getName().length() - 3)
-                                            + "/"
-                                            + tableName
-                                            + "/metadata");
+                                    String.format("iceberg/%s/%s/metadata", dbName, tableName));
                     this.pathFactory = new IcebergPathFactory(separatePath);
                 } else {
                     throw new UnsupportedOperationException(

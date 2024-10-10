@@ -55,7 +55,7 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                         + "  v2 STRING,\n"
                         + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
                         + ") PARTITIONED BY (pt) WITH (\n"
-                        + "  'metadata.iceberg.storage' = 'HADOOP_CATALOG',\n"
+                        + "  'metadata.iceberg.storage' = 'hadoop-catalog',\n"
                         // make sure all changes are visible in iceberg metadata
                         + "  'full-compaction.delta-commits' = '1',\n"
                         + "  'file.format' = '"
@@ -126,7 +126,7 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                         + "  country STRING,\n"
                         + "  name STRING\n"
                         + ") WITH (\n"
-                        + "  'metadata.iceberg.storage' = 'HADOOP_CATALOG',\n"
+                        + "  'metadata.iceberg.storage' = 'hadoop-catalog',\n"
                         + "  'file.format' = '"
                         + format
                         + "'\n"

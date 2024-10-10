@@ -40,25 +40,38 @@ public class IcebergOptions {
     public static final ConfigOption<Integer> COMPACT_MIN_FILE_NUM =
             ConfigOptions.key("metadata.iceberg.compaction.min.file-num")
                     .intType()
-                    .defaultValue(10);
+                    .defaultValue(10)
+                    .withDescription(
+                            "Minimum number of Iceberg metadata files to trigger metadata compaction.");
 
     public static final ConfigOption<Integer> COMPACT_MAX_FILE_NUM =
             ConfigOptions.key("metadata.iceberg.compaction.max.file-num")
                     .intType()
-                    .defaultValue(50);
+                    .defaultValue(50)
+                    .withDescription(
+                            "If number of small Iceberg metadata files exceeds this limit, "
+                                    + "always trigger metadata compaction regardless of their total size.");
 
     /** Where to store Iceberg metadata. */
     public enum StorageType implements DescribedEnum {
-        DISABLED("Disable Iceberg compatibility support."),
-        TABLE_LOCATION("Store Iceberg metadata with each table."),
+        DISABLED("disabled", "Disable Iceberg compatibility support."),
+        TABLE_LOCATION("table-location", "Store Iceberg metadata in each table's directory."),
         HADOOP_CATALOG(
+                "hadoop-catalog",
                 "Store Iceberg metadata in a separate directory. "
                         + "This directory can be specified as the warehouse directory of an Iceberg Hadoop catalog.");
 
+        private final String value;
         private final String description;
 
-        StorageType(String description) {
+        StorageType(String value, String description) {
+            this.value = value;
             this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
         }
 
         @Override
