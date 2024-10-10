@@ -70,7 +70,6 @@ import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 import static org.apache.paimon.utils.BranchManager.BRANCH_PREFIX;
 import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedDirectories;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A {@link Table} for showing branches of table. */
 public class BranchesTable implements ReadonlyTable {
@@ -250,20 +249,16 @@ public class BranchesTable implements ReadonlyTable {
                     SortedMap<Snapshot, List<String>> snapshotTags =
                             branchTable.tagManager().tags();
                     Long earliestSnapshotId = branchTable.snapshotManager().earliestSnapshotId();
-                    if (snapshotTags.isEmpty()) {
-                        // create based on snapshotId
-                        basedSnapshotId = earliestSnapshotId;
-                    } else {
+
+                    if (!snapshotTags.isEmpty()) {
                         Snapshot snapshot = snapshotTags.firstKey();
-                        if (Objects.equals(earliestSnapshotId, snapshot.id())) {
-                            // create based on tag
-                            List<String> tags = snapshotTags.get(snapshot);
-                            checkArgument(tags.size() == 1);
+                        if (earliestSnapshotId >= snapshot.id()) {
+                            List<String> tags =
+                                    branchTable
+                                            .tagManager()
+                                            .sortTagsOfOneSnapshot(snapshotTags.get(snapshot));
                             basedTag = tags.get(0);
                             basedSnapshotId = snapshot.id();
-                        } else {
-                            // create based on snapshotId
-                            basedSnapshotId = earliestSnapshotId;
                         }
                     }
                 }

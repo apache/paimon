@@ -170,40 +170,6 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testDeleteBranchTable() throws Exception {
-        sql(
-                "CREATE TABLE T ("
-                        + " pt INT"
-                        + ", k INT"
-                        + ", v STRING"
-                        + ", PRIMARY KEY (pt, k) NOT ENFORCED"
-                        + " ) PARTITIONED BY (pt) WITH ("
-                        + " 'bucket' = '2'"
-                        + " )");
-
-        // snapshot 1.
-        sql("INSERT INTO T VALUES(1, 10, 'apple')");
-
-        // snapshot 2.
-        sql("INSERT INTO T VALUES(1, 20, 'dog')");
-
-        sql("CALL sys.create_tag('default.T', 'tag1', 1)");
-
-        sql("CALL sys.create_tag('default.T', 'tag2', 2)");
-
-        sql("CALL sys.create_branch('default.T', 'test', 'tag1')");
-        sql("CALL sys.create_branch('default.T', 'test2', 'tag2')");
-
-        assertThat(collectResult("SELECT branch_name, created_from_snapshot FROM `T$branches`"))
-                .containsExactlyInAnyOrder("+I[test, 1]", "+I[test2, 2]");
-
-        sql("CALL sys.delete_branch('default.T', 'test')");
-
-        assertThat(collectResult("SELECT branch_name, created_from_snapshot FROM `T$branches`"))
-                .containsExactlyInAnyOrder("+I[test2, 2]");
-    }
-
-    @Test
     public void testBranchManagerGetBranchSnapshotsList() throws Exception {
         sql(
                 "CREATE TABLE T ("
@@ -232,6 +198,44 @@ public class BranchSqlITCase extends CatalogITCaseBase {
 
         assertThat(collectResult("SELECT created_from_snapshot FROM `T$branches`"))
                 .containsExactlyInAnyOrder("+I[1]", "+I[2]", "+I[3]");
+    }
+
+    @Test
+    public void testDeleteBranchTable() throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " pt INT"
+                        + ", k INT"
+                        + ", v STRING"
+                        + ", PRIMARY KEY (pt, k) NOT ENFORCED"
+                        + " ) PARTITIONED BY (pt) WITH ("
+                        + " 'bucket' = '2'"
+                        + " )");
+
+        // snapshot 1.
+        sql("INSERT INTO T VALUES(1, 10, 'apple')");
+
+        // snapshot 2.
+        sql("INSERT INTO T VALUES(1, 20, 'dog')");
+
+        sql("CALL sys.create_tag('default.T', 'tag1', 1)");
+
+        sql("CALL sys.create_tag('default.T', 'tag2', 2)");
+
+        sql("CALL sys.create_branch('default.T', 'test', 'tag1')");
+        sql("CALL sys.create_branch('default.T', 'test2', 'tag2')");
+
+        assertThat(
+                        collectResult(
+                                "SELECT branch_name, created_from_tag, created_from_snapshot FROM `T$branches`"))
+                .containsExactlyInAnyOrder("+I[test, tag1, 1]", "+I[test2, tag2, 2]");
+
+        sql("CALL sys.delete_branch('default.T', 'test')");
+
+        assertThat(
+                        collectResult(
+                                "SELECT branch_name, created_from_tag, created_from_snapshot FROM `T$branches`"))
+                .containsExactlyInAnyOrder("+I[test2, tag2, 2]");
     }
 
     @Test
