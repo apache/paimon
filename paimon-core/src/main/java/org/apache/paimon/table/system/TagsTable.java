@@ -59,11 +59,11 @@ import javax.annotation.Nullable;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeMap;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -220,7 +220,7 @@ public class TagsTable implements ReadonlyTable {
             LeafPredicate predicate = ((TagsSplit) split).tagName;
             TagManager tagManager = new TagManager(fileIO, location, branch);
 
-            Map<String, Tag> nameToSnapshot = new LinkedHashMap<>();
+            Map<String, Tag> nameToSnapshot = new TreeMap<>();
 
             if (predicate != null
                     && predicate.function() instanceof Equal
