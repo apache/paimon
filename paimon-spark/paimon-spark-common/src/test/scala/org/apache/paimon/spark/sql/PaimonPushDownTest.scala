@@ -129,7 +129,7 @@ class PaimonPushDownTest extends PaimonSparkTestBase {
     Assertions.assertEquals(1, spark.sql("SELECT * FROM T LIMIT 1").count())
   }
 
-  test("Paimon pushDown: limit for change-log tables") {
+  test("Paimon pushDown: limit for primary key table") {
     spark.sql(s"""
                  |CREATE TABLE T (a INT, b STRING, c STRING)
                  |TBLPROPERTIES ('primary-key'='a')
@@ -141,8 +141,27 @@ class PaimonPushDownTest extends PaimonSparkTestBase {
     val scanBuilder = getScanBuilder()
     Assertions.assertTrue(scanBuilder.isInstanceOf[SupportsPushDownLimit])
 
-    // Tables with primary keys can't support the push-down limit.
+    val dataSplitsWithoutLimit = scanBuilder.build().asInstanceOf[PaimonScan].getOriginSplits
+    Assertions.assertEquals(4, dataSplitsWithoutLimit.length)
+
+    // It still return false even it can push down limit.
     Assertions.assertFalse(scanBuilder.asInstanceOf[SupportsPushDownLimit].pushLimit(1))
+
+    val dataSplitsWithLimit = scanBuilder.build().asInstanceOf[PaimonScan].getOriginSplits
+    Assertions.assertEquals(1, dataSplitsWithLimit.length)
+
+    Assertions.assertEquals(1, spark.sql("SELECT * FROM T LIMIT 1").count())
+
+    spark.sql("UPDATE T SET b = 'x' WHERE a = 1")
+
+    val scanBuilder2 = getScanBuilder()
+    val dataSplitsWithoutLimit2 = scanBuilder2.build().asInstanceOf[PaimonScan].getOriginSplits
+    Assertions.assertEquals(4, dataSplitsWithoutLimit2.length)
+
+    val dataSplitsWithLimit2 = scanBuilder2.build().asInstanceOf[PaimonScan].getOriginSplits
+    Assertions.assertEquals(4, dataSplitsWithLimit2.length)
+
+    Assertions.assertEquals(1, spark.sql("SELECT * FROM T LIMIT 1").count())
   }
 
   test("Paimon pushDown: runtime filter") {
