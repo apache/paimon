@@ -24,15 +24,19 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
+import org.apache.paimon.flink.utils.TableStatsUtil;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
@@ -1239,8 +1243,8 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public final void alterTableStatistics(
             ObjectPath tablePath, CatalogTableStatistics tableStatistics, boolean ignoreIfNotExists)
-            throws CatalogException {
-        throw new UnsupportedOperationException();
+            throws CatalogException, TableNotExistException {
+        alterTableStatisticsInternal(tablePath, tableStatistics, ignoreIfNotExists);
     }
 
     @Override
@@ -1248,8 +1252,48 @@ public class FlinkCatalog extends AbstractCatalog {
             ObjectPath tablePath,
             CatalogColumnStatistics columnStatistics,
             boolean ignoreIfNotExists)
-            throws CatalogException {
-        throw new UnsupportedOperationException();
+            throws CatalogException, TableNotExistException {
+        alterTableStatisticsInternal(tablePath, columnStatistics, ignoreIfNotExists);
+    }
+
+    private void alterTableStatisticsInternal(
+            ObjectPath tablePath, Object statistics, boolean ignoreIfNotExists)
+            throws TableNotExistException {
+        try {
+            Table table = catalog.getTable(toIdentifier(tablePath));
+            checkArgument(
+                    table instanceof FileStoreTable, "Now only support analyze FileStoreTable.");
+            if (!table.latestSnapshotId().isPresent()) {
+                LOG.info("Skipping analyze table because the snapshot is null.");
+                return;
+            }
+
+            Statistics tableStats = null;
+            if (statistics instanceof CatalogColumnStatistics) {
+                tableStats =
+                        TableStatsUtil.createTableColumnStats(
+                                ((FileStoreTable) table), (CatalogColumnStatistics) statistics);
+            } else if (statistics instanceof CatalogTableStatistics) {
+                tableStats =
+                        TableStatsUtil.createTableStats(
+                                ((FileStoreTable) table), (CatalogTableStatistics) statistics);
+            }
+
+            if (tableStats != null) {
+                FileStoreTable fileStoreTable = (FileStoreTable) table;
+                FileStoreCommit commit =
+                        fileStoreTable
+                                .store()
+                                .newCommit(
+                                        CoreOptions.createCommitUser(
+                                                fileStoreTable.coreOptions().toConfiguration()));
+                commit.commitStatistics(tableStats, BatchWriteBuilder.COMMIT_IDENTIFIER);
+            }
+        } catch (Catalog.TableNotExistException e) {
+            if (!ignoreIfNotExists) {
+                throw new TableNotExistException(getName(), tablePath);
+            }
+        }
     }
 
     @Override
