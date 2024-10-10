@@ -121,6 +121,82 @@ catalog_options = {
 catalog = Catalog.create(catalog_options)
 ```
 
+## Create Database & Table
+
+You can use the catalog to create table for writing data.
+
+### Create Database (optional)
+Table is located in a database. If you want to create table in a new database, you should create it.
+
+```python
+catalog.create_database(
+  name='database_name', 
+  ignore_if_exists=True,    # If you want to raise error if the database exists, set False
+  properties={'key': 'value'} # optional database properties
+)
+```
+
+### Create Schema
+
+Table schema contains fields definition, partition keys, primary keys, table options and comment. For example:
+
+```python
+import pyarrow as pa
+
+from paimon_python_api import Schema
+
+pa_schema = pa.schema([
+    ('dt', pa.string()),
+    ('hh', pa.string()),
+    ('pk', pa.int64()),
+    ('value', pa.string())
+])
+
+schema = Schema(
+    pa_schema=pa_schema, 
+    partition_keys=['dt', 'hh'],
+    primary_keys=['dt', 'hh', 'pk'],
+    options={'bucket': '2'},
+    comment='my test table'
+)
+```
+
+All arguments except `pa_schema` is optional. If you have some Pandas data, the `pa_schema` can be extracted from `DataFrame`:
+
+```python
+import pandas as pd
+import pyarrow as pa
+
+from paimon_python_api import Schema
+
+# Example DataFrame data
+data = {
+    'dt': ['2024-01-01', '2024-01-01', '2024-01-02'],
+    'hh': ['12', '15', '20'],
+    'pk': [1, 2, 3],
+    'value': ['a', 'b', 'c'],
+}
+dataframe = pd.DataFrame(data)
+
+# Get Paimon Schema
+record_batch = pa.RecordBatch.from_pandas(dataframe)
+schema = Schema(
+    pa_schema=record_batch.schema, 
+    partition_keys=['dt', 'hh'], 
+    primary_keys=['dt', 'hh', 'pk'],
+    options={'bucket': '2'})
+```
+
+### Create Tale
+```python
+schema = ...
+catalog.create_table(
+    identifier='database_name.table_name',
+    schema=schema, 
+    ignore_if_exists=True # If you want to raise error if the table exists, set False
+)
+```
+
 ## Get Table
 
 The Table interface provides tools to read and write table.
