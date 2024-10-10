@@ -49,15 +49,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class LookupReaderBenchmark extends AbstractLookupBenchmark {
     private static final int QUERY_KEY_COUNT = 10000;
     private final int recordCount;
+    private final boolean bloomFilterEnabled;
     @TempDir Path tempDir;
 
-    public LookupReaderBenchmark(int recordCount) {
-        this.recordCount = recordCount;
+    public LookupReaderBenchmark(List<Object> countBloomList) {
+        this.recordCount = (Integer) countBloomList.get(0);
+        this.bloomFilterEnabled = (Boolean) countBloomList.get(1);
     }
 
-    @Parameters(name = "record-count-{0}")
-    public static List<Integer> getVarSeg() {
-        return RECORD_COUNT_LIST;
+    @Parameters(name = "countBloom-{0}")
+    public static List<List<Object>> getVarSeg() {
+        return getCountBloomList();
     }
 
     @TestTemplate
@@ -81,7 +83,7 @@ public class LookupReaderBenchmark extends AbstractLookupBenchmark {
                                 Collections.singletonMap(
                                         LOOKUP_LOCAL_FILE_TYPE.key(), fileType.name()));
                 Pair<String, LookupStoreFactory.Context> pair =
-                        writeData(tempDir, options, inputs, valueLength, false);
+                        writeData(tempDir, options, inputs, valueLength, false, bloomFilterEnabled);
                 benchmark.addCase(
                         String.format(
                                 "%s-read-%dB-value-%d-num",

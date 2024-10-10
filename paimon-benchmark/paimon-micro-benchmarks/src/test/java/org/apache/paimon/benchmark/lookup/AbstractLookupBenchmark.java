@@ -27,11 +27,13 @@ import org.apache.paimon.lookup.LookupStoreWriter;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.Pair;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
@@ -46,6 +48,15 @@ abstract class AbstractLookupBenchmark {
     private final RowCompactedSerializer keySerializer =
             new RowCompactedSerializer(RowType.of(new IntType()));
     private final GenericRow reusedKey = new GenericRow(1);
+
+    protected static List<List<Object>> getCountBloomList() {
+        List<List<Object>> countBloomList = new ArrayList<>();
+        for (Integer recordCount : RECORD_COUNT_LIST) {
+            countBloomList.add(Arrays.asList(recordCount, false));
+            countBloomList.add(Arrays.asList(recordCount, true));
+        }
+        return countBloomList;
+    }
 
     protected byte[][] generateSequenceInputs(int start, int end) {
         int count = end - start;
@@ -74,7 +85,12 @@ abstract class AbstractLookupBenchmark {
     }
 
     protected Pair<String, LookupStoreFactory.Context> writeData(
-            Path tempDir, CoreOptions options, byte[][] inputs, int valueLength, boolean sameValue)
+            Path tempDir,
+            CoreOptions options,
+            byte[][] inputs,
+            int valueLength,
+            boolean sameValue,
+            boolean bloomFilterEnabled)
             throws IOException {
         byte[] value1 = new byte[valueLength];
         byte[] value2 = new byte[valueLength];
@@ -87,7 +103,7 @@ abstract class AbstractLookupBenchmark {
                         keySerializer.createSliceComparator());
 
         File file = new File(tempDir.toFile(), UUID.randomUUID().toString());
-        LookupStoreWriter writer = factory.createWriter(file, null);
+        LookupStoreWriter writer = factory.createWriter(file, createBloomFiler(bloomFilterEnabled));
         int i = 0;
         for (byte[] input : inputs) {
             if (sameValue) {
@@ -103,5 +119,12 @@ abstract class AbstractLookupBenchmark {
         }
         LookupStoreFactory.Context context = writer.close();
         return Pair.of(file.getAbsolutePath(), context);
+    }
+
+    private BloomFilter.Builder createBloomFiler(boolean enabled) {
+        if (!enabled) {
+            return null;
+        }
+        return BloomFilter.builder(100, 0.01);
     }
 }
