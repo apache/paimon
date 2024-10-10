@@ -592,6 +592,42 @@ public class LookupTableTest extends TableTestBase {
         assertThat(result).hasSize(0);
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testPartialLookupTableRefreshAsync(boolean refreshAsync) throws Exception {
+        FileStoreTable dimTable = createDimTable(refreshAsync);
+        PrimaryKeyPartialLookupTable table =
+                PrimaryKeyPartialLookupTable.createLocalTable(
+                        dimTable,
+                        new int[] {0, 1, 2},
+                        tempDir.toFile(),
+                        ImmutableList.of("pk1", "pk2"),
+                        null);
+        table.open();
+
+        List<InternalRow> result = table.get(row(1, -1));
+        assertThat(result).hasSize(0);
+
+        write(dimTable, ioManager, GenericRow.of(1, -1, 11), GenericRow.of(2, -2, 22));
+        result = table.get(row(1, -1));
+        assertThat(result).hasSize(0);
+
+        table.refresh();
+        table.sync();
+        result = table.get(row(1, -1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 1, -1, 11);
+        result = table.get(row(2, -2));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 2, -2, 22);
+
+        write(dimTable, ioManager, GenericRow.ofKind(RowKind.DELETE, 1, -1, 11));
+        table.refresh();
+        table.sync();
+        result = table.get(row(1, -1));
+        assertThat(result).hasSize(0);
+    }
+
     @Test
     public void testPartialLookupTableWithProjection() throws Exception {
         FileStoreTable dimTable = createDimTable();
@@ -691,8 +727,8 @@ public class LookupTableTest extends TableTestBase {
         table.refresh();
         Set<Integer> batchKeys = new HashSet<>();
         long start = System.currentTimeMillis();
+        table.sync();
         while (batchKeys.size() < 100_000) {
-            Thread.sleep(10);
             for (int i = 1; i <= 100_000; i++) {
                 List<InternalRow> result = table.get(row(i));
                 if (!result.isEmpty()) {
@@ -826,6 +862,10 @@ public class LookupTableTest extends TableTestBase {
     }
 
     private FileStoreTable createDimTable() throws Exception {
+        return createDimTable(false);
+    }
+
+    private FileStoreTable createDimTable(boolean refreshAsync) throws Exception {
         FileIO fileIO = LocalFileIO.create();
         org.apache.paimon.fs.Path tablePath =
                 new org.apache.paimon.fs.Path(
@@ -838,6 +878,9 @@ public class LookupTableTest extends TableTestBase {
                         .primaryKey("pk1", "pk2")
                         .option(CoreOptions.BUCKET.key(), "2")
                         .option(CoreOptions.BUCKET_KEY.key(), "pk2")
+                        .option(
+                                FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC.key(),
+                                String.valueOf(refreshAsync))
                         .build();
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(new SchemaManager(fileIO, tablePath), schema);
