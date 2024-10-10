@@ -54,7 +54,9 @@ public class IcebergSchema {
 
     public static IcebergSchema create(TableSchema tableSchema) {
         int bias;
-        if (new CoreOptions(tableSchema.options()).formatType().equals("parquet")) {
+        if (new CoreOptions(tableSchema.options())
+                .formatType()
+                .equals(CoreOptions.FILE_FORMAT_PARQUET)) {
             if (tableSchema.primaryKeys().isEmpty()) {
                 // ParquetSchemaUtil.addFallbackIds starts enumerating id from 1 instead of 0
                 bias = 1;
