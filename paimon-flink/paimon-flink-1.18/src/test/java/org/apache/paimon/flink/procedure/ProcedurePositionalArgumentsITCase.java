@@ -489,4 +489,31 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
         assertThatCode(() -> sql("CALL sys.rewrite_file_index('default.T', 'pt = 0')"))
                 .doesNotThrowAnyException();
     }
+
+    @Test
+    public void testExpireTags() throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " k STRING,"
+                        + " dt STRING,"
+                        + " PRIMARY KEY (k, dt) NOT ENFORCED"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + " 'bucket' = '1'"
+                        + ")");
+        FileStoreTable table = paimonTable("T");
+        for (int i = 1; i <= 3; i++) {
+            sql("INSERT INTO T VALUES ('" + i + "', '" + i + "')");
+        }
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(3L);
+
+        sql("CALL sys.create_tag('default.T', 'tag-1', 1)");
+        sql("CALL sys.create_tag('default.T', 'tag-2', 2, '1d')");
+        sql("CALL sys.create_tag('default.T', 'tag-3', 3, '1s')");
+
+        assertThat(sql("select count(*) from `T$tags`")).containsExactly(Row.of(3L));
+
+        Thread.sleep(1000);
+        assertThat(sql("CALL sys.expire_tags('default.T')"))
+                .containsExactlyInAnyOrder(Row.of("tag-3"));
+    }
 }
