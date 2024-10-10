@@ -169,6 +169,13 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
 
     private void createMetadata(long snapshotId, FileChangesCollector fileChangesCollector) {
         try {
+            if (snapshotId == Snapshot.FIRST_SNAPSHOT_ID) {
+                // If Iceberg metadata is stored separately in another directory, dropping the table
+                // will not delete old Iceberg metadata. So we delete them here, when the table is
+                // created again and the first snapshot is committed.
+                table.fileIO().delete(pathFactory.metadataDirectory(), true);
+            }
+
             if (table.fileIO().exists(pathFactory.toMetadataPath(snapshotId))) {
                 return;
             }

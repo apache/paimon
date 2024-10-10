@@ -266,6 +266,82 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                 .containsExactly(Row.of(3));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "parquet", "avro"})
+    public void testDropAndRecreateTable(String format) throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().parallelism(2).build();
+        tEnv.executeSql(
+                "CREATE CATALOG paimon WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        String createTableDdl =
+                "CREATE TABLE paimon.`default`.cities (\n"
+                        + "  country STRING,\n"
+                        + "  name STRING\n"
+                        + ") WITH (\n"
+                        + "  'metadata.iceberg.storage' = 'hadoop-catalog',\n"
+                        + "  'file.format' = '"
+                        + format
+                        + "'\n"
+                        + ")";
+        tEnv.executeSql(createTableDdl);
+        tEnv.executeSql(
+                        "INSERT INTO paimon.`default`.cities VALUES "
+                                + "('usa', 'new york'), "
+                                + "('germany', 'berlin')")
+                .await();
+
+        tEnv.executeSql(
+                "CREATE TABLE cities (\n"
+                        + "  country STRING,\n"
+                        + "  name STRING\n"
+                        + ") WITH (\n"
+                        + "  'connector' = 'iceberg',\n"
+                        + "  'catalog-type' = 'hadoop',\n"
+                        + "  'catalog-name' = 'test',\n"
+                        + "  'catalog-database' = 'default',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "/iceberg'\n"
+                        + ")");
+        assertThat(collect(tEnv.executeSql("SELECT name, country FROM cities")))
+                .containsExactlyInAnyOrder(Row.of("new york", "usa"), Row.of("berlin", "germany"));
+
+        tEnv.executeSql(
+                        "INSERT INTO paimon.`default`.cities VALUES "
+                                + "('usa', 'chicago'), "
+                                + "('germany', 'hamburg')")
+                .await();
+        assertThat(collect(tEnv.executeSql("SELECT name, country FROM cities")))
+                .containsExactlyInAnyOrder(
+                        Row.of("new york", "usa"),
+                        Row.of("chicago", "usa"),
+                        Row.of("berlin", "germany"),
+                        Row.of("hamburg", "germany"));
+
+        tEnv.executeSql("DROP TABLE paimon.`default`.cities");
+        tEnv.executeSql(createTableDdl);
+        tEnv.executeSql(
+                        "INSERT INTO paimon.`default`.cities VALUES "
+                                + "('usa', 'houston'), "
+                                + "('germany', 'munich')")
+                .await();
+        assertThat(collect(tEnv.executeSql("SELECT name, country FROM cities")))
+                .containsExactlyInAnyOrder(Row.of("houston", "usa"), Row.of("munich", "germany"));
+
+        tEnv.executeSql(
+                        "INSERT INTO paimon.`default`.cities VALUES "
+                                + "('usa', 'san francisco'), "
+                                + "('germany', 'cologne')")
+                .await();
+        assertThat(collect(tEnv.executeSql("SELECT name FROM cities WHERE country = 'germany'")))
+                .containsExactlyInAnyOrder(Row.of("munich"), Row.of("cologne"));
+    }
+
     private List<Row> collect(TableResult result) throws Exception {
         List<Row> rows = new ArrayList<>();
         try (CloseableIterator<Row> it = result.collect()) {
