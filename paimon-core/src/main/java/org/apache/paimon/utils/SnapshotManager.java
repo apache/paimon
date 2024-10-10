@@ -732,7 +732,7 @@ public class SnapshotManager implements Serializable {
         List<Snapshot> overlappedSnapshots = new ArrayList<>();
         int right = findPreviousSnapshot(sortedSnapshots, endExclusive);
         if (right >= 0) {
-            int left = Math.max(findPreviousOrEqualSnapshot(sortedSnapshots, beginInclusive), 0);
+            int left = Math.max(findNextOrEqualTag(sortedSnapshots, beginInclusive), 0);
             for (int i = left; i <= right; i++) {
                 overlappedSnapshots.add(sortedSnapshots.get(i));
             }
@@ -749,10 +749,9 @@ public class SnapshotManager implements Serializable {
         return -1;
     }
 
-    private static int findPreviousOrEqualSnapshot(
-            List<Snapshot> sortedSnapshots, long targetSnapshotId) {
-        for (int i = sortedSnapshots.size() - 1; i >= 0; i--) {
-            if (sortedSnapshots.get(i).id() <= targetSnapshotId) {
+    private static int findNextOrEqualTag(List<Snapshot> sortedSnapshots, long targetSnapshotId) {
+        for (int i = 0; i < sortedSnapshots.size(); i++) {
+            if (sortedSnapshots.get(i).id() >= targetSnapshotId) {
                 return i;
             }
         }
