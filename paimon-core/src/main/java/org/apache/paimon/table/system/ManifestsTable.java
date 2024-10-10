@@ -200,6 +200,8 @@ public class ManifestsTable implements ReadonlyTable {
         SnapshotManager snapshotManager = dataTable.snapshotManager();
         Long snapshotId = coreOptions.scanSnapshotId();
         String tagName = coreOptions.scanTagName();
+        Long timestampMills = coreOptions.scanTimestampMills();
+
         Snapshot snapshot = null;
         if (snapshotId != null) {
             // reminder user with snapshot id range
@@ -212,12 +214,16 @@ public class ManifestsTable implements ReadonlyTable {
                                 snapshotId, earliestSnapshotId, latestSnapshotId));
             }
             snapshot = snapshotManager.snapshot(snapshotId);
-        } else {
-            if (!StringUtils.isEmpty(tagName) && dataTable.tagManager().tagExists(tagName)) {
-                snapshot = dataTable.tagManager().tag(tagName).trimToSnapshot();
-            } else {
-                snapshot = snapshotManager.latestSnapshot();
+        } else if (!StringUtils.isEmpty(tagName)) {
+            if (!dataTable.tagManager().tagExists(tagName)) {
+                throw new RuntimeException(
+                        String.format("Specified scan.tag-name %s is not exist.", tagName));
             }
+            snapshot = dataTable.tagManager().tag(tagName).trimToSnapshot();
+        } else if (timestampMills != null) {
+            snapshot = snapshotManager.earlierOrEqualTimeMills(timestampMills);
+        } else {
+            snapshot = snapshotManager.latestSnapshot();
         }
 
         if (snapshot == null) {

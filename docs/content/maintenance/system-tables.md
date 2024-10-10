@@ -283,6 +283,17 @@ SELECT * FROM my_table$manifests /*+ OPTIONS('scan.tag-name'='tag1') */;
 +--------------------------------+-------------+------------------+-------------------+---------------+
 1 rows in set
 */
+
+- You can also query the manifest with specified timestamp in unix milliseconds
+SELECT * FROM my_table$manifests /*+ OPTIONS('scan.timestamp-millis'='1678883047356') */;
+/*
++--------------------------------+-------------+------------------+-------------------+---------------+
+|                      file_name |   file_size |  num_added_files | num_deleted_files |     schema_id |
++--------------------------------+-------------+------------------+-------------------+---------------+
+| manifest-f4dcab43-ef6b-4713... |        12365|               40 |                 0 |             0 |
++--------------------------------+-------------+------------------+-------------------+---------------+
+1 rows in set
+*/
 ```
 
 ### Aggregation fields Table

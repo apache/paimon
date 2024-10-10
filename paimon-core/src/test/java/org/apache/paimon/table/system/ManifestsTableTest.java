@@ -136,6 +136,24 @@ public class ManifestsTableTest extends TableTestBase {
     }
 
     @Test
+    public void testReadManifestsFromSpecifiedTimestampMillis() throws Exception {
+        Thread.sleep(10);
+        write(table, GenericRow.of(3, 1, 1), GenericRow.of(3, 2, 1));
+        long time = System.currentTimeMillis();
+
+        List<InternalRow> expectedRow = getExpectedResult(3L);
+
+        manifestsTable =
+                (ManifestsTable)
+                        manifestsTable.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
+                                        String.valueOf(time)));
+        List<InternalRow> result = read(manifestsTable);
+        assertThat(result).containsExactlyElementsOf(expectedRow);
+    }
+
+    @Test
     public void testReadManifestsFromNotExistSnapshot() throws Exception {
         manifestsTable =
                 (ManifestsTable)
