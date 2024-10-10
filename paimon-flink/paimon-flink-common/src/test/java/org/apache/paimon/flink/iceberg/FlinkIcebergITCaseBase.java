@@ -158,6 +158,125 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                         Row.of("chicago", "usa"),
                         Row.of("berlin", "germany"),
                         Row.of("hamburg", "germany"));
+
+        tEnv.executeSql(
+                        "INSERT INTO paimon.`default`.cities VALUES "
+                                + "('usa', 'houston'), "
+                                + "('germany', 'munich')")
+                .await();
+        assertThat(collect(tEnv.executeSql("SELECT name FROM cities WHERE country = 'germany'")))
+                .containsExactlyInAnyOrder(Row.of("berlin"), Row.of("hamburg"), Row.of("munich"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "parquet", "avro"})
+    public void testFilterAllTypes(String format) throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().parallelism(2).build();
+        tEnv.executeSql(
+                "CREATE CATALOG paimon WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql(
+                "CREATE TABLE paimon.`default`.T (\n"
+                        + "  pt INT,\n"
+                        + "  id INT,"
+                        + "  v_int INT,\n"
+                        + "  v_boolean BOOLEAN,\n"
+                        + "  v_bigint BIGINT,\n"
+                        + "  v_float FLOAT,\n"
+                        + "  v_double DOUBLE,\n"
+                        + "  v_decimal DECIMAL(8, 3),\n"
+                        + "  v_char CHAR(20),\n"
+                        + "  v_varchar STRING,\n"
+                        + "  v_binary BINARY(20),\n"
+                        + "  v_varbinary VARBINARY(20),\n"
+                        + "  v_date DATE\n"
+                        + ") PARTITIONED BY (pt) WITH (\n"
+                        + "  'metadata.iceberg.storage' = 'hadoop-catalog',\n"
+                        + "  'file.format' = '"
+                        + format
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql(
+                        "INSERT INTO paimon.`default`.T VALUES "
+                                + "(1, 1, 1, true, 10, CAST(100.0 AS FLOAT), 1000.0, 123.456, CAST('apple' AS CHAR(20)), 'cat', CAST('B_apple' AS BINARY(20)), CAST('B_cat' AS VARBINARY(20)), DATE '2024-10-10'), "
+                                + "(2, 2, 2, false, 20, CAST(200.0 AS FLOAT), 2000.0, 234.567, CAST('banana' AS CHAR(20)), 'dog', CAST('B_banana' AS BINARY(20)), CAST('B_dog' AS VARBINARY(20)), DATE '2024-10-20'), "
+                                + "(3, 3, CAST(NULL AS INT), CAST(NULL AS BOOLEAN), CAST(NULL AS BIGINT), CAST(NULL AS FLOAT), CAST(NULL AS DOUBLE), CAST(NULL AS DECIMAL(8, 3)), CAST(NULL AS CHAR(20)), CAST(NULL AS STRING), CAST(NULL AS BINARY(20)), CAST(NULL AS VARBINARY(20)), CAST(NULL AS DATE))")
+                .await();
+
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  pt INT,\n"
+                        + "  id INT,"
+                        + "  v_int INT,\n"
+                        + "  v_boolean BOOLEAN,\n"
+                        + "  v_bigint BIGINT,\n"
+                        + "  v_float FLOAT,\n"
+                        + "  v_double DOUBLE,\n"
+                        + "  v_decimal DECIMAL(8, 3),\n"
+                        + "  v_char CHAR(20),\n"
+                        + "  v_varchar STRING,\n"
+                        + "  v_binary BINARY(20),\n"
+                        + "  v_varbinary VARBINARY(20),\n"
+                        + "  v_date DATE\n"
+                        + ") PARTITIONED BY (pt) WITH (\n"
+                        + "  'connector' = 'iceberg',\n"
+                        + "  'catalog-type' = 'hadoop',\n"
+                        + "  'catalog-name' = 'test',\n"
+                        + "  'catalog-database' = 'default',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "/iceberg'\n"
+                        + ")");
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where pt = 1")))
+                .containsExactly(Row.of(1));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_int = 1")))
+                .containsExactly(Row.of(1));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_boolean = true")))
+                .containsExactly(Row.of(1));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_bigint = 10")))
+                .containsExactly(Row.of(1));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_float = 100.0")))
+                .containsExactly(Row.of(1));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_double = 1000.0")))
+                .containsExactly(Row.of(1));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_decimal = 123.456")))
+                .containsExactly(Row.of(1));
+        assertThat(
+                        collect(
+                                tEnv.executeSql(
+                                        "SELECT id FROM T where v_char = CAST('apple' AS CHAR(20))")))
+                .containsExactly(Row.of(1));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_varchar = 'cat'")))
+                .containsExactly(Row.of(1));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_date = '2024-10-10'")))
+                .containsExactly(Row.of(1));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_int IS NULL")))
+                .containsExactly(Row.of(3));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_boolean IS NULL")))
+                .containsExactly(Row.of(3));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_bigint IS NULL")))
+                .containsExactly(Row.of(3));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_float IS NULL")))
+                .containsExactly(Row.of(3));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_double IS NULL")))
+                .containsExactly(Row.of(3));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_decimal IS NULL")))
+                .containsExactly(Row.of(3));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_char IS NULL")))
+                .containsExactly(Row.of(3));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_varchar IS NULL")))
+                .containsExactly(Row.of(3));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_binary IS NULL")))
+                .containsExactly(Row.of(3));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_varbinary IS NULL")))
+                .containsExactly(Row.of(3));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_date IS NULL")))
+                .containsExactly(Row.of(3));
     }
 
     private List<Row> collect(TableResult result) throws Exception {

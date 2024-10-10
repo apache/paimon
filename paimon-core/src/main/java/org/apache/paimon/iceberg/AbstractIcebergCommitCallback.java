@@ -44,7 +44,6 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.source.DataSplit;
@@ -191,20 +190,23 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
 
     private void createMetadataWithoutBase(long snapshotId) throws IOException {
         SnapshotReader snapshotReader = table.newSnapshotReader().withSnapshot(snapshotId);
-        SchemaCache schemas = new SchemaCache();
+        SchemaCache schemaCache = new SchemaCache();
         Iterator<IcebergManifestEntry> entryIterator =
                 snapshotReader.read().dataSplits().stream()
                         .filter(DataSplit::rawConvertible)
-                        .flatMap(s -> dataSplitToManifestEntries(s, snapshotId, schemas).stream())
+                        .flatMap(
+                                s ->
+                                        dataSplitToManifestEntries(s, snapshotId, schemaCache)
+                                                .stream())
                         .iterator();
         List<IcebergManifestFileMeta> manifestFileMetas =
                 manifestFile.rollingWrite(entryIterator, snapshotId);
         String manifestListFileName = manifestList.writeWithoutRolling(manifestFileMetas);
 
-        IcebergSchema icebergSchema = IcebergSchema.create(table.schema());
+        int schemaId = (int) table.schema().id();
+        IcebergSchema icebergSchema = schemaCache.get(schemaId);
         List<IcebergPartitionField> partitionFields =
                 getPartitionFields(table.schema().partitionKeys(), icebergSchema);
-        int schemaId = (int) table.schema().id();
         IcebergSnapshot snapshot =
                 new IcebergSnapshot(
                         snapshotId,
@@ -220,7 +222,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                         tableUuid,
                         table.location().toString(),
                         snapshotId,
-                        table.schema().highestFieldId(),
+                        icebergSchema.highestFieldId(),
                         Collections.singletonList(icebergSchema),
                         schemaId,
                         Collections.singletonList(new IcebergPartitionSpec(partitionFields)),
@@ -242,7 +244,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
     }
 
     private List<IcebergManifestEntry> dataSplitToManifestEntries(
-            DataSplit dataSplit, long snapshotId, SchemaCache schemas) {
+            DataSplit dataSplit, long snapshotId, SchemaCache schemaCache) {
         List<IcebergManifestEntry> result = new ArrayList<>();
         List<RawFile> rawFiles = dataSplit.convertToRawFiles().get();
         for (int i = 0; i < dataSplit.dataFiles().size(); i++) {
@@ -256,7 +258,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                             dataSplit.partition(),
                             rawFile.rowCount(),
                             rawFile.fileSize(),
-                            schemas.get(paimonFileMeta.schemaId()),
+                            schemaCache.get(paimonFileMeta.schemaId()),
                             paimonFileMeta.valueStats());
             result.add(
                     new IcebergManifestEntry(
@@ -332,11 +334,13 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                         compactMetadataIfNeeded(newManifestFileMetas, snapshotId));
 
         // add new schema if needed
+        SchemaCache schemaCache = new SchemaCache();
         int schemaId = (int) table.schema().id();
+        IcebergSchema icebergSchema = schemaCache.get(schemaId);
         List<IcebergSchema> schemas = baseMetadata.schemas();
         if (baseMetadata.currentSchemaId() != schemaId) {
             schemas = new ArrayList<>(schemas);
-            schemas.add(IcebergSchema.create(table.schema()));
+            schemas.add(icebergSchema);
         }
 
         List<IcebergSnapshot> snapshots = new ArrayList<>(baseMetadata.snapshots());
@@ -366,7 +370,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                         baseMetadata.tableUuid(),
                         baseMetadata.location(),
                         snapshotId,
-                        table.schema().highestFieldId(),
+                        icebergSchema.highestFieldId(),
                         schemas,
                         schemaId,
                         baseMetadata.partitionSpecs(),
@@ -448,7 +452,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
             return Collections.emptyList();
         }
 
-        SchemaCache schemas = new SchemaCache();
+        SchemaCache schemaCache = new SchemaCache();
         return manifestFile.rollingWrite(
                 addedFiles.entrySet().stream()
                         .map(
@@ -462,7 +466,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                                                     e.getValue().getLeft(),
                                                     paimonFileMeta.rowCount(),
                                                     paimonFileMeta.fileSize(),
-                                                    schemas.get(paimonFileMeta.schemaId()),
+                                                    schemaCache.get(paimonFileMeta.schemaId()),
                                                     paimonFileMeta.valueStats());
                                     return new IcebergManifestEntry(
                                             IcebergManifestEntry.Status.ADDED,
@@ -706,10 +710,11 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
     private class SchemaCache {
 
         SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
-        Map<Long, TableSchema> tableSchemas = new HashMap<>();
+        Map<Long, IcebergSchema> schemas = new HashMap<>();
 
-        private TableSchema get(long schemaId) {
-            return tableSchemas.computeIfAbsent(schemaId, id -> schemaManager.schema(id));
+        private IcebergSchema get(long schemaId) {
+            return schemas.computeIfAbsent(
+                    schemaId, id -> IcebergSchema.create(schemaManager.schema(id)));
         }
     }
 }
