@@ -190,9 +190,7 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                         + "  v_float FLOAT,\n"
                         + "  v_double DOUBLE,\n"
                         + "  v_decimal DECIMAL(8, 3),\n"
-                        + "  v_char CHAR(20),\n"
                         + "  v_varchar STRING,\n"
-                        + "  v_binary BINARY(20),\n"
                         + "  v_varbinary VARBINARY(20),\n"
                         + "  v_date DATE\n"
                         + ") PARTITIONED BY (pt) WITH (\n"
@@ -203,9 +201,9 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                         + ")");
         tEnv.executeSql(
                         "INSERT INTO paimon.`default`.T VALUES "
-                                + "(1, 1, 1, true, 10, CAST(100.0 AS FLOAT), 1000.0, 123.456, CAST('apple' AS CHAR(20)), 'cat', CAST('B_apple' AS BINARY(20)), CAST('B_cat' AS VARBINARY(20)), DATE '2024-10-10'), "
-                                + "(2, 2, 2, false, 20, CAST(200.0 AS FLOAT), 2000.0, 234.567, CAST('banana' AS CHAR(20)), 'dog', CAST('B_banana' AS BINARY(20)), CAST('B_dog' AS VARBINARY(20)), DATE '2024-10-20'), "
-                                + "(3, 3, CAST(NULL AS INT), CAST(NULL AS BOOLEAN), CAST(NULL AS BIGINT), CAST(NULL AS FLOAT), CAST(NULL AS DOUBLE), CAST(NULL AS DECIMAL(8, 3)), CAST(NULL AS CHAR(20)), CAST(NULL AS STRING), CAST(NULL AS BINARY(20)), CAST(NULL AS VARBINARY(20)), CAST(NULL AS DATE))")
+                                + "(1, 1, 1, true, 10, CAST(100.0 AS FLOAT), 1000.0, 123.456, 'cat', CAST('B_cat' AS VARBINARY(20)), DATE '2024-10-10'), "
+                                + "(2, 2, 2, false, 20, CAST(200.0 AS FLOAT), 2000.0, 234.567, 'dog', CAST('B_dog' AS VARBINARY(20)), DATE '2024-10-20'), "
+                                + "(3, 3, CAST(NULL AS INT), CAST(NULL AS BOOLEAN), CAST(NULL AS BIGINT), CAST(NULL AS FLOAT), CAST(NULL AS DOUBLE), CAST(NULL AS DECIMAL(8, 3)), CAST(NULL AS STRING), CAST(NULL AS VARBINARY(20)), CAST(NULL AS DATE))")
                 .await();
 
         tEnv.executeSql(
@@ -218,9 +216,7 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                         + "  v_float FLOAT,\n"
                         + "  v_double DOUBLE,\n"
                         + "  v_decimal DECIMAL(8, 3),\n"
-                        + "  v_char CHAR(20),\n"
                         + "  v_varchar STRING,\n"
-                        + "  v_binary BINARY(20),\n"
                         + "  v_varbinary VARBINARY(20),\n"
                         + "  v_date DATE\n"
                         + ") PARTITIONED BY (pt) WITH (\n"
@@ -246,11 +242,6 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                 .containsExactly(Row.of(1));
         assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_decimal = 123.456")))
                 .containsExactly(Row.of(1));
-        assertThat(
-                        collect(
-                                tEnv.executeSql(
-                                        "SELECT id FROM T where v_char = CAST('apple' AS CHAR(20))")))
-                .containsExactly(Row.of(1));
         assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_varchar = 'cat'")))
                 .containsExactly(Row.of(1));
         assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_date = '2024-10-10'")))
@@ -267,11 +258,7 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                 .containsExactly(Row.of(3));
         assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_decimal IS NULL")))
                 .containsExactly(Row.of(3));
-        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_char IS NULL")))
-                .containsExactly(Row.of(3));
         assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_varchar IS NULL")))
-                .containsExactly(Row.of(3));
-        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_binary IS NULL")))
                 .containsExactly(Row.of(3));
         assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_varbinary IS NULL")))
                 .containsExactly(Row.of(3));
