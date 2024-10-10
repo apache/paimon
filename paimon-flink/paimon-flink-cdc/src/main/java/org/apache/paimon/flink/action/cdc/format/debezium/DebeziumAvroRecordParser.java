@@ -33,7 +33,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -153,7 +152,7 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
                             className,
                             typeMapping,
                             record.get(fieldName),
-                            ZoneOffset.UTC);
+                            LOCAL_TZ);
             resultMap.put(fieldName, transformed);
             rowTypeBuilder.field(fieldName, avroToPaimonDataType(schema));
         }
