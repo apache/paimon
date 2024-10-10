@@ -424,6 +424,20 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testQueryServiceWithDeletionVectors() {
+        sql(
+                "CREATE TABLE DIM (k INT, v STRING, PRIMARY KEY(k) NOT ENFORCED) WITH ('bucket' = '1', 'deletion-vectors.enabled' = 'true')");
+        sql("INSERT INTO DIM VALUES (1, 'a'), (2, 'b')");
+        assertThatCode(
+                        () -> {
+                            CloseableIterator<Row> service =
+                                    streamSqlIter("CALL sys.query_service('default.DIM', 1)");
+                            service.close();
+                        })
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     public void testRemoveOrphanFiles() {
         sql(
                 "CREATE TABLE T ("
