@@ -40,6 +40,8 @@ import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -89,11 +91,12 @@ class TagsTableTest extends TableTestBase {
     }
 
     private List<InternalRow> getExpectedResult() {
-        List<InternalRow> internalRows = new ArrayList<>();
+        Map<String, InternalRow> tagToRows = new TreeMap<>();
         for (Pair<Tag, String> snapshot : tagManager.tagObjects()) {
             Tag tag = snapshot.getKey();
             String tagName = snapshot.getValue();
-            internalRows.add(
+            tagToRows.put(
+                    tagName,
                     GenericRow.of(
                             BinaryString.fromString(tagName),
                             tag.id(),
@@ -108,6 +111,11 @@ class TagsTableTest extends TableTestBase {
                                     ? null
                                     : BinaryString.fromString(
                                             tag.getTagTimeRetained().toString())));
+        }
+
+        List<InternalRow> internalRows = new ArrayList<>();
+        for (Map.Entry<String, InternalRow> entry : tagToRows.entrySet()) {
+            internalRows.add(entry.getValue());
         }
         return internalRows;
     }
