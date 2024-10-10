@@ -20,14 +20,11 @@ package org.apache.paimon.flink.utils;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.Decimal;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeRoot;
-import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.table.catalog.exceptions.CatalogException;
 import org.apache.flink.table.catalog.stats.CatalogColumnStatistics;
@@ -56,25 +53,14 @@ public class TableStatsUtil {
     public static Statistics createTableStats(
             FileStoreTable table, CatalogTableStatistics catalogTableStatistics) {
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
-        long mergedRecordCount = catalogTableStatistics.getRowCount();
-        if (snapshot.totalRecordCount() == null) {
+        if (snapshot == null) {
             return null;
         }
-        long totalRecordCount = snapshot.totalRecordCount();
-        Preconditions.checkState(
-                totalRecordCount >= mergedRecordCount,
-                "totalRecordCount: $totalRecordCount should be greater or equal than mergedRecordCount: $mergedRecordCount.");
-        long totalSize =
-                table.newScan().plan().splits().stream()
-                        .flatMap(split -> ((DataSplit) split).dataFiles().stream())
-                        .mapToLong(DataFileMeta::fileSize)
-                        .sum();
-        long mergedRecordSize =
-                (long) (totalSize * ((double) mergedRecordCount / totalRecordCount));
-
-        // convert to paimon stats
         return new Statistics(
-                snapshot.id(), snapshot.schemaId(), mergedRecordCount, mergedRecordSize);
+                snapshot.id(),
+                snapshot.schemaId(),
+                catalogTableStatistics.getRowCount(),
+                catalogTableStatistics.getTotalSize());
     }
 
     /** Create Paimon statistics from given Flink columnStatistics. */

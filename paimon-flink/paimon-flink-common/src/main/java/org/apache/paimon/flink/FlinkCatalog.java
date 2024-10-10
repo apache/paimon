@@ -24,7 +24,6 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
-import org.apache.paimon.flink.utils.TableStatsUtil;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.FileStoreCommit;
@@ -111,6 +110,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.descriptors.DescriptorProperties.COMMENT;
@@ -146,6 +146,8 @@ import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deseriali
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deserializeWatermarkSpec;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.nonPhysicalColumnsCount;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.serializeNewWatermarkSpec;
+import static org.apache.paimon.flink.utils.TableStatsUtil.createTableColumnStats;
+import static org.apache.paimon.flink.utils.TableStatsUtil.createTableStats;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -1244,7 +1246,8 @@ public class FlinkCatalog extends AbstractCatalog {
     public final void alterTableStatistics(
             ObjectPath tablePath, CatalogTableStatistics tableStatistics, boolean ignoreIfNotExists)
             throws CatalogException, TableNotExistException {
-        alterTableStatisticsInternal(tablePath, tableStatistics, ignoreIfNotExists);
+        alterTableStatisticsInternal(
+                tablePath, t -> createTableStats(t, tableStatistics), ignoreIfNotExists);
     }
 
     @Override
@@ -1253,11 +1256,14 @@ public class FlinkCatalog extends AbstractCatalog {
             CatalogColumnStatistics columnStatistics,
             boolean ignoreIfNotExists)
             throws CatalogException, TableNotExistException {
-        alterTableStatisticsInternal(tablePath, columnStatistics, ignoreIfNotExists);
+        alterTableStatisticsInternal(
+                tablePath, t -> createTableColumnStats(t, columnStatistics), ignoreIfNotExists);
     }
 
     private void alterTableStatisticsInternal(
-            ObjectPath tablePath, Object statistics, boolean ignoreIfNotExists)
+            ObjectPath tablePath,
+            Function<FileStoreTable, Statistics> statistics,
+            boolean ignoreIfNotExists)
             throws TableNotExistException {
         try {
             Table table = catalog.getTable(toIdentifier(tablePath));
@@ -1268,26 +1274,13 @@ public class FlinkCatalog extends AbstractCatalog {
                 return;
             }
 
-            Statistics tableStats = null;
-            if (statistics instanceof CatalogColumnStatistics) {
-                tableStats =
-                        TableStatsUtil.createTableColumnStats(
-                                ((FileStoreTable) table), (CatalogColumnStatistics) statistics);
-            } else if (statistics instanceof CatalogTableStatistics) {
-                tableStats =
-                        TableStatsUtil.createTableStats(
-                                ((FileStoreTable) table), (CatalogTableStatistics) statistics);
-            }
-
+            FileStoreTable storeTable = (FileStoreTable) table;
+            Statistics tableStats = statistics.apply(storeTable);
             if (tableStats != null) {
-                FileStoreTable fileStoreTable = (FileStoreTable) table;
-                FileStoreCommit commit =
-                        fileStoreTable
-                                .store()
-                                .newCommit(
-                                        CoreOptions.createCommitUser(
-                                                fileStoreTable.coreOptions().toConfiguration()));
-                commit.commitStatistics(tableStats, BatchWriteBuilder.COMMIT_IDENTIFIER);
+                String commitUser = storeTable.coreOptions().createCommitUser();
+                try (FileStoreCommit commit = storeTable.store().newCommit(commitUser)) {
+                    commit.commitStatistics(tableStats, BatchWriteBuilder.COMMIT_IDENTIFIER);
+                }
             }
         } catch (Catalog.TableNotExistException e) {
             if (!ignoreIfNotExists) {

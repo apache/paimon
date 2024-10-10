@@ -1574,6 +1574,10 @@ public class CoreOptions implements Serializable {
                 : commitUserPrefix + "_" + UUID.randomUUID();
     }
 
+    public String createCommitUser() {
+        return createCommitUser(options);
+    }
+
     public boolean definedAggFunc() {
         if (options.contains(FIELDS_DEFAULT_AGG_FUNC)) {
             return true;

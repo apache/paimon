@@ -97,6 +97,7 @@ case class PaimonAnalyzeTableColumnCommand(
     // commit stats
     val commit = table.store.newCommit(UUID.randomUUID.toString)
     commit.commitStatistics(stats, BatchWriteBuilder.COMMIT_IDENTIFIER)
+    commit.close()
 
     Seq.empty[Row]
   }
