@@ -50,7 +50,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.MAX_RETRY_NUM_TIMES;
 import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.RETRY_SLEEP_TIME;
+import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.SKIP_CORRUPT_RECORD;
 import static org.apache.paimon.flink.sink.cdc.CdcRecordUtils.toGenericRow;
 
 /**
@@ -118,6 +120,9 @@ public class CdcRecordStoreMultiWriteOperator
 
         FileStoreTable table = getTable(tableId);
 
+        int retryCnt = table.coreOptions().toConfiguration().get(MAX_RETRY_NUM_TIMES);
+        boolean skipCorruptRecord = table.coreOptions().toConfiguration().get(SKIP_CORRUPT_RECORD);
+
         // all table write should share one write buffer so that writers can preempt memory
         // from those of other tables
         if (memoryPoolFactory == null) {
@@ -149,7 +154,7 @@ public class CdcRecordStoreMultiWriteOperator
                 toGenericRow(record.record(), table.schema().fields());
         if (!optionalConverted.isPresent()) {
             FileStoreTable latestTable = table;
-            while (true) {
+            for (int retry = 0; retry < retryCnt; ++retry) {
                 latestTable = latestTable.copyWithLatestSchema();
                 tables.put(tableId, latestTable);
                 optionalConverted = toGenericRow(record.record(), latestTable.schema().fields());
@@ -166,10 +171,18 @@ public class CdcRecordStoreMultiWriteOperator
             write.replace(latestTable);
         }
 
-        try {
-            write.write(optionalConverted.get());
-        } catch (Exception e) {
-            throw new IOException(e);
+        if (!optionalConverted.isPresent()) {
+            if (skipCorruptRecord) {
+                LOG.warn("Skipping corrupt or unparsable record {}", record);
+            } else {
+                throw new RuntimeException("Unable to process element. Possibly a corrupt record");
+            }
+        } else {
+            try {
+                write.write(optionalConverted.get());
+            } catch (Exception e) {
+                throw new IOException(e);
+            }
         }
     }
 
