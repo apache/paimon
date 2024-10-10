@@ -45,10 +45,11 @@ public class QueryServiceActionFactory implements ActionFactory {
         String parallStr = params.get(PARALLELISM);
         int parallelism = parallStr == null ? 1 : Integer.parseInt(parallStr);
         Action action =
-                new TableActionBase(tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig) {
+                new TableActionBase(
+                        tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig, tableConfig) {
                     @Override
                     public void run() throws Exception {
-                        QueryService.build(env, table.copy(tableConfig), parallelism);
+                        QueryService.build(env, table, parallelism);
                         execute("Query Service job");
                     }
                 };

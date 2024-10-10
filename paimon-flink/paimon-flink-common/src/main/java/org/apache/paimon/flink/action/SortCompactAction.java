@@ -37,7 +37,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -57,8 +57,13 @@ public class SortCompactAction extends CompactAction {
             Map<String, String> catalogConfig,
             Map<String, String> tableConf) {
         super(warehouse, database, tableName, catalogConfig, tableConf);
+    }
 
-        table = table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true"));
+    @Override
+    protected Map<String, String> dynamicOptions(Map<String, String> tableConf) {
+        HashMap<String, String> dynamicOptions = new HashMap<>(super.dynamicOptions(tableConf));
+        dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        return dynamicOptions;
     }
 
     @Override

@@ -69,16 +69,20 @@ public class CompactAction extends TableActionBase {
             String tableName,
             Map<String, String> catalogConfig,
             Map<String, String> tableConf) {
-        super(warehouse, database, tableName, catalogConfig);
+        super(warehouse, database, tableName, catalogConfig, tableConf);
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(
                     String.format(
                             "Only FileStoreTable supports compact action. The table type is '%s'.",
                             table.getClass().getName()));
         }
-        HashMap<String, String> dynamicOptions = new HashMap<>(tableConf);
+    }
+
+    @Override
+    protected Map<String, String> dynamicOptions(Map<String, String> tableConf) {
+        HashMap<String, String> dynamicOptions = new HashMap<>(super.dynamicOptions(tableConf));
         dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
-        table = table.copy(dynamicOptions);
+        return dynamicOptions;
     }
 
     // ------------------------------------------------------------------------
