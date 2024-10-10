@@ -49,7 +49,10 @@ object EvalSubqueriesForDeleteTable extends Rule[LogicalPlan] with ExpressionHel
     plan.transformDown {
       case d @ DeleteFromPaimonTableCommand(_, table, condition)
           if SubqueryExpression.hasSubquery(condition) &&
-            isPredicatePartitionColumnsOnly(condition, table.partitionKeys().asScala, resolver) =>
+            isPredicatePartitionColumnsOnly(
+              condition,
+              table.partitionKeys().asScala.toSeq,
+              resolver) =>
         try {
           d.copy(condition = evalSubquery(condition))
         } catch {

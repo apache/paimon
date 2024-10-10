@@ -60,7 +60,7 @@ case class DeleteFromPaimonTableCommand(
     } else {
       val (partitionCondition, otherCondition) = splitPruePartitionAndOtherPredicates(
         condition,
-        table.partitionKeys().asScala,
+        table.partitionKeys().asScala.toSeq,
         sparkSession.sessionState.conf.resolver)
 
       val partitionPredicate = if (partitionCondition.isEmpty) {

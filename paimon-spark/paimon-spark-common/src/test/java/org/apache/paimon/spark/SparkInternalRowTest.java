@@ -104,8 +104,8 @@ public class SparkInternalRowTest {
                         + "paimon,"
                         + "22.2,"
                         + "Map(key2 -> [2.4,3.5], key1 -> [1.2,2.3]),"
-                        + "WrappedArray(v1, v5),"
-                        + "WrappedArray(10, 30),"
+                        + "[v1, v5],"
+                        + "[10, 30],"
                         + "true,"
                         + "22,"
                         + "356,"
@@ -129,6 +129,12 @@ public class SparkInternalRowTest {
 
     private String sparkRowToString(org.apache.spark.sql.Row row) {
         return JavaConverters.seqAsJavaList(row.toSeq()).stream()
+                .map(
+                        x ->
+                                (x instanceof scala.collection.Seq)
+                                        ? JavaConverters.seqAsJavaList(
+                                                (scala.collection.Seq<Object>) x)
+                                        : x)
                 .map(Object::toString)
                 // Since the toString result of Spark's binary col is unstable, replace it
                 .map(x -> x.startsWith("[B@") ? "[B@" : x)

@@ -25,8 +25,8 @@ import org.apache.paimon.stats.{ColStats, Statistics}
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
 import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.utils.Preconditions.checkState
 
-import org.apache.parquet.Preconditions
 import org.apache.spark.sql.{PaimonStatsUtils, Row, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.logical.ColumnStat
@@ -74,9 +74,7 @@ case class PaimonAnalyzeTableColumnCommand(
       PaimonStatsUtils.computeColumnStats(sparkSession, relation, attributes)
 
     val totalRecordCount = currentSnapshot.totalRecordCount()
-    Preconditions.checkState(
-      totalRecordCount >= mergedRecordCount,
-      s"totalRecordCount: $totalRecordCount should be greater or equal than mergedRecordCount: $mergedRecordCount.")
+    checkState(totalRecordCount >= mergedRecordCount)
     val mergedRecordSize = totalSize * (mergedRecordCount.toDouble / totalRecordCount).toLong
 
     // convert to paimon stats

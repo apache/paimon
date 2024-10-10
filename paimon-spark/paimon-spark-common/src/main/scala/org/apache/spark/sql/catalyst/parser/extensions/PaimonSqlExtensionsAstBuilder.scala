@@ -57,8 +57,8 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
 
   /** Creates a [[PaimonCallStatement]] for a stored procedure call. */
   override def visitCall(ctx: CallContext): PaimonCallStatement = withOrigin(ctx) {
-    val name = toSeq(ctx.multipartIdentifier.parts).map(_.getText)
-    val args = toSeq(ctx.callArgument).map(typedVisit[PaimonCallArgument])
+    val name = ctx.multipartIdentifier.parts.asScala.map(_.getText).toSeq
+    val args = ctx.callArgument.asScala.map(typedVisit[PaimonCallArgument]).toSeq
     logical.PaimonCallStatement(name, args)
   }
 
@@ -89,7 +89,7 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
   /** Returns a multi-part identifier as Seq[String]. */
   override def visitMultipartIdentifier(ctx: MultipartIdentifierContext): Seq[String] =
     withOrigin(ctx) {
-      ctx.parts.asScala.map(_.getText)
+      ctx.parts.asScala.map(_.getText).toSeq
     }
 
   private def toBuffer[T](list: java.util.List[T]) = list.asScala

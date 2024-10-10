@@ -129,12 +129,12 @@ object PaimonColumnStats {
   def apply(v1ColStats: ColumnStat): PaimonColumnStats = {
     import PaimonImplicits._
     PaimonColumnStats(
-      if (v1ColStats.nullCount.isDefined) OptionalLong.of(v1ColStats.nullCount.get.longValue())
+      if (v1ColStats.nullCount.isDefined) OptionalLong.of(v1ColStats.nullCount.get.longValue)
       else OptionalLong.empty(),
       v1ColStats.min,
       v1ColStats.max,
       if (v1ColStats.distinctCount.isDefined)
-        OptionalLong.of(v1ColStats.distinctCount.get.longValue())
+        OptionalLong.of(v1ColStats.distinctCount.get.longValue)
       else OptionalLong.empty(),
       if (v1ColStats.avgLen.isDefined) OptionalLong.of(v1ColStats.avgLen.get.longValue())
       else OptionalLong.empty(),

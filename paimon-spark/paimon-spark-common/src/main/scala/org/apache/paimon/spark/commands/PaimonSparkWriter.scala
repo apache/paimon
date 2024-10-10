@@ -250,7 +250,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     val serializedCommits = deletionVectors
       .groupByKey(_.partitionAndBucket)
       .mapGroups {
-        case (_, iter: Iterator[SparkDeletionVectors]) =>
+        (_, iter: Iterator[SparkDeletionVectors]) =>
           val indexHandler = table.store().newIndexFileHandler()
           var dvIndexFileMaintainer: AppendDeletionFileMaintainer = null
           while (iter.hasNext) {
@@ -397,7 +397,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
   }
 
   private def repartitionByPartitionsAndBucket(df: DataFrame): DataFrame = {
-    val partitionCols = tableSchema.partitionKeys().asScala.map(col)
+    val partitionCols = tableSchema.partitionKeys().asScala.map(col).toSeq
     df.repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
   }
 
