@@ -716,6 +716,27 @@ public class LookupTableTest extends TableTestBase {
     }
 
     @Test
+    public void testPartialLookupTableWithRowFilter() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET.key(), "2");
+        options.set(CoreOptions.BUCKET_KEY.key(), "f0");
+        FileStoreTable dimTable = createTable(singletonList("f0"), options);
+        write(dimTable, GenericRow.of(1, 11, 111), GenericRow.of(2, 22, 222));
+
+        PrimaryKeyPartialLookupTable table =
+                PrimaryKeyPartialLookupTable.createLocalTable(
+                        dimTable, new int[] {0, 2}, tempDir.toFile(), ImmutableList.of("f0"), null);
+        table.specifyCacheRowFilter(row -> row.getInt(0) < 2);
+        table.open();
+
+        List<InternalRow> result = table.get(row(1, 11));
+        assertThat(result).hasSize(1);
+
+        result = table.get(row(2, 22));
+        assertThat(result).isEmpty();
+    }
+
+    @Test
     public void testPartialLookupTableWithProjection() throws Exception {
         FileStoreTable dimTable = createDimTable();
         PrimaryKeyPartialLookupTable table =
@@ -988,16 +1009,5 @@ public class LookupTableTest extends TableTestBase {
         }
         assertThat(results).containsExactly(expected);
         assertThat(resultRow.getFieldCount()).isEqualTo(expected.length);
-    }
-
-    private void writeAndCommit(FileStoreTable table, InternalRow... rows) throws Exception {
-        BatchWriteBuilder builder = table.newBatchWriteBuilder();
-        try (BatchTableWrite writer = builder.newWrite();
-                BatchTableCommit commiter = builder.newCommit()) {
-            for (InternalRow row : rows) {
-                writer.write(row, 0);
-            }
-            commiter.commit(writer.prepareCommit());
-        }
     }
 }
