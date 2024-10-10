@@ -112,6 +112,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
                             return 1;
                         }
                     });
+
             // fast return if there is no rawConvertible split
             if (!splits.get(0).rawConvertible()) {
                 return result;
