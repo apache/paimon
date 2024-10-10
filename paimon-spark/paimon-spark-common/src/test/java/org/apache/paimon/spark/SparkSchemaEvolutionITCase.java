@@ -203,7 +203,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 UnsupportedOperationException.class,
-                                "Cannot drop/rename partition key[a]"));
+                                "Cannot rename partition column: [a]"));
     }
 
     @Test
@@ -254,7 +254,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 UnsupportedOperationException.class,
-                                "Cannot drop/rename partition key[a]"));
+                                "Cannot drop partition key or primary key: [a]"));
     }
 
     @Test
@@ -276,7 +276,72 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 UnsupportedOperationException.class,
-                                "Cannot drop/rename primary key[b]"));
+                                "Cannot drop partition key or primary key: [b]"));
+    }
+
+    @Test
+    public void testRenamePrimaryKey() {
+        spark.sql(
+                "CREATE TABLE test_rename_primary_key_table (\n"
+                        + "a BIGINT NOT NULL,\n"
+                        + "b STRING)\n"
+                        + "TBLPROPERTIES ('primary-key' = 'a')");
+
+        spark.sql("INSERT INTO test_rename_primary_key_table VALUES(1, 'aaa'), (2, 'bbb')");
+
+        spark.sql("ALTER TABLE test_rename_primary_key_table RENAME COLUMN a to a_");
+
+        List<Row> result =
+                spark.sql("SHOW CREATE TABLE test_rename_primary_key_table").collectAsList();
+        assertThat(result.toString())
+                .contains(
+                        showCreateString(
+                                "test_rename_primary_key_table", "a_ BIGINT NOT NULL", "b STRING"))
+                .contains("'primary-key' = 'a_'");
+
+        List<String> actual =
+                spark.sql("SELECT * FROM test_rename_primary_key_table").collectAsList().stream()
+                        .map(Row::toString)
+                        .collect(Collectors.toList());
+
+        assertThat(actual).containsExactlyInAnyOrder("[1,aaa]", "[2,bbb]");
+
+        spark.sql("INSERT INTO test_rename_primary_key_table VALUES(1, 'AAA'), (2, 'BBB')");
+
+        actual =
+                spark.sql("SELECT * FROM test_rename_primary_key_table").collectAsList().stream()
+                        .map(Row::toString)
+                        .collect(Collectors.toList());
+        assertThat(actual).containsExactlyInAnyOrder("[1,AAA]", "[2,BBB]");
+    }
+
+    @Test
+    public void testRenameBucketKey() {
+        spark.sql(
+                "CREATE TABLE test_rename_bucket_key_table (\n"
+                        + "a BIGINT NOT NULL,\n"
+                        + "b STRING)\n"
+                        + "TBLPROPERTIES ('bucket-key' = 'a,b', 'bucket'='16')");
+
+        spark.sql("INSERT INTO test_rename_bucket_key_table VALUES(1, 'aaa'), (2, 'bbb')");
+
+        spark.sql("ALTER TABLE test_rename_bucket_key_table RENAME COLUMN b to b_");
+
+        List<Row> result =
+                spark.sql("SHOW CREATE TABLE test_rename_bucket_key_table").collectAsList();
+        assertThat(result.toString())
+                .contains(
+                        showCreateString(
+                                "test_rename_bucket_key_table", "a BIGINT NOT NULL", "b_ STRING"))
+                .contains("'bucket-key' = 'a,b_'");
+
+        List<String> actual =
+                spark.sql("SELECT * FROM test_rename_bucket_key_table where b_ = 'bbb'")
+                        .collectAsList().stream()
+                        .map(Row::toString)
+                        .collect(Collectors.toList());
+
+        assertThat(actual).containsExactlyInAnyOrder("[2,bbb]");
     }
 
     @Test
