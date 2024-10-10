@@ -83,13 +83,16 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     spark.sql(s"INSERT INTO T VALUES ('1', 'a', 1, 1)")
     spark.sql(s"INSERT INTO T VALUES ('2', 'aaa', 1, 2)")
     Assertions.assertEquals(0, spark.sql("select * from `T$statistics`").count())
-
+    Thread.sleep(10)
     spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
+    val time1 = System.currentTimeMillis
 
     spark.sql(s"INSERT INTO T VALUES ('3', 'b', 2, 1)")
     spark.sql(s"INSERT INTO T VALUES ('4', 'bbb', 3, 2)")
 
+    Thread.sleep(10)
     spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
+    val time2 = System.currentTimeMillis
 
     // create tag
     checkAnswer(
@@ -118,6 +121,12 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
         Row(2, 0, 2, "{ }"))
     }
 
+    withSQLConf("spark.paimon.scan.timestamp-millis" -> time1.toString) {
+      checkAnswer(
+        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
+        Row(2, 0, 2, "{ }"))
+    }
+
     withSQLConf("spark.paimon.scan.snapshot-id" -> "4") {
       checkAnswer(
         sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
@@ -130,10 +139,14 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
         Row(5, 0, 4, "{ }"))
     }
 
-    withSQLConf("spark.paimon.scan.snapshot-id" -> "100") {
+    withSQLConf("spark.paimon.scan.timestamp-millis" -> time2.toString) {
       checkAnswer(
         sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
         Row(5, 0, 4, "{ }"))
+    }
+
+    withSQLConf("spark.paimon.scan.snapshot-id" -> "100") {
+      Assertions.assertEquals(0, sql("select * from `T$statistics`").count())
     }
 
   }
