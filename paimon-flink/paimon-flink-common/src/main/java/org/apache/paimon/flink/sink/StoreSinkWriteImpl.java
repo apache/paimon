@@ -65,6 +65,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
 
     @Nullable private final MetricGroup metricGroup;
 
+    @Nullable private Boolean lastInsertOnly;
+
     public StoreSinkWriteImpl(
             FileStoreTable table,
             String commitUser,
@@ -154,15 +156,21 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         }
 
         if (memoryPoolFactory != null) {
-            return tableWrite.withMemoryPoolFactory(memoryPoolFactory);
+            tableWrite.withMemoryPoolFactory(memoryPoolFactory);
         } else {
-            return tableWrite.withMemoryPool(
+            tableWrite.withMemoryPool(
                     memoryPool != null
                             ? memoryPool
                             : new HeapMemorySegmentPool(
                                     table.coreOptions().writeBufferSize(),
                                     table.coreOptions().pageSize()));
         }
+
+        if (lastInsertOnly != null) {
+            tableWrite.withInsertOnly(lastInsertOnly);
+        }
+
+        return tableWrite;
     }
 
     public void withCompactExecutor(ExecutorService compactExecutor) {
@@ -171,6 +179,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
 
     @Override
     public void withInsertOnly(boolean insertOnly) {
+        this.lastInsertOnly = insertOnly;
         write.withInsertOnly(insertOnly);
     }
 
