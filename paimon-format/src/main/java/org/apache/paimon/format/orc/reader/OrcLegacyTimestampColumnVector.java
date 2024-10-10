@@ -34,13 +34,14 @@ public class OrcLegacyTimestampColumnVector extends AbstractOrcColumnVector
 
     private final LongColumnVector hiveVector;
 
-    OrcLegacyTimestampColumnVector(LongColumnVector vector) {
-        super(vector);
+    OrcLegacyTimestampColumnVector(LongColumnVector vector, int[] selected) {
+        super(vector, selected);
         this.hiveVector = vector;
     }
 
     @Override
     public Timestamp getTimestamp(int i, int precision) {
+        i = rowMapper(i);
         int index = hiveVector.isRepeating ? 0 : i;
         java.sql.Timestamp timestamp = toTimestamp(hiveVector.vector[index]);
         return Timestamp.fromSQLTimestamp(timestamp);

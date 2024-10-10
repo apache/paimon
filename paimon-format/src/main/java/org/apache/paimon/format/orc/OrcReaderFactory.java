@@ -123,7 +123,10 @@ public class OrcReaderFactory implements FormatReaderFactory {
         for (int i = 0; i < vectors.length; i++) {
             String name = tableFieldNames.get(i);
             DataType type = tableFieldTypes.get(i);
-            vectors[i] = createPaimonVector(orcBatch.cols[tableFieldNames.indexOf(name)], type);
+            int[] selected = orcBatch.selectedInUse ? orcBatch.getSelected() : null;
+            vectors[i] =
+                    createPaimonVector(
+                            orcBatch.cols[tableFieldNames.indexOf(name)], selected, type);
         }
         return new OrcReaderBatch(filePath, orcBatch, new VectorizedColumnBatch(vectors), recycler);
     }
@@ -268,7 +271,12 @@ public class OrcReaderFactory implements FormatReaderFactory {
                             .skipCorruptRecords(OrcConf.SKIP_CORRUPT_DATA.getBoolean(conf))
                             .tolerateMissingSchema(
                                     OrcConf.TOLERATE_MISSING_SCHEMA.getBoolean(conf));
-
+            if (!conjunctPredicates.isEmpty()) {
+                // TODO fix it , if open this option,future deletion vectors would not work,
+                //  cased by getRowNumber would be changed .
+                options.useSelected(OrcConf.READER_USE_SELECTED.getBoolean(conf));
+                options.allowSARGToFilter(OrcConf.ALLOW_SARG_TO_FILTER.getBoolean(conf));
+            }
             // configure filters
             if (!conjunctPredicates.isEmpty()) {
                 SearchArgument.Builder b = SearchArgumentFactory.newBuilder();
