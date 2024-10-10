@@ -21,6 +21,7 @@ package org.apache.paimon.hive;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hive.common.JavaUtils;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaHookLoader;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
@@ -29,6 +30,7 @@ import org.apache.hadoop.hive.metastore.RetryingMetaStoreClient;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -75,6 +77,16 @@ public class RetryingMetaStoreClientFactory {
                                                     new ConcurrentHashMap<>(),
                                                     clientClassName,
                                                     true))
+                    .put(
+                            new Class<?>[] {
+                                HiveConf.class,
+                                Class[].class,
+                                Object[].class,
+                                ConcurrentHashMap.class,
+                                String.class
+                            },
+                            RetryingMetaStoreClientFactory
+                                    ::constructorDetectedHiveMetastoreProxySupplier)
                     // for hive 3.x
                     .put(
                             new Class<?>[] {
@@ -103,23 +115,8 @@ public class RetryingMetaStoreClientFactory {
                                 ConcurrentHashMap.class,
                                 String.class
                             },
-                            (getProxyMethod, hiveConf, clientClassName) ->
-                                    (IMetaStoreClient)
-                                            getProxyMethod.invoke(
-                                                    null,
-                                                    hiveConf,
-                                                    new Class[] {
-                                                        HiveConf.class,
-                                                        HiveMetaHookLoader.class,
-                                                        Boolean.class
-                                                    },
-                                                    new Object[] {
-                                                        hiveConf,
-                                                        (HiveMetaHookLoader) (tbl -> null),
-                                                        true
-                                                    },
-                                                    new ConcurrentHashMap<>(),
-                                                    clientClassName))
+                            RetryingMetaStoreClientFactory
+                                    ::constructorDetectedHiveMetastoreProxySupplier)
                     .build();
 
     // If clientClassName is HiveMetaStoreClient,
@@ -174,5 +171,46 @@ public class RetryingMetaStoreClientFactory {
     public interface HiveMetastoreProxySupplier {
         IMetaStoreClient get(Method getProxyMethod, Configuration conf, String clientClassName)
                 throws IllegalAccessException, IllegalArgumentException, InvocationTargetException;
+    }
+
+    /** Detect the client class whether it has the proper constructor. */
+    private static IMetaStoreClient constructorDetectedHiveMetastoreProxySupplier(
+            Method getProxyMethod, Configuration hiveConf, String clientClassName)
+            throws IllegalAccessException, IllegalArgumentException, InvocationTargetException {
+
+        try {
+            Class<?> baseClass = Class.forName(clientClassName, false, JavaUtils.getClassLoader());
+
+            // Configuration.class or HiveConf.class
+            Class<?> firstParamType = getProxyMethod.getParameterTypes()[0];
+
+            Class<?>[] fullParams =
+                    new Class[] {firstParamType, HiveMetaHookLoader.class, Boolean.TYPE};
+            Object[] fullParamValues =
+                    new Object[] {hiveConf, (HiveMetaHookLoader) (tbl -> null), Boolean.TRUE};
+
+            for (int i = fullParams.length; i >= 1; i--) {
+                try {
+                    baseClass.getConstructor(Arrays.copyOfRange(fullParams, 0, i));
+                    return (IMetaStoreClient)
+                            getProxyMethod.invoke(
+                                    null,
+                                    hiveConf,
+                                    Arrays.copyOfRange(fullParams, 0, i),
+                                    Arrays.copyOfRange(fullParamValues, 0, i),
+                                    new ConcurrentHashMap<>(),
+                                    clientClassName);
+                } catch (NoSuchMethodException ignored) {
+                }
+            }
+
+        } catch (ClassNotFoundException e) {
+            throw new RuntimeException(e);
+        }
+
+        throw new IllegalArgumentException(
+                "Failed to create the desired metastore client with proper constructors (class name: "
+                        + clientClassName
+                        + ")");
     }
 }
