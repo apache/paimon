@@ -65,7 +65,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
 
     @Nullable private final MetricGroup metricGroup;
 
-    @Nullable private Boolean lastInsertOnly;
+    @Nullable private Boolean insertOnly;
 
     public StoreSinkWriteImpl(
             FileStoreTable table,
@@ -166,8 +166,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                                     table.coreOptions().pageSize()));
         }
 
-        if (lastInsertOnly != null) {
-            tableWrite.withInsertOnly(lastInsertOnly);
+        if (insertOnly != null) {
+            tableWrite.withInsertOnly(insertOnly);
         }
 
         return tableWrite;
@@ -179,7 +179,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
 
     @Override
     public void withInsertOnly(boolean insertOnly) {
-        this.lastInsertOnly = insertOnly;
+        this.insertOnly = insertOnly;
         write.withInsertOnly(insertOnly);
     }
 
