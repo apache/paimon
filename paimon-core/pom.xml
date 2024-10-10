@@ -33,6 +33,7 @@ under the License.
 
     <properties>
         <frocksdbjni.version>6.20.3-ververica-2.0</frocksdbjni.version>
+        <iceberg.version>1.6.1</iceberg.version>
     </properties>
 
     <dependencies>
@@ -193,14 +194,14 @@ under the License.
         <dependency>
             <groupId>org.apache.iceberg</groupId>
             <artifactId>iceberg-core</artifactId>
-            <version>1.5.2</version>
+            <version>${iceberg.version}</version>
             <scope>test</scope>
         </dependency>
 
         <dependency>
             <groupId>org.apache.iceberg</groupId>
             <artifactId>iceberg-data</artifactId>
-            <version>1.5.2</version>
+            <version>${iceberg.version}</version>
             <scope>test</scope>
         </dependency>
 

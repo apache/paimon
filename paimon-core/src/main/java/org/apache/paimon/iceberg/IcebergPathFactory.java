@@ -37,8 +37,8 @@ public class IcebergPathFactory {
     private int manifestFileCount;
     private int manifestListCount;
 
-    public IcebergPathFactory(Path root) {
-        this.metadataDirectory = new Path(root, "metadata");
+    public IcebergPathFactory(Path metadataDirectory) {
+        this.metadataDirectory = metadataDirectory;
         this.uuid = UUID.randomUUID().toString();
     }
 
