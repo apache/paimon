@@ -498,6 +498,135 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         waitForResult(expected, table, rowType, getPrimaryKey(format));
     }
 
+    protected void testComputedColumn(String format) throws Exception {
+        final String topic = "computedcolumn";
+        boolean writeOne = true;
+        int fileCount = 2;
+        List<String> topics = Collections.singletonList(topic);
+        topics.forEach(t -> createTestTopic(t, 1, 1));
+
+        for (int i = 0; i < fileCount; i++) {
+            writeRecordsToKafka(
+                    topics.get(0),
+                    "kafka/%s/database/computedcolumn/topic%s/%s-data-1.txt",
+                    format,
+                    i,
+                    format);
+        }
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(TOPIC.key(), String.join(";", topics));
+        KafkaSyncDatabaseAction action =
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withComputedColumnArgs("_substring=substring(name,2)")
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        testComputedColumnImpl(topics, writeOne, fileCount, format);
+    }
+
+    private void testComputedColumnImpl(
+            List<String> topics, boolean writeOne, int fileCount, String format) throws Exception {
+        waitingTables("t1", "t2");
+
+        FileStoreTable table1 = getFileStoreTable("t1");
+        FileStoreTable table2 = getFileStoreTable("t2");
+
+        RowType rowType1 =
+                RowType.of(
+                        new DataType[] {
+                            getDataType(format),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "description", "weight", "_substring"});
+
+        List<String> expected =
+                Arrays.asList(
+                        "+I[101, scooter, Small 2-wheel scooter, 3.14, ooter]",
+                        "+I[102, car battery, 12V car battery, 8.1, r battery]");
+        waitForResult(expected, table1, rowType1, getPrimaryKey(format));
+
+        RowType rowType2 =
+                RowType.of(
+                        new DataType[] {
+                            getDataType(format),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "description", "weight", "_substring"});
+
+        List<String> expected2 =
+                Arrays.asList(
+                        "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8, -pack drill bits]",
+                        "+I[104, hammer, 12oz carpenter's hammer, 0.75, mmer]");
+        waitForResult(expected2, table2, rowType2, getPrimaryKey(format));
+
+        for (int i = 0; i < fileCount; i++) {
+            writeRecordsToKafka(
+                    writeOne ? topics.get(0) : topics.get(i),
+                    "kafka/%s/database/computedcolumn/topic%s/%s-data-2.txt",
+                    format,
+                    i,
+                    format);
+        }
+
+        rowType1 =
+                RowType.of(
+                        new DataType[] {
+                            getDataType(format),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "description", "weight", "_substring", "age"});
+        expected =
+                Arrays.asList(
+                        "+I[101, scooter, Small 2-wheel scooter, 3.14, ooter, NULL]",
+                        "+I[102, car battery, 12V car battery, 8.1, r battery, NULL]",
+                        "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8, -pack drill bits, 19]",
+                        "+I[104, hammer, 12oz carpenter's hammer, 0.75, mmer, 25]");
+        waitForResult(expected, table1, rowType1, getPrimaryKey(format));
+
+        rowType2 =
+                RowType.of(
+                        new DataType[] {
+                            getDataType(format),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {
+                            "id", "name", "description", "weight", "_substring", "address"
+                        });
+
+        if (format.equals("debezium")) {
+            expected =
+                    Arrays.asList(
+                            "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8, -pack drill bits, NULL]",
+                            "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8, -pack drill bits, Beijing]",
+                            "+I[104, hammer, 12oz carpenter's hammer, 0.75, mmer, NULL]",
+                            "+I[104, hammer, 12oz carpenter's hammer, 0.75, mmer, Shanghai]");
+        } else {
+            expected =
+                    Arrays.asList(
+                            "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8, -pack drill bits, Beijing]",
+                            "+I[104, hammer, 12oz carpenter's hammer, 0.75, mmer, Shanghai]");
+        }
+
+        waitForResult(expected, table2, rowType2, getPrimaryKey(format));
+    }
+
     private DataType getDataType(String format) {
         return format.equals("debezium") ? DataTypes.STRING() : DataTypes.STRING().notNull();
     }

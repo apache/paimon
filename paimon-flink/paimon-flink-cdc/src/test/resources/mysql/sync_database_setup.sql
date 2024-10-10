@@ -514,3 +514,23 @@ CREATE TABLE t2 (
     v1 VARCHAR(10),
     PRIMARY KEY (k)
 );
+
+-- ################################################################################
+--  computedColumn
+-- ################################################################################
+CREATE DATABASE test_computed_column;
+USE test_computed_column;
+
+CREATE TABLE t1 (
+   pk INT,
+   _date DATE,
+   _datetime DATETIME,
+   _timestamp TIMESTAMP,
+   PRIMARY KEY (pk)
+);
+
+CREATE TABLE t2 (
+   pk INT,
+   _date DATE,
+   PRIMARY KEY (pk)
+);

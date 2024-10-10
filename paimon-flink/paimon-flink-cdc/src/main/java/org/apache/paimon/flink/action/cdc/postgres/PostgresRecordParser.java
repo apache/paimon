@@ -20,7 +20,6 @@ package org.apache.paimon.flink.action.cdc.postgres;
 
 import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
-import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.format.DebeziumEvent;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
@@ -84,7 +83,6 @@ public class PostgresRecordParser
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ZoneId serverTimeZone;
-    private final List<ComputedColumn> computedColumns;
     private final TypeMapping typeMapping;
 
     private DebeziumEvent root;
@@ -96,10 +94,8 @@ public class PostgresRecordParser
 
     public PostgresRecordParser(
             Configuration postgresConfig,
-            List<ComputedColumn> computedColumns,
             TypeMapping typeMapping,
             CdcMetadataConverter[] metadataConverters) {
-        this.computedColumns = computedColumns;
         this.typeMapping = typeMapping;
         this.metadataConverters = metadataConverters;
         objectMapper
@@ -347,13 +343,6 @@ public class PostgresRecordParser
             }
 
             resultMap.put(fieldName, newValue);
-        }
-
-        // generate values of computed columns
-        for (ComputedColumn computedColumn : computedColumns) {
-            resultMap.put(
-                    computedColumn.columnName(),
-                    computedColumn.eval(resultMap.get(computedColumn.fieldReference())));
         }
 
         for (CdcMetadataConverter metadataConverter : metadataConverters) {

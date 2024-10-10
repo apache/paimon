@@ -46,9 +46,12 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
     private transient EventParser<T> parser;
     private transient Map<String, OutputTag<List<DataField>>> updatedDataFieldsOutputTags;
     private transient Map<String, OutputTag<CdcRecord>> recordOutputTags;
+    private final Map<String, List<DataField>> dataFiledMap;
 
-    public CdcMultiTableParsingProcessFunction(EventParser.Factory<T> parserFactory) {
+    public CdcMultiTableParsingProcessFunction(
+            EventParser.Factory<T> parserFactory, Map<String, List<DataField>> dataFiledMap) {
         this.parserFactory = parserFactory;
+        this.dataFiledMap = dataFiledMap;
     }
 
     @Override
@@ -62,6 +65,8 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
     public void processElement(T raw, Context context, Collector<Void> collector) throws Exception {
         parser.setRawEvent(raw);
         String tableName = parser.parseTableName();
+        parser.evalComputedColumns(dataFiledMap.get(tableName));
+
         List<DataField> schemaChange = parser.parseSchemaChange();
         if (!schemaChange.isEmpty()) {
             context.output(getUpdatedDataFieldsOutputTag(tableName), schemaChange);

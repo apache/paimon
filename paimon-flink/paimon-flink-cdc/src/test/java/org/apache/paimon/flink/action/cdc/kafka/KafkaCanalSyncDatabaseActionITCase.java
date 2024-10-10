@@ -667,4 +667,65 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         waitingTables(tableNames);
         assertTablePartitionKeys(partitionKeyMultiple);
     }
+
+    @Test
+    @Timeout(60)
+    public void testComputedColumn() throws Exception {
+        final String topic = "test_computed_column";
+        createTestTopic(topic, 1, 1);
+        writeRecordsToKafka(topic, "kafka/canal/database/computedcolumn/canal-data-1.txt");
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+
+        KafkaSyncDatabaseAction action =
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withPartitionKeys("_year")
+                        .withPrimaryKeys("_id", "_year")
+                        .withTableConfig(getBasicTableConfig())
+                        .withComputedColumnArgs(
+                                "_year=year(_date)", "_year_timestamp=year(_timestamp)")
+                        .build();
+
+        runActionWithDefaultEnv(action);
+
+        waitingTables("test_computed_column1", "test_computed_column2");
+
+        FileStoreTable table1 = getFileStoreTable("test_computed_column1");
+        assertThat(table1.partitionKeys()).containsExactly("_year");
+        assertThat(table1.primaryKeys()).containsExactly("_id", "_year");
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.DATE(),
+                            DataTypes.TIMESTAMP(0),
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT()
+                        },
+                        new String[] {"_id", "_date", "_timestamp", "_year", "_year_timestamp"});
+        waitForResult(
+                Collections.singletonList("+I[1, 19439, 2022-01-01T14:30, 2023, 2022]"),
+                table1,
+                rowType,
+                Arrays.asList("_id", "_year"));
+
+        FileStoreTable table2 = getFileStoreTable("test_computed_column2");
+        assertThat(table2.partitionKeys()).containsExactly("_year");
+        assertThat(table2.primaryKeys()).containsExactly("_id", "_year");
+
+        RowType rowType2 =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.DATE(), DataTypes.INT().notNull()
+                        },
+                        new String[] {"_id", "_date", "_year"});
+        waitForResult(
+                Collections.singletonList("+I[2, 19805, 2024]"),
+                table2,
+                rowType2,
+                Arrays.asList("_id", "_year"));
+    }
 }

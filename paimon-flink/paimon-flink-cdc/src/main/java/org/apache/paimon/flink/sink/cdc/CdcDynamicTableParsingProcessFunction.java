@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 
 import org.apache.flink.api.common.typeinfo.TypeHint;
@@ -33,6 +34,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 /**
  * A {@link ProcessFunction} to parse CDC change event to either a list of {@link DataField}s or
@@ -65,13 +68,18 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
 
     private transient EventParser<T> parser;
     private transient Catalog catalog;
+    private final Map<String, List<DataField>> dataFiledMap;
 
     public CdcDynamicTableParsingProcessFunction(
-            String database, Catalog.Loader catalogLoader, EventParser.Factory<T> parserFactory) {
+            String database,
+            Catalog.Loader catalogLoader,
+            EventParser.Factory<T> parserFactory,
+            Map<String, List<DataField>> dataFiledMap) {
         // for now, only support single database
         this.database = database;
         this.catalogLoader = catalogLoader;
         this.parserFactory = parserFactory;
+        this.dataFiledMap = dataFiledMap;
     }
 
     @Override
@@ -92,19 +100,19 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
         String tableName = parser.parseTableName();
 
         // check for newly added table
-        parser.parseNewTable()
-                .ifPresent(
-                        schema -> {
-                            Identifier identifier = new Identifier(database, tableName);
-                            try {
-                                catalog.createTable(identifier, schema, true);
-                            } catch (Exception e) {
-                                LOG.error(
-                                        "Cannot create newly added Paimon table {}",
-                                        identifier.getFullName(),
-                                        e);
-                            }
-                        });
+        Optional<Schema> tablesSchema = parser.parseNewTable();
+        if (tablesSchema.isPresent()) {
+            Schema schema = tablesSchema.get();
+            dataFiledMap.put(tableName, schema.fields());
+            Identifier identifier = new Identifier(database, tableName);
+            try {
+                catalog.createTable(identifier, schema, true);
+            } catch (Exception e) {
+                LOG.error("Cannot create newly added Paimon table {}", identifier.getFullName(), e);
+            }
+        } else {
+            parser.evalComputedColumns(dataFiledMap.get(tableName));
+        }
 
         List<DataField> schemaChange = parser.parseSchemaChange();
         if (!schemaChange.isEmpty()) {

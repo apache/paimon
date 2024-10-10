@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action.cdc.format;
 
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
-import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.DataTypes;
@@ -63,8 +62,8 @@ public abstract class AbstractJsonRecordParser extends AbstractRecordParser {
 
     protected JsonNode root;
 
-    public AbstractJsonRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        super(typeMapping, computedColumns);
+    public AbstractJsonRecordParser(TypeMapping typeMapping) {
+        super(typeMapping);
     }
 
     protected void setRoot(CdcSourceRecord record) {
@@ -103,7 +102,6 @@ public abstract class AbstractJsonRecordParser extends AbstractRecordParser {
                                             }
                                             return Objects.toString(entry.getValue());
                                         }));
-        evalComputedColumns(rowData, rowTypeBuilder);
         return rowData;
     }
 
