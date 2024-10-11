@@ -62,7 +62,7 @@ case class SparkOrphanFilesClean(
     val maxBranchParallelism = Math.min(branches.size(), parallelism)
     // find snapshots using branch and find manifests(manifest, index, statistics) using snapshot
     val usedManifestFiles = spark.sparkContext
-      .parallelize(branches.asScala, maxBranchParallelism)
+      .parallelize(branches.asScala.toSeq, maxBranchParallelism)
       .mapPartitions(_.flatMap {
         branch => safelyGetAllSnapshots(branch).asScala.map(snapshot => (branch, snapshot.toJson))
       })
@@ -114,7 +114,7 @@ case class SparkOrphanFilesClean(
       .toDF("used_name")
 
     // find candidate files which can be removed
-    val fileDirs = listPaimonFileDirs.asScala.map(_.toUri.toString)
+    val fileDirs = listPaimonFileDirs.asScala.map(_.toUri.toString).toSeq
     val maxFileDirsParallelism = Math.min(fileDirs.size, parallelism)
     val candidates = spark.sparkContext
       .parallelize(fileDirs, maxFileDirsParallelism)

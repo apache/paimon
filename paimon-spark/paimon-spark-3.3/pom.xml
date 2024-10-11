@@ -38,6 +38,18 @@ under the License.
     <dependencies>
         <dependency>
             <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-bundle</artifactId>
+            <version>${project.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-spark-common</artifactId>
             <version>${project.version}</version>
         </dependency>
@@ -60,7 +72,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.spark</groupId>
-            <artifactId>spark-sql_2.12</artifactId>
+            <artifactId>spark-sql_${scala.binary.version}</artifactId>
             <version>${spark.version}</version>
             <exclusions>
                 <exclusion>
@@ -93,7 +105,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.spark</groupId>
-            <artifactId>spark-core_2.12</artifactId>
+            <artifactId>spark-core_${scala.binary.version}</artifactId>
             <version>${spark.version}</version>
             <exclusions>
                 <exclusion>
@@ -137,7 +149,7 @@ under the License.
         </dependency>
         <dependency>
             <groupId>org.apache.spark</groupId>
-            <artifactId>spark-sql_2.12</artifactId>
+            <artifactId>spark-sql_${scala.binary.version}</artifactId>
             <version>${spark.version}</version>
             <classifier>tests</classifier>
             <scope>test</scope>
@@ -150,23 +162,11 @@ under the License.
                     <groupId>org.slf4j</groupId>
                     <artifactId>slf4j-log4j12</artifactId>
                 </exclusion>
-                <exclusion>
-                    <groupId>org.apache.orc</groupId>
-                    <artifactId>orc-core</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.apache.parquet</groupId>
-                    <artifactId>parquet-column</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.apache.parquet</groupId>
-                    <artifactId>parquet-hadoop</artifactId>
-                </exclusion>
             </exclusions>
         </dependency>
         <dependency>
             <groupId>org.apache.spark</groupId>
-            <artifactId>spark-core_2.12</artifactId>
+            <artifactId>spark-core_${scala.binary.version}</artifactId>
             <version>${spark.version}</version>
             <classifier>tests</classifier>
             <scope>test</scope>
@@ -183,15 +183,11 @@ under the License.
                     <groupId>org.apache.logging.log4j</groupId>
                     <artifactId>log4j-slf4j2-impl</artifactId>
                 </exclusion>
-                <exclusion>
-                    <groupId>org.apache.orc</groupId>
-                    <artifactId>orc-core</artifactId>
-                </exclusion>
             </exclusions>
         </dependency>
         <dependency>
             <groupId>org.apache.spark</groupId>
-            <artifactId>spark-catalyst_2.12</artifactId>
+            <artifactId>spark-catalyst_${scala.binary.version}</artifactId>
             <version>${spark.version}</version>
             <classifier>tests</classifier>
             <scope>test</scope>
@@ -204,10 +200,6 @@ under the License.
                     <groupId>org.slf4j</groupId>
                     <artifactId>slf4j-log4j12</artifactId>
                 </exclusion>
-                <exclusion>
-                    <groupId>org.apache.orc</groupId>
-                    <artifactId>orc-core</artifactId>
-                </exclusion>
             </exclusions>
         </dependency>
         <dependency>
@@ -218,7 +210,7 @@ under the License.
         </dependency>
         <dependency>
             <groupId>org.apache.spark</groupId>
-            <artifactId>spark-hive_2.12</artifactId>
+            <artifactId>spark-hive_${scala.binary.version}</artifactId>
             <version>${spark.version}</version>
             <scope>test</scope>
             <exclusions>
@@ -229,10 +221,6 @@ under the License.
                 <exclusion>
                     <groupId>org.slf4j</groupId>
                     <artifactId>slf4j-log4j12</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.apache.orc</groupId>
-                    <artifactId>orc-core</artifactId>
                 </exclusion>
                 <exclusion>
                     <groupId>com.google.protobuf</groupId>

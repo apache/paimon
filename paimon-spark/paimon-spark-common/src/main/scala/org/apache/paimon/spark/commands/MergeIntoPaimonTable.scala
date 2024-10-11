@@ -243,7 +243,7 @@ case class MergeIntoPaimonTable(
     val outputFields = mutable.ArrayBuffer(tableSchema.fields: _*)
     outputFields += StructField(ROW_KIND_COL, ByteType)
     outputFields ++= metadataCols.map(_.toStructField)
-    val outputSchema = StructType(outputFields)
+    val outputSchema = StructType(outputFields.toSeq)
 
     val joinedRowEncoder = EncoderUtils.encode(joinedPlan.schema)
     val outputEncoder = EncoderUtils.encode(outputSchema).resolveAndBind()
