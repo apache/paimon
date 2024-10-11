@@ -195,6 +195,12 @@ under the License.
             <td>Specify the consumer consistency mode for table.<br /><br />Possible values:<ul><li>"exactly-once": Readers consume data at snapshot granularity, and strictly ensure that the snapshot-id recorded in the consumer is the snapshot-id + 1 that all readers have exactly consumed.</li><li>"at-least-once": Each reader consumes snapshots at a different rate, and the snapshot with the slowest consumption progress among all readers will be recorded in the consumer.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>consumer.snapshot-id</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>Specify the consumer startup mode from snapshot-id, if set it would reset snapshot-id firstly and consumer from the snapshot, default from the snapshot-id before.</td>
+        </tr>
+        <tr>
             <td><h5>continuous.discovery-interval</h5></td>
             <td style="word-wrap: break-word;">10 s</td>
             <td>Duration</td>

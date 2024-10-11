@@ -48,6 +48,9 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -61,6 +64,8 @@ public abstract class AbstractDataTableScan implements DataTableScan {
 
     private final CoreOptions options;
     protected final SnapshotReader snapshotReader;
+
+    private static final Logger LOG = LoggerFactory.getLogger(AbstractDataTableScan.class);
 
     protected AbstractDataTableScan(CoreOptions options, SnapshotReader snapshotReader) {
         this.options = options;
@@ -123,6 +128,17 @@ public abstract class AbstractDataTableScan implements DataTableScan {
         String consumerId = options.consumerId();
         if (isStreaming && consumerId != null && !options.consumerIgnoreProgress()) {
             ConsumerManager consumerManager = snapshotReader.consumerManager();
+            Long snapshotId = options.consumerStartupFromSnapshotID();
+            if (snapshotId != null) {
+                if (snapshotManager.snapshotExists(snapshotId)) {
+                    consumerManager.resetConsumer(consumerId, new Consumer(snapshotId));
+                } else {
+                    LOG.warn(
+                            String.format(
+                                    "You set consumer.snapshot-id: %s is not exisit, it would not work!",
+                                    snapshotId));
+                }
+            }
             Optional<Consumer> consumer = consumerManager.consumer(consumerId);
             if (consumer.isPresent()) {
                 return new ContinuousFromSnapshotStartingScanner(

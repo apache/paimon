@@ -80,6 +80,22 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                                 changelogRow("+I", 3L, "Paimon")))
                 .close();
 
+        // use consumer streaming read table with consumer.snapshot-id
+        testStreamingRead(
+                        "SELECT * FROM `"
+                                + tableName
+                                + "` /*+ OPTIONS('consumer-id'='myid','consumer.expiration-time'='3h','consumer.snapshot-id'='2') */",
+                        Arrays.asList(
+                                changelogRow("+I", 2L, "Hello"), changelogRow("+I", 3L, "Paimon")))
+                .close();
+
+        testStreamingRead(
+                        "SELECT * FROM `"
+                                + tableName
+                                + "` /*+ OPTIONS('consumer-id'='myid','consumer.expiration-time'='3h','consumer.snapshot-id'='3') */",
+                        Arrays.asList(changelogRow("+I", 3L, "Paimon")))
+                .close();
+
         Thread.sleep(1000);
         ConsumerManager consumerManager = new ConsumerManager(table.fileIO(), table.location());
         Optional<Consumer> consumer1 = consumerManager.consumer("myid");
