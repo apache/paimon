@@ -970,11 +970,18 @@ public class CoreOptions implements Serializable {
                             "Whether to ignore consumer progress for the newly started job.");
 
     public static final ConfigOption<Long> CONSUMER_SNAPSHOT_ID =
-            key("consumer.snapshot-id")
+            key("consumer.from.snapshot-id")
                     .longType()
                     .noDefaultValue()
                     .withDescription(
                             "Specify the consumer startup mode from snapshot-id, if set it would reset snapshot-id firstly and consumer from the snapshot, default from the snapshot-id before.");
+
+    public static final ConfigOption<Long> CONSUMER_TIMESTAMP_MILLIS =
+            key("consumer.from.timestamp-millis")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specify the consumer startup mode from timestamp-millis, if set it would reset snapshot-id firstly and consumer from the snapshot before the time, default from the snapshot-id before.");
 
     public static final ConfigOption<Long> DYNAMIC_BUCKET_TARGET_ROW_NUM =
             key("dynamic-bucket.target-row-num")
@@ -2084,6 +2091,10 @@ public class CoreOptions implements Serializable {
 
     public Long consumerStartupFromSnapshotID() {
         return options.get(CONSUMER_SNAPSHOT_ID);
+    }
+
+    public Long consumerStartupFromTimestamp() {
+        return options.get(CONSUMER_TIMESTAMP_MILLIS);
     }
 
     public boolean partitionedTableInMetastore() {

@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.consumer.ConsumerManager;
@@ -129,16 +130,34 @@ public abstract class AbstractDataTableScan implements DataTableScan {
         if (isStreaming && consumerId != null && !options.consumerIgnoreProgress()) {
             ConsumerManager consumerManager = snapshotReader.consumerManager();
             Long snapshotId = options.consumerStartupFromSnapshotID();
+            Long timestamp = options.consumerStartupFromTimestamp();
+            if (snapshotId != null && timestamp != null) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Can not set consumer.from.snapshot-id: %s and consumer.timestamp: %s both!",
+                                snapshotId, timestamp));
+            }
             if (snapshotId != null) {
                 if (snapshotManager.snapshotExists(snapshotId)) {
                     consumerManager.resetConsumer(consumerId, new Consumer(snapshotId));
                 } else {
                     LOG.warn(
                             String.format(
-                                    "You set consumer.snapshot-id: %s is not exisit, it would not work!",
+                                    "You set consumer.from.snapshot-id: %s is not exisit, would consumer from snapshot before!",
                                     snapshotId));
                 }
+            } else if (timestamp != null) {
+                Snapshot snapshot = snapshotManager.earlierOrEqualTimeMills(timestamp);
+                if (snapshot != null) {
+                    consumerManager.resetConsumer(consumerId, new Consumer(snapshot.id()));
+                } else {
+                    LOG.warn(
+                            String.format(
+                                    "Earlier or equal than consumer.timestamp: %s is not exist, would consumer from snapshot before!",
+                                    snapshot.id()));
+                }
             }
+
             Optional<Consumer> consumer = consumerManager.consumer(consumerId);
             if (consumer.isPresent()) {
                 return new ContinuousFromSnapshotStartingScanner(
