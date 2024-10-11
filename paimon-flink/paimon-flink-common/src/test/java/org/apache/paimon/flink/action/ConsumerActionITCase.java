@@ -83,7 +83,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         ConsumerManager consumerManager = new ConsumerManager(table.fileIO(), table.location());
         Optional<Consumer> consumer1 = consumerManager.consumer("myid");
         assertThat(consumer1).isPresent();
-        assertThat(consumer1.get().nextSnapshot()).isEqualTo(8);
+        assertThat(consumer1.get().nextSnapshot()).isEqualTo(4);
 
         List<String> args =
                 Arrays.asList(
@@ -191,7 +191,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                 new ConsumerManager(table.fileIO(), table.location(), branchName);
         Optional<Consumer> consumer1 = consumerManager.consumer("myid");
         assertThat(consumer1).isPresent();
-        assertThat(consumer1.get().nextSnapshot()).isEqualTo(8);
+        assertThat(consumer1.get().nextSnapshot()).isEqualTo(4);
 
         List<String> args =
                 Arrays.asList(
