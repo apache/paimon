@@ -20,7 +20,6 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -30,12 +29,17 @@ import java.util.List;
 /** Contains time travel functions. */
 public class TimeTravelUtil {
 
-    public static List<String> scanKeys;
+    public static String[] scanKeys = {
+        CoreOptions.SCAN_SNAPSHOT_ID.key(),
+        CoreOptions.SCAN_TAG_NAME.key(),
+        CoreOptions.SCAN_WATERMARK.key(),
+        CoreOptions.SCAN_TIMESTAMP_MILLIS.key()
+    };
 
     public static Snapshot resolveSnapshotFromOption(
             CoreOptions options, SnapshotManager snapshotManager) {
         List<String> scanHandleKey = new ArrayList<>();
-        for (String key : getScanKeys()) {
+        for (String key : scanKeys) {
             if (options.toConfiguration().containsKey(key)) {
                 scanHandleKey.add(key);
             }
@@ -70,7 +74,7 @@ public class TimeTravelUtil {
 
     private static Snapshot handleSnapshotId(SnapshotManager snapshotManager, CoreOptions options) {
         Long snapshotId = options.scanSnapshotId();
-        if (snapshotId != null && snapshotManager.snapshotExists(snapshotId)){
+        if (snapshotId != null && snapshotManager.snapshotExists(snapshotId)) {
             return snapshotManager.snapshot(snapshotId);
         }
         return null;
@@ -91,16 +95,5 @@ public class TimeTravelUtil {
         TagManager tagManager =
                 new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
         return tagManager.taggedSnapshot(tagName);
-    }
-
-    public static List<String> getScanKeys() {
-        if (scanKeys == null) {
-            scanKeys = new ArrayList<>();
-            scanKeys.add(CoreOptions.SCAN_SNAPSHOT_ID.key());
-            scanKeys.add(CoreOptions.SCAN_TAG_NAME.key());
-            scanKeys.add(CoreOptions.SCAN_WATERMARK.key());
-            scanKeys.add(CoreOptions.SCAN_TIMESTAMP_MILLIS.key());
-        }
-        return scanKeys;
     }
 }
