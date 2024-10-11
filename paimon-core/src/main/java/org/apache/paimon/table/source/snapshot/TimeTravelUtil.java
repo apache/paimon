@@ -51,7 +51,7 @@ public class TimeTravelUtil {
         }
 
         Preconditions.checkArgument(
-                scanHandleKey.size() > 1,
+                scanHandleKey.size() == 1,
                 String.format(
                         "Only one of the following parameters may be set : [%s, %s, %s, %s]",
                         CoreOptions.SCAN_SNAPSHOT_ID.key(),
