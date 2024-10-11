@@ -20,6 +20,7 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -48,15 +49,15 @@ public class TimeTravelUtil {
         if (scanHandleKey.size() == 0) {
             return null;
         }
-        if (scanHandleKey.size() > 1) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "%s %s %s and %s can contains only one",
-                            CoreOptions.SCAN_SNAPSHOT_ID.key(),
-                            CoreOptions.SCAN_TAG_NAME.key(),
-                            CoreOptions.SCAN_WATERMARK.key(),
-                            CoreOptions.SCAN_TIMESTAMP_MILLIS.key()));
-        }
+
+        Preconditions.checkArgument(
+                scanHandleKey.size() > 1,
+                String.format(
+                        "Only one of the following parameters may be set : [%s, %s, %s, %s]",
+                        CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                        CoreOptions.SCAN_TAG_NAME.key(),
+                        CoreOptions.SCAN_WATERMARK.key(),
+                        CoreOptions.SCAN_TIMESTAMP_MILLIS.key()));
 
         String key = scanHandleKey.get(0);
         Snapshot snapshot = null;
