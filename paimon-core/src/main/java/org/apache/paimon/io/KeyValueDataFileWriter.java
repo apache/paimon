@@ -23,6 +23,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleStatsExtractor;
@@ -41,7 +42,10 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.function.Function;
+
+import static org.apache.paimon.io.DataFilePathFactory.dataFileToFileIndexPath;
 
 /**
  * A {@link StatsCollectingSingleFileWriter} to write data files containing {@link KeyValue}s. Also
@@ -64,6 +68,7 @@ public class KeyValueDataFileWriter
     private final SimpleStatsConverter valueStatsConverter;
     private final InternalRowSerializer keySerializer;
     private final FileSource fileSource;
+    @Nullable private final DataFileIndexWriter dataFileIndexWriter;
 
     private BinaryRow minKey = null;
     private InternalRow maxKey = null;
@@ -83,7 +88,8 @@ public class KeyValueDataFileWriter
             int level,
             String compression,
             CoreOptions options,
-            FileSource fileSource) {
+            FileSource fileSource,
+            FileIndexOptions fileIndexOptions) {
         super(
                 fileIO,
                 factory,
@@ -105,11 +111,18 @@ public class KeyValueDataFileWriter
         this.valueStatsConverter = new SimpleStatsConverter(valueType);
         this.keySerializer = new InternalRowSerializer(keyType);
         this.fileSource = fileSource;
+        this.dataFileIndexWriter =
+                DataFileIndexWriter.create(
+                        fileIO, dataFileToFileIndexPath(path), valueType, fileIndexOptions);
     }
 
     @Override
     public void write(KeyValue kv) throws IOException {
         super.write(kv);
+
+        if (dataFileIndexWriter != null) {
+            dataFileIndexWriter.write(kv.value());
+        }
 
         updateMinKey(kv);
         updateMaxKey(kv);
@@ -161,6 +174,11 @@ public class KeyValueDataFileWriter
                 Arrays.copyOfRange(rowStats, numKeyFields + 2, rowStats.length);
         SimpleStats valueStats = valueStatsConverter.toBinary(valFieldStats);
 
+        DataFileIndexWriter.FileIndexResult indexResult =
+                dataFileIndexWriter == null
+                        ? DataFileIndexWriter.EMPTY_RESULT
+                        : dataFileIndexWriter.result();
+
         return new DataFileMeta(
                 path.getName(),
                 fileIO.getFileSize(path),
@@ -173,9 +191,20 @@ public class KeyValueDataFileWriter
                 maxSeqNumber,
                 schemaId,
                 level,
+                indexResult.independentIndexFile() == null
+                        ? Collections.emptyList()
+                        : Collections.singletonList(indexResult.independentIndexFile()),
                 deleteRecordCount,
                 // TODO: enable file filter for primary key table (e.g. deletion table).
-                null,
+                indexResult.embeddedIndexBytes(),
                 fileSource);
+    }
+
+    @Override
+    public void close() throws IOException {
+        if (dataFileIndexWriter != null) {
+            dataFileIndexWriter.close();
+        }
+        super.close();
     }
 }
