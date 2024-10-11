@@ -40,6 +40,10 @@ public class TimeTravelUtil {
                 scanHandleKey.add(key);
             }
         }
+        
+        if (scanHandleKey.size() == 0) {
+            return null;
+        }
         if (scanHandleKey.size() > 1) {
             throw new IllegalArgumentException(
                     String.format(
@@ -49,9 +53,7 @@ public class TimeTravelUtil {
                             CoreOptions.SCAN_WATERMARK.key(),
                             CoreOptions.SCAN_TIMESTAMP_MILLIS.key()));
         }
-        if (scanHandleKey.size() == 0) {
-            return null;
-        }
+
         String key = scanHandleKey.get(0);
         Snapshot snapshot = null;
         if (key.equals(CoreOptions.SCAN_SNAPSHOT_ID.key())) {
