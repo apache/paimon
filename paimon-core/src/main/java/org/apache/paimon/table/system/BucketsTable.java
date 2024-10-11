@@ -57,7 +57,7 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -185,21 +185,23 @@ public class BucketsTable implements ReadonlyTable {
                             fileStoreTable.schema().logicalPartitionType());
 
             // sorted by partition and bucket
-            Map<Pair<String, Integer>, BucketEntry> pairBucketsMap =
-                    new TreeMap<>(
-                            Comparator.comparing((Pair<String, Integer> o) -> o.getLeft())
-                                    .thenComparing(Pair::getRight));
-            buckets.forEach(
-                    entry ->
-                            pairBucketsMap.put(
-                                    Pair.of(
-                                            Arrays.toString(converter.convert(entry.partition())),
-                                            entry.bucket()),
-                                    entry));
+            List<Pair<String, BucketEntry>> bucketList =
+                    buckets.stream()
+                            .map(
+                                    entry ->
+                                            Pair.of(
+                                                    Arrays.toString(
+                                                            converter.convert(entry.partition())),
+                                                    entry))
+                            .sorted(
+                                    Comparator.comparing(
+                                                    (Pair<String, BucketEntry> p) -> p.getLeft())
+                                            .thenComparing(p -> p.getRight().bucket()))
+                            .collect(Collectors.toList());
 
             List<InternalRow> results = new ArrayList<>(buckets.size());
-            for (Map.Entry<Pair<String, Integer>, BucketEntry> pair : pairBucketsMap.entrySet()) {
-                results.add(toRow(pair.getKey().getLeft(), pair.getValue()));
+            for (Pair<String, BucketEntry> pair : bucketList) {
+                results.add(toRow(pair.getLeft(), pair.getRight()));
             }
 
             Iterator<InternalRow> iterator = results.iterator();
