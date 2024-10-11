@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source.snapshot;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.sink.StreamTableCommit;
@@ -31,7 +32,7 @@ import java.util.HashMap;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/** Tests for {@link TimeTravelUtilsTest}. */
+/** Tests for {@link TimeTravelUtil}. */
 public class TimeTravelUtilsTest extends ScannerTestBase {
 
     @Test
@@ -52,25 +53,25 @@ public class TimeTravelUtilsTest extends ScannerTestBase {
 
         HashMap<String, String> optMap = new HashMap<>();
         optMap.put("scan.snapshot-id", "2");
-        Options options = Options.fromMap(optMap);
+        CoreOptions options = CoreOptions.fromMap(optMap);
         Snapshot snapshot = TimeTravelUtil.resolveSnapshotFromOption(options, snapshotManager);
         assertThat(snapshot.id() == 2);
         optMap.clear();
         optMap.put("scan.timestamp-millis", ts + "");
-        options = Options.fromMap(optMap);
+        options = CoreOptions.fromMap(optMap);
         snapshot = TimeTravelUtil.resolveSnapshotFromOption(options, snapshotManager);
         assertThat(snapshot.id() == 1);
 
         table.createTag("tag3", 3);
         optMap.clear();
         optMap.put("scan.tag-name", "tag3");
-        options = Options.fromMap(optMap);
+        options = CoreOptions.fromMap(optMap);
         snapshot = TimeTravelUtil.resolveSnapshotFromOption(options, snapshotManager);
         assertThat(snapshot.id() == 3);
 
         // if contain more scan.xxx config would throw out
         optMap.put("scan.snapshot-id", "2");
-        Options options1 = Options.fromMap(optMap);
+        CoreOptions options1 = CoreOptions.fromMap(optMap);
         assertThrows(
                 IllegalArgumentException.class,
                 () -> TimeTravelUtil.resolveSnapshotFromOption(options1, snapshotManager),

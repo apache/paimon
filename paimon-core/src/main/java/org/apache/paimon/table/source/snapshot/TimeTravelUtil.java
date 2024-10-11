@@ -33,14 +33,14 @@ public class TimeTravelUtil {
     public static List<String> scanKeys;
 
     public static Snapshot resolveSnapshotFromOption(
-            Options options, SnapshotManager snapshotManager) {
+            CoreOptions options, SnapshotManager snapshotManager) {
         List<String> scanHandleKey = new ArrayList<>();
         for (String key : getScanKeys()) {
-            if (options.containsKey(key)) {
+            if (options.toConfiguration().containsKey(key)) {
                 scanHandleKey.add(key);
             }
         }
-        
+
         if (scanHandleKey.size() == 0) {
             return null;
         }
@@ -68,23 +68,26 @@ public class TimeTravelUtil {
         return snapshot;
     }
 
-    private static Snapshot handleSnapshotId(SnapshotManager snapshotManager, Options options) {
-        Long snapshotId = options.get(CoreOptions.SCAN_SNAPSHOT_ID);
-        return snapshotManager.snapshot(snapshotId);
+    private static Snapshot handleSnapshotId(SnapshotManager snapshotManager, CoreOptions options) {
+        Long snapshotId = options.scanSnapshotId();
+        if (snapshotId != null && snapshotManager.snapshotExists(snapshotId)){
+            return snapshotManager.snapshot(snapshotId);
+        }
+        return null;
     }
 
-    private static Snapshot handleTimestamp(SnapshotManager snapshotManager, Options options) {
-        Long timestamp = options.get(CoreOptions.SCAN_TIMESTAMP_MILLIS);
+    private static Snapshot handleTimestamp(SnapshotManager snapshotManager, CoreOptions options) {
+        Long timestamp = options.scanTimestampMills();
         return snapshotManager.earlierOrEqualTimeMills(timestamp);
     }
 
-    private static Snapshot handleWatermark(SnapshotManager snapshotManager, Options options) {
-        Long watermark = options.get(CoreOptions.SCAN_WATERMARK);
+    private static Snapshot handleWatermark(SnapshotManager snapshotManager, CoreOptions options) {
+        Long watermark = options.scanWatermark();
         return snapshotManager.laterOrEqualWatermark(watermark);
     }
 
-    private static Snapshot handleTagName(SnapshotManager snapshotManager, Options options) {
-        String tagName = options.get(CoreOptions.SCAN_TAG_NAME);
+    private static Snapshot handleTagName(SnapshotManager snapshotManager, CoreOptions options) {
+        String tagName = options.scanTagName();
         TagManager tagManager =
                 new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
         return tagManager.taggedSnapshot(tagName);
