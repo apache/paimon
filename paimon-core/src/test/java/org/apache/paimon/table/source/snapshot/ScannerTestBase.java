@@ -78,7 +78,7 @@ public abstract class ScannerTestBase {
 
     @BeforeEach
     public void before() throws Exception {
-        tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
+        tablePath = new Path((TraceableFileIO.SCHEME + "://" + tempDir.toString()).replaceAll("\\\\", "\\/"));
         fileIO = FileIOFinder.find(tablePath);
         commitUser = UUID.randomUUID().toString();
         table = createFileStoreTable();

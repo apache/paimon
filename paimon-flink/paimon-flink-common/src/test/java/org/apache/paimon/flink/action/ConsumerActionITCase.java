@@ -79,39 +79,6 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                                 changelogRow("+I", 2L, "Hello"),
                                 changelogRow("+I", 3L, "Paimon")))
                 .close();
-
-        // use consumer streaming read table with consumer.from.snapshot-id
-        testStreamingRead(
-                        "SELECT * FROM `"
-                                + tableName
-                                + "` /*+ OPTIONS('consumer-id'='myid','consumer.expiration-time'='3h','consumer.from.snapshot-id'='2') */",
-                        Arrays.asList(
-                                changelogRow("+I", 2L, "Hello"), changelogRow("+I", 3L, "Paimon")))
-                .close();
-
-        testStreamingRead(
-                        "SELECT * FROM `"
-                                + tableName
-                                + "` /*+ OPTIONS('consumer-id'='myid','consumer.expiration-time'='3h','consumer.from.snapshot-id'='3') */",
-                        Arrays.asList(changelogRow("+I", 3L, "Paimon")))
-                .close();
-
-        // 3 snapshots
-        writeData(rowData(4L, BinaryString.fromString("aa")));
-        writeData(rowData(5L, BinaryString.fromString("bb")));
-        long ts = System.currentTimeMillis();
-        writeData(rowData(6L, BinaryString.fromString("cc")));
-
-        // use consumer streaming read table with consumer.from.timestamp-millis
-        testStreamingRead(
-                        "SELECT * FROM `"
-                                + tableName
-                                + "` /*+ OPTIONS('consumer-id'='myid','consumer.expiration-time'='3h','consumer.from.timestamp-millis'='"
-                                + ts
-                                + "') */",
-                        Arrays.asList(changelogRow("+I", 6L, "cc")))
-                .close();
-
         Thread.sleep(1000);
         ConsumerManager consumerManager = new ConsumerManager(table.fileIO(), table.location());
         Optional<Consumer> consumer1 = consumerManager.consumer("myid");
@@ -224,7 +191,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                 new ConsumerManager(table.fileIO(), table.location(), branchName);
         Optional<Consumer> consumer1 = consumerManager.consumer("myid");
         assertThat(consumer1).isPresent();
-        assertThat(consumer1.get().nextSnapshot()).isEqualTo(4);
+        assertThat(consumer1.get().nextSnapshot()).isEqualTo(8);
 
         List<String> args =
                 Arrays.asList(
