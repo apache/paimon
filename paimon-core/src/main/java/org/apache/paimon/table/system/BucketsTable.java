@@ -40,6 +40,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IteratorRecordReader;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SerializationUtils;
@@ -52,9 +53,11 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -181,9 +184,24 @@ public class BucketsTable implements ReadonlyTable {
                     new RowDataToObjectArrayConverter(
                             fileStoreTable.schema().logicalPartitionType());
 
+            // sorted by partition and bucket
+            List<Pair<String, BucketEntry>> bucketList =
+                    buckets.stream()
+                            .map(
+                                    entry ->
+                                            Pair.of(
+                                                    Arrays.toString(
+                                                            converter.convert(entry.partition())),
+                                                    entry))
+                            .sorted(
+                                    Comparator.comparing(
+                                                    (Pair<String, BucketEntry> p) -> p.getLeft())
+                                            .thenComparing(p -> p.getRight().bucket()))
+                            .collect(Collectors.toList());
+
             List<InternalRow> results = new ArrayList<>(buckets.size());
-            for (BucketEntry entry : buckets) {
-                results.add(toRow(entry, converter));
+            for (Pair<String, BucketEntry> pair : bucketList) {
+                results.add(toRow(pair.getLeft(), pair.getRight()));
             }
 
             Iterator<InternalRow> iterator = results.iterator();
@@ -198,13 +216,9 @@ public class BucketsTable implements ReadonlyTable {
             return new IteratorRecordReader<>(iterator);
         }
 
-        private GenericRow toRow(
-                BucketEntry entry, RowDataToObjectArrayConverter partitionConverter) {
-            BinaryString partitionId =
-                    BinaryString.fromString(
-                            Arrays.toString(partitionConverter.convert(entry.partition())));
+        private GenericRow toRow(String partStr, BucketEntry entry) {
             return GenericRow.of(
-                    partitionId,
+                    BinaryString.fromString(partStr),
                     entry.bucket(),
                     entry.recordCount(),
                     entry.fileSizeInBytes(),
