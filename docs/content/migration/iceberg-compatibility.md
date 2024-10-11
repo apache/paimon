@@ -309,7 +309,7 @@ SELECT * FROM iceberg_catalog.`default`.orders WHERE status = 'COMPLETED';
 
 ### Timeliness
 
-Paimon primary key tables organize data files as [LSM trees]({{< ref "learn-paimon/understand-files/#understand-lsm-for-primary-table" >}}), so data files must be merged in memory before querying.
+Paimon primary key tables organize data files as LSM trees, so data files must be merged in memory before querying.
 However, Iceberg readers are not able to merge data files, so they can only query data files on the highest level of LSM trees.
 Data files on the highest level are produced by the full compaction process.
 So **to conclude, for primary key tables, Iceberg readers can only query data after full compaction**.
