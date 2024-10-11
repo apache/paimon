@@ -195,7 +195,6 @@ public class KeyValueDataFileWriter
                         ? Collections.emptyList()
                         : Collections.singletonList(indexResult.independentIndexFile()),
                 deleteRecordCount,
-                // TODO: enable file filter for primary key table (e.g. deletion table).
                 indexResult.embeddedIndexBytes(),
                 fileSource);
     }
