@@ -35,6 +35,8 @@ under the License.
 
     <properties>
         <flink.version>1.16.3</flink.version>
+        <iceberg.flink.version>1.16</iceberg.flink.version>
+        <iceberg.version>1.5.2</iceberg.version>
     </properties>
 
     <dependencies>
@@ -100,6 +102,12 @@ under the License.
             <scope>test</scope>
         </dependency>
 
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-flink-${iceberg.flink.version}</artifactId>
+            <version>${iceberg.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

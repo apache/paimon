@@ -20,10 +20,12 @@ package org.apache.paimon.iceberg.metadata;
 
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -58,9 +60,9 @@ public class IcebergDataField {
     @JsonProperty(FIELD_DOC)
     private final String doc;
 
-    public IcebergDataField(DataField dataField) {
+    public IcebergDataField(DataField dataField, int bias) {
         this(
-                dataField.id(),
+                dataField.id() + bias,
                 dataField.name(),
                 !dataField.type().isNullable(),
                 toTypeString(dataField.type()),
@@ -106,6 +108,11 @@ public class IcebergDataField {
         return doc;
     }
 
+    @JsonIgnore
+    public DataType dataType() {
+        return fromTypeString(type);
+    }
+
     private static String toTypeString(DataType dataType) {
         switch (dataType.getTypeRoot()) {
             case BOOLEAN:
@@ -132,6 +139,33 @@ public class IcebergDataField {
                         "decimal(%d, %d)", decimalType.getPrecision(), decimalType.getScale());
             default:
                 throw new UnsupportedOperationException("Unsupported data type: " + dataType);
+        }
+    }
+
+    private static DataType fromTypeString(String type) {
+        if ("boolean".equals(type)) {
+            return DataTypes.BOOLEAN();
+        } else if ("int".equals(type)) {
+            return DataTypes.INT();
+        } else if ("long".equals(type)) {
+            return DataTypes.BIGINT();
+        } else if ("float".equals(type)) {
+            return DataTypes.FLOAT();
+        } else if ("double".equals(type)) {
+            return DataTypes.DOUBLE();
+        } else if ("date".equals(type)) {
+            return DataTypes.DATE();
+        } else if ("string".equals(type)) {
+            return DataTypes.STRING();
+        } else if ("binary".equals(type)) {
+            return DataTypes.BYTES();
+        } else if (type.startsWith("decimal")) {
+            String[] precisionAndScale =
+                    type.substring("decimal(".length(), type.length() - 1).split(", ");
+            return DataTypes.DECIMAL(
+                    Integer.parseInt(precisionAndScale[0]), Integer.parseInt(precisionAndScale[1]));
+        } else {
+            throw new UnsupportedOperationException("Unsupported data type: " + type);
         }
     }
 

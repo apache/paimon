@@ -23,6 +23,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.iceberg.PrimaryKeyIcebergCommitCallback;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
@@ -183,7 +184,8 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
         List<CommitCallback> callbacks = super.createCommitCallbacks(commitUser);
         CoreOptions options = coreOptions();
 
-        if (options.metadataIcebergCompatible()) {
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                != IcebergOptions.StorageType.DISABLED) {
             callbacks.add(new PrimaryKeyIcebergCommitCallback(this, commitUser));
         }
 
