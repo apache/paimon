@@ -55,7 +55,7 @@ public class TimeTravelUtilsTest extends ScannerTestBase {
         CoreOptions options = CoreOptions.fromMap(optMap);
         Snapshot snapshot = TimeTravelUtil.resolveSnapshotFromOption(options, snapshotManager);
         assertThat(snapshot.id() == 2);
-        
+
         optMap.clear();
         optMap.put("scan.timestamp-millis", ts + "");
         options = CoreOptions.fromMap(optMap);
