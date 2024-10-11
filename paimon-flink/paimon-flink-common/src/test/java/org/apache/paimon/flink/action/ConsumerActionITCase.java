@@ -102,8 +102,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         long ts = System.currentTimeMillis();
         writeData(rowData(6L, BinaryString.fromString("cc")));
 
-        // use consumer streaming read table with consumer.from.snapshot-id
-
+        // use consumer streaming read table with consumer.from.timestamp-millis
         testStreamingRead(
                         "SELECT * FROM `"
                                 + tableName
