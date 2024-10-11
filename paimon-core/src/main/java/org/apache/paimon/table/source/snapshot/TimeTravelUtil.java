@@ -32,7 +32,8 @@ public class TimeTravelUtil {
 
     public static List<String> scanKeys;
 
-    public static Snapshot resolveSnapshotFromOption(Options options, SnapshotManager snapshotManager) {
+    public static Snapshot resolveSnapshotFromOption(
+            Options options, SnapshotManager snapshotManager) {
         List<String> scanHandleKey = new ArrayList<>();
         for (String key : getScanKeys()) {
             if (options.containsKey(key)) {
@@ -40,7 +41,13 @@ public class TimeTravelUtil {
             }
         }
         if (scanHandleKey.size() > 1) {
-            throw new IllegalArgumentException(String.format("%s %s %s and %s can contains only one", CoreOptions.SCAN_SNAPSHOT_ID.key(), CoreOptions.SCAN_TAG_NAME.key(), CoreOptions.SCAN_WATERMARK.key(), CoreOptions.SCAN_TIMESTAMP_MILLIS.key()));
+            throw new IllegalArgumentException(
+                    String.format(
+                            "%s %s %s and %s can contains only one",
+                            CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                            CoreOptions.SCAN_TAG_NAME.key(),
+                            CoreOptions.SCAN_WATERMARK.key(),
+                            CoreOptions.SCAN_TIMESTAMP_MILLIS.key()));
         }
         if (scanHandleKey.size() == 0) {
             return null;
@@ -91,5 +98,4 @@ public class TimeTravelUtil {
         }
         return scanKeys;
     }
-
 }

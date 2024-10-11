@@ -18,12 +18,12 @@
 
 package org.apache.paimon.table.source.snapshot;
 
-
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.utils.SnapshotManager;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
@@ -71,9 +71,11 @@ public class TimeTravelUtilsTest extends ScannerTestBase {
         // if contain more scan.xxx config would throw out
         optMap.put("scan.snapshot-id", "2");
         Options options1 = Options.fromMap(optMap);
-        assertThrows(IllegalArgumentException.class, () -> TimeTravelUtil.resolveSnapshotFromOption(options1, snapshotManager), "scan.snapshot-id scan.tag-name scan.watermark and scan.timestamp-millis can contains only one");
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> TimeTravelUtil.resolveSnapshotFromOption(options1, snapshotManager),
+                "scan.snapshot-id scan.tag-name scan.watermark and scan.timestamp-millis can contains only one");
         write.close();
         commit.close();
     }
-
 }
