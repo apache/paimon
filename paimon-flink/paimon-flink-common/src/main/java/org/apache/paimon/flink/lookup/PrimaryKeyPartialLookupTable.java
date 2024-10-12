@@ -44,7 +44,7 @@ import java.util.Set;
 import java.util.function.Function;
 
 /** Lookup table for primary key which supports to read the LSM tree directly. */
-public class PrimaryKeyPartialLookupTable implements LookupTable {
+public class PrimaryKeyPartialLookupTable extends AsyncRefreshLookupTable {
 
     private final Function<Predicate, QueryExecutor> executorFactory;
     private final FixedBucketFromPkExtractor extractor;
@@ -58,6 +58,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
             Function<Predicate, QueryExecutor> executorFactory,
             FileStoreTable table,
             List<String> joinKey) {
+        super(table);
         this.executorFactory = executorFactory;
 
         if (table.bucketMode() != BucketMode.HASH_FIXED) {
@@ -131,14 +132,23 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
     }
 
     @Override
-    public void refresh() {
+    public void doRefresh() {
         queryExecutor.refresh();
     }
 
     @Override
+    public Long nextSnapshotId() {
+        return queryExecutor.nextSnapshotId();
+    }
+
+    @Override
     public void close() throws IOException {
-        if (queryExecutor != null) {
-            queryExecutor.close();
+        try {
+            super.close();
+        } finally {
+            if (queryExecutor != null) {
+                queryExecutor.close();
+            }
         }
     }
 
@@ -171,10 +181,11 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         InternalRow lookup(BinaryRow partition, int bucket, InternalRow key) throws IOException;
 
         void refresh();
+
+        Long nextSnapshotId();
     }
 
     static class LocalQueryExecutor implements QueryExecutor {
-
         private final LocalTableQuery tableQuery;
         private final StreamTableScan scan;
 
@@ -229,6 +240,11 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         }
 
         @Override
+        public Long nextSnapshotId() {
+            return scan.checkpoint();
+        }
+
+        @Override
         public void close() throws IOException {
             tableQuery.close();
         }
@@ -250,6 +266,11 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
         @Override
         public void refresh() {}
+
+        @Override
+        public Long nextSnapshotId() {
+            return null;
+        }
 
         @Override
         public void close() throws IOException {
