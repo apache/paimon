@@ -137,18 +137,14 @@ public class ManifestsTableTest extends TableTestBase {
 
     @Test
     public void testReadManifestsFromSpecifiedTimestampMillis() throws Exception {
-        Thread.sleep(10);
         write(table, GenericRow.of(3, 1, 1), GenericRow.of(3, 2, 1));
-        long time = System.currentTimeMillis();
-
         List<InternalRow> expectedRow = getExpectedResult(3L);
-
         manifestsTable =
                 (ManifestsTable)
                         manifestsTable.copy(
                                 Collections.singletonMap(
                                         CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
-                                        String.valueOf(time)));
+                                        String.valueOf(System.currentTimeMillis())));
         List<InternalRow> result = read(manifestsTable);
         assertThat(result).containsExactlyElementsOf(expectedRow);
     }
@@ -160,7 +156,7 @@ public class ManifestsTableTest extends TableTestBase {
                         manifestsTable.copy(
                                 Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "3"));
         assertThrows(
-                "Specified scan.snapshot-id 3 is not exist, you can set it in range from 1 to 2",
+                "Specified parameter scan.snapshot-id = 3 is not exist, you can set it in range from 1 to 2",
                 SnapshotNotExistException.class,
                 () -> read(manifestsTable));
     }

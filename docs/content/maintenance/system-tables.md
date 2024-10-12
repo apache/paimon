@@ -399,7 +399,7 @@ SELECT * FROM T$statistics;
 
 /*
 +--------------+------------+-----------------------+------------------+----------+
-|  snapshot_id |  schema_id |     mergedRecordCount | mergedRecordSize |  colstat |
+|  snapshot_id |  schema_id |     mergedRecordCount | mergedRecordSize |  colStat |
 +--------------+------------+-----------------------+------------------+----------+
 |            2 |          0 |              2        |         2        |    {}    |
 +--------------+------------+-----------------------+------------------+----------+

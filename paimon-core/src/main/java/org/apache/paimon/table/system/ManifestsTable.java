@@ -50,16 +50,24 @@ import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
+import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing committing snapshots of table. */
 public class ManifestsTable implements ReadonlyTable {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ManifestsTable.class);
+
     private static final long serialVersionUID = 1L;
 
     public static final String MANIFESTS = "manifests";
@@ -202,7 +210,7 @@ public class ManifestsTable implements ReadonlyTable {
         String tagName = coreOptions.scanTagName();
         Long timestampMills = coreOptions.scanTimestampMills();
 
-        Snapshot snapshot = null;
+        Snapshot snapshot;
         if (snapshotId != null) {
             // reminder user with snapshot id range
             if (!snapshotManager.snapshotExists(snapshotId)) {
@@ -210,14 +218,19 @@ public class ManifestsTable implements ReadonlyTable {
                 Long latestSnapshotId = snapshotManager.latestSnapshotId();
                 throw new SnapshotNotExistException(
                         String.format(
-                                "Specified scan.snapshot-id %s is not exist, you can set it in range from %s to %s",
-                                snapshotId, earliestSnapshotId, latestSnapshotId));
+                                "Specified parameter %s = %s is not exist, you can set it in range from %s to %s.",
+                                SCAN_SNAPSHOT_ID.key(),
+                                snapshotId,
+                                earliestSnapshotId,
+                                latestSnapshotId));
             }
             snapshot = snapshotManager.snapshot(snapshotId);
         } else if (!StringUtils.isEmpty(tagName)) {
             if (!dataTable.tagManager().tagExists(tagName)) {
                 throw new RuntimeException(
-                        String.format("Specified scan.tag-name %s is not exist.", tagName));
+                        String.format(
+                                "Specified parameter %s = %s is not exist.",
+                                SCAN_TAG_NAME.key(), tagName));
             }
             snapshot = dataTable.tagManager().tag(tagName).trimToSnapshot();
         } else if (timestampMills != null) {
@@ -227,6 +240,7 @@ public class ManifestsTable implements ReadonlyTable {
         }
 
         if (snapshot == null) {
+            LOG.warn("Check if your snapshot is empty.");
             return Collections.emptyList();
         }
         FileStorePathFactory fileStorePathFactory = dataTable.store().pathFactory();
