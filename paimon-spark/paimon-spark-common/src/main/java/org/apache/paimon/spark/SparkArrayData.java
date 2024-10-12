@@ -38,7 +38,7 @@ import static org.apache.paimon.spark.SparkInternalRow.fromPaimon;
 import static org.apache.paimon.utils.InternalRowUtils.copyArray;
 
 /** Spark {@link ArrayData} to wrap Paimon {@link InternalArray}. */
-public class SparkArrayData extends ArrayData {
+public class SparkArrayData extends org.apache.spark.sql.shims.ArrayData {
 
     private final DataType elementType;
 

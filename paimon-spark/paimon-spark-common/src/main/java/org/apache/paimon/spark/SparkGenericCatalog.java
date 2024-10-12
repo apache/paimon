@@ -202,7 +202,8 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
             return sparkCatalog.createTable(ident, schema, partitions, properties);
         } else {
             // delegate to the session catalog
-            return asTableCatalog().createTable(ident, schema, partitions, properties);
+            return org.apache.spark.sql.shims.createTable(
+                    asTableCatalog(), ident, schema, partitions, properties);
         }
     }
 
