@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-name: UTCase and ITCase Spark
+name: UTCase and ITCase Spark 3.x
 
 on:
   push:

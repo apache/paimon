@@ -43,6 +43,8 @@ class PushDownAggregatesTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
     if (numAggregates == 0) {
       assert(collect(df.queryExecution.executedPlan) {
         case scan: LocalTableScanExec => scan
+        // For compatibility with Spark3.x
+        case e if e.getClass.getName == "org.apache.spark.sql.execution.EmptyRelationExec" => e
       }.size == 1)
     }
   }

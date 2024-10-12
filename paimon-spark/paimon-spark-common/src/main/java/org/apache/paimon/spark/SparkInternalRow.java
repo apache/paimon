@@ -64,7 +64,7 @@ import java.util.Objects;
 import static org.apache.paimon.utils.InternalRowUtils.copyInternalRow;
 
 /** Spark {@link org.apache.spark.sql.catalyst.InternalRow} to wrap {@link InternalRow}. */
-public class SparkInternalRow extends org.apache.spark.sql.catalyst.InternalRow {
+public class SparkInternalRow extends org.apache.spark.sql.shims.InternalRow {
 
     private final RowType rowType;
 

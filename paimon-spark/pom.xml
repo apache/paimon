@@ -23,8 +23,8 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>paimon-parent</artifactId>
         <groupId>org.apache.paimon</groupId>
+        <artifactId>paimon-parent</artifactId>
         <version>1.0-SNAPSHOT</version>
     </parent>
 
@@ -39,10 +39,6 @@ under the License.
 
     <modules>
         <module>paimon-spark-common</module>
-        <module>paimon-spark-3.5</module>
-        <module>paimon-spark-3.4</module>
-        <module>paimon-spark-3.3</module>
-        <module>paimon-spark-3.2</module>
     </modules>
 
     <dependencyManagement>
