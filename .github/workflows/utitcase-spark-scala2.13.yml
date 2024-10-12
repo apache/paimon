@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-name: UTCase and ITCase Others
+name: UTCase and ITCase Spark on Scala 2.13
 
 on:
   push:
@@ -44,20 +44,20 @@ jobs:
         with:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'adopt'
-      - name: Build
-        run:  mvn -T 1C -B clean install -DskipTests
-      - name: Test
+      - name: Build Spark
+        run:  mvn -T 1C -B clean install -DskipTests -Pscala-2.13
+      - name: Test Spark
         timeout-minutes: 60
         run: |
           # run tests with random timezone to find out timezone related bugs
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          test_modules="!paimon-e2e-tests,"
-          for suffix in 3.5 3.4 3.3 3.2 common; do
-          test_modules+="!org.apache.paimon:paimon-spark-${suffix},"
+          test_modules=""
+          for suffix in common 3.5 3.4 3.3 3.2; do
+          test_modules+="org.apache.paimon:paimon-spark-${suffix},"
           done
           test_modules="${test_modules%,}"
-          mvn -T 1C -B clean install -pl "${test_modules}" -Pskip-paimon-flink-tests -Duser.timezone=$jvm_timezone
+          mvn -T 1C -B test -pl "${test_modules}" -Duser.timezone=$jvm_timezone -Pscala-2.13
         env:
           MAVEN_OPTS: -Xmx4096m
