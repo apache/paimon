@@ -28,20 +28,22 @@ import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Tests for {@link TimeTravelUtil}. */
 public class TimeTravelUtilsTest extends ScannerTestBase {
 
     @Test
-    public void testScan() throws Exception {
+    public void testResolveSnapshotFromOptions() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
 
         write.write(rowData(1, 10, 100L));
         commit.commit(0, write.prepareCommit(true, 0));
+
         long ts = System.currentTimeMillis();
 
         write.write(rowData(2, 30, 101L));
@@ -50,31 +52,32 @@ public class TimeTravelUtilsTest extends ScannerTestBase {
         write.write(rowData(3, 50, 500L));
         commit.commit(2, write.prepareCommit(true, 2));
 
-        HashMap<String, String> optMap = new HashMap<>();
+        HashMap<String, String> optMap = new HashMap<>(4);
         optMap.put("scan.snapshot-id", "2");
         CoreOptions options = CoreOptions.fromMap(optMap);
-        Snapshot snapshot = TimeTravelUtil.resolveSnapshotFromOption(options, snapshotManager);
-        assertThat(snapshot.id() == 2);
+        Snapshot snapshot = TimeTravelUtil.resolveSnapshotFromOptions(options, snapshotManager);
+        assertNotNull(snapshot);
+        assertTrue(snapshot.id() == 2);
 
         optMap.clear();
         optMap.put("scan.timestamp-millis", ts + "");
         options = CoreOptions.fromMap(optMap);
-        snapshot = TimeTravelUtil.resolveSnapshotFromOption(options, snapshotManager);
-        assertThat(snapshot.id() == 1);
+        snapshot = TimeTravelUtil.resolveSnapshotFromOptions(options, snapshotManager);
+        assertTrue(snapshot.id() == 1);
 
         table.createTag("tag3", 3);
         optMap.clear();
         optMap.put("scan.tag-name", "tag3");
         options = CoreOptions.fromMap(optMap);
-        snapshot = TimeTravelUtil.resolveSnapshotFromOption(options, snapshotManager);
-        assertThat(snapshot.id() == 3);
+        snapshot = TimeTravelUtil.resolveSnapshotFromOptions(options, snapshotManager);
+        assertTrue(snapshot.id() == 3);
 
         // if contain more scan.xxx config would throw out
         optMap.put("scan.snapshot-id", "2");
         CoreOptions options1 = CoreOptions.fromMap(optMap);
         assertThrows(
                 IllegalArgumentException.class,
-                () -> TimeTravelUtil.resolveSnapshotFromOption(options1, snapshotManager),
+                () -> TimeTravelUtil.resolveSnapshotFromOptions(options1, snapshotManager),
                 "scan.snapshot-id scan.tag-name scan.watermark and scan.timestamp-millis can contains only one");
         write.close();
         commit.close();

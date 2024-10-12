@@ -24,22 +24,27 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.ArrayList;
 import java.util.List;
 
-/** Contains time travel functions. */
+/** The util class of resolve snapshot from scan params for time travel. */
 public class TimeTravelUtil {
 
-    public static String[] scanKeys = {
+    private static String[] scanKeys = {
         CoreOptions.SCAN_SNAPSHOT_ID.key(),
         CoreOptions.SCAN_TAG_NAME.key(),
         CoreOptions.SCAN_WATERMARK.key(),
         CoreOptions.SCAN_TIMESTAMP_MILLIS.key()
     };
 
-    public static Snapshot resolveSnapshotFromOption(
+    private static final Logger LOG = LoggerFactory.getLogger(TimeTravelUtil.class);
+
+    public static Snapshot resolveSnapshotFromOptions(
             CoreOptions options, SnapshotManager snapshotManager) {
-        List<String> scanHandleKey = new ArrayList<>();
+        List<String> scanHandleKey = new ArrayList<>(1);
         for (String key : scanKeys) {
             if (options.toConfiguration().containsKey(key)) {
                 scanHandleKey.add(key);
@@ -47,6 +52,7 @@ public class TimeTravelUtil {
         }
 
         if (scanHandleKey.size() == 0) {
+            LOG.warn("Not set any time travel parameter.");
             return null;
         }
 
@@ -62,18 +68,19 @@ public class TimeTravelUtil {
         String key = scanHandleKey.get(0);
         Snapshot snapshot = null;
         if (key.equals(CoreOptions.SCAN_SNAPSHOT_ID.key())) {
-            snapshot = handleSnapshotId(snapshotManager, options);
+            snapshot = resolveSnapshotBySnapshotId(snapshotManager, options);
         } else if (key.equals(CoreOptions.SCAN_WATERMARK.key())) {
-            snapshot = handleWatermark(snapshotManager, options);
+            snapshot = resolveSnapshotByWatermark(snapshotManager, options);
         } else if (key.equals(CoreOptions.SCAN_TIMESTAMP_MILLIS.key())) {
-            snapshot = handleTimestamp(snapshotManager, options);
+            snapshot = resolveSnapshotByTimestamp(snapshotManager, options);
         } else if (key.equals(CoreOptions.SCAN_TAG_NAME.key())) {
-            snapshot = handleTagName(snapshotManager, options);
+            snapshot = resolveSnapshotByTagName(snapshotManager, options);
         }
         return snapshot;
     }
 
-    private static Snapshot handleSnapshotId(SnapshotManager snapshotManager, CoreOptions options) {
+    private static Snapshot resolveSnapshotBySnapshotId(
+            SnapshotManager snapshotManager, CoreOptions options) {
         Long snapshotId = options.scanSnapshotId();
         if (snapshotId != null && snapshotManager.snapshotExists(snapshotId)) {
             return snapshotManager.snapshot(snapshotId);
@@ -81,17 +88,20 @@ public class TimeTravelUtil {
         return null;
     }
 
-    private static Snapshot handleTimestamp(SnapshotManager snapshotManager, CoreOptions options) {
+    private static Snapshot resolveSnapshotByTimestamp(
+            SnapshotManager snapshotManager, CoreOptions options) {
         Long timestamp = options.scanTimestampMills();
         return snapshotManager.earlierOrEqualTimeMills(timestamp);
     }
 
-    private static Snapshot handleWatermark(SnapshotManager snapshotManager, CoreOptions options) {
+    private static Snapshot resolveSnapshotByWatermark(
+            SnapshotManager snapshotManager, CoreOptions options) {
         Long watermark = options.scanWatermark();
         return snapshotManager.laterOrEqualWatermark(watermark);
     }
 
-    private static Snapshot handleTagName(SnapshotManager snapshotManager, CoreOptions options) {
+    private static Snapshot resolveSnapshotByTagName(
+            SnapshotManager snapshotManager, CoreOptions options) {
         String tagName = options.scanTagName();
         TagManager tagManager =
                 new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
