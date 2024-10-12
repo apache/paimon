@@ -86,6 +86,13 @@ public class SortedRun {
 
     @VisibleForTesting
     public void validate(Comparator<InternalRow> comparator) {
+
+        Preconditions.checkNotNull(comparator, "Comparator cannot be null");
+
+        if (files == null || files.size() <= 1) {
+            return;
+        }
+
         for (int i = 1; i < files.size(); i++) {
             Preconditions.checkState(
                     comparator.compare(files.get(i).minKey(), files.get(i - 1).maxKey()) > 0,
