@@ -68,17 +68,31 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
             inputData.addData((2, "b"))
             stream.processAllAvailable()
             checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
+            val ts = System.currentTimeMillis
 
             // snapshot-3
             inputData.addData((2, "b2"))
             stream.processAllAvailable()
             checkAnswer(query(), Row(1, "a") :: Row(2, "b2") :: Nil)
+
+            // snapshot-4
+            inputData.addData((2, "b3"))
+            stream.processAllAvailable()
+            checkAnswer(query(), Row(1, "a") :: Row(2, "b3") :: Nil)
+
             assertThrows[RuntimeException] {
               spark.sql("CALL paimon.sys.rollback(table => 'test.T_exception', version =>  '2')")
             }
             // rollback to snapshot
             checkAnswer(
-              spark.sql("CALL paimon.sys.rollback(table => 'test.T', version => '2')"),
+              spark.sql("CALL paimon.sys.rollback(table => 'test.T', version => '3')"),
+              Row(true) :: Nil)
+            checkAnswer(query(), Row(1, "a") :: Row(2, "b2") :: Nil)
+
+            // rollback to timestamp
+            checkAnswer(
+              spark.sql(
+                s"CALL paimon.sys.rollback(table => 'test.T', version => '$ts', isTimestamp => true)"),
               Row(true) :: Nil)
             checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
 

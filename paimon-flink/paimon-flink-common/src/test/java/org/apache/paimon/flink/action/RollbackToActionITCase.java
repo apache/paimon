@@ -51,6 +51,64 @@ public class RollbackToActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"action", "procedure_named", "procedure_indexed"})
+    public void rollbackToTimestampTest(String invoker) throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        ROW_TYPE,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = writeBuilder.newWrite();
+        commit = writeBuilder.newCommit();
+
+        writeData(rowData(1L, BinaryString.fromString("Hi")));
+        writeData(rowData(2L, BinaryString.fromString("Hello")));
+        writeData(rowData(2L, BinaryString.fromString("World")));
+        long ts = System.currentTimeMillis();
+        writeData(rowData(2L, BinaryString.fromString("Flink")));
+
+        switch (invoker) {
+            case "action":
+                createAction(
+                                RollbackToAction.class,
+                                "rollback_to",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--version",
+                                ts + "",
+                                "--is_timestamp",
+                                "true")
+                        .run();
+                break;
+            case "procedure_indexed":
+                executeSQL(
+                        String.format(
+                                "CALL sys.rollback_to('%s.%s', '', null, cast(%s as bigint))",
+                                database, tableName, ts));
+                break;
+            case "procedure_named":
+                executeSQL(
+                        String.format(
+                                "CALL sys.rollback_to(`table` => '%s.%s', `timestamp` => %s)",
+                                database, tableName, ts));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
+        }
+
+        testBatchRead(
+                "SELECT * FROM `" + tableName + "`",
+                Arrays.asList(Row.of(1L, "Hi"), Row.of(2L, "World")));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"action", "procedure_named", "procedure_indexed"})
     public void rollbackToSnapshotTest(String invoker) throws Exception {
         FileStoreTable table =
                 createFileStoreTable(

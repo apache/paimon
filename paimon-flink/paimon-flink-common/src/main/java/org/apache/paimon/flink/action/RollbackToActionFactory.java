@@ -30,6 +30,8 @@ public class RollbackToActionFactory implements ActionFactory {
 
     private static final String VERSION = "version";
 
+    private static final String IS_TIMESTAMP = "is_timestamp";
+
     @Override
     public String identifier() {
         return IDENTIFIER;
@@ -41,12 +43,18 @@ public class RollbackToActionFactory implements ActionFactory {
 
         checkRequiredArgument(params, VERSION);
         String version = params.get(VERSION);
+        Boolean isTimestamp = Boolean.parseBoolean(params.get(IS_TIMESTAMP));
 
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
 
         RollbackToAction action =
                 new RollbackToAction(
-                        tablePath.f0, tablePath.f1, tablePath.f2, version, catalogConfig);
+                        tablePath.f0,
+                        tablePath.f1,
+                        tablePath.f2,
+                        version,
+                        isTimestamp,
+                        catalogConfig);
 
         return Optional.of(action);
     }
@@ -60,9 +68,9 @@ public class RollbackToActionFactory implements ActionFactory {
         System.out.println("Syntax:");
         System.out.println(
                 "  rollback_to --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> --version <version_string>");
+                        + "--table <table_name> --version <version_string> --is_timestamp <is_timestamp>");
         System.out.println(
-                "  <version_string> can be a long value representing a snapshot ID or a tag name.");
+                "  <version_string> can be a long value representing a snapshot ID or a tag name or a timestamp.");
         System.out.println();
     }
 }
