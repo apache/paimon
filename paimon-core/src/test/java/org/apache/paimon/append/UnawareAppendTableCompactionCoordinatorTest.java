@@ -190,6 +190,7 @@ public class UnawareAppendTableCompactionCoordinatorTest {
                 0,
                 0L,
                 null,
-                FileSource.APPEND);
+                FileSource.APPEND,
+                null);
     }
 }

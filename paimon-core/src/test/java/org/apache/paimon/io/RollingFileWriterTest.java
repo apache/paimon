@@ -35,6 +35,7 @@ import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -62,6 +63,10 @@ public class RollingFileWriterTest {
     private RollingFileWriter<InternalRow, DataFileMeta> rollingFileWriter;
 
     public void initialize(String identifier) {
+        initialize(identifier, false);
+    }
+
+    public void initialize(String identifier, boolean statsDenseStore) {
         FileFormat fileFormat = FileFormat.fromIdentifier(identifier, new Options());
         rollingFileWriter =
                 new RollingFileWriter<>(
@@ -94,7 +99,8 @@ public class RollingFileWriterTest {
                                                 SCHEMA.getFieldNames()),
                                         new FileIndexOptions(),
                                         FileSource.APPEND,
-                                        true),
+                                        true,
+                                        statsDenseStore),
                         TARGET_FILE_SIZE);
     }
 
@@ -122,5 +128,17 @@ public class RollingFileWriterTest {
         File dataDir = tempDir.resolve("bucket-0").toFile();
         File[] files = dataDir.listFiles();
         assertThat(files).isNotNull().hasSize(expected);
+    }
+
+    @Test
+    public void testStatsDenseStore() throws IOException {
+        initialize("parquet", true);
+        for (int i = 0; i < 1000; i++) {
+            rollingFileWriter.write(GenericRow.of(i));
+        }
+        rollingFileWriter.close();
+        DataFileMeta file = rollingFileWriter.result().get(0);
+        assertThat(file.valueStatsCols()).isNull();
+        assertThat(file.valueStats().minValues().getFieldCount()).isEqualTo(SCHEMA.getFieldCount());
     }
 }

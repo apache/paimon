@@ -21,7 +21,9 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.data.serializer.VersionedSerializer;
 import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMeta08Serializer;
+import org.apache.paimon.io.DataFileMeta09Serializer;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.DataInputDeserializer;
@@ -29,6 +31,7 @@ import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.io.IndexIncrement;
+import org.apache.paimon.utils.IOExceptionSupplier;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -42,7 +45,7 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 /** {@link VersionedSerializer} for {@link CommitMessage}. */
 public class CommitMessageSerializer implements VersionedSerializer<CommitMessage> {
 
-    private static final int CURRENT_VERSION = 3;
+    private static final int CURRENT_VERSION = 4;
 
     private final DataFileMetaSerializer dataFileSerializer;
     private final IndexFileMetaSerializer indexEntrySerializer;
@@ -104,18 +107,20 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
     }
 
     private CommitMessage deserialize(int version, DataInputView view) throws IOException {
-        if (version == CURRENT_VERSION) {
+        if (version >= 3) {
+            IOExceptionSupplier<List<DataFileMeta>> fileDeserializer =
+                    () -> dataFileSerializer.deserializeList(view);
+            if (version == 3) {
+                DataFileMeta09Serializer serializer = new DataFileMeta09Serializer();
+                fileDeserializer = () -> serializer.deserializeList(view);
+            }
             return new CommitMessageImpl(
                     deserializeBinaryRow(view),
                     view.readInt(),
                     new DataIncrement(
-                            dataFileSerializer.deserializeList(view),
-                            dataFileSerializer.deserializeList(view),
-                            dataFileSerializer.deserializeList(view)),
+                            fileDeserializer.get(), fileDeserializer.get(), fileDeserializer.get()),
                     new CompactIncrement(
-                            dataFileSerializer.deserializeList(view),
-                            dataFileSerializer.deserializeList(view),
-                            dataFileSerializer.deserializeList(view)),
+                            fileDeserializer.get(), fileDeserializer.get(), fileDeserializer.get()),
                     new IndexIncrement(
                             indexEntrySerializer.deserializeList(view),
                             indexEntrySerializer.deserializeList(view)));

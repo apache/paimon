@@ -55,4 +55,8 @@ public class SystemFields {
     public static boolean isSystemField(int fieldId) {
         return fieldId >= SYSTEM_FIELD_ID_START;
     }
+
+    public static boolean isSystemField(String field) {
+        return field.startsWith(KEY_FIELD_PREFIX) || SYSTEM_FIELD_NAMES.contains(field);
+    }
 }

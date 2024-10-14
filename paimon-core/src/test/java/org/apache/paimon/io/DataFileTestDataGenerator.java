@@ -156,15 +156,16 @@ public class DataFileTestDataGenerator {
                         kvs.size(),
                         minKey,
                         maxKey,
-                        keyStatsSerializer.toBinary(keyStatsCollector.extract()),
-                        valueStatsSerializer.toBinary(valueStatsCollector.extract()),
+                        keyStatsSerializer.toBinaryAllMode(keyStatsCollector.extract()),
+                        valueStatsSerializer.toBinaryAllMode(valueStatsCollector.extract()),
                         minSequenceNumber,
                         maxSequenceNumber,
                         0,
                         level,
                         kvs.stream().filter(kv -> kv.valueKind().isRetract()).count(),
                         null,
-                        FileSource.APPEND),
+                        FileSource.APPEND,
+                        null),
                 kvs);
     }
 

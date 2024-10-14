@@ -94,7 +94,8 @@ public abstract class ManifestFileMetaTestBase {
                         Timestamp.fromEpochMillis(200000),
                         0L, // not used
                         embeddedIndex, // not used
-                        FileSource.APPEND));
+                        FileSource.APPEND,
+                        null));
     }
 
     protected ManifestFileMeta makeManifest(ManifestEntry... entries) {
@@ -272,6 +273,7 @@ public abstract class ManifestFileMetaTestBase {
                         0, // not used
                         0L,
                         null,
-                        FileSource.APPEND));
+                        FileSource.APPEND,
+                        null));
     }
 }

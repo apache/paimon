@@ -94,11 +94,12 @@ public class StatsTestUtils {
         for (int i = 0; i < fieldCount; i++) {
             array[i] = new SimpleColStats(null, null, 0L);
         }
-        return statsConverter.toBinary(array);
+        return statsConverter.toBinaryAllMode(array);
     }
 
     public static SimpleStats newSimpleStats(int min, int max) {
         SimpleStatsConverter statsConverter = new SimpleStatsConverter(RowType.of(new IntType()));
-        return statsConverter.toBinary(new SimpleColStats[] {new SimpleColStats(min, max, 0L)});
+        return statsConverter.toBinaryAllMode(
+                new SimpleColStats[] {new SimpleColStats(min, max, 0L)});
     }
 }

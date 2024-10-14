@@ -137,7 +137,7 @@ public class AppendOnlyWriterTest {
                 new SimpleColStats[] {
                     initStats(1, 1, 0), initStats("AAA", "AAA", 0), initStats(PART, PART, 0)
                 };
-        assertThat(meta.valueStats()).isEqualTo(STATS_SERIALIZER.toBinary(expected));
+        assertThat(meta.valueStats()).isEqualTo(STATS_SERIALIZER.toBinaryAllMode(expected));
 
         assertThat(meta.minSequenceNumber()).isEqualTo(0);
         assertThat(meta.maxSequenceNumber()).isEqualTo(0);
@@ -200,7 +200,7 @@ public class AppendOnlyWriterTest {
                         initStats(String.format("%03d", start), String.format("%03d", end - 1), 0),
                         initStats(PART, PART, 0)
                     };
-            assertThat(meta.valueStats()).isEqualTo(STATS_SERIALIZER.toBinary(expected));
+            assertThat(meta.valueStats()).isEqualTo(STATS_SERIALIZER.toBinaryAllMode(expected));
 
             assertThat(meta.minSequenceNumber()).isEqualTo(start);
             assertThat(meta.maxSequenceNumber()).isEqualTo(end - 1);
@@ -243,7 +243,7 @@ public class AppendOnlyWriterTest {
                         initStats(String.format("%03d", min), String.format("%03d", max), 0),
                         initStats(PART, PART, 0)
                     };
-            assertThat(meta.valueStats()).isEqualTo(STATS_SERIALIZER.toBinary(expected));
+            assertThat(meta.valueStats()).isEqualTo(STATS_SERIALIZER.toBinaryAllMode(expected));
 
             assertThat(meta.minSequenceNumber()).isEqualTo(min);
             assertThat(meta.maxSequenceNumber()).isEqualTo(max);
@@ -633,7 +633,8 @@ public class AppendOnlyWriterTest {
                                 options, AppendOnlyWriterTest.SCHEMA.getFieldNames()),
                         MemorySize.MAX_VALUE,
                         new FileIndexOptions(),
-                        true);
+                        true,
+                        false);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());
@@ -649,7 +650,7 @@ public class AppendOnlyWriterTest {
                 fileName,
                 toCompact.stream().mapToLong(DataFileMeta::fileSize).sum(),
                 toCompact.stream().mapToLong(DataFileMeta::rowCount).sum(),
-                STATS_SERIALIZER.toBinary(
+                STATS_SERIALIZER.toBinaryAllMode(
                         new SimpleColStats[] {
                             initStats(
                                     toCompact.get(0).valueStats().minValues().getInt(0),
@@ -674,6 +675,9 @@ public class AppendOnlyWriterTest {
                 minSeq,
                 maxSeq,
                 toCompact.get(0).schemaId(),
-                FileSource.APPEND);
+                Collections.emptyList(),
+                null,
+                FileSource.APPEND,
+                null);
     }
 }

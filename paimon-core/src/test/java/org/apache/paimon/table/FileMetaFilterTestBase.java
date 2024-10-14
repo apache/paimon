@@ -23,8 +23,8 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.stats.SimpleStats;
-import org.apache.paimon.stats.SimpleStatsConverter;
-import org.apache.paimon.stats.SimpleStatsConverters;
+import org.apache.paimon.stats.SimpleStatsEvolution;
+import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
 
@@ -78,14 +78,16 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                             .containsAll(filesName);
 
                     Function<Long, List<DataField>> schemaFields = id -> schemas.get(id).fields();
-                    SimpleStatsConverters converters =
-                            new SimpleStatsConverters(schemaFields, table.schema().id());
+                    SimpleStatsEvolutions converters =
+                            new SimpleStatsEvolutions(schemaFields, table.schema().id());
                     for (DataFileMeta fileMeta : fileMetaList) {
                         SimpleStats stats = getTableValueStats(fileMeta);
-                        SimpleStatsConverter serializer =
-                                converters.getOrCreate(fileMeta.schemaId());
-                        InternalRow min = serializer.evolution(stats.minValues());
-                        InternalRow max = serializer.evolution(stats.maxValues());
+                        SimpleStatsEvolution.Result result =
+                                converters
+                                        .getOrCreate(fileMeta.schemaId())
+                                        .evolution(stats, null, null);
+                        InternalRow min = result.minValues();
+                        InternalRow max = result.maxValues();
 
                         assertThat(min.getFieldCount()).isEqualTo(6);
 
@@ -184,16 +186,18 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                     assertThat(filterAllSplits).isEqualTo(allSplits);
 
                     Function<Long, List<DataField>> schemaFields = id -> schemas.get(id).fields();
-                    SimpleStatsConverters converters =
-                            new SimpleStatsConverters(schemaFields, table.schema().id());
+                    SimpleStatsEvolutions converters =
+                            new SimpleStatsEvolutions(schemaFields, table.schema().id());
                     Set<String> filterFileNames = new HashSet<>();
                     for (DataSplit dataSplit : filterAllSplits) {
                         for (DataFileMeta dataFileMeta : dataSplit.dataFiles()) {
                             SimpleStats stats = getTableValueStats(dataFileMeta);
-                            SimpleStatsConverter serializer =
-                                    converters.getOrCreate(dataFileMeta.schemaId());
-                            InternalRow min = serializer.evolution(stats.minValues());
-                            InternalRow max = serializer.evolution(stats.maxValues());
+                            SimpleStatsEvolution.Result result =
+                                    converters
+                                            .getOrCreate(dataFileMeta.schemaId())
+                                            .evolution(stats, null, null);
+                            InternalRow min = result.minValues();
+                            InternalRow max = result.maxValues();
                             int minValue = min.getInt(1);
                             int maxValue = max.getInt(1);
                             if (minValue >= 14
@@ -263,15 +267,17 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
 
                     Set<String> filterFileNames = new HashSet<>();
                     Function<Long, List<DataField>> schemaFields = id -> schemas.get(id).fields();
-                    SimpleStatsConverters converters =
-                            new SimpleStatsConverters(schemaFields, table.schema().id());
+                    SimpleStatsEvolutions converters =
+                            new SimpleStatsEvolutions(schemaFields, table.schema().id());
                     for (DataSplit dataSplit : allSplits) {
                         for (DataFileMeta dataFileMeta : dataSplit.dataFiles()) {
                             SimpleStats stats = getTableValueStats(dataFileMeta);
-                            SimpleStatsConverter serializer =
-                                    converters.getOrCreate(dataFileMeta.schemaId());
-                            InternalRow min = serializer.evolution(stats.minValues());
-                            InternalRow max = serializer.evolution(stats.maxValues());
+                            SimpleStatsEvolution.Result result =
+                                    converters
+                                            .getOrCreate(dataFileMeta.schemaId())
+                                            .evolution(stats, null, null);
+                            InternalRow min = result.minValues();
+                            InternalRow max = result.maxValues();
                             Integer minValue = min.isNullAt(3) ? null : min.getInt(3);
                             Integer maxValue = max.isNullAt(3) ? null : max.getInt(3);
                             if (minValue != null

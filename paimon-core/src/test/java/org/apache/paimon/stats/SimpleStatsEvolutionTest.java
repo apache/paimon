@@ -36,8 +36,8 @@ import java.util.Collections;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link SimpleStatsConverter}. */
-public class SimpleStatsConverterTest {
+/** Tests for {@link SimpleStatsEvolution}. */
+public class SimpleStatsEvolutionTest {
 
     @Test
     public void testFromBinary() {
@@ -73,8 +73,8 @@ public class SimpleStatsConverterTest {
                 SchemaEvolutionUtil.createIndexCastMapping(
                         tableSchema.fields(), dataSchema.fields());
         int[] indexMapping = indexCastMapping.getIndexMapping();
-        SimpleStatsConverter serializer =
-                new SimpleStatsConverter(
+        SimpleStatsEvolution evolution =
+                new SimpleStatsEvolution(
                         tableSchema.logicalRowType(),
                         indexMapping,
                         indexCastMapping.getCastMapping());
@@ -83,10 +83,10 @@ public class SimpleStatsConverterTest {
         Long[] nullCounts = new Long[] {1L, 0L, 10L, 100L};
         SimpleStats stats =
                 new SimpleStats(minRowData, maxRowData, BinaryArray.fromLongArray(nullCounts));
-
-        InternalRow min = serializer.evolution(stats.minValues());
-        InternalRow max = serializer.evolution(stats.maxValues());
-        InternalArray nulls = serializer.evolution(stats.nullCounts(), 1000L);
+        SimpleStatsEvolution.Result result = evolution.evolution(stats, 1000L, null);
+        InternalRow min = result.minValues();
+        InternalRow max = result.maxValues();
+        InternalArray nulls = result.nullCounts();
 
         checkFieldStats(min, max, nulls, 0, 2, 99, 0L);
         checkFieldStats(min, max, nulls, 1, 4, 97, 100L);
