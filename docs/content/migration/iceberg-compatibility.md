@@ -345,6 +345,28 @@ You can configure the following table option, so that Paimon is forced to perfor
 Note that full compaction is a resource-consuming process, so the value of this table option should not be too small.
 We recommend full compaction to be performed once or twice per hour.
 
+## Supported Types
+
+Paimon Iceberg compatibility currently supports the following data types.
+
+| Paimon Data Type           | Iceberg Data Type |
+|----------------------------|-------------------|
+| `BOOLEAN`                  | `boolean`         |
+| `INT`                      | `int`             |
+| `BIGINT`                   | `long`            |
+| `FLOAT`                    | `float`           |
+| `DOUBLE`                   | `double`          |
+| `DECIMAL`                  | `decimal`         |
+| `CHAR`                     | `string`          |
+| `VARCHAR`                  | `string`          |
+| `BINARY`                   | `binary`          |
+| `VARBINARY`                | `binary`          |
+| `DATE`                     | `date` |
+| `TIMESTAMP`*     | `timestamp`       |
+| `TIMESTAMP_LTZ`* | `timestamptz`      |
+
+*: `TIMESTAMP` and `TIMESTAMP_LTZ` type only support precision from 4 to 6
+
 ## Other Related Table Options
 
 <table class="table table-bordered">

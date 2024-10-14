@@ -20,8 +20,12 @@ package org.apache.paimon.iceberg.manifest;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.utils.Preconditions;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -79,9 +83,24 @@ public class IcebergConversions {
             case DECIMAL:
                 Decimal decimal = (Decimal) value;
                 return ByteBuffer.wrap((decimal.toUnscaledBytes()));
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                return timestampToByteBuffer(
+                        (Timestamp) value, ((TimestampType) type).getPrecision());
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return timestampToByteBuffer(
+                        (Timestamp) value, ((LocalZonedTimestampType) type).getPrecision());
             default:
                 throw new UnsupportedOperationException("Cannot serialize type: " + type);
         }
+    }
+
+    private static ByteBuffer timestampToByteBuffer(Timestamp timestamp, int precision) {
+        Preconditions.checkArgument(
+                precision > 3 && precision <= 6,
+                "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 6.");
+        return ByteBuffer.allocate(8)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .putLong(0, timestamp.toMicros());
     }
 
     public static Object toPaimonObject(DataType type, byte[] bytes) {
@@ -112,6 +131,15 @@ public class IcebergConversions {
                 DecimalType decimalType = (DecimalType) type;
                 return Decimal.fromUnscaledBytes(
                         bytes, decimalType.getPrecision(), decimalType.getScale());
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                int timestampPrecision = ((TimestampType) type).getPrecision();
+                long timestampLong =
+                        ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getLong();
+                Preconditions.checkArgument(
+                        timestampPrecision > 3 && timestampPrecision <= 6,
+                        "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 6.");
+                return Timestamp.fromMicros(timestampLong);
             default:
                 throw new UnsupportedOperationException("Cannot deserialize type: " + type);
         }

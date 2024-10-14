@@ -24,6 +24,13 @@ import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.data.IcebergGenerics;
+import org.apache.iceberg.data.Record;
+import org.apache.iceberg.expressions.Expressions;
+import org.apache.iceberg.hadoop.HadoopCatalog;
+import org.apache.iceberg.io.CloseableIterable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -192,7 +199,10 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                         + "  v_decimal DECIMAL(8, 3),\n"
                         + "  v_varchar STRING,\n"
                         + "  v_varbinary VARBINARY(20),\n"
-                        + "  v_date DATE\n"
+                        + "  v_date DATE,\n"
+                        // it seems that Iceberg Flink connector has some bug when filtering a
+                        // timestamp_ltz, so we don't test it here
+                        + "  v_timestamp TIMESTAMP(6)\n"
                         + ") PARTITIONED BY (pt) WITH (\n"
                         + "  'metadata.iceberg.storage' = 'hadoop-catalog',\n"
                         + "  'file.format' = '"
@@ -201,9 +211,9 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                         + ")");
         tEnv.executeSql(
                         "INSERT INTO paimon.`default`.T VALUES "
-                                + "(1, 1, 1, true, 10, CAST(100.0 AS FLOAT), 1000.0, 123.456, 'cat', CAST('B_cat' AS VARBINARY(20)), DATE '2024-10-10'), "
-                                + "(2, 2, 2, false, 20, CAST(200.0 AS FLOAT), 2000.0, 234.567, 'dog', CAST('B_dog' AS VARBINARY(20)), DATE '2024-10-20'), "
-                                + "(3, 3, CAST(NULL AS INT), CAST(NULL AS BOOLEAN), CAST(NULL AS BIGINT), CAST(NULL AS FLOAT), CAST(NULL AS DOUBLE), CAST(NULL AS DECIMAL(8, 3)), CAST(NULL AS STRING), CAST(NULL AS VARBINARY(20)), CAST(NULL AS DATE))")
+                                + "(1, 1, 1, true, 10, CAST(100.0 AS FLOAT), 1000.0, 123.456, 'cat', CAST('B_cat' AS VARBINARY(20)), DATE '2024-10-10', TIMESTAMP '2024-10-10 11:22:33.123456'), "
+                                + "(2, 2, 2, false, 20, CAST(200.0 AS FLOAT), 2000.0, 234.567, 'dog', CAST('B_dog' AS VARBINARY(20)), DATE '2024-10-20', TIMESTAMP '2024-10-20 11:22:33.123456'), "
+                                + "(3, 3, CAST(NULL AS INT), CAST(NULL AS BOOLEAN), CAST(NULL AS BIGINT), CAST(NULL AS FLOAT), CAST(NULL AS DOUBLE), CAST(NULL AS DECIMAL(8, 3)), CAST(NULL AS STRING), CAST(NULL AS VARBINARY(20)), CAST(NULL AS DATE), CAST(NULL AS TIMESTAMP(6)))")
                 .await();
 
         tEnv.executeSql(
@@ -218,7 +228,8 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                         + "  v_decimal DECIMAL(8, 3),\n"
                         + "  v_varchar STRING,\n"
                         + "  v_varbinary VARBINARY(20),\n"
-                        + "  v_date DATE\n"
+                        + "  v_date DATE,\n"
+                        + "  v_timestamp TIMESTAMP(6)\n"
                         + ") PARTITIONED BY (pt) WITH (\n"
                         + "  'connector' = 'iceberg',\n"
                         + "  'catalog-type' = 'hadoop',\n"
@@ -246,6 +257,11 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                 .containsExactly(Row.of(1));
         assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_date = '2024-10-10'")))
                 .containsExactly(Row.of(1));
+        assertThat(
+                        collect(
+                                tEnv.executeSql(
+                                        "SELECT id FROM T where v_timestamp = TIMESTAMP '2024-10-10 11:22:33.123456'")))
+                .containsExactly(Row.of(1));
         assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_int IS NULL")))
                 .containsExactly(Row.of(3));
         assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_boolean IS NULL")))
@@ -264,6 +280,65 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                 .containsExactly(Row.of(3));
         assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_date IS NULL")))
                 .containsExactly(Row.of(3));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_timestamp IS NULL")))
+                .containsExactly(Row.of(3));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "parquet"})
+    public void testFilterTimestampLtz(String format) throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().parallelism(2).build();
+        tEnv.executeSql(
+                "CREATE CATALOG paimon WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql(
+                "CREATE TABLE paimon.`default`.T (\n"
+                        + "  id INT,"
+                        + "  v_timestampltz TIMESTAMP_LTZ(6)\n"
+                        + ") WITH (\n"
+                        + "  'metadata.iceberg.storage' = 'hadoop-catalog',\n"
+                        + "  'file.format' = '"
+                        + format
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql(
+                        "INSERT INTO paimon.`default`.T VALUES "
+                                + "(1, CAST(TO_TIMESTAMP_LTZ(1100000000321, 3) AS TIMESTAMP_LTZ(6))), "
+                                + "(2, CAST(TO_TIMESTAMP_LTZ(1200000000321, 3) AS TIMESTAMP_LTZ(6))), "
+                                + "(3, CAST(NULL AS TIMESTAMP_LTZ(6)))")
+                .await();
+
+        HadoopCatalog icebergCatalog =
+                new HadoopCatalog(new Configuration(), warehouse + "/iceberg");
+        TableIdentifier icebergIdentifier = TableIdentifier.of("default", "T");
+        org.apache.iceberg.Table icebergTable = icebergCatalog.loadTable(icebergIdentifier);
+
+        CloseableIterable<Record> result =
+                IcebergGenerics.read(icebergTable)
+                        .where(Expressions.equal("v_timestampltz", 1100000000321000L))
+                        .build();
+        List<Object> actual = new ArrayList<>();
+        for (Record record : result) {
+            actual.add(record.get(0));
+        }
+        result.close();
+        assertThat(actual).containsExactly(1);
+
+        result =
+                IcebergGenerics.read(icebergTable)
+                        .where(Expressions.isNull("v_timestampltz"))
+                        .build();
+        actual = new ArrayList<>();
+        for (Record record : result) {
+            actual.add(record.get(0));
+        }
+        result.close();
+        assertThat(actual).containsExactly(3);
     }
 
     @ParameterizedTest

@@ -97,6 +97,7 @@ under the License.
         <flink.forkCount>1C</flink.forkCount>
         <flink.reuseForks>true</flink.reuseForks>
         <testcontainers.version>1.19.1</testcontainers.version>
+        <iceberg.version>1.6.1</iceberg.version>
 
         <!-- Can be set to any value to reproduce a specific build. -->
         <test.randomization.seed/>

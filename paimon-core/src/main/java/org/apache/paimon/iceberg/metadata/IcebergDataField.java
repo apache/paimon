@@ -20,8 +20,10 @@ package org.apache.paimon.iceberg.metadata;
 
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
@@ -57,6 +59,8 @@ public class IcebergDataField {
     @JsonProperty(FIELD_TYPE)
     private final String type;
 
+    @JsonIgnore private final DataType dataType;
+
     @JsonProperty(FIELD_DOC)
     private final String doc;
 
@@ -66,6 +70,7 @@ public class IcebergDataField {
                 dataField.name(),
                 !dataField.type().isNullable(),
                 toTypeString(dataField.type()),
+                dataField.type(),
                 dataField.description());
     }
 
@@ -76,10 +81,16 @@ public class IcebergDataField {
             @JsonProperty(FIELD_REQUIRED) boolean required,
             @JsonProperty(FIELD_TYPE) String type,
             @JsonProperty(FIELD_DOC) String doc) {
+        this(id, name, required, type, null, doc);
+    }
+
+    public IcebergDataField(
+            int id, String name, boolean required, String type, DataType dataType, String doc) {
         this.id = id;
         this.name = name;
         this.required = required;
         this.type = type;
+        this.dataType = dataType;
         this.doc = doc;
     }
 
@@ -110,7 +121,7 @@ public class IcebergDataField {
 
     @JsonIgnore
     public DataType dataType() {
-        return fromTypeString(type);
+        return Preconditions.checkNotNull(dataType);
     }
 
     private static String toTypeString(DataType dataType) {
@@ -137,35 +148,20 @@ public class IcebergDataField {
                 DecimalType decimalType = (DecimalType) dataType;
                 return String.format(
                         "decimal(%d, %d)", decimalType.getPrecision(), decimalType.getScale());
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                int timestampPrecision = ((TimestampType) dataType).getPrecision();
+                Preconditions.checkArgument(
+                        timestampPrecision > 3 && timestampPrecision <= 6,
+                        "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 6.");
+                return "timestamp";
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                int timestampLtzPrecision = ((LocalZonedTimestampType) dataType).getPrecision();
+                Preconditions.checkArgument(
+                        timestampLtzPrecision > 3 && timestampLtzPrecision <= 6,
+                        "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 6.");
+                return "timestamptz";
             default:
                 throw new UnsupportedOperationException("Unsupported data type: " + dataType);
-        }
-    }
-
-    private static DataType fromTypeString(String type) {
-        if ("boolean".equals(type)) {
-            return DataTypes.BOOLEAN();
-        } else if ("int".equals(type)) {
-            return DataTypes.INT();
-        } else if ("long".equals(type)) {
-            return DataTypes.BIGINT();
-        } else if ("float".equals(type)) {
-            return DataTypes.FLOAT();
-        } else if ("double".equals(type)) {
-            return DataTypes.DOUBLE();
-        } else if ("date".equals(type)) {
-            return DataTypes.DATE();
-        } else if ("string".equals(type)) {
-            return DataTypes.STRING();
-        } else if ("binary".equals(type)) {
-            return DataTypes.BYTES();
-        } else if (type.startsWith("decimal")) {
-            String[] precisionAndScale =
-                    type.substring("decimal(".length(), type.length() - 1).split(", ");
-            return DataTypes.DECIMAL(
-                    Integer.parseInt(precisionAndScale[0]), Integer.parseInt(precisionAndScale[1]));
-        } else {
-            throw new UnsupportedOperationException("Unsupported data type: " + type);
         }
     }
 
