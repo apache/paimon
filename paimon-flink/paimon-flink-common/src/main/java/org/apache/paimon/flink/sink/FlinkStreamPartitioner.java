@@ -24,6 +24,7 @@ import org.apache.flink.runtime.io.network.api.writer.SubtaskStateMapper;
 import org.apache.flink.runtime.plugable.SerializationDelegate;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
+import org.apache.flink.streaming.runtime.partitioner.RebalancePartitioner;
 import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
@@ -70,6 +71,16 @@ public class FlinkStreamPartitioner<T> extends StreamPartitioner<T> {
     public static <T> DataStream<T> partition(
             DataStream<T> input, ChannelComputer<T> channelComputer, Integer parallelism) {
         FlinkStreamPartitioner<T> partitioner = new FlinkStreamPartitioner<>(channelComputer);
+        PartitionTransformation<T> partitioned =
+                new PartitionTransformation<>(input.getTransformation(), partitioner);
+        if (parallelism != null) {
+            partitioned.setParallelism(parallelism);
+        }
+        return new DataStream<>(input.getExecutionEnvironment(), partitioned);
+    }
+
+    public static <T> DataStream<T> rebalance(DataStream<T> input, Integer parallelism) {
+        RebalancePartitioner<T> partitioner = new RebalancePartitioner<>();
         PartitionTransformation<T> partitioned =
                 new PartitionTransformation<>(input.getTransformation(), partitioner);
         if (parallelism != null) {

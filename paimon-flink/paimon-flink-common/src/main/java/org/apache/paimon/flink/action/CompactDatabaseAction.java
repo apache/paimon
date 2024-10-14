@@ -54,6 +54,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
+import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.rebalance;
 
 /** Database compact action for Flink. */
 public class CompactDatabaseAction extends ActionBase {
@@ -208,6 +209,11 @@ public class CompactDatabaseAction extends ActionBase {
                                         .toMillis())
                         .withPartitionIdleTime(partitionIdleTime);
 
+        Integer parallelism =
+                tableOptions.get(FlinkConnectorOptions.SINK_PARALLELISM) == null
+                        ? env.getParallelism()
+                        : tableOptions.get(FlinkConnectorOptions.SINK_PARALLELISM);
+
         // multi bucket table which has multi bucket in a partition like fix bucket and dynamic
         // bucket
         DataStream<RowData> awareBucketTableSource =
@@ -217,14 +223,16 @@ public class CompactDatabaseAction extends ActionBase {
                                 .withContinuousMode(isStreaming)
                                 .buildAwareBucketTableSource(),
                         new BucketsRowChannelComputer(),
-                        tableOptions.get(FlinkConnectorOptions.SINK_PARALLELISM));
+                        parallelism);
 
         // unaware bucket table
         DataStream<MultiTableUnawareAppendCompactionTask> unawareBucketTableSource =
-                sourceBuilder
-                        .withEnv(env)
-                        .withContinuousMode(isStreaming)
-                        .buildForUnawareBucketsTableSource();
+                rebalance(
+                        sourceBuilder
+                                .withEnv(env)
+                                .withContinuousMode(isStreaming)
+                                .buildForUnawareBucketsTableSource(),
+                        parallelism);
 
         new CombinedTableCompactorSink(catalogLoader(), tableOptions)
                 .sinkFrom(awareBucketTableSource, unawareBucketTableSource);

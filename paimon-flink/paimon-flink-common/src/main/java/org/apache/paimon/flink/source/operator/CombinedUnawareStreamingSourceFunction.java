@@ -110,8 +110,7 @@ public class CombinedUnawareStreamingSourceFunction
                         isParallel,
                         name,
                         Boundedness.CONTINUOUS_UNBOUNDED)
-                .forceNonParallel()
-                .rebalance();
+                .forceNonParallel();
     }
 
     @Override
