@@ -20,6 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
+import org.apache.paimon.catalog.CachingCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
@@ -163,7 +164,7 @@ public class FlinkCatalog extends AbstractCatalog {
     public static final String NUM_FILES_KEY = "numFiles";
     private final ClassLoader classLoader;
 
-    private final Catalog catalog;
+    private Catalog catalog;
     private final String name;
     private final boolean logStoreAutoRegister;
 
@@ -1154,6 +1155,10 @@ public class FlinkCatalog extends AbstractCatalog {
             }
         }
         try {
+            if (catalog instanceof CachingCatalog) {
+                catalog = ((CachingCatalog) catalog).wrapped();
+            }
+
             if (catalog instanceof HiveCatalog) {
                 Identifier identifier = toIdentifier(tablePath);
                 catalog.createPartition(identifier, partitionSpec.getPartitionSpec());
