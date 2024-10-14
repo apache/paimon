@@ -25,7 +25,7 @@ import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Expression, GenericInternalRow, PredicateHelper}
 import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, LogicalPlan}
-import org.apache.spark.sql.connector.catalog.{CatalogManager, Identifier, PaimonLookupCatalog, TableCatalog}
+import org.apache.spark.sql.connector.catalog.{Identifier, PaimonLookupCatalog, TableCatalog}
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.shim.PaimonCreateTableAsSelectStrategy
 
@@ -46,6 +46,7 @@ case class PaimonStrategy(spark: SparkSession)
     case c @ PaimonCallCommand(procedure, args) =>
       val input = buildInternalRow(args)
       PaimonCallExec(c.output, procedure, input) :: Nil
+
     case t @ ShowTagsCommand(PaimonCatalogAndIdentifier(catalog, ident)) =>
       ShowTagsExec(catalog, ident, t.output) :: Nil
     case _ => Nil
@@ -61,11 +62,11 @@ case class PaimonStrategy(spark: SparkSession)
 
   private object PaimonCatalogAndIdentifier {
     def unapply(identifier: Seq[String]): Option[(TableCatalog, Identifier)] = {
-      val catalogAndIdentifer =
+      val catalogAndIdentifier =
         SparkUtils.catalogAndIdentifier(spark, identifier.asJava, catalogManager.currentCatalog)
-      catalogAndIdentifer.catalog match {
+      catalogAndIdentifier.catalog match {
         case paimonCatalog: SparkCatalog =>
-          Some((paimonCatalog, catalogAndIdentifer.identifier()))
+          Some((paimonCatalog, catalogAndIdentifier.identifier()))
         case _ =>
           None
       }

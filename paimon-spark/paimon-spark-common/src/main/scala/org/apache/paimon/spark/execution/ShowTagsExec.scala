@@ -42,7 +42,8 @@ case class ShowTagsExec(catalog: TableCatalog, ident: Identifier, out: Seq[Attri
         val tagNames = paimonTable.tagManager().allTagNames()
         tags = tagNames.asScala.toList.sorted.map(t => InternalRow(UTF8String.fromString(t)))
       case t =>
-        throw new UnsupportedOperationException(s"Can not show tags for non-paimon table: $t")
+        throw new UnsupportedOperationException(
+          s"Can not show tags for non-paimon FileStoreTable: $t")
     }
     tags
   }
