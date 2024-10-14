@@ -55,6 +55,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecute;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
+import static org.apache.paimon.utils.ThreadPoolUtils.sequentialBatchedExecute;
 
 /**
  * Local {@link OrphanFilesClean}, it will use thread pool to execute deletion.
@@ -70,6 +71,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
 
     private Set<String> candidateDeletes;
 
+    private final int parallelism;
+
     public LocalOrphanFilesClean(FileStoreTable table) {
         this(table, System.currentTimeMillis() - TimeUnit.DAYS.toMillis(1));
     }
@@ -82,9 +85,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
             FileStoreTable table, long olderThanMillis, SerializableConsumer<Path> fileCleaner) {
         super(table, olderThanMillis, fileCleaner);
         this.deleteFiles = new ArrayList<>();
-        this.executor =
-                createCachedThreadPool(
-                        table.coreOptions().deleteFileThreadNum(), "ORPHAN_FILES_CLEAN");
+        this.parallelism = table.coreOptions().deleteFileThreadNum();
+        this.executor = createCachedThreadPool(parallelism, "ORPHAN_FILES_CLEAN");
     }
 
     public List<Path> clean() throws IOException, ExecutionException, InterruptedException {
@@ -139,29 +141,39 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         try {
             Set<String> manifests = ConcurrentHashMap.newKeySet();
             collectWithoutDataFile(branch, usedFiles::add, manifests::add);
-            randomlyOnlyExecute(
-                    executor,
-                    manifestName -> {
-                        try {
-                            retryReadingFiles(
-                                            () -> manifestFile.readWithIOException(manifestName),
-                                            Collections.<ManifestEntry>emptyList())
-                                    .stream()
-                                    .map(ManifestEntry::file)
-                                    .forEach(
-                                            f -> {
-                                                if (candidateDeletes.contains(f.fileName())) {
-                                                    usedFiles.add(f.fileName());
-                                                }
-                                                f.extraFiles().stream()
-                                                        .filter(candidateDeletes::contains)
-                                                        .forEach(usedFiles::add);
-                                            });
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
-                    },
-                    manifests);
+            Iterable<String> dataFiles =
+                    sequentialBatchedExecute(
+                            executor,
+                            manifestName -> {
+                                try {
+                                    List<String> dataFilesInBatch = new ArrayList<>();
+                                    retryReadingFiles(
+                                                    () ->
+                                                            manifestFile.readWithIOException(
+                                                                    manifestName),
+                                                    Collections.<ManifestEntry>emptyList())
+                                            .stream()
+                                            .map(ManifestEntry::file)
+                                            .forEach(
+                                                    f -> {
+                                                        if (candidateDeletes.contains(
+                                                                f.fileName())) {
+                                                            dataFilesInBatch.add(f.fileName());
+                                                        }
+                                                        f.extraFiles().stream()
+                                                                .filter(candidateDeletes::contains)
+                                                                .forEach(dataFilesInBatch::add);
+                                                    });
+                                    return dataFilesInBatch;
+                                } catch (IOException e) {
+                                    throw new RuntimeException(e);
+                                }
+                            },
+                            new ArrayList<>(manifests),
+                            parallelism);
+            for (String fileName : dataFiles) {
+                usedFiles.add(fileName);
+            }
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
