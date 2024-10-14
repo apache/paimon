@@ -1497,4 +1497,39 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                         + scanStartupMode
                                         + "'. Valid scan.startup.mode for MySQL CDC are [initial, earliest-offset, latest-offset, specific-offset, timestamp, snapshot]"));
     }
+
+    @Test
+    @Timeout(60)
+    public void testRuntimeExecutionModeCheckForCdcSync() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "check_cdc_sync_runtime_execution_mode");
+        mySqlConfig.put("table-name", "t");
+
+        Map<String, String> tableConfig = getBasicTableConfig();
+        tableConfig.put(CoreOptions.WRITE_ONLY.key(), "true");
+
+        MySqlSyncTableAction action = syncTableActionBuilder(mySqlConfig).build();
+
+        assertThatThrownBy(() -> runActionWithBatchEnv(action))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Don't support batch mode for flink-cdc sync table action"));
+
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable();
+
+        try (Statement statement = getStatement()) {
+            statement.executeUpdate("USE check_cdc_sync_runtime_execution_mode");
+            statement.executeUpdate("INSERT INTO t VALUES (1, 'one'), (2, 'two')");
+            RowType rowType =
+                    RowType.of(
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                            new String[] {"k", "v1"});
+            List<String> primaryKeys = Collections.singletonList("k");
+            List<String> expected = Arrays.asList("+I[1, one]", "+I[2, two]");
+            waitForResult(expected, table, rowType, primaryKeys);
+        }
+    }
 }

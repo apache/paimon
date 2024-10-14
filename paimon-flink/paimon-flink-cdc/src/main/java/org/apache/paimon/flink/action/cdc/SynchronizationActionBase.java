@@ -32,10 +32,12 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
@@ -53,6 +55,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGN
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_TIMEOUT;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Base {@link Action} for table/database synchronizing job. */
 public abstract class SynchronizationActionBase extends ActionBase {
@@ -135,6 +138,13 @@ public abstract class SynchronizationActionBase extends ActionBase {
     protected CdcTimestampExtractor createCdcTimestampExtractor() {
         throw new IllegalArgumentException(
                 "Unsupported timestamp extractor for current cdc source.");
+    }
+
+    protected void validateRuntimeExecutionMode() {
+        checkArgument(
+                env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
+                        != RuntimeExecutionMode.BATCH,
+                "Don't support batch mode for flink-cdc sync table action.");
     }
 
     private DataStreamSource<CdcSourceRecord> buildDataStreamSource(Object source) {
