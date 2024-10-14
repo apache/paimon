@@ -241,10 +241,13 @@ All available procedures are listed below.
             matched_upsert_setting => 'matchedUpsertSetting',<br/>
             not_matched_insert_condition => 'notMatchedInsertCondition',<br/>
             not_matched_insert_values => 'notMatchedInsertValues',<br/>
-            matched_delete_condition => 'matchedDeleteCondition') <br/><br/>
+            matched_delete_condition => 'matchedDeleteCondition',<br/>
+            not_matched_by_source_upsert_condition => 'notMatchedBySourceUpsertCondition',<br/>
+            not_matched_by_source_upsert_setting => 'notMatchedBySourceUpsertSetting',<br/>
+            not_matched_by_source_delete_condition => 'notMatchedBySourceDeleteCondition') <br/><br/>
       </td>
       <td>
-         To perform "MERGE INTO" syntax. See <a href="/how-to/writing-tables#merging-into-table">merge_into action</a> for
+         To perform "MERGE INTO" syntax. See <a href="/flink/action-jars#merging-into-table">merge_into action</a> for
          details of arguments.
       </td>
       <td>
