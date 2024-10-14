@@ -103,6 +103,12 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
+    public void createPartition(Identifier identifier, Map<String, String> partitions)
+            throws TableNotExistException, PartitionNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
         return tableSchemaInFileSystem(
                         getTableLocation(identifier), identifier.getBranchNameOrDefault())

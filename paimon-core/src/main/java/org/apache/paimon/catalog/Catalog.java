@@ -274,6 +274,17 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException, PartitionNotExistException;
 
     /**
+     * Create a partition for the specify table.
+     *
+     * @param identifier path of the table to drop partition
+     * @param partitions the partition to be deleted
+     * @throws TableNotExistException if the table does not exist
+     * @throws PartitionNotExistException if the partition does not exist
+     */
+    void createPartition(Identifier identifier, Map<String, String> partitions)
+            throws TableNotExistException, PartitionNotExistException;
+
+    /**
      * Modify an existing table from a {@link SchemaChange}.
      *
      * <p>NOTE: System tables can not be altered.
