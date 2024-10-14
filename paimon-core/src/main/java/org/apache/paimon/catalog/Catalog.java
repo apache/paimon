@@ -276,8 +276,8 @@ public interface Catalog extends AutoCloseable {
     /**
      * Create a partition for the specify table.
      *
-     * @param identifier path of the table to drop partition
-     * @param partitions the partition to be deleted
+     * @param identifier path of the table to add partition
+     * @param partitions the partition to be added
      * @throws TableNotExistException if the table does not exist
      * @throws PartitionNotExistException if the partition does not exist
      */
