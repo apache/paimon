@@ -43,7 +43,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
 import java.util.function.Consumer;
@@ -55,6 +54,7 @@ import java.util.stream.LongStream;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
+import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
 
 /** Manager for {@link Snapshot}, providing utility methods related to paths and snapshot hints. */
@@ -418,8 +418,7 @@ public class SnapshotManager implements Serializable {
     }
 
     public Iterator<Snapshot> snapshotsWithinRange(
-            Optional<Long> optionalMaxSnapshotId, Optional<Long> optionalMinSnapshotId)
-            throws IOException {
+            Optional<Long> optionalMaxSnapshotId, Optional<Long> optionalMinSnapshotId) {
         Long lowerBoundSnapshotId = earliestSnapshotId();
         Long upperBoundSnapshotId = latestSnapshotId();
         Long lowerId;
@@ -461,7 +460,7 @@ public class SnapshotManager implements Serializable {
 
     public Iterator<Changelog> changelogs() throws IOException {
         return listVersionedFiles(fileIO, changelogDirectory(), CHANGELOG_PREFIX)
-                .map(snapshotId -> changelog(snapshotId))
+                .map(this::changelog)
                 .sorted(Comparator.comparingLong(Changelog::id))
                 .iterator();
     }
@@ -473,10 +472,10 @@ public class SnapshotManager implements Serializable {
     public List<Snapshot> safelyGetAllSnapshots() throws IOException {
         List<Path> paths =
                 listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
-                        .map(id -> snapshotPath(id))
+                        .map(this::snapshotPath)
                         .collect(Collectors.toList());
 
-        List<Snapshot> snapshots = Collections.synchronizedList(new ArrayList<>());
+        List<Snapshot> snapshots = Collections.synchronizedList(new ArrayList<>(paths.size()));
         collectSnapshots(
                 path -> {
                     try {
@@ -495,10 +494,10 @@ public class SnapshotManager implements Serializable {
     public List<Changelog> safelyGetAllChangelogs() throws IOException {
         List<Path> paths =
                 listVersionedFiles(fileIO, changelogDirectory(), CHANGELOG_PREFIX)
-                        .map(id -> longLivedChangelogPath(id))
+                        .map(this::longLivedChangelogPath)
                         .collect(Collectors.toList());
 
-        List<Changelog> changelogs = Collections.synchronizedList(new ArrayList<>());
+        List<Changelog> changelogs = Collections.synchronizedList(new ArrayList<>(paths.size()));
         collectSnapshots(
                 path -> {
                     try {
@@ -517,7 +516,8 @@ public class SnapshotManager implements Serializable {
     private void collectSnapshots(Consumer<Path> pathConsumer, List<Path> paths)
             throws IOException {
         ExecutorService executor =
-                Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+                createCachedThreadPool(
+                        Runtime.getRuntime().availableProcessors(), "SNAPSHOT_COLLECTOR");
 
         try {
             randomlyOnlyExecute(executor, pathConsumer, paths);
