@@ -70,6 +70,7 @@ singleStatement
 
 statement
     : CALL multipartIdentifier '(' (callArgument (',' callArgument)*)? ')'                  #call
+    | SHOW TAGS multipartIdentifier                                                         #showTags
     ;
 
 callArgument
@@ -130,6 +131,8 @@ nonReserved
     ;
 
 CALL: 'CALL';
+SHOW: 'SHOW';
+TAGS: 'TAGS';
 
 TRUE: 'TRUE';
 FALSE: 'FALSE';

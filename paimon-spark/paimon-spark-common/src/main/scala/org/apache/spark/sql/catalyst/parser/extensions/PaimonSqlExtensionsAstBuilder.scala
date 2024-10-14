@@ -19,7 +19,7 @@
 package org.apache.spark.sql.catalyst.parser.extensions
 
 import org.apache.paimon.spark.catalyst.plans.logical
-import org.apache.paimon.spark.catalyst.plans.logical.{PaimonCallArgument, PaimonCallStatement, PaimonNamedArgument, PaimonPositionalArgument}
+import org.apache.paimon.spark.catalyst.plans.logical.{PaimonCallArgument, PaimonCallStatement, PaimonNamedArgument, PaimonPositionalArgument, ShowTagsCommand}
 
 import org.antlr.v4.runtime._
 import org.antlr.v4.runtime.misc.Interval
@@ -91,6 +91,10 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
     withOrigin(ctx) {
       ctx.parts.asScala.map(_.getText).toSeq
     }
+
+  override def visitShowTags(ctx: ShowTagsContext): AnyRef = withOrigin(ctx) {
+    ShowTagsCommand(typedVisit[Seq[String]](ctx.multipartIdentifier))
+  }
 
   private def toBuffer[T](list: java.util.List[T]) = list.asScala
 
