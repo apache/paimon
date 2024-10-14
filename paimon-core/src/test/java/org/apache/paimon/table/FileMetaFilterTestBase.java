@@ -85,7 +85,7 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                         SimpleStatsEvolution.Result result =
                                 converters
                                         .getOrCreate(fileMeta.schemaId())
-                                        .evolution(stats, null, null);
+                                        .evolution(stats, 100L, null);
                         InternalRow min = result.minValues();
                         InternalRow max = result.maxValues();
 
@@ -195,7 +195,7 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                             SimpleStatsEvolution.Result result =
                                     converters
                                             .getOrCreate(dataFileMeta.schemaId())
-                                            .evolution(stats, null, null);
+                                            .evolution(stats, 100L, null);
                             InternalRow min = result.minValues();
                             InternalRow max = result.maxValues();
                             int minValue = min.getInt(1);
@@ -275,7 +275,7 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                             SimpleStatsEvolution.Result result =
                                     converters
                                             .getOrCreate(dataFileMeta.schemaId())
-                                            .evolution(stats, null, null);
+                                            .evolution(stats, 100L, null);
                             InternalRow min = result.minValues();
                             InternalRow max = result.maxValues();
                             Integer minValue = min.isNullAt(3) ? null : min.getInt(3);
