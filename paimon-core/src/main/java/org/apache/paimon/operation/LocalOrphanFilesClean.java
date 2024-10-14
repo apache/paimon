@@ -116,7 +116,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         return deleteFiles;
     }
 
-    protected void collectWithoutDataFile(
+    private void collectWithoutDataFile(
             String branch, Consumer<String> usedFileConsumer, Consumer<String> manifestConsumer)
             throws IOException {
         randomlyOnlyExecute(
