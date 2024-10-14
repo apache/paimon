@@ -57,6 +57,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -105,6 +106,19 @@ public abstract class TableTestBase {
                 BatchTableCommit commit = writeBuilder.newCommit()) {
             for (Pair<InternalRow, Integer> row : rows) {
                 write.write(row.getKey(), row.getValue());
+            }
+            commit.commit(write.prepareCommit());
+        }
+    }
+
+    protected void writeWithBucketAssigner(
+            Table table, Function<InternalRow, Integer> bucketAssigner, InternalRow... rows)
+            throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (InternalRow row : rows) {
+                write.write(row, bucketAssigner.apply(row));
             }
             commit.commit(write.prepareCommit());
         }

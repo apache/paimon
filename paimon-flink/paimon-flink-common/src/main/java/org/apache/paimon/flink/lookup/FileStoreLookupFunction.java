@@ -33,6 +33,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
@@ -95,6 +96,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private transient long nextLoadTime;
 
     protected FunctionContext functionContext;
+
+    @Nullable private Filter<InternalRow> cacheRowFilter;
 
     public FileStoreLookupFunction(
             Table table, int[] projection, int[] joinKeyIndex, @Nullable Predicate predicate) {
@@ -195,6 +198,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         }
 
         refreshDynamicPartition(false);
+        if (cacheRowFilter != null) {
+            lookupTable.specifyCacheRowFilter(cacheRowFilter);
+        }
         lookupTable.open();
     }
 
@@ -360,5 +366,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     protected Set<Integer> getRequireCachedBucketIds() {
         // TODO: Implement the method when Flink support bucket shuffle for lookup join.
         return null;
+    }
+
+    protected void setCacheRowFilter(@Nullable Filter<InternalRow> cacheRowFilter) {
+        this.cacheRowFilter = cacheRowFilter;
     }
 }
