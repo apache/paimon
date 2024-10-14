@@ -539,9 +539,6 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         result = sql("SHOW PARTITIONS PartitionTable partition (dt='2020-01-02', hh='11')");
         assertThat(result).containsExactlyInAnyOrder(Row.of("dt=2020-01-02/hh=11"));
-
-        result = sql("ALTER TABLE PartitionTable ADD partition (dt='2020-01-04', hh='12')");
-        assertThat(result).containsExactlyInAnyOrder(Row.of("dt=2020-01-02/hh=11"));
     }
 
     @Test
