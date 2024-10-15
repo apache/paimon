@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.operation.FileStoreCommit
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
@@ -114,6 +115,31 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
   override def createPartitions(
       internalRows: Array[InternalRow],
       maps: Array[JMap[String, String]]): Unit = {
-    throw new UnsupportedOperationException("Create partition is not supported")
+    table match {
+      case fileStoreTable: FileStoreTable =>
+        val rowConverter = CatalystTypeConverters
+          .createToScalaConverter(CharVarcharUtils.replaceCharVarcharWithString(partitionSchema))
+        val rowDataPartitionComputer = new InternalRowPartitionComputer(
+          fileStoreTable.coreOptions().partitionDefaultName(),
+          partitionRowType,
+          table.partitionKeys().asScala.toArray)
+        val partitions = internalRows.map {
+          r =>
+            rowDataPartitionComputer
+              .generatePartValues(new SparkRow(partitionRowType, rowConverter(r).asInstanceOf[Row]))
+              .asInstanceOf[JMap[String, String]]
+        }
+        partitions.map {
+          partition: JMap[String, String] =>
+            catalog.createPartition(getIdentifierFromTableName(table.fullName()), partition)
+        }
+      case _ =>
+        throw new UnsupportedOperationException("Only FileStoreTable supports create partitions.")
+    }
+  }
+
+  def getIdentifierFromTableName(tableName: String): Identifier = {
+    val name: Array[String] = tableName.split("\\.")
+    new Identifier(name.apply(0), name.apply(1))
   }
 }

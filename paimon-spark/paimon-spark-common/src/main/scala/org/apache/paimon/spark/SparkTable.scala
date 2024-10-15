@@ -19,6 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.catalog.Catalog
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.{DataTable, FileStoreTable, KnownSplitsTable, Table}
@@ -36,7 +37,7 @@ import java.util.{Collections, EnumSet => JEnumSet, HashMap => JHashMap, Map => 
 import scala.collection.JavaConverters._
 
 /** A spark [[org.apache.spark.sql.connector.catalog.Table]] for paimon. */
-case class SparkTable(table: Table)
+case class SparkTable(table: Table, catalog: Catalog = null)
   extends org.apache.spark.sql.connector.catalog.Table
   with SupportsRead
   with SupportsWrite
