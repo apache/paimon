@@ -16,41 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.mergetree.compact.aggregate;
+package org.apache.paimon.mergetree.compact.aggregate.factory;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
+import org.apache.paimon.mergetree.compact.aggregate.FieldMergeMapAgg;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.MapType;
 
-/** first non-null value aggregate a field of a row. */
-public class FieldFirstNonNullValueAgg extends FieldAggregator {
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-    public static final String NAME = "first_non_null_value";
-    public static final String LEGACY_NAME = "first_not_null_value";
-
-    private static final long serialVersionUID = 1L;
-
-    private boolean initialized;
-
-    public FieldFirstNonNullValueAgg(DataType dataType) {
-        super(dataType);
+/** Factory for #{@link FieldMergeMapAgg}. */
+public class FieldMergeMapAggFactory implements FieldAggregatorFactory {
+    @Override
+    public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
+        checkArgument(
+                fieldType instanceof MapType,
+                "Data type of merge map column must be 'MAP' but was '%s'",
+                fieldType);
+        return new FieldMergeMapAgg((MapType) fieldType);
     }
 
     @Override
-    public String name() {
-        return NAME;
-    }
-
-    @Override
-    public Object agg(Object accumulator, Object inputField) {
-        if (!initialized && inputField != null) {
-            initialized = true;
-            return inputField;
-        } else {
-            return accumulator;
-        }
-    }
-
-    @Override
-    public void reset() {
-        this.initialized = false;
+    public String identifier() {
+        return FieldMergeMapAgg.NAME;
     }
 }

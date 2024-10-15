@@ -18,39 +18,19 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.types.DataType;
 
-/** first non-null value aggregate a field of a row. */
-public class FieldFirstNonNullValueAgg extends FieldAggregator {
-
-    public static final String NAME = "first_non_null_value";
-    public static final String LEGACY_NAME = "first_not_null_value";
-
-    private static final long serialVersionUID = 1L;
-
-    private boolean initialized;
-
-    public FieldFirstNonNullValueAgg(DataType dataType) {
-        super(dataType);
+/** FieldAggregatorFactory for test. */
+public class TestCostomAggFactory implements FieldAggregatorFactory {
+    @Override
+    public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
+        return new TestCostomAgg(fieldType);
     }
 
     @Override
-    public String name() {
-        return NAME;
-    }
-
-    @Override
-    public Object agg(Object accumulator, Object inputField) {
-        if (!initialized && inputField != null) {
-            initialized = true;
-            return inputField;
-        } else {
-            return accumulator;
-        }
-    }
-
-    @Override
-    public void reset() {
-        this.initialized = false;
+    public String identifier() {
+        return "custom";
     }
 }

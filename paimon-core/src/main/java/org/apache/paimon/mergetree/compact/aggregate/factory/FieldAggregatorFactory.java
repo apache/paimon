@@ -16,33 +16,17 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.mergetree.compact.aggregate;
+package org.apache.paimon.mergetree.compact.aggregate.factory;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.factories.Factory;
+import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.types.DataType;
 
-/** last value aggregate a field of a row. */
-public class FieldLastValueAgg extends FieldAggregator {
+/** Factory for {@link FieldAggregator}. */
+public interface FieldAggregatorFactory extends Factory {
 
-    public static final String NAME = "last_value";
+    FieldAggregator create(DataType fieldType, CoreOptions options, String field);
 
-    private static final long serialVersionUID = 1L;
-
-    public FieldLastValueAgg(DataType dataType) {
-        super(dataType);
-    }
-
-    @Override
-    public String name() {
-        return NAME;
-    }
-
-    @Override
-    public Object agg(Object accumulator, Object inputField) {
-        return inputField;
-    }
-
-    @Override
-    public Object retract(Object accumulator, Object retractField) {
-        return null;
-    }
+    String identifier();
 }
