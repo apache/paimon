@@ -37,14 +37,20 @@ import java.util.{Collections, EnumSet => JEnumSet, HashMap => JHashMap, Map => 
 import scala.collection.JavaConverters._
 
 /** A spark [[org.apache.spark.sql.connector.catalog.Table]] for paimon. */
-case class SparkTable(table: Table, catalog: Catalog = null)
+case class SparkTable(table: Table)
   extends org.apache.spark.sql.connector.catalog.Table
   with SupportsRead
   with SupportsWrite
   with SupportsMetadataColumns
   with PaimonPartitionManagement {
 
+  var catalog: Catalog = _
+
   def getTable: Table = table
+
+  def setCatalog(catalog: Catalog): Unit = {
+    this.catalog = catalog
+  }
 
   override def name: String = table.fullName
 

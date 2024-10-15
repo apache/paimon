@@ -538,7 +538,9 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
                                     + formatTable.format().name());
                 }
             } else {
-                return new SparkTable(copyWithSQLConf(paimonTable, extraOptions), catalog);
+                SparkTable sparkTable = new SparkTable(copyWithSQLConf(paimonTable, extraOptions));
+                sparkTable.setCatalog(catalog);
+                return sparkTable;
             }
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
