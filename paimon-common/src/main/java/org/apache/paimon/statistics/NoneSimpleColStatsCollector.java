@@ -29,11 +29,11 @@ public class NoneSimpleColStatsCollector extends AbstractSimpleColStatsCollector
 
     @Override
     public SimpleColStats result() {
-        return new SimpleColStats(null, null, null);
+        return SimpleColStats.NONE;
     }
 
     @Override
     public SimpleColStats convert(SimpleColStats source) {
-        return new SimpleColStats(null, null, null);
+        return SimpleColStats.NONE;
     }
 }

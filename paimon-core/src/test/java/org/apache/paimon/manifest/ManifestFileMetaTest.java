@@ -300,13 +300,13 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         // case5:the sizes of some manifest files are greater than suggestedMetaSize, while the
         // sizes of other manifest files is less than. All manifest files have no delete files
         input.clear();
-        input.addAll(Arrays.asList(manifest1, manifest2, manifest3));
+        input.addAll(Arrays.asList(manifest1, manifest2, manifest3, manifest4));
         List<ManifestFileMeta> newMetas5 = new ArrayList<>();
         List<ManifestFileMeta> fullCompacted5 =
                 ManifestFileMerger.tryFullCompaction(
                                 input, newMetas5, manifestFile, 1800, 100, getPartitionType(), null)
                         .get();
-        assertThat(fullCompacted5.size()).isEqualTo(2);
+        assertThat(fullCompacted5.size()).isEqualTo(3);
         assertThat(newMetas5.size()).isEqualTo(1);
 
         // trigger full compaction

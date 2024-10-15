@@ -359,10 +359,20 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                 .isEqualTo(Arrays.asList("20001|21", "202|22"));
     }
 
-    @Test
-    public void testBatchFilter() throws Exception {
-        writeData();
-        FileStoreTable table = createFileStoreTable();
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testBatchFilter(boolean statsDenseStore) throws Exception {
+        Consumer<Options> optionsSetter =
+                options -> {
+                    options.set(CoreOptions.METADATA_STATS_DENSE_STORE, statsDenseStore);
+                    if (statsDenseStore) {
+                        // pk table doesn't need value stats
+                        options.set(CoreOptions.METADATA_STATS_MODE, "none");
+                    }
+                };
+        writeData(optionsSetter);
+        FileStoreTable table = createFileStoreTable(optionsSetter);
+
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
 
         Predicate predicate = and(builder.equal(2, 201L), builder.equal(1, 21));
@@ -604,7 +614,11 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     private void writeData() throws Exception {
-        FileStoreTable table = createFileStoreTable();
+        writeData(options -> {});
+    }
+
+    private void writeData(Consumer<Options> optionsSetter) throws Exception {
+        FileStoreTable table = createFileStoreTable(optionsSetter);
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
 
@@ -1416,15 +1430,23 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                 .hasMessage("Unsupported streaming scan for read optimized table");
     }
 
-    @Test
-    public void testReadDeletionVectorTable() throws Exception {
-        FileStoreTable table =
-                createFileStoreTable(
-                        options -> {
-                            // let level has many files
-                            options.set(TARGET_FILE_SIZE, new MemorySize(1));
-                            options.set(DELETION_VECTORS_ENABLED, true);
-                        });
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testReadDeletionVectorTable(boolean statsDenseStore) throws Exception {
+        Consumer<Options> optionsSetter =
+                options -> {
+                    // let level has many files
+                    options.set(TARGET_FILE_SIZE, new MemorySize(1));
+                    options.set(DELETION_VECTORS_ENABLED, true);
+
+                    options.set(CoreOptions.METADATA_STATS_DENSE_STORE, statsDenseStore);
+                    if (statsDenseStore) {
+                        options.set(CoreOptions.METADATA_STATS_MODE, "none");
+                        options.set("fields.b.stats-mode", "full");
+                    }
+                };
+
+        FileStoreTable table = createFileStoreTable(optionsSetter);
         StreamTableWrite write = table.newWrite(commitUser);
         IOManager ioManager = IOManager.create(tablePath.toString());
         write.withIOManager(ioManager);

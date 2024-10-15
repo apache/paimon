@@ -154,6 +154,7 @@ public class CommitMessageLegacyV2Serializer {
                     row.getTimestamp(12, 3),
                     null,
                     null,
+                    null,
                     null);
         }
     }

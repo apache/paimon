@@ -472,6 +472,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Specify the merge engine for table with primary key.<br /><br />Possible values:<ul><li>"deduplicate": De-duplicate and keep the last row.</li><li>"partial-update": Partial update non-null fields.</li><li>"aggregation": Aggregate fields with same primary key.</li><li>"first-row": De-duplicate and keep the first row.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>metadata.stats-dense-store</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to store statistic densely in metadata (manifest files), which will significantly reduce the storage size of metadata when the none statistic mode is set.<br />Note, when this mode is enabled, the Paimon sdk in reading engine requires at least version 0.9.1 or 1.0.0 or higher.</td>
+        </tr>
+        <tr>
             <td><h5>metadata.stats-mode</h5></td>
             <td style="word-wrap: break-word;">"truncate(16)"</td>
             <td>String</td>

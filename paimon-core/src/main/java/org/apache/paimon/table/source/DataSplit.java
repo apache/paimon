@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMeta08Serializer;
+import org.apache.paimon.io.DataFileMeta09Serializer;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
@@ -49,7 +50,7 @@ public class DataSplit implements Split {
 
     private static final long serialVersionUID = 7L;
     private static final long MAGIC = -2394839472490812314L;
-    private static final int VERSION = 2;
+    private static final int VERSION = 3;
 
     private long snapshotId = 0;
     private BinaryRow partition;
@@ -316,6 +317,9 @@ public class DataSplit implements Split {
             DataFileMeta08Serializer serializer = new DataFileMeta08Serializer();
             return serializer::deserialize;
         } else if (version == 2) {
+            DataFileMeta09Serializer serializer = new DataFileMeta09Serializer();
+            return serializer::deserialize;
+        } else if (version == 3) {
             DataFileMetaSerializer serializer = new DataFileMetaSerializer();
             return serializer::deserialize;
         } else {
