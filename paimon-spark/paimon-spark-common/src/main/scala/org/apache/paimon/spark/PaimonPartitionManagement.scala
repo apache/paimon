@@ -32,7 +32,6 @@ import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.catalog.SupportsAtomicPartitionManagement
 import org.apache.spark.sql.types.StructType
 
-import java.lang.reflect.Method
 import java.util.{LinkedHashMap, Map => JMap, Objects, UUID}
 
 import scala.collection.JavaConverters._
