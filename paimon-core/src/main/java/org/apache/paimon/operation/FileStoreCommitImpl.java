@@ -1025,47 +1025,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     e);
         }
 
-        boolean success;
-        try {
-            Callable<Boolean> callable =
-                    () -> {
-                        boolean committed =
-                                fileIO.tryToWriteAtomic(newSnapshotPath, newSnapshot.toJson());
-                        if (committed) {
-                            snapshotManager.commitLatestHint(newSnapshotId);
-                        }
-                        return committed;
-                    };
-            if (lock != null) {
-                success =
-                        lock.runWithLock(
-                                () ->
-                                        // fs.rename may not returns false if target file
-                                        // already exists, or even not atomic
-                                        // as we're relying on external locking, we can first
-                                        // check if file exist then rename to work around this
-                                        // case
-                                        !fileIO.exists(newSnapshotPath) && callable.call());
-            } else {
-                success = callable.call();
-            }
-        } catch (Throwable e) {
-            // exception when performing the atomic rename,
-            // we cannot clean up because we can't determine the success
-            throw new RuntimeException(
-                    String.format(
-                            "Exception occurs when committing snapshot #%d (path %s) by user %s "
-                                    + "with identifier %s and kind %s. "
-                                    + "Cannot clean up because we can't determine the success.",
-                            newSnapshotId,
-                            newSnapshotPath,
-                            commitUser,
-                            identifier,
-                            commitKind.name()),
-                    e);
-        }
-
-        if (success) {
+        if (commitSnapshotImpl(newSnapshot, newSnapshotPath)) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug(
                         String.format(
@@ -1102,6 +1062,97 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 indexManifest,
                 latestSnapshot,
                 baseDataFiles);
+    }
+
+    public void compactManifest() {
+        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+
+        if (latestSnapshot == null) {
+            return;
+        }
+
+        List<ManifestFileMeta> mergeBeforeManifests =
+                manifestList.readDataManifests(latestSnapshot);
+
+        List<ManifestFileMeta> mergeAfterManifests =
+                ManifestFileMerger.merge(
+                        mergeBeforeManifests,
+                        manifestFile,
+                        manifestTargetSize.getBytes(),
+                        1,
+                        manifestFullCompactionSize.getBytes(),
+                        partitionType,
+                        manifestReadParallelism);
+
+        String baseManifestList = manifestList.write(mergeAfterManifests);
+        String deltaManifestList = manifestList.write(Collections.emptyList());
+
+        // prepare snapshot file
+        Snapshot newSnapshot =
+                new Snapshot(
+                        latestSnapshot.id() + 1,
+                        latestSnapshot.schemaId(),
+                        baseManifestList,
+                        deltaManifestList,
+                        null,
+                        latestSnapshot.indexManifest(),
+                        commitUser,
+                        Long.MAX_VALUE,
+                        Snapshot.CommitKind.COMPACT,
+                        System.currentTimeMillis(),
+                        latestSnapshot.logOffsets(),
+                        latestSnapshot.totalRecordCount(),
+                        0L,
+                        0L,
+                        latestSnapshot.watermark(),
+                        latestSnapshot.statistics());
+
+        Path newSnapshotPath =
+                branchName.equals(DEFAULT_MAIN_BRANCH)
+                        ? snapshotManager.snapshotPath(newSnapshot.id())
+                        : snapshotManager.copyWithBranch(branchName).snapshotPath(newSnapshot.id());
+
+        commitSnapshotImpl(newSnapshot, newSnapshotPath);
+    }
+
+    private boolean commitSnapshotImpl(Snapshot newSnapshot, Path newSnapshotPath) {
+        try {
+            Callable<Boolean> callable =
+                    () -> {
+                        boolean committed =
+                                fileIO.tryToWriteAtomic(newSnapshotPath, newSnapshot.toJson());
+                        if (committed) {
+                            snapshotManager.commitLatestHint(newSnapshot.id());
+                        }
+                        return committed;
+                    };
+            if (lock != null) {
+                return lock.runWithLock(
+                        () ->
+                                // fs.rename may not returns false if target file
+                                // already exists, or even not atomic
+                                // as we're relying on external locking, we can first
+                                // check if file exist then rename to work around this
+                                // case
+                                !fileIO.exists(newSnapshotPath) && callable.call());
+            } else {
+                return callable.call();
+            }
+        } catch (Throwable e) {
+            // exception when performing the atomic rename,
+            // we cannot clean up because we can't determine the success
+            throw new RuntimeException(
+                    String.format(
+                            "Exception occurs when committing snapshot #%d (path %s) by user %s "
+                                    + "with identifier %s and kind %s. "
+                                    + "Cannot clean up because we can't determine the success.",
+                            newSnapshot.id(),
+                            newSnapshotPath,
+                            commitUser,
+                            newSnapshot.commitIdentifier(),
+                            newSnapshot.commitKind().name()),
+                    e);
+        }
     }
 
     private List<SimpleFileEntry> readIncrementalChanges(

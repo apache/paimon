@@ -33,6 +33,7 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
@@ -908,6 +909,38 @@ public class FileStoreCommitTest {
         assertThat(dvs.size()).isEqualTo(2);
         assertThat(dvs.get("f1").isDeleted(3)).isTrue();
         assertThat(dvs.get("f2").isDeleted(3)).isTrue();
+    }
+
+    @Test
+    public void testManifestCompact() throws Exception {
+        TestFileStore store = createStore(false);
+
+        List<KeyValue> keyValues = generateDataList(1);
+        BinaryRow partition = gen.getPartition(keyValues.get(0));
+        // commit 1
+        Snapshot snapshot1 =
+                store.commitData(keyValues, s -> partition, kv -> 0, Collections.emptyMap()).get(0);
+        // commit 2
+        Snapshot snapshot2 =
+                store.overwriteData(keyValues, s -> partition, kv -> 0, Collections.emptyMap())
+                        .get(0);
+        // commit 3
+        Snapshot snapshot3 =
+                store.overwriteData(keyValues, s -> partition, kv -> 0, Collections.emptyMap())
+                        .get(0);
+
+        long deleteNum =
+                store.manifestListFactory().create().readDataManifests(snapshot3).stream()
+                        .mapToLong(ManifestFileMeta::numDeletedFiles)
+                        .sum();
+        assertThat(deleteNum).isEqualTo(2);
+        store.newCommit().compactManifest();
+        Snapshot latest = store.snapshotManager().latestSnapshot();
+        assertThat(
+                        store.manifestListFactory().create().readDataManifests(latest).stream()
+                                .mapToLong(ManifestFileMeta::numDeletedFiles)
+                                .sum())
+                .isEqualTo(0);
     }
 
     private TestFileStore createStore(boolean failing) throws Exception {

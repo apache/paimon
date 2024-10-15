@@ -74,6 +74,8 @@ public interface FileStoreCommit extends AutoCloseable {
 
     void truncateTable(long commitIdentifier);
 
+    void compactManifest();
+
     /** Abort an unsuccessful commit. The data files will be deleted. */
     void abort(List<CommitMessage> commitMessages);
 
