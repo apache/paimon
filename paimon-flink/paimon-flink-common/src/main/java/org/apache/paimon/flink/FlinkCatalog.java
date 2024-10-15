@@ -163,7 +163,7 @@ public class FlinkCatalog extends AbstractCatalog {
     public static final String NUM_FILES_KEY = "numFiles";
     private final ClassLoader classLoader;
 
-    private Catalog catalog;
+    private final Catalog catalog;
     private final String name;
     private final boolean logStoreAutoRegister;
 
