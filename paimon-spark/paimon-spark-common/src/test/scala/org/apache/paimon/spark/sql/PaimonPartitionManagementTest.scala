@@ -116,8 +116,6 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
                   "dt=20240101/hh=00") :: Row("dt=20240102/hh=00") :: Nil
             )
 
-            spark.sql("alter table T add partition (dt=20230816, hh='1154')")
-
             checkAnswer(
               spark.sql("show partitions T PARTITION (dt=20230817, hh='1132')"),
               Row("dt=20230817/hh=1132") :: Nil)
