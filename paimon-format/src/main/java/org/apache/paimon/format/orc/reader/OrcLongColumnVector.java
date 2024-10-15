@@ -19,6 +19,7 @@
 package org.apache.paimon.format.orc.reader;
 
 import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
+import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 
 /**
  * This column vector is used to adapt hive's LongColumnVector to Paimon's boolean, byte, short, int
@@ -33,8 +34,8 @@ public class OrcLongColumnVector extends AbstractOrcColumnVector
 
     private final LongColumnVector vector;
 
-    public OrcLongColumnVector(LongColumnVector vector, int[] selected) {
-        super(vector, selected);
+    public OrcLongColumnVector(LongColumnVector vector, VectorizedRowBatch orcBatch) {
+        super(vector, orcBatch);
         this.vector = vector;
     }
 

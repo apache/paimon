@@ -23,6 +23,7 @@ import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.hadoop.hive.ql.exec.vector.ColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.TimestampColumnVector;
+import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 
 /**
  * This column vector is used to adapt hive's TimestampColumnVector to Paimon's
@@ -33,8 +34,8 @@ public class OrcTimestampColumnVector extends AbstractOrcColumnVector
 
     private final TimestampColumnVector vector;
 
-    public OrcTimestampColumnVector(ColumnVector vector, int[] selected) {
-        super(vector, selected);
+    public OrcTimestampColumnVector(ColumnVector vector, VectorizedRowBatch orcBatch) {
+        super(vector, orcBatch);
         this.vector = (TimestampColumnVector) vector;
     }
 

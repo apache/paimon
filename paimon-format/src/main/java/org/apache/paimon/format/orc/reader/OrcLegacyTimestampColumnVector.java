@@ -22,6 +22,7 @@ import org.apache.paimon.data.Timestamp;
 
 import org.apache.hadoop.hive.ql.exec.vector.ColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
+import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 
 import java.time.LocalDateTime;
 
@@ -34,8 +35,8 @@ public class OrcLegacyTimestampColumnVector extends AbstractOrcColumnVector
 
     private final LongColumnVector hiveVector;
 
-    OrcLegacyTimestampColumnVector(LongColumnVector vector, int[] selected) {
-        super(vector, selected);
+    OrcLegacyTimestampColumnVector(LongColumnVector vector, VectorizedRowBatch orcBatch) {
+        super(vector, orcBatch);
         this.hiveVector = vector;
     }
 

@@ -21,6 +21,7 @@ package org.apache.paimon.format.orc.reader;
 import org.apache.paimon.data.Decimal;
 
 import org.apache.hadoop.hive.ql.exec.vector.DecimalColumnVector;
+import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 
 import java.math.BigDecimal;
 
@@ -32,8 +33,8 @@ public class OrcDecimalColumnVector extends AbstractOrcColumnVector
 
     private final DecimalColumnVector vector;
 
-    public OrcDecimalColumnVector(DecimalColumnVector vector, int[] selected) {
-        super(vector, selected);
+    public OrcDecimalColumnVector(DecimalColumnVector vector, VectorizedRowBatch orcBatch) {
+        super(vector, orcBatch);
         this.vector = vector;
     }
 

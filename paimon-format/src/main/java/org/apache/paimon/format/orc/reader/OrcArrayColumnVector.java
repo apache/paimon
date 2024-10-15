@@ -24,6 +24,7 @@ import org.apache.paimon.data.columnar.ColumnarArray;
 import org.apache.paimon.types.ArrayType;
 
 import org.apache.hadoop.hive.ql.exec.vector.ListColumnVector;
+import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 
 /** This column vector is used to adapt hive's ListColumnVector to Paimon's ArrayColumnVector. */
 public class OrcArrayColumnVector extends AbstractOrcColumnVector
@@ -32,10 +33,11 @@ public class OrcArrayColumnVector extends AbstractOrcColumnVector
     private final ListColumnVector hiveVector;
     private final ColumnVector paimonVector;
 
-    public OrcArrayColumnVector(ListColumnVector hiveVector, int[] selected, ArrayType type) {
-        super(hiveVector, selected);
+    public OrcArrayColumnVector(
+            ListColumnVector hiveVector, VectorizedRowBatch orcBatch, ArrayType type) {
+        super(hiveVector, orcBatch);
         this.hiveVector = hiveVector;
-        this.paimonVector = createPaimonVector(hiveVector.child, selected, type.getElementType());
+        this.paimonVector = createPaimonVector(hiveVector.child, orcBatch, type.getElementType());
     }
 
     @Override

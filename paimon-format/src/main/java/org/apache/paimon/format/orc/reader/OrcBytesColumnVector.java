@@ -19,6 +19,7 @@
 package org.apache.paimon.format.orc.reader;
 
 import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
+import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 
 /** This column vector is used to adapt hive's BytesColumnVector to Paimon's BytesColumnVector. */
 public class OrcBytesColumnVector extends AbstractOrcColumnVector
@@ -26,8 +27,8 @@ public class OrcBytesColumnVector extends AbstractOrcColumnVector
 
     private final BytesColumnVector vector;
 
-    public OrcBytesColumnVector(BytesColumnVector vector, int[] selected) {
-        super(vector, selected);
+    public OrcBytesColumnVector(BytesColumnVector vector, VectorizedRowBatch orcBatch) {
+        super(vector, orcBatch);
         this.vector = vector;
     }
 
