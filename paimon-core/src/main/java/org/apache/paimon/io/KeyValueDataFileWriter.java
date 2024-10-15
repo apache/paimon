@@ -103,7 +103,7 @@ public class KeyValueDataFileWriter
         this.schemaId = schemaId;
         this.level = level;
 
-        this.keyStatsConverter = new SimpleStatsConverter(keyType, false);
+        this.keyStatsConverter = new SimpleStatsConverter(keyType);
         this.valueStatsConverter = new SimpleStatsConverter(valueType, options.statsDenseStore());
         this.keySerializer = new InternalRowSerializer(keyType);
         this.fileSource = fileSource;

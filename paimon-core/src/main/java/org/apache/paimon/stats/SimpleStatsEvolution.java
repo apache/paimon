@@ -123,7 +123,7 @@ public class SimpleStatsEvolution {
         private final InternalArray array;
         private final long notFoundValue;
 
-        protected NullCountsEvoArray(int[] indexMapping, InternalArray array, long notFoundValue) {
+        private NullCountsEvoArray(int[] indexMapping, InternalArray array, long notFoundValue) {
             this.indexMapping = indexMapping;
             this.array = array;
             this.notFoundValue = notFoundValue;

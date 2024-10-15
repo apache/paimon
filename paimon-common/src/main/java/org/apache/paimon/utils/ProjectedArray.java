@@ -36,11 +36,11 @@ import org.apache.paimon.types.DataType;
  */
 public class ProjectedArray implements InternalArray {
 
-    protected final int[] indexMapping;
+    private final int[] indexMapping;
 
-    protected InternalArray array;
+    private InternalArray array;
 
-    protected ProjectedArray(int[] indexMapping) {
+    private ProjectedArray(int[] indexMapping) {
         this.indexMapping = indexMapping;
     }
 

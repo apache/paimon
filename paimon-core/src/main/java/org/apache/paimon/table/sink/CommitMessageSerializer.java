@@ -124,15 +124,8 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
                     new IndexIncrement(
                             indexEntrySerializer.deserializeList(view),
                             indexEntrySerializer.deserializeList(view)));
-        } else if (version <= 2) {
-            return deserialize08(version, view);
         } else {
-            throw new UnsupportedOperationException(
-                    "Expecting CommitMessageSerializer version to be smaller or equal than "
-                            + CURRENT_VERSION
-                            + ", but found "
-                            + version
-                            + ".");
+            return deserialize08(version, view);
         }
     }
 
