@@ -130,7 +130,7 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
               .asInstanceOf[JMap[String, String]]
         }
         partitions.map {
-          partition: JMap[String, String] =>
+          partition =>
             catalog.createPartition(getIdentifierFromTableName(table.fullName()), partition)
         }
       case _ =>
