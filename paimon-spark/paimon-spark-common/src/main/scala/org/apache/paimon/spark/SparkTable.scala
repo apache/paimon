@@ -19,7 +19,6 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.catalog.Catalog
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.{DataTable, FileStoreTable, KnownSplitsTable, Table}
@@ -44,13 +43,7 @@ case class SparkTable(table: Table)
   with SupportsMetadataColumns
   with PaimonPartitionManagement {
 
-  var catalog: Catalog = _
-
   def getTable: Table = table
-
-  def setCatalog(catalog: Catalog): Unit = {
-    this.catalog = catalog
-  }
 
   override def name: String = table.fullName
 

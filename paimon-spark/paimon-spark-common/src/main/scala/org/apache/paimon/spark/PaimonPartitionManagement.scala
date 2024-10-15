@@ -26,6 +26,7 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.{InternalRowPartitionComputer, TypeUtils}
+
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.{CatalystTypeConverters, InternalRow}
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
@@ -33,8 +34,8 @@ import org.apache.spark.sql.connector.catalog.SupportsAtomicPartitionManagement
 import org.apache.spark.sql.types.StructType
 
 import java.lang.reflect.Method
-import java.util
-import java.util.{Objects, UUID, Map => JMap}
+import java.util.{LinkedHashMap, Map => JMap, Objects, UUID}
+
 import scala.collection.JavaConverters._
 
 trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
@@ -131,15 +132,11 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
               .generatePartValues(new SparkRow(partitionRowType, rowConverter(r).asInstanceOf[Row]))
               .asInstanceOf[JMap[String, String]]
         }
-        val metastoreClient: MetastoreClient = fileStoreTable.catalogEnvironment().metastoreClientFactory().create
-        partitions.map {
+        val metastoreClient: MetastoreClient =
+          fileStoreTable.catalogEnvironment().metastoreClientFactory().create
+        partitions.foreach {
           partition =>
-            metastoreClient.addPartition(new util.LinkedHashMap[String, String](partition))
-//            val func = catalog.getClass.getMethod(
-//              "createPartition",
-//              classOf[Identifier],
-//              classOf[JMap[_, _]])
-//            func.invoke(catalog, getIdentifierFromTableName(table.fullName()), partition)
+            metastoreClient.addPartition(partition.asInstanceOf[LinkedHashMap[String, String]])
         }
       case _ =>
         throw new UnsupportedOperationException("Only FileStoreTable supports create partitions.")
