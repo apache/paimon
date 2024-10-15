@@ -25,7 +25,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.options.Options;
@@ -1158,7 +1157,7 @@ public class FlinkCatalog extends AbstractCatalog {
         try {
             Identifier identifier = toIdentifier(tablePath);
             Method func =
-                    HiveCatalog.class.getMethod("createPartition", Identifier.class, Map.class);
+                    catalog.getClass().getMethod("createPartition", Identifier.class, Map.class);
             func.invoke(catalog, identifier, partitionSpec.getPartitionSpec());
         } catch (Exception e) {
             throw new CatalogException(e);

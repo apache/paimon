@@ -1352,7 +1352,7 @@ public abstract class HiveCatalogITCaseBase {
     public void testCreatePartitionsToMetastore() throws Exception {
         prepareTestAddPartitionsToMetastore();
 
-        // drop partition
+        // add partition
         tEnv.executeSql(
                         "ALTER TABLE t ADD PARTITION (ptb = '1c', pta = 1) PARTITION (ptb = '1d', pta = 6)")
                 .await();

@@ -169,9 +169,11 @@ public abstract class AbstractCatalog implements Catalog {
                 && new CoreOptions(tableSchema.options()).partitionedTableInMetastore()) {
             try {
                 // Do not close client, it is for HiveCatalog
-                if (metastoreClient != null) {
-                    metastoreClient.addPartition(new LinkedHashMap<>(partitionSpec));
+                if (metastoreClient == null) {
+                    throw new UnsupportedOperationException(
+                            "Only Support HiveCatalog in create partition!");
                 }
+                metastoreClient.addPartition(new LinkedHashMap<>(partitionSpec));
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }

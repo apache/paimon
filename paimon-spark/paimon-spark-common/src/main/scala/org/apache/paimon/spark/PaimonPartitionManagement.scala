@@ -32,6 +32,7 @@ import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.catalog.SupportsAtomicPartitionManagement
 import org.apache.spark.sql.types.StructType
 
+import java.lang.reflect.Method
 import java.util.{Map => JMap, Objects, UUID}
 
 import scala.collection.JavaConverters._
@@ -132,14 +133,11 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
         }
         partitions.map {
           partition =>
-            if (catalog.isInstanceOf[HiveCatalog]) {
-              catalog
-                .asInstanceOf[HiveCatalog]
-                .createPartition(getIdentifierFromTableName(table.fullName()), partition)
-            } else {
-              throw new UnsupportedOperationException(
-                "Only Support HiveCatalog in create partition.")
-            }
+            val func = catalog.getClass.getMethod(
+              "createPartition",
+              classOf[Identifier],
+              classOf[JMap[_, _]])
+            func.invoke(catalog, getIdentifierFromTableName(table.fullName()), partition)
         }
       case _ =>
         throw new UnsupportedOperationException("Only FileStoreTable supports create partitions.")

@@ -141,7 +141,7 @@ public class DelegateCatalog implements Catalog {
     }
 
     public void createPartition(Identifier identifier, Map<String, String> partitions)
-            throws TableNotExistException, PartitionNotExistException {
+            throws TableNotExistException {
         if (wrapped instanceof AbstractCatalog) {
             ((AbstractCatalog) wrapped).createPartition(identifier, partitions);
         } else {
