@@ -20,7 +20,6 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
-import org.apache.paimon.catalog.CachingCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
@@ -103,6 +102,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.lang.reflect.Method;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -1154,20 +1154,13 @@ public class FlinkCatalog extends AbstractCatalog {
                 throw new PartitionAlreadyExistsException(getName(), tablePath, partitionSpec);
             }
         }
-        try {
-            if (catalog instanceof CachingCatalog) {
-                catalog = ((CachingCatalog) catalog).wrapped();
-            }
 
-            if (catalog instanceof HiveCatalog) {
-                Identifier identifier = toIdentifier(tablePath);
-                ((HiveCatalog) catalog)
-                        .createPartition(identifier, partitionSpec.getPartitionSpec());
-            } else {
-                throw new UnsupportedOperationException(
-                        "Only support Hive Catalog in create partition");
-            }
-        } catch (Catalog.TableNotExistException e) {
+        try {
+            Identifier identifier = toIdentifier(tablePath);
+            Method func =
+                    HiveCatalog.class.getMethod("createPartition", Identifier.class, Map.class);
+            func.invoke(catalog, identifier, partitionSpec.getPartitionSpec());
+        } catch (Exception e) {
             throw new CatalogException(e);
         }
     }
