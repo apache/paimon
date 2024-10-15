@@ -140,11 +140,6 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
         sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
         Row(5, 0, 4, "{ }"))
     }
-
-    withSQLConf("spark.paimon.scan.snapshot-id" -> "100") {
-      Assertions.assertEquals(0, sql("select * from `T$statistics`").count())
-    }
-
   }
 
   test("Paimon analyze: analyze table without snapshot") {

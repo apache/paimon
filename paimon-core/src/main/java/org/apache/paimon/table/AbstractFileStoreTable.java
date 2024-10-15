@@ -58,6 +58,7 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanner;
+import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Preconditions;
@@ -65,7 +66,6 @@ import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.SnapshotNotExistException;
-import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.utils.TagManager;
 
 import javax.annotation.Nullable;
@@ -169,24 +169,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public Optional<Statistics> statistics() {
-        Snapshot latestSnapshot = null;
-        Long snapshotId = coreOptions().scanSnapshotId();
-        String tagName = coreOptions().scanTagName();
-        Long timestampMills = coreOptions().scanTimestampMills();
-
-        if (snapshotId != null && snapshotManager().snapshotExists(snapshotId)) {
-            latestSnapshot = snapshotManager().snapshot(snapshotId);
-        } else if (!StringUtils.isEmpty(tagName) && tagManager().tagExists(tagName)) {
-            return store().newStatsFileHandler()
-                    .readStats(tagManager().tag(tagName).trimToSnapshot());
-        } else if (timestampMills != null) {
-            latestSnapshot = snapshotManager().earlierOrEqualTimeMills(timestampMills);
-        } else if (snapshotId == null && StringUtils.isEmpty(tagName)) {
-            latestSnapshot = snapshotManager().latestSnapshot();
-        }
-
-        if (latestSnapshot != null) {
-            return store().newStatsFileHandler().readStats(latestSnapshot);
+        Snapshot snapshot = TimeTravelUtil.resolveSnapshot(this);
+        if (snapshot != null) {
+            return store().newStatsFileHandler().readStats(snapshot);
         }
         return Optional.empty();
     }

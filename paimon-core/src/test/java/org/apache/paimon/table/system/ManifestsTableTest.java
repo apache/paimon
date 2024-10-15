@@ -150,7 +150,7 @@ public class ManifestsTableTest extends TableTestBase {
     }
 
     @Test
-    public void testReadManifestsFromNotExistSnapshot() throws Exception {
+    public void testReadManifestsFromNotExistSnapshot() {
         manifestsTable =
                 (ManifestsTable)
                         manifestsTable.copy(

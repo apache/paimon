@@ -20,40 +20,42 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.utils.TagManager;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
+
 /** The util class of resolve snapshot from scan params for time travel. */
 public class TimeTravelUtil {
 
-    private static String[] scanKeys = {
+    private static final String[] SCAN_KEYS = {
         CoreOptions.SCAN_SNAPSHOT_ID.key(),
         CoreOptions.SCAN_TAG_NAME.key(),
         CoreOptions.SCAN_WATERMARK.key(),
         CoreOptions.SCAN_TIMESTAMP_MILLIS.key()
     };
 
-    private static final Logger LOG = LoggerFactory.getLogger(TimeTravelUtil.class);
+    public static Snapshot resolveSnapshot(FileStoreTable table) {
+        return resolveSnapshotFromOptions(table.coreOptions(), table.snapshotManager());
+    }
 
     public static Snapshot resolveSnapshotFromOptions(
             CoreOptions options, SnapshotManager snapshotManager) {
         List<String> scanHandleKey = new ArrayList<>(1);
-        for (String key : scanKeys) {
+        for (String key : SCAN_KEYS) {
             if (options.toConfiguration().containsKey(key)) {
                 scanHandleKey.add(key);
             }
         }
 
         if (scanHandleKey.size() == 0) {
-            LOG.warn("Not set any time travel parameter.");
-            return null;
+            return snapshotManager.latestSnapshot();
         }
 
         Preconditions.checkArgument(
@@ -76,13 +78,28 @@ public class TimeTravelUtil {
         } else if (key.equals(CoreOptions.SCAN_TAG_NAME.key())) {
             snapshot = resolveSnapshotByTagName(snapshotManager, options);
         }
+
+        if (snapshot == null) {
+            snapshot = snapshotManager.latestSnapshot();
+        }
         return snapshot;
     }
 
     private static Snapshot resolveSnapshotBySnapshotId(
             SnapshotManager snapshotManager, CoreOptions options) {
         Long snapshotId = options.scanSnapshotId();
-        if (snapshotId != null && snapshotManager.snapshotExists(snapshotId)) {
+        if (snapshotId != null) {
+            if (!snapshotManager.snapshotExists(snapshotId)) {
+                Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+                Long latestSnapshotId = snapshotManager.latestSnapshotId();
+                throw new SnapshotNotExistException(
+                        String.format(
+                                "Specified parameter %s = %s is not exist, you can set it in range from %s to %s.",
+                                SCAN_SNAPSHOT_ID.key(),
+                                snapshotId,
+                                earliestSnapshotId,
+                                latestSnapshotId));
+            }
             return snapshotManager.snapshot(snapshotId);
         }
         return null;
