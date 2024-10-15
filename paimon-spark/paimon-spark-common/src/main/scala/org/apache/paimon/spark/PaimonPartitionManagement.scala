@@ -19,7 +19,6 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.catalog.Identifier
-import org.apache.paimon.hive.HiveCatalog
 import org.apache.paimon.metastore.MetastoreClient
 import org.apache.paimon.operation.FileStoreCommit
 import org.apache.paimon.table.FileStoreTable
