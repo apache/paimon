@@ -86,11 +86,22 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
 
     spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
 
+    withSQLConf("spark.paimon.scan.timestamp-millis" -> System.currentTimeMillis.toString) {
+      checkAnswer(
+        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
+        Row(2, 0, 2, "{ }"))
+    }
+
     spark.sql(s"INSERT INTO T VALUES ('3', 'b', 2, 1)")
     spark.sql(s"INSERT INTO T VALUES ('4', 'bbb', 3, 2)")
 
     spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
 
+    withSQLConf("spark.paimon.scan.timestamp-millis" -> System.currentTimeMillis.toString) {
+      checkAnswer(
+        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
+        Row(5, 0, 4, "{ }"))
+    }
     // create tag
     checkAnswer(
       spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 'test_tag5', snapshot => 5)"),
@@ -131,9 +142,7 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     }
 
     withSQLConf("spark.paimon.scan.snapshot-id" -> "100") {
-      checkAnswer(
-        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
-        Row(5, 0, 4, "{ }"))
+      Assertions.assertEquals(0, sql("select * from `T$statistics`").count())
     }
 
   }
