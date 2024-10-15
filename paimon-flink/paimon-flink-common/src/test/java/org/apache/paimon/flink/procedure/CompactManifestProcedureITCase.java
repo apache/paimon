@@ -25,8 +25,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Objects;
 
-/** IT Case for {@link ManifestCompactProcedure}. */
-public class ManifestCompactProcedureITCase extends CatalogITCaseBase {
+/** IT Case for {@link CompactManifestProcedure}. */
+public class CompactManifestProcedureITCase extends CatalogITCaseBase {
 
     @Test
     public void testManifestCompactProcedure() {
@@ -61,7 +61,7 @@ public class ManifestCompactProcedureITCase extends CatalogITCaseBase {
 
         Assertions.assertThat(
                         Objects.requireNonNull(
-                                        sql("CALL sys.manifest_compact(`table` => 'default.T')")
+                                        sql("CALL sys.compact_manifest(`table` => 'default.T')")
                                                 .get(0)
                                                 .getField(0))
                                 .toString())
@@ -114,7 +114,7 @@ public class ManifestCompactProcedureITCase extends CatalogITCaseBase {
 
         Assertions.assertThat(
                         Objects.requireNonNull(
-                                        sql("CALL sys.manifest_compact(`table` => 'default.T$branch_branch1')")
+                                        sql("CALL sys.compact_manifest(`table` => 'default.T$branch_branch1')")
                                                 .get(0)
                                                 .getField(0))
                                 .toString())

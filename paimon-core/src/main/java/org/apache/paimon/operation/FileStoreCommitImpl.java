@@ -1065,6 +1065,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     public void compactManifest() {
+        compactManifest(null);
+    }
+
+    private void compactManifest(
+            @Nullable Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> lastResult) {
         Snapshot latestSnapshot = snapshotManager.latestSnapshot();
 
         if (latestSnapshot == null) {
@@ -1073,16 +1078,42 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         List<ManifestFileMeta> mergeBeforeManifests =
                 manifestList.readDataManifests(latestSnapshot);
+        List<ManifestFileMeta> mergeAfterManifests;
 
-        List<ManifestFileMeta> mergeAfterManifests =
-                ManifestFileMerger.merge(
-                        mergeBeforeManifests,
-                        manifestFile,
-                        manifestTargetSize.getBytes(),
-                        1,
-                        manifestFullCompactionSize.getBytes(),
-                        partitionType,
-                        manifestReadParallelism);
+        if (lastResult != null) {
+            List<ManifestFileMeta> oldMergeBeforeManifests = lastResult.getLeft();
+            List<ManifestFileMeta> oldMergeAfterManifests = lastResult.getRight();
+
+            Set<String> retryMergeBefore =
+                    oldMergeBeforeManifests.stream()
+                            .map(ManifestFileMeta::fileName)
+                            .collect(Collectors.toSet());
+
+            List<ManifestFileMeta> manifestsFromOther =
+                    mergeBeforeManifests.stream()
+                            .filter(m -> !retryMergeBefore.remove(m.fileName()))
+                            .collect(Collectors.toList());
+
+            if (retryMergeBefore.isEmpty()) {
+                // no manifest compact from latest failed commit to latest commit
+                mergeAfterManifests = new ArrayList<>(oldMergeAfterManifests);
+                mergeAfterManifests.addAll(manifestsFromOther);
+            } else {
+                // manifest compact happens, quit
+                return;
+            }
+        } else {
+            // the fist trial
+            mergeAfterManifests =
+                    ManifestFileMerger.merge(
+                            mergeBeforeManifests,
+                            manifestFile,
+                            manifestTargetSize.getBytes(),
+                            1,
+                            manifestFullCompactionSize.getBytes(),
+                            partitionType,
+                            manifestReadParallelism);
+        }
 
         String baseManifestList = manifestList.write(mergeAfterManifests);
         String deltaManifestList = manifestList.write(Collections.emptyList());
@@ -1112,7 +1143,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         ? snapshotManager.snapshotPath(newSnapshot.id())
                         : snapshotManager.copyWithBranch(branchName).snapshotPath(newSnapshot.id());
 
-        commitSnapshotImpl(newSnapshot, newSnapshotPath);
+        if (!commitSnapshotImpl(newSnapshot, newSnapshotPath)) {
+            compactManifest(Pair.of(mergeBeforeManifests, mergeAfterManifests));
+        }
     }
 
     private boolean commitSnapshotImpl(Snapshot newSnapshot, Path newSnapshotPath) {

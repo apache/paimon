@@ -30,13 +30,13 @@ import org.apache.flink.table.procedure.ProcedureContext;
 import java.util.Collections;
 
 /** Compact manifest file to reduce deleted manifest entries. */
-public class ManifestCompactProcedure extends ProcedureBase {
+public class CompactManifestProcedure extends ProcedureBase {
 
-    private static final String commitUser = "Compact-Procedure-Committer";
+    private static final String commitUser = "Compact-Manifest-Procedure-Committer";
 
     @Override
     public String identifier() {
-        return "manifest_compact";
+        return "compact_manifest";
     }
 
     @ProcedureHint(argument = {@ArgumentHint(name = "table", type = @DataTypeHint("STRING"))})
