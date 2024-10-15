@@ -65,9 +65,10 @@ public class SparkGenericCatalogWithHiveTest {
         spark.sql("CREATE DATABASE IF NOT EXISTS my_db2");
         spark.sql("USE my_db2");
         spark.sql(
-                "CREATE TABLE IF NOT EXISTS t2 (a INT, Bb INT, c STRING) PARTITIONED BY (c) USING paimon TBLPROPERTIES"
-                        + " ('file.format'='avro')");
+                "CREATE TABLE IF NOT EXISTS t2 (a INT, Bb INT, c STRING) USING paimon TBLPROPERTIES"
+                        + " ('file.format'='avro')  PARTITIONED BY (c)");
 
+        // support add partition
         spark.sql("ALTER TABLE t2 ADD PARTITION(c='aa')");
         spark.close();
     }
