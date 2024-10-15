@@ -57,7 +57,7 @@ public abstract class AbstractOrcColumnVector
 
     @Override
     public boolean isNullAt(int i) {
-        return !vector.noNulls && vector.isNull[vector.isRepeating ? 0 : i];
+        return !vector.noNulls && vector.isNull[rowMapper(i)];
     }
 
     public static org.apache.paimon.data.columnar.ColumnVector createPaimonVector(

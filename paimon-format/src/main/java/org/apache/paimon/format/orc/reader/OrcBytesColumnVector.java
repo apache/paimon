@@ -34,11 +34,10 @@ public class OrcBytesColumnVector extends AbstractOrcColumnVector
 
     @Override
     public Bytes getBytes(int i) {
-        int rowId = vector.isRepeating ? 0 : i;
-        int selectedRowId = rowMapper(rowId);
+        int rowId = rowMapper(i);
         byte[][] data = vector.vector;
         int[] start = vector.start;
         int[] length = vector.length;
-        return new Bytes(data[selectedRowId], start[selectedRowId], length[selectedRowId]);
+        return new Bytes(data[rowId], start[rowId], length[rowId]);
     }
 }

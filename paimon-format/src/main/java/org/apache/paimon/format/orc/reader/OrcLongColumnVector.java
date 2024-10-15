@@ -42,30 +42,30 @@ public class OrcLongColumnVector extends AbstractOrcColumnVector
     @Override
     public long getLong(int i) {
         i = rowMapper(i);
-        return vector.vector[vector.isRepeating ? 0 : i];
+        return vector.vector[i];
     }
 
     @Override
     public boolean getBoolean(int i) {
         i = rowMapper(i);
-        return vector.vector[vector.isRepeating ? 0 : i] == 1;
+        return vector.vector[i] == 1;
     }
 
     @Override
     public byte getByte(int i) {
         i = rowMapper(i);
-        return (byte) vector.vector[vector.isRepeating ? 0 : i];
+        return (byte) vector.vector[i];
     }
 
     @Override
     public int getInt(int i) {
         i = rowMapper(i);
-        return (int) vector.vector[vector.isRepeating ? 0 : i];
+        return (int) vector.vector[i];
     }
 
     @Override
     public short getShort(int i) {
         i = rowMapper(i);
-        return (short) vector.vector[vector.isRepeating ? 0 : i];
+        return (short) vector.vector[i];
     }
 }

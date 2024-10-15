@@ -41,8 +41,7 @@ public class OrcDecimalColumnVector extends AbstractOrcColumnVector
     @Override
     public Decimal getDecimal(int i, int precision, int scale) {
         i = rowMapper(i);
-        BigDecimal data =
-                vector.vector[vector.isRepeating ? 0 : i].getHiveDecimal().bigDecimalValue();
+        BigDecimal data = vector.vector[i].getHiveDecimal().bigDecimalValue();
         return Decimal.fromBigDecimal(data, precision, scale);
     }
 }

@@ -39,12 +39,12 @@ public class OrcDoubleColumnVector extends AbstractOrcColumnVector
     @Override
     public double getDouble(int i) {
         i = rowMapper(i);
-        return vector.vector[vector.isRepeating ? 0 : i];
+        return vector.vector[i];
     }
 
     @Override
     public float getFloat(int i) {
         i = rowMapper(i);
-        return (float) vector.vector[vector.isRepeating ? 0 : i];
+        return (float) vector.vector[i];
     }
 }
