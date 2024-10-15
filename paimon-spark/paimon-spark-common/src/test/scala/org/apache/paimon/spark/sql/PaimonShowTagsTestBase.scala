@@ -22,22 +22,101 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
 
-abstract class PaimonShowTagsTestBase extends PaimonSparkTestBase {
+abstract class PaimonTagDdlTestBase extends PaimonSparkTestBase {
+  test("Tag ddl: show tags syntax") {
+    spark.sql("""CREATE TABLE T (id INT, name STRING)
+                |USING PAIMON
+                |TBLPROPERTIES ('primary-key'='id')""".stripMargin)
 
-  test("Paimon DDL: show tags for table") {
+    spark.sql("insert into T values(1, 'a')")
+
+    spark.sql("alter table T create tag `2024-10-12`")
+    spark.sql("alter table T create tag `2024-10-11`")
+    spark.sql("alter table T create tag `2024-10-13`")
+
+    checkAnswer(
+      spark.sql("show tags T"),
+      Row("2024-10-11") :: Row("2024-10-12") :: Row("2024-10-13") :: Nil)
+  }
+
+  test("Tag ddl: alter table t crete tag syntax") {
     spark.sql("""CREATE TABLE T (id INT, name STRING)
                 |USING PAIMON
                 |TBLPROPERTIES ('primary-key'='id')""".stripMargin)
 
     spark.sql("insert into T values(1, 'a')")
     spark.sql("insert into T values(2, 'b')")
+    spark.sql("insert into T values(3, 'c')")
+    val table = loadTable("T")
+    assertResult(3)(table.snapshotManager().snapshotCount())
 
-    spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => '2024-10-12')")
-    spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => '2024-10-11')")
-    spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => '2024-10-13')")
+    spark.sql("alter table T create tag `tag-1`")
+    spark.sql("alter table T create tag `tag-2` RETAIN 2 DAYS")
+    spark.sql("alter table T create tag `tag-3` as of version 1")
+    spark.sql("alter table T create tag `tag-4` as of version 2 RETAIN 3 HOURS")
+    assertResult(4)(spark.sql("show tags T").count())
 
     checkAnswer(
+      spark.sql("select tag_name,snapshot_id,time_retained from `T$tags`"),
+      Row("tag-1", 3, null) :: Row("tag-2", 3, "PT48H") :: Row("tag-3", 1, null) :: Row(
+        "tag-4",
+        2,
+        "PT3H") :: Nil
+    )
+
+    // update the tag info if tag exists
+    spark.sql("alter table T create tag `tag-1` RETAIN 1 HOURS")
+    checkAnswer(
+      spark.sql("select tag_name,snapshot_id,time_retained from `T$tags` where tag_name='tag-1'"),
+      Row("tag-1", 3, "PT1H"))
+
+    // not update tag with 'if not exists' syntax, although tag already exists
+    spark.sql("alter table T create tag if not exists `tag-1` RETAIN 10 HOURS")
+    checkAnswer(
+      spark.sql("select tag_name,snapshot_id,time_retained from `T$tags` where tag_name='tag-1'"),
+      Row("tag-1", 3, "PT1H"))
+  }
+
+  test("Tag ddl: alter table t delete tag syntax") {
+    spark.sql("""CREATE TABLE T (id INT, name STRING)
+                |USING PAIMON
+                |TBLPROPERTIES ('primary-key'='id')""".stripMargin)
+
+    spark.sql("insert into T values(1, 'a')")
+    assertResult(1)(loadTable("T").snapshotManager().snapshotCount())
+
+    spark.sql("alter table T create tag `2024-10-12`")
+    spark.sql("alter table T create tag `2024-10-15`")
+    spark.sql("alter table T create tag `2024-10-13`")
+    spark.sql("alter table T create tag `2024-10-14`")
+    checkAnswer(
       spark.sql("show tags T"),
-      Row("2024-10-11") :: Row("2024-10-12") :: Row("2024-10-13") :: Nil)
+      Row("2024-10-12") :: Row("2024-10-13") :: Row("2024-10-14") :: Row("2024-10-15") :: Nil)
+
+    spark.sql("alter table T delete tag `2024-10-12`")
+    checkAnswer(
+      spark.sql("show tags T"),
+      Row("2024-10-13") :: Row("2024-10-14") :: Row("2024-10-15") :: Nil)
+
+    spark.sql("alter table T delete tag `2024-10-13, 2024-10-14`")
+    checkAnswer(spark.sql("show tags T"), Row("2024-10-15") :: Nil)
+
+    spark.sql("alter table T delete tag if EXISTS `2024-10-18`")
+    checkAnswer(spark.sql("show tags T"), Row("2024-10-15") :: Nil)
+  }
+
+  test("Tag ddl: alter table t rename tag syntax") {
+    spark.sql("""CREATE TABLE T (id INT, name STRING)
+                |USING PAIMON
+                |TBLPROPERTIES ('primary-key'='id')""".stripMargin)
+
+    spark.sql("insert into T values(1, 'a')")
+    assertResult(1)(loadTable("T").snapshotManager().snapshotCount())
+
+    spark.sql("alter table T create tag `tag-1`")
+    checkAnswer(spark.sql("show tags T"), Row("tag-1"))
+
+    spark.sql("alter table T rename tag `tag-1` to `tag-2`")
+    checkAnswer(spark.sql("show tags T"), Row("tag-2"))
   }
 }
