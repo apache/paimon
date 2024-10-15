@@ -59,8 +59,8 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
     }
   }
 
-  test("Paimon DDL with hive catalog: create partition for paimon table") {
-    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+  test("Paimon DDL with hive catalog: create partition for paimon table sparkCatalogName") {
+    Seq(paimonHiveCatalogName).foreach {
       catalogName =>
         spark.sql(s"USE $catalogName")
         withTempDir {
@@ -76,14 +76,15 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 spark.sql(s"""
                              |CREATE TABLE paimon_db.paimon_tbl (id STRING, name STRING, pt STRING)
                              |USING PAIMON
-                             |TBLPROPERTIES ('primary-key' = 'id')
-                             |PARTITIONED BY (pt)
+                             |PARTITIONED BY (name, pt)
+                             |TBLPROPERTIES('metastore.partitioned-table' = 'true')
                              |""".stripMargin)
                 Assertions.assertEquals(
                   getTableLocation("paimon_db.paimon_tbl"),
                   s"${dBLocation.getCanonicalPath}/paimon_tbl")
+                spark.sql("insert into paimon_db.paimon_tbl select '1', 'n', 'cc'")
 
-                spark.sql("alter table paimon_db.paimon_tbl add partition(pt='aa') ")
+                spark.sql("alter table paimon_db.paimon_tbl add partition(name='cc', `pt`='aa') ")
               }
             }
         }

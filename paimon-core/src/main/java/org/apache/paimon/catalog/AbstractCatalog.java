@@ -47,7 +47,13 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.TYPE;
@@ -170,8 +176,7 @@ public abstract class AbstractCatalog implements Catalog {
                 throw new RuntimeException(e);
             }
         } else {
-            LOG.warn(
-                    "partitionKeys is empty or metastore.partitioned-table is false, would not add partitions");
+            throw new RuntimeException("the table is not partitioned table in metastore!");
         }
     }
 

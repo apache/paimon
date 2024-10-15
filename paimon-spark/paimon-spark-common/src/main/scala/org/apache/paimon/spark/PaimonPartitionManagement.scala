@@ -19,6 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.hive.HiveCatalog
 import org.apache.paimon.operation.FileStoreCommit
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
@@ -131,7 +132,14 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
         }
         partitions.map {
           partition =>
-            catalog.createPartition(getIdentifierFromTableName(table.fullName()), partition)
+            if (catalog.isInstanceOf[HiveCatalog]) {
+              catalog
+                .asInstanceOf[HiveCatalog]
+                .createPartition(getIdentifierFromTableName(table.fullName()), partition)
+            } else {
+              throw new UnsupportedOperationException(
+                "Only Support HiveCatalog in create partition.")
+            }
         }
       case _ =>
         throw new UnsupportedOperationException("Only FileStoreTable supports create partitions.")
