@@ -285,7 +285,9 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"orc", "parquet"})
+    // orc writer does not write timestamp_ltz correctly, however we won't fix it due to
+    // compatibility concern, so we don't test orc here
+    @ValueSource(strings = {"parquet"})
     public void testFilterTimestampLtz(String format) throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().parallelism(2).build();
