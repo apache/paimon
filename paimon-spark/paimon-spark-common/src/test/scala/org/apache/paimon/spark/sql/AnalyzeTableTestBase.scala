@@ -66,10 +66,10 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
 
     val df =
-      spark.sql("select snapshot_id, schema_id, mergedRecordCount, colStat from `T$statistics`")
+      spark.sql("select snapshot_id, schema_id, mergedRecordCount, colstat from `T$statistics`")
     Assertions.assertEquals(df.collect().size, 1)
     checkAnswer(
-      spark.sql("SELECT snapshot_id, schema_id, mergedRecordCount, colStat from `T$statistics`"),
+      spark.sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat from `T$statistics`"),
       Row(2, 0, 2, "{ }"))
   }
 
@@ -88,7 +88,7 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
 
     withSQLConf("spark.paimon.scan.timestamp-millis" -> System.currentTimeMillis.toString) {
       checkAnswer(
-        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colStat FROM `T$statistics`"),
+        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
         Row(2, 0, 2, "{ }"))
     }
 
@@ -99,7 +99,7 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
 
     withSQLConf("spark.paimon.scan.timestamp-millis" -> System.currentTimeMillis.toString) {
       checkAnswer(
-        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colStat FROM `T$statistics`"),
+        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
         Row(5, 0, 4, "{ }"))
     }
     // create tag
@@ -113,31 +113,31 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
 
     withSQLConf("spark.paimon.scan.tag-name" -> "test_tag5") {
       checkAnswer(
-        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colStat FROM `T$statistics`"),
+        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
         Row(2, 0, 2, "{ }"))
     }
 
     withSQLConf("spark.paimon.scan.tag-name" -> "test_tag6") {
       checkAnswer(
-        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colStat FROM `T$statistics`"),
+        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
         Row(5, 0, 4, "{ }"))
     }
 
     withSQLConf("spark.paimon.scan.snapshot-id" -> "3") {
       checkAnswer(
-        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colStat FROM `T$statistics`"),
+        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
         Row(2, 0, 2, "{ }"))
     }
 
     withSQLConf("spark.paimon.scan.snapshot-id" -> "4") {
       checkAnswer(
-        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colStat FROM `T$statistics`"),
+        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
         Row(2, 0, 2, "{ }"))
     }
 
     withSQLConf("spark.paimon.scan.snapshot-id" -> "6") {
       checkAnswer(
-        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colStat FROM `T$statistics`"),
+        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
         Row(5, 0, 4, "{ }"))
     }
 

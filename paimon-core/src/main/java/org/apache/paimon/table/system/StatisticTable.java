@@ -72,7 +72,7 @@ public class StatisticTable implements ReadonlyTable {
                             new DataField(1, "schema_id", new BigIntType(false)),
                             new DataField(2, "mergedRecordCount", new BigIntType(true)),
                             new DataField(3, "mergedRecordSize", new BigIntType(true)),
-                            new DataField(4, "colStat", SerializationUtils.newStringType(true))));
+                            new DataField(4, "colstat", SerializationUtils.newStringType(true))));
 
     private final FileIO fileIO;
     private final Path location;
