@@ -131,6 +131,17 @@ This section introduce all available spark procedures about paimon.
       <td>CALL sys.delete_tag(table => 'default.T', tag => 'my_tag')</td>
     </tr>
     <tr>
+      <td>expire_tags</td>
+      <td>
+         To expire tags by time. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>older_than: tagCreateTime before which tags will be removed.</li>
+      </td>
+      <td>
+         CALL sys.expire_tags(table => 'default.T', older_than => '2024-09-06 11:00:00')
+      </td>
+    </tr>
+    <tr>
       <td>rollback</td>
       <td>
          To rollback to a specific version of target table. Argument:
