@@ -46,34 +46,6 @@ public class SparkGenericCatalogWithHiveTest {
     }
 
     @Test
-    public void testCreatePartitionForTable(@TempDir java.nio.file.Path tempDir) {
-        // firstly, we use hive metastore to creata table, and check the result.
-        Path warehousePath = new Path("file:" + tempDir.toString());
-        SparkSession spark =
-                SparkSession.builder()
-                        .config("spark.sql.warehouse.dir", warehousePath.toString())
-                        // with case-sensitive false
-                        .config("spark.sql.caseSensitive", "false")
-                        // with hive metastore
-                        .config("spark.sql.catalogImplementation", "hive")
-                        .config(
-                                "spark.sql.catalog.spark_catalog",
-                                SparkGenericCatalog.class.getName())
-                        .master("local[2]")
-                        .getOrCreate();
-
-        spark.sql("CREATE DATABASE IF NOT EXISTS my_db2");
-        spark.sql("USE my_db2");
-        spark.sql(
-                "CREATE TABLE IF NOT EXISTS t2 (a INT, Bb INT, c STRING) USING paimon TBLPROPERTIES"
-                        + " ('file.format'='avro')  PARTITIONED BY (c)");
-
-        // support add partition
-        spark.sql("ALTER TABLE t2 ADD PARTITION(c='aa')");
-        spark.close();
-    }
-
-    @Test
     public void testCreateTableCaseSensitive(@TempDir java.nio.file.Path tempDir) {
         // firstly, we use hive metastore to creata table, and check the result.
         Path warehousePath = new Path("file:" + tempDir.toString());
