@@ -33,7 +33,6 @@ under the License.
 
     <properties>
         <frocksdbjni.version>6.20.3-ververica-2.0</frocksdbjni.version>
-        <iceberg.version>1.6.1</iceberg.version>
     </properties>
 
     <dependencies>
