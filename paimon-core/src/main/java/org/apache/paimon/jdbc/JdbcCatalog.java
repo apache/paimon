@@ -159,12 +159,6 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void createPartition(Identifier identifier, Map<String, String> partitions)
-            throws TableNotExistException, PartitionNotExistException {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
     protected Map<String, String> loadDatabasePropertiesImpl(String databaseName)
             throws DatabaseNotExistException {
         if (!JdbcUtils.databaseExists(connections, catalogKey, databaseName)) {

@@ -1163,12 +1163,10 @@ public class FlinkCatalog extends AbstractCatalog {
                 Identifier identifier = toIdentifier(tablePath);
                 catalog.createPartition(identifier, partitionSpec.getPartitionSpec());
             } else {
-                throw new UnsupportedOperationException();
+                throw new UnsupportedOperationException("Only support Hive Catalog");
             }
         } catch (Catalog.TableNotExistException e) {
             throw new CatalogException(e);
-        } catch (Catalog.PartitionNotExistException e) {
-            throw new RuntimeException(e);
         }
     }
 

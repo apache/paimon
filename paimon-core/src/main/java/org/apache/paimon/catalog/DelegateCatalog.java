@@ -148,7 +148,7 @@ public class DelegateCatalog implements Catalog {
 
     @Override
     public void createPartition(Identifier identifier, Map<String, String> partitions)
-            throws TableNotExistException, PartitionNotExistException {
+            throws TableNotExistException {
         wrapped.createPartition(identifier, partitions);
     }
 

@@ -274,7 +274,7 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException, PartitionNotExistException;
 
     /**
-     * Create a partition for the specify table.
+     * Create a partition for the specified table.
      *
      * @param identifier path of the table to add partition
      * @param partitions the partition to be added
@@ -282,7 +282,7 @@ public interface Catalog extends AutoCloseable {
      * @throws PartitionNotExistException if the partition does not exist
      */
     void createPartition(Identifier identifier, Map<String, String> partitions)
-            throws TableNotExistException, PartitionNotExistException;
+            throws TableNotExistException;
 
     /**
      * Modify an existing table from a {@link SchemaChange}.
