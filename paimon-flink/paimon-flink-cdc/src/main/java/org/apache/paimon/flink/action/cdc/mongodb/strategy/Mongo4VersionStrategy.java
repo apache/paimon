@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb.strategy;
 
-import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.DataField;
@@ -50,17 +49,12 @@ public class Mongo4VersionStrategy implements MongoVersionStrategy {
     private final String databaseName;
     private final String collection;
     private final Configuration mongodbConfig;
-    private final List<ComputedColumn> computedColumns;
 
     public Mongo4VersionStrategy(
-            String databaseName,
-            String collection,
-            List<ComputedColumn> computedColumns,
-            Configuration mongodbConfig) {
+            String databaseName, String collection, Configuration mongodbConfig) {
         this.databaseName = databaseName;
         this.collection = collection;
         this.mongodbConfig = mongodbConfig;
-        this.computedColumns = computedColumns;
     }
 
     /**
@@ -124,8 +118,7 @@ public class Mongo4VersionStrategy implements MongoVersionStrategy {
     private RichCdcMultiplexRecord processRecord(JsonNode fullDocument, RowKind rowKind)
             throws JsonProcessingException {
         RowType.Builder rowTypeBuilder = RowType.builder();
-        Map<String, String> record =
-                getExtractRow(fullDocument, rowTypeBuilder, computedColumns, mongodbConfig);
+        Map<String, String> record = getExtractRow(fullDocument, rowTypeBuilder, mongodbConfig);
         List<DataField> fields = rowTypeBuilder.build().getFields();
 
         return new RichCdcMultiplexRecord(

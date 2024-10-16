@@ -19,6 +19,8 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.action.cdc.ComputedColumnUtils;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
@@ -28,6 +30,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -60,8 +63,18 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     private boolean shouldSynchronizeCurrentTable;
     private RichEventParser currentParser;
 
-    public RichCdcMultiplexRecordEventParser(boolean caseSensitive) {
-        this(null, null, null, new TableNameConverter(caseSensitive), new HashSet<>());
+    private final Map<String, List<ComputedColumn>> cacheComputedColumns = new HashMap<>();
+    private final List<String> computedColumnArgs;
+
+    public RichCdcMultiplexRecordEventParser(
+            boolean caseSensitive, List<String> computedColumnArgs) {
+        this(
+                null,
+                null,
+                null,
+                new TableNameConverter(caseSensitive),
+                new HashSet<>(),
+                computedColumnArgs);
     }
 
     public RichCdcMultiplexRecordEventParser(
@@ -69,12 +82,14 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
             @Nullable Pattern includingPattern,
             @Nullable Pattern excludingPattern,
             TableNameConverter tableNameConverter,
-            Set<String> createdTables) {
+            Set<String> createdTables,
+            List<String> computedColumnArgs) {
         this.schemaBuilder = schemaBuilder;
         this.includingPattern = includingPattern;
         this.excludingPattern = excludingPattern;
         this.tableNameConverter = tableNameConverter;
         this.createdTables = createdTables;
+        this.computedColumnArgs = computedColumnArgs;
     }
 
     @Override
@@ -86,6 +101,52 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
             this.currentParser = parsers.computeIfAbsent(currentTable, t -> new RichEventParser());
             this.currentParser.setRawEvent(record.toRichCdcRecord());
         }
+    }
+
+    @Override
+    public void evalComputedColumns(List<DataField> dataFields) {
+        if (computedColumnArgs.isEmpty()) {
+            return;
+        }
+        List<ComputedColumn> computedColumns;
+        if (cacheComputedColumns.containsKey(currentTable)) {
+            computedColumns = cacheComputedColumns.get(currentTable);
+        } else {
+            computedColumns =
+                    ComputedColumnUtils.buildComputedColumns(
+                            computedColumnArgs, dataFields, tableNameConverter.isCaseSensitive());
+            cacheComputedColumns.put(currentTable, computedColumns);
+        }
+
+        List<DataField> fieldsWithComputedColumns = new ArrayList<>();
+        currentParser
+                .parseRecords()
+                .forEach(
+                        cdcRecord -> {
+                            Map<String, String> fields = cdcRecord.fields();
+                            List<DataField> previousDataFields = record.fields();
+                            fieldsWithComputedColumns.addAll(previousDataFields);
+                            computedColumns.forEach(
+                                    computedColumn -> {
+                                        fieldsWithComputedColumns.add(
+                                                new DataField(
+                                                        fields.size(),
+                                                        computedColumn.columnName(),
+                                                        computedColumn.columnType()));
+                                        fields.put(
+                                                computedColumn.columnName(),
+                                                computedColumn.eval(
+                                                        fields.get(
+                                                                computedColumn.fieldReference())));
+                                    });
+                            record =
+                                    new RichCdcMultiplexRecord(
+                                            record.databaseName(),
+                                            record.tableName(),
+                                            fieldsWithComputedColumns,
+                                            record.primaryKeys(),
+                                            cdcRecord);
+                        });
     }
 
     @Override
@@ -118,6 +179,7 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     public Optional<Schema> parseNewTable() {
         if (shouldCreateCurrentTable()) {
             checkNotNull(schemaBuilder, "NewTableSchemaBuilder hasn't been set.");
+            evalComputedColumns(record.fields());
             return schemaBuilder.build(record);
         }
 

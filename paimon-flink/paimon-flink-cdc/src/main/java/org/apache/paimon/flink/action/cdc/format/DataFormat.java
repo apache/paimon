@@ -19,14 +19,11 @@
 package org.apache.paimon.flink.action.cdc.format;
 
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
-import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
-
-import java.util.List;
 
 /**
  * Supports the message queue's data format and provides definitions for the message queue's record
@@ -38,11 +35,9 @@ public interface DataFormat {
      * Creates a new instance of {@link AbstractRecordParser} for this data format with the
      * specified configurations.
      *
-     * @param computedColumns List of computed columns to be considered by the parser.
      * @return A new instance of {@link AbstractRecordParser}.
      */
-    AbstractRecordParser createParser(
-            TypeMapping typeMapping, List<ComputedColumn> computedColumns);
+    AbstractRecordParser createParser(TypeMapping typeMapping);
 
     KafkaDeserializationSchema<CdcSourceRecord> createKafkaDeserializer(
             Configuration cdcSourceConfig);

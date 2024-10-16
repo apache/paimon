@@ -58,4 +58,8 @@ public class TableNameConverter implements Serializable {
                                 + originIdentifier.getObjectName();
         return convert(rawName);
     }
+
+    public boolean isCaseSensitive() {
+        return caseSensitive;
+    }
 }
