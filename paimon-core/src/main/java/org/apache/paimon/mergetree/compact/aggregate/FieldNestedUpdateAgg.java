@@ -67,7 +67,7 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
     }
 
     @Override
-    String name() {
+    public String name() {
         return NAME;
     }
 

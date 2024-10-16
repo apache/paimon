@@ -810,6 +810,21 @@ public class FieldAggregatorTest {
         assertThat(result4).isEqualTo(acc2);
     }
 
+    @Test
+    public void testCustomAgg() throws IOException {
+        FieldAggregator fieldAggregator =
+                FieldAggregator.createFieldAggregator(
+                        DataTypes.STRING(),
+                        "custom",
+                        false,
+                        false,
+                        CoreOptions.fromMap(new HashMap<>()),
+                        "custom");
+
+        Object agg = fieldAggregator.agg("test", "test");
+        assertThat(agg).isEqualTo("test");
+    }
+
     private Map<Object, Object> toMap(Object... kvs) {
         Map<Object, Object> result = new HashMap<>();
         for (int i = 0; i < kvs.length; i += 2) {

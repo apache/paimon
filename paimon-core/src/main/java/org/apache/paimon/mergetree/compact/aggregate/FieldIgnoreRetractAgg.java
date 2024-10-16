@@ -31,7 +31,7 @@ public class FieldIgnoreRetractAgg extends FieldAggregator {
     }
 
     @Override
-    String name() {
+    public String name() {
         return aggregator.name();
     }
 

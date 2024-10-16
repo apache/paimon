@@ -13,9 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-org.apache.paimon.catalog.FileSystemCatalogFactory
-org.apache.paimon.jdbc.JdbcCatalogFactory
-org.apache.paimon.jdbc.JdbcCatalogLockFactory
 org.apache.paimon.mergetree.compact.aggregate.factory.FieldBoolAndAggFactory
 org.apache.paimon.mergetree.compact.aggregate.factory.FieldBoolOrAggFactory
 org.apache.paimon.mergetree.compact.aggregate.factory.FieldCollectAggFactory
@@ -36,3 +33,4 @@ org.apache.paimon.mergetree.compact.aggregate.factory.FieldRoaringBitmap32AggFac
 org.apache.paimon.mergetree.compact.aggregate.factory.FieldRoaringBitmap64AggFactory
 org.apache.paimon.mergetree.compact.aggregate.factory.FieldSumAggFactory
 org.apache.paimon.mergetree.compact.aggregate.factory.FieldThetaSketchAggFactory
+org.apache.paimon.mergetree.compact.aggregate.TestCostomAggFactory
