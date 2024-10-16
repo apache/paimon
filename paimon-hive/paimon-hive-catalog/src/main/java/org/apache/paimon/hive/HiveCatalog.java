@@ -311,23 +311,6 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void createPartition(Identifier identifier, Map<String, String> partitionSpec)
-            throws TableNotExistException {
-        try {
-            TableSchema tableSchema = getDataTableSchema(identifier);
-            metastoreClient =
-                    new HiveMetastoreClient(
-                            new Identifier(identifier.getDatabaseName(), identifier.getTableName()),
-                            tableSchema,
-                            clients);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-
-        super.createPartition(identifier, partitionSpec);
-    }
-
-    @Override
     public void dropPartition(Identifier identifier, Map<String, String> partitionSpec)
             throws TableNotExistException {
         TableSchema tableSchema = getDataTableSchema(identifier);
