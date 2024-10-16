@@ -41,6 +41,8 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.view.View;
+import org.apache.paimon.view.ViewImpl;
 
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.catalog.AbstractCatalog;
@@ -53,10 +55,12 @@ import org.apache.flink.table.catalog.CatalogPartition;
 import org.apache.flink.table.catalog.CatalogPartitionImpl;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.CatalogTable;
+import org.apache.flink.table.catalog.CatalogView;
 import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.IntervalFreshness;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.ResolvedCatalogBaseTable;
+import org.apache.flink.table.catalog.ResolvedCatalogView;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.catalog.TableChange;
 import org.apache.flink.table.catalog.TableChange.AddColumn;
@@ -280,10 +284,16 @@ public class FlinkCatalog extends AbstractCatalog {
 
     private CatalogBaseTable getTable(ObjectPath tablePath, @Nullable Long timestamp)
             throws TableNotExistException {
+        Identifier identifier = toIdentifier(tablePath);
         Table table;
         try {
             table = catalog.getTable(toIdentifier(tablePath));
         } catch (Catalog.TableNotExistException e) {
+            Optional<CatalogBaseTable> view = getView(tablePath, timestamp);
+            if (view.isPresent()) {
+                return view.get();
+            }
+
             throw new TableNotExistException(getName(), tablePath);
         }
 
@@ -307,6 +317,32 @@ public class FlinkCatalog extends AbstractCatalog {
         } else {
             return new SystemCatalogTable(table);
         }
+    }
+
+    private Optional<CatalogBaseTable> getView(ObjectPath tablePath, @Nullable Long timestamp) {
+        View view;
+        try {
+            view = catalog.getView(toIdentifier(tablePath));
+        } catch (Catalog.ViewNotExistException e) {
+            return Optional.empty();
+        }
+
+        if (timestamp != null) {
+            throw new UnsupportedOperationException(
+                    String.format("View %s does not support time travel.", tablePath));
+        }
+
+        org.apache.flink.table.api.Schema schema =
+                org.apache.flink.table.api.Schema.newBuilder()
+                        .fromRowDataType(fromLogicalToDataType(toLogicalType(view.rowType())))
+                        .build();
+        return Optional.of(
+                CatalogView.of(
+                        schema,
+                        view.comment().orElse(null),
+                        view.query(),
+                        view.query(),
+                        view.options()));
     }
 
     @Override
@@ -335,12 +371,6 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public void createTable(ObjectPath tablePath, CatalogBaseTable table, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException, CatalogException {
-        if (!(table instanceof CatalogTable || table instanceof CatalogMaterializedTable)) {
-            throw new UnsupportedOperationException(
-                    "Only support CatalogTable and CatalogMaterializedTable, but is: "
-                            + table.getClass());
-        }
-
         if (Objects.equals(getDefaultDatabase(), tablePath.getDatabaseName())
                 && disableCreateTableInDefaultDatabase) {
             throw new UnsupportedOperationException(
@@ -351,10 +381,28 @@ public class FlinkCatalog extends AbstractCatalog {
         // the returned value of "table.getOptions" may be unmodifiable (for example from
         // TableDescriptor)
         Map<String, String> options = new HashMap<>(table.getOptions());
+
+        if (table instanceof CatalogView) {
+            ResolvedCatalogView viewTable = (ResolvedCatalogView) table;
+            org.apache.paimon.types.RowType.Builder builder = org.apache.paimon.types.RowType.builder();
+            viewTable.getResolvedSchema().getColumns().forEach(column -> builder.field(column.getName(), toDataType(column.getDataType().getLogicalType()), column.getComment().orElse(null)));
+            View view = new ViewImpl(identifier, builder.build(), viewTable.getExpandedQuery(), viewTable.getComment(), viewTable.getOptions());
+            try {
+                catalog.createView(identifier, view, ignoreIfExists);
+            } catch (Catalog.ViewAlreadyExistException e) {
+                throw new TableAlreadyExistException(getName(), tablePath);
+            } catch (Catalog.DatabaseNotExistException e) {
+                throw new DatabaseNotExistException(getName(), tablePath.getDatabaseName());
+            }
+            return;
+        }
+
         if (table instanceof CatalogMaterializedTable) {
             fillOptionsForMaterializedTable((CatalogMaterializedTable) table, options);
         }
         Schema paimonSchema = buildPaimonSchema(identifier, table, options);
+
+
 
         boolean unRegisterLogSystem = false;
         try {

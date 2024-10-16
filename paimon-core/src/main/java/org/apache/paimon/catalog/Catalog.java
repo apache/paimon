@@ -25,6 +25,7 @@ import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.view.View;
 
 import java.io.Serializable;
 import java.util.Arrays;
@@ -300,42 +301,43 @@ public interface Catalog extends AutoCloseable {
     }
 
     /**
-     * Return a {@link Table} identified by the given {@link Identifier}.
+     * Return a {@link View} identified by the given {@link Identifier}.
      *
-     * <p>System tables can be got by '$' splitter.
-     *
-     * @param identifier Path of the table
-     * @return The requested table
-     * @throws TableNotExistException if the target does not exist
+     * @param identifier Path of the view
+     * @return The requested view
+     * @throws ViewNotExistException if the target does not exist
      */
-    Table getView(Identifier identifier) throws TableNotExistException;
+    default View getView(Identifier identifier) throws ViewNotExistException {
+        throw new UnsupportedOperationException();
+    }
 
     /**
-     * Drop a table.
+     * Drop a view.
      *
-     * <p>NOTE: System tables can not be dropped.
-     *
-     * @param identifier Path of the table to be dropped
-     * @param ignoreIfNotExists Flag to specify behavior when the table does not exist: if set to
+     * @param identifier Path of the view to be dropped
+     * @param ignoreIfNotExists Flag to specify behavior when the view does not exist: if set to
      *     false, throw an exception, if set to true, do nothing.
-     * @throws TableNotExistException if the table does not exist
+     * @throws ViewNotExistException if the view does not exist
      */
-    void dropTable(Identifier identifier, boolean ignoreIfNotExists) throws TableNotExistException;
+    default void dropView(Identifier identifier, boolean ignoreIfNotExists)
+            throws ViewNotExistException {
+        throw new UnsupportedOperationException();
+    }
 
     /**
-     * Create a new table.
+     * Create a new view.
      *
-     * <p>NOTE: System tables can not be created.
-     *
-     * @param identifier path of the table to be created
-     * @param schema the table definition
-     * @param ignoreIfExists flag to specify behavior when a table already exists at the given path:
-     *     if set to false, it throws a TableAlreadyExistException, if set to true, do nothing.
-     * @throws TableAlreadyExistException if table already exists and ignoreIfExists is false
+     * @param identifier path of the view to be created
+     * @param view the view definition
+     * @param ignoreIfExists flag to specify behavior when a view already exists at the given path:
+     *     if set to false, it throws a ViewAlreadyExistException, if set to true, do nothing.
+     * @throws ViewAlreadyExistException if view already exists and ignoreIfExists is false
      * @throws DatabaseNotExistException if the database in identifier doesn't exist
      */
-    void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
-            throws TableAlreadyExistException, DatabaseNotExistException;
+    default void createView(Identifier identifier, View view, boolean ignoreIfExists)
+            throws ViewAlreadyExistException, DatabaseNotExistException {
+        throw new UnsupportedOperationException();
+    }
 
     /** Return a boolean that indicates whether this catalog allow upper case. */
     boolean allowUpperCase();
@@ -567,6 +569,48 @@ public interface Catalog extends AutoCloseable {
 
         public String column() {
             return column;
+        }
+    }
+
+    /** Exception for trying to create a view that already exists. */
+    class ViewAlreadyExistException extends Exception {
+
+        private static final String MSG = "View %s already exists.";
+
+        private final Identifier identifier;
+
+        public ViewAlreadyExistException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public ViewAlreadyExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+    }
+
+    /** Exception for trying to operate on a view that doesn't exist. */
+    class ViewNotExistException extends Exception {
+
+        private static final String MSG = "View %s does not exist.";
+
+        private final Identifier identifier;
+
+        public ViewNotExistException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public ViewNotExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
         }
     }
 

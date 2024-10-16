@@ -18,43 +18,32 @@
 
 package org.apache.paimon.view;
 
-import org.apache.paimon.table.Table;
 import org.apache.paimon.types.RowType;
 
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 
 /** Interface for view definition. */
 public interface View {
 
-  /** A name to identify this view. */
-  String name();
+    /** A name to identify this view. */
+    String name();
 
-  default String fullName() {
-    return name();
-  }
+    /** Full name (including database) to identify this view. */
+    String fullName();
 
-  /** Returns the row type of this view. */
-  RowType rowType();
+    /** Returns the row type of this view. */
+    RowType rowType();
 
-  /** Options of this view. */
-  Map<String, String> options();
+    /** Returns the view representation. */
+    String query();
 
-  /** Optional comment of this view. */
-  Optional<String> comment();
+    /** Optional comment of this view. */
+    Optional<String> comment();
 
-  /** Copy this view with adding dynamic options. */
-  Table copy(Map<String, String> dynamicOptions);
+    /** Options of this view. */
+    Map<String, String> options();
 
-  /**
-   * Returns the view representation for the given SQL dialect
-   *
-   * @return the view representation for the given SQL dialect, or null if no representation could
-   *     be resolved
-   */
-  default SQLViewRepresentation sqlFor(String dialect) {
-    throw new UnsupportedOperationException(
-        "Resolving a sql with a given dialect is not supported");
-  }
+    /** Copy this view with adding dynamic options. */
+    View copy(Map<String, String> dynamicOptions);
 }

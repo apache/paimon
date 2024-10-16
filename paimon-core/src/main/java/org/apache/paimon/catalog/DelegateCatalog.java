@@ -24,6 +24,7 @@ import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.view.View;
 
 import java.util.List;
 import java.util.Map;
@@ -133,6 +134,21 @@ public class DelegateCatalog implements Catalog {
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
         return wrapped.getTable(identifier);
+    }
+
+    @Override
+    public View getView(Identifier identifier) throws ViewNotExistException {
+        return wrapped.getView(identifier);
+    }
+
+    @Override
+    public void dropView(Identifier identifier, boolean ignoreIfNotExists) throws ViewNotExistException {
+        wrapped.dropView(identifier, ignoreIfNotExists);
+    }
+
+    @Override
+    public void createView(Identifier identifier, View view, boolean ignoreIfExists) throws ViewAlreadyExistException, DatabaseNotExistException {
+        wrapped.createView(identifier, view, ignoreIfExists);
     }
 
     @Override
