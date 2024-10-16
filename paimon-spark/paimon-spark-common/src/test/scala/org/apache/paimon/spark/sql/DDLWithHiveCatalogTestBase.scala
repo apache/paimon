@@ -59,7 +59,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
     }
   }
 
-  test("Paimon DDL with hive catalog: delete partition for paimon table sparkCatalogName") {
+  test("Paimon DDL with hive catalog: drop partition for paimon table sparkCatalogName") {
     Seq(paimonHiveCatalogName).foreach {
       catalogName =>
         spark.sql(s"USE $catalogName")
@@ -86,9 +86,16 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 spark.sql("insert into paimon_db.paimon_tbl select '1', 'n1', 'aa'")
                 spark.sql("insert into paimon_db.paimon_tbl select '1', 'n2', 'bb'")
 
-                spark.sql("show partition paimon_db.paimon_tbl")
-                spark.sql("alter table paimon_db.paimon_tbl drop partition (name='n1', `pt`='aa')")
-                spark.sql("show partition paimon_db.paimon_tbl")
+                spark.sql("show partitions paimon_db.paimon_tbl")
+                checkAnswer(
+                  spark.sql("show partitions paimon_db.paimon_tbl"),
+                  Row("name=n/pt=cc") :: Row("name=n1/pt=aa") :: Row("name=n2/pt=bb") :: Nil)
+                spark.sql(
+                  "alter table paimon_db.paimon_tbl drop partition (name='n1', `pt`='aa'), partition (name='n2', `pt`='bb')")
+                spark.sql("show partitions paimon_db.paimon_tbl")
+                checkAnswer(
+                  spark.sql("show partitions paimon_db.paimon_tbl"),
+                  Row("name=n/pt=cc") :: Nil)
 
               }
             }
