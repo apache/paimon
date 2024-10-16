@@ -101,7 +101,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
       filter.foreach(snapshotReader.withFilter)
     }
 
-    snapshotReader.read().splits().asScala.collect { case s: DataSplit => s }
+    snapshotReader.read().splits().asScala.collect { case s: DataSplit => s }.toSeq
   }
 
   protected def findTouchedFiles(
@@ -232,7 +232,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
       .as[(String, Long)]
       .groupByKey(_._1)
       .mapGroups {
-        case (filePath, iter) =>
+        (filePath, iter) =>
           val dv = new BitmapDeletionVector()
           while (iter.hasNext) {
             dv.delete(iter.next()._2)

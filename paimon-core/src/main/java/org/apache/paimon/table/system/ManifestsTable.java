@@ -37,6 +37,7 @@ import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -44,11 +45,11 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
-import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.SnapshotNotExistException;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -60,6 +61,9 @@ import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing committing snapshots of table. */
 public class ManifestsTable implements ReadonlyTable {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ManifestsTable.class);
+
     private static final long serialVersionUID = 1L;
 
     public static final String MANIFESTS = "manifests";
@@ -196,39 +200,18 @@ public class ManifestsTable implements ReadonlyTable {
     }
 
     private static List<ManifestFileMeta> allManifests(FileStoreTable dataTable) {
-        CoreOptions coreOptions = CoreOptions.fromMap(dataTable.options());
-        SnapshotManager snapshotManager = dataTable.snapshotManager();
-        Long snapshotId = coreOptions.scanSnapshotId();
-        String tagName = coreOptions.scanTagName();
-        Snapshot snapshot = null;
-        if (snapshotId != null) {
-            // reminder user with snapshot id range
-            if (!snapshotManager.snapshotExists(snapshotId)) {
-                Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
-                Long latestSnapshotId = snapshotManager.latestSnapshotId();
-                throw new SnapshotNotExistException(
-                        String.format(
-                                "Specified scan.snapshot-id %s is not exist, you can set it in range from %s to %s",
-                                snapshotId, earliestSnapshotId, latestSnapshotId));
-            }
-            snapshot = snapshotManager.snapshot(snapshotId);
-        } else {
-            if (!StringUtils.isEmpty(tagName) && dataTable.tagManager().tagExists(tagName)) {
-                snapshot = dataTable.tagManager().tag(tagName).trimToSnapshot();
-            } else {
-                snapshot = snapshotManager.latestSnapshot();
-            }
-        }
-
+        CoreOptions options = dataTable.coreOptions();
+        Snapshot snapshot = TimeTravelUtil.resolveSnapshot(dataTable);
         if (snapshot == null) {
+            LOG.warn("Check if your snapshot is empty.");
             return Collections.emptyList();
         }
         FileStorePathFactory fileStorePathFactory = dataTable.store().pathFactory();
         ManifestList manifestList =
                 new ManifestList.Factory(
                                 dataTable.fileIO(),
-                                coreOptions.manifestFormat(),
-                                coreOptions.manifestCompression(),
+                                options.manifestFormat(),
+                                options.manifestCompression(),
                                 fileStorePathFactory,
                                 null)
                         .create();

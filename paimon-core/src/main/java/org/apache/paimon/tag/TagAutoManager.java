@@ -42,7 +42,7 @@ public class TagAutoManager {
             tagAutoCreation.run();
         }
         if (tagTimeExpire != null) {
-            tagTimeExpire.run();
+            tagTimeExpire.expire();
         }
     }
 
@@ -64,5 +64,9 @@ public class TagAutoManager {
 
     public TagAutoCreation getTagAutoCreation() {
         return tagAutoCreation;
+    }
+
+    public TagTimeExpire getTagTimeExpire() {
+        return tagTimeExpire;
     }
 }

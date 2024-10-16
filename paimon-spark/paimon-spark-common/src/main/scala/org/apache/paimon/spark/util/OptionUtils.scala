@@ -38,6 +38,7 @@ object OptionUtils extends SQLConfHelper {
           case (key, value) =>
             key.stripPrefix(PAIMON_OPTION_PREFIX) -> value
         }
+        .toMap
         .asJava)
     mergedOptions.putAll(extraOptions)
     mergedOptions

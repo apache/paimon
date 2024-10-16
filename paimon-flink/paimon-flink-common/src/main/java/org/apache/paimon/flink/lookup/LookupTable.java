@@ -20,6 +20,7 @@ package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.utils.Filter;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -35,4 +36,6 @@ public interface LookupTable extends Closeable {
     List<InternalRow> get(InternalRow key) throws IOException;
 
     void refresh() throws Exception;
+
+    void specifyCacheRowFilter(Filter<InternalRow> filter);
 }

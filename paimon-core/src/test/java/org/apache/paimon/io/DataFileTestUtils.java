@@ -56,7 +56,8 @@ public class DataFileTestUtils {
                 Timestamp.fromEpochMillis(100),
                 maxSeq - minSeq + 1,
                 null,
-                FileSource.APPEND);
+                FileSource.APPEND,
+                null);
     }
 
     public static DataFileMeta newFile() {
@@ -74,7 +75,8 @@ public class DataFileTestUtils {
                 0,
                 0L,
                 null,
-                FileSource.APPEND);
+                FileSource.APPEND,
+                null);
     }
 
     public static DataFileMeta newFile(
@@ -98,7 +100,8 @@ public class DataFileTestUtils {
                 level,
                 deleteRowCount,
                 null,
-                FileSource.APPEND);
+                FileSource.APPEND,
+                null);
     }
 
     public static BinaryRow row(int i) {

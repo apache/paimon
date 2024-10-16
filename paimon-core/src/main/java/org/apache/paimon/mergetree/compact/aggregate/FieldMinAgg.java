@@ -34,7 +34,7 @@ public class FieldMinAgg extends FieldAggregator {
     }
 
     @Override
-    String name() {
+    public String name() {
         return NAME;
     }
 

@@ -1026,7 +1026,7 @@ public class CoreOptions implements Serializable {
     public static final String STATS_MODE_SUFFIX = "stats-mode";
 
     public static final ConfigOption<String> METADATA_STATS_MODE =
-            key("metadata." + STATS_MODE_SUFFIX)
+            key("metadata.stats-mode")
                     .stringType()
                     .defaultValue("truncate(16)")
                     .withDescription(
@@ -1051,6 +1051,22 @@ public class CoreOptions implements Serializable {
                                                             + "."
                                                             + "{field_name}."
                                                             + STATS_MODE_SUFFIX))
+                                    .build());
+
+    public static final ConfigOption<Boolean> METADATA_STATS_DENSE_STORE =
+            key("metadata.stats-dense-store")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Whether to store statistic densely in metadata (manifest files), which"
+                                                    + " will significantly reduce the storage size of metadata when the"
+                                                    + " none statistic mode is set.")
+                                    .linebreak()
+                                    .text(
+                                            "Note, when this mode is enabled, the Paimon sdk in reading engine requires"
+                                                    + " at least version 0.9.1 or 1.0.0 or higher.")
                                     .build());
 
     public static final ConfigOption<String> COMMIT_CALLBACKS =
@@ -1342,14 +1358,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "When need to lookup, commit will wait for compaction by lookup.");
 
-    public static final ConfigOption<Boolean> METADATA_ICEBERG_COMPATIBLE =
-            key("metadata.iceberg-compatible")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "When set to true, produce Iceberg metadata after a snapshot is committed, "
-                                    + "so that Iceberg readers can read Paimon's raw files.");
-
     public static final ConfigOption<Integer> DELETE_FILE_THREAD_NUM =
             key("delete-file.thread-num")
                     .intType()
@@ -1579,6 +1587,10 @@ public class CoreOptions implements Serializable {
         return commitUserPrefix == null
                 ? UUID.randomUUID().toString()
                 : commitUserPrefix + "_" + UUID.randomUUID();
+    }
+
+    public String createCommitUser() {
+        return createCommitUser(options);
     }
 
     public boolean definedAggFunc() {
@@ -2163,7 +2175,7 @@ public class CoreOptions implements Serializable {
         Map<String, String> result = new HashMap<>();
         for (String className : options.get(callbacks).split(",")) {
             className = className.trim();
-            if (className.length() == 0) {
+            if (className.isEmpty()) {
                 continue;
             }
 
@@ -2248,8 +2260,8 @@ public class CoreOptions implements Serializable {
         return options.get(ASYNC_FILE_WRITE);
     }
 
-    public boolean metadataIcebergCompatible() {
-        return options.get(METADATA_ICEBERG_COMPATIBLE);
+    public boolean statsDenseStore() {
+        return options.get(METADATA_STATS_DENSE_STORE);
     }
 
     /** Specifies the merge engine for table with primary key. */

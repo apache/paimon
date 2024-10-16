@@ -24,6 +24,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.lineage.LineageMetaFactory;
+import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
@@ -46,6 +47,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -153,6 +155,32 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected abstract Map<String, String> loadDatabasePropertiesImpl(String name)
             throws DatabaseNotExistException;
+
+    @Override
+    public void createPartition(Identifier identifier, Map<String, String> partitionSpec)
+            throws TableNotExistException {
+        Identifier tableIdentifier =
+                Identifier.create(identifier.getDatabaseName(), identifier.getTableName());
+        FileStoreTable table = (FileStoreTable) getTable(tableIdentifier);
+
+        if (table.partitionKeys().isEmpty() || !table.coreOptions().partitionedTableInMetastore()) {
+            throw new UnsupportedOperationException(
+                    "The table is not partitioned table in metastore.");
+        }
+
+        MetastoreClient.Factory metastoreFactory =
+                table.catalogEnvironment().metastoreClientFactory();
+        if (metastoreFactory == null) {
+            throw new UnsupportedOperationException(
+                    "The catalog must have metastore to create partition.");
+        }
+
+        try (MetastoreClient client = metastoreFactory.create()) {
+            client.addPartition(new LinkedHashMap<>(partitionSpec));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
 
     @Override
     public void dropPartition(Identifier identifier, Map<String, String> partitionSpec)

@@ -19,7 +19,7 @@
 package org.apache.spark.sql.catalyst.parser.extensions
 
 import org.apache.paimon.spark.catalyst.plans.logical
-import org.apache.paimon.spark.catalyst.plans.logical.{PaimonCallArgument, PaimonCallStatement, PaimonNamedArgument, PaimonPositionalArgument}
+import org.apache.paimon.spark.catalyst.plans.logical.{PaimonCallArgument, PaimonCallStatement, PaimonNamedArgument, PaimonPositionalArgument, ShowTagsCommand}
 
 import org.antlr.v4.runtime._
 import org.antlr.v4.runtime.misc.Interval
@@ -57,8 +57,8 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
 
   /** Creates a [[PaimonCallStatement]] for a stored procedure call. */
   override def visitCall(ctx: CallContext): PaimonCallStatement = withOrigin(ctx) {
-    val name = toSeq(ctx.multipartIdentifier.parts).map(_.getText)
-    val args = toSeq(ctx.callArgument).map(typedVisit[PaimonCallArgument])
+    val name = ctx.multipartIdentifier.parts.asScala.map(_.getText).toSeq
+    val args = ctx.callArgument.asScala.map(typedVisit[PaimonCallArgument]).toSeq
     logical.PaimonCallStatement(name, args)
   }
 
@@ -89,8 +89,12 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
   /** Returns a multi-part identifier as Seq[String]. */
   override def visitMultipartIdentifier(ctx: MultipartIdentifierContext): Seq[String] =
     withOrigin(ctx) {
-      ctx.parts.asScala.map(_.getText)
+      ctx.parts.asScala.map(_.getText).toSeq
     }
+
+  override def visitShowTags(ctx: ShowTagsContext): AnyRef = withOrigin(ctx) {
+    ShowTagsCommand(typedVisit[Seq[String]](ctx.multipartIdentifier))
+  }
 
   private def toBuffer[T](list: java.util.List[T]) = list.asScala
 

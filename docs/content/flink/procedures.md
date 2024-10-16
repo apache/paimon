@@ -222,6 +222,20 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
+      <td>expire_tags</td>
+      <td>
+         CALL [catalog.]sys.expire_tags('identifier', 'older_than')
+      </td>
+      <td>
+         To expire tags by time. Arguments:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>older_than: tagCreateTime before which tags will be removed.</li>
+      </td>
+      <td>
+         CALL sys.expire_tags(table => 'default.T', older_than => '2024-09-06 11:00:00')
+      </td>
+   </tr>
+   <tr>
       <td>merge_into</td>
       <td>
          -- for Flink 1.18<br/>
@@ -241,10 +255,13 @@ All available procedures are listed below.
             matched_upsert_setting => 'matchedUpsertSetting',<br/>
             not_matched_insert_condition => 'notMatchedInsertCondition',<br/>
             not_matched_insert_values => 'notMatchedInsertValues',<br/>
-            matched_delete_condition => 'matchedDeleteCondition') <br/><br/>
+            matched_delete_condition => 'matchedDeleteCondition',<br/>
+            not_matched_by_source_upsert_condition => 'notMatchedBySourceUpsertCondition',<br/>
+            not_matched_by_source_upsert_setting => 'notMatchedBySourceUpsertSetting',<br/>
+            not_matched_by_source_delete_condition => 'notMatchedBySourceDeleteCondition') <br/><br/>
       </td>
       <td>
-         To perform "MERGE INTO" syntax. See <a href="/how-to/writing-tables#merging-into-table">merge_into action</a> for
+         To perform "MERGE INTO" syntax. See <a href="/flink/action-jars#merging-into-table">merge_into action</a> for
          details of arguments.
       </td>
       <td>

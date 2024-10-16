@@ -18,10 +18,12 @@
 
 package org.apache.paimon.iceberg.metadata;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.schema.TableSchema;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -50,11 +52,27 @@ public class IcebergSchema {
     @JsonProperty(FIELD_FIELDS)
     private final List<IcebergDataField> fields;
 
-    public IcebergSchema(TableSchema tableSchema) {
-        this(
+    public static IcebergSchema create(TableSchema tableSchema) {
+        int bias;
+        if (new CoreOptions(tableSchema.options())
+                .formatType()
+                .equals(CoreOptions.FILE_FORMAT_PARQUET)) {
+            if (tableSchema.primaryKeys().isEmpty()) {
+                // ParquetSchemaUtil.addFallbackIds starts enumerating id from 1 instead of 0
+                bias = 1;
+            } else {
+                // data files start with trimmed primary keys + sequence number + value kind
+                // also ParquetSchemaUtil.addFallbackIds starts enumerating id from 1 instead of 0
+                bias = tableSchema.trimmedPrimaryKeys().size() + 3;
+            }
+        } else {
+            bias = 0;
+        }
+
+        return new IcebergSchema(
                 (int) tableSchema.id(),
                 tableSchema.fields().stream()
-                        .map(IcebergDataField::new)
+                        .map(f -> new IcebergDataField(f, bias))
                         .collect(Collectors.toList()));
     }
 
@@ -85,6 +103,11 @@ public class IcebergSchema {
     @JsonGetter(FIELD_FIELDS)
     public List<IcebergDataField> fields() {
         return fields;
+    }
+
+    @JsonIgnore
+    public int highestFieldId() {
+        return fields.stream().mapToInt(IcebergDataField::id).max().orElse(0);
     }
 
     @Override

@@ -57,7 +57,7 @@ class PaimonSparkSqlExtensionsParser(delegate: ParserInterface)
   /** Parses a string to a LogicalPlan. */
   override def parsePlan(sqlText: String): LogicalPlan = {
     val sqlTextAfterSubstitution = substitutor.substitute(sqlText)
-    if (isCommand(sqlTextAfterSubstitution)) {
+    if (isPaimonCommand(sqlTextAfterSubstitution)) {
       parse(sqlTextAfterSubstitution)(parser => astBuilder.visit(parser.singleStatement()))
         .asInstanceOf[LogicalPlan]
     } else {
@@ -93,7 +93,7 @@ class PaimonSparkSqlExtensionsParser(delegate: ParserInterface)
     delegate.parseMultipartIdentifier(sqlText)
 
   /** Returns whether SQL text is command. */
-  private def isCommand(sqlText: String): Boolean = {
+  private def isPaimonCommand(sqlText: String): Boolean = {
     val normalized = sqlText
       .toLowerCase(Locale.ROOT)
       .trim()
@@ -101,7 +101,8 @@ class PaimonSparkSqlExtensionsParser(delegate: ParserInterface)
       .replaceAll("\\s+", " ")
       .replaceAll("/\\*.*?\\*/", " ")
       .trim()
-    normalized.startsWith("call")
+    normalized.startsWith("call") ||
+    normalized.contains("show tags")
   }
 
   protected def parse[T](command: String)(toResult: PaimonSqlExtensionsParser => T): T = {

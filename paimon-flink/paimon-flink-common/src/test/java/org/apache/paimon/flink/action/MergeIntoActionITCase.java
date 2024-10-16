@@ -571,6 +571,123 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 .satisfies(anyCauseMatches(ValidationException.class, "Object 'S' not found"));
     }
 
+    @ParameterizedTest
+    @MethodSource("testArguments")
+    public void testNotMatchedBySourceUpsert(boolean qualified, String invoker) throws Exception {
+        sEnv.executeSql("DROP TABLE T");
+        prepareTargetTable(CoreOptions.ChangelogProducer.INPUT);
+
+        // build MergeIntoAction
+        MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, database, "T");
+        action.withSourceSqls("CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
+                .withSourceTable(qualified ? "default.SS" : "SS")
+                .withMergeCondition("T.k = SS.k AND T.dt = SS.dt")
+                .withNotMatchedBySourceUpsert(
+                        "dt < '02-28'", "v = v || '_nmu', last_action = 'not_matched_upsert'");
+
+        String procedureStatement = "";
+        if ("procedure_indexed".equals(invoker)) {
+            procedureStatement =
+                    String.format(
+                            "CALL sys.merge_into('%s.T', '', '%s', '%s', 'T.k = SS.k AND T.dt = SS.dt', '', '', '', '', '', 'dt < ''02-28''', 'v = v || ''_nmu'', last_action = ''not_matched_upsert''')",
+                            database,
+                            "CREATE TEMPORARY VIEW SS AS SELECT k, v, ''unknown'', dt FROM S",
+                            qualified ? "default.SS" : "SS");
+        } else if ("procedure_named".equals(invoker)) {
+            procedureStatement =
+                    String.format(
+                            "CALL sys.merge_into("
+                                    + "target_table => '%s.T', "
+                                    + "source_sqls => '%s', "
+                                    + "source_table => '%s', "
+                                    + "merge_condition => 'T.k = SS.k AND T.dt = SS.dt', "
+                                    + "not_matched_by_source_upsert_condition => 'dt < ''02-28''',"
+                                    + "not_matched_by_source_upsert_setting => 'v = v || ''_nmu'', last_action = ''not_matched_upsert''')",
+                            database,
+                            "CREATE TEMPORARY VIEW SS AS SELECT k, v, ''unknown'', dt FROM S",
+                            qualified ? "default.SS" : "SS");
+        }
+
+        List<Row> streamingExpected =
+                Arrays.asList(
+                        changelogRow("+U", 2, "v_2_nmu", "not_matched_upsert", "02-27"),
+                        changelogRow("+U", 3, "v_3_nmu", "not_matched_upsert", "02-27"));
+
+        List<Row> batchExpected =
+                Arrays.asList(
+                        changelogRow("+I", 1, "v_1", "creation", "02-27"),
+                        changelogRow("+I", 2, "v_2_nmu", "not_matched_upsert", "02-27"),
+                        changelogRow("+I", 3, "v_3_nmu", "not_matched_upsert", "02-27"),
+                        changelogRow("+I", 4, "v_4", "creation", "02-27"),
+                        changelogRow("+I", 5, "v_5", "creation", "02-28"),
+                        changelogRow("+I", 6, "v_6", "creation", "02-28"),
+                        changelogRow("+I", 7, "v_7", "creation", "02-28"),
+                        changelogRow("+I", 8, "v_8", "creation", "02-28"),
+                        changelogRow("+I", 9, "v_9", "creation", "02-28"),
+                        changelogRow("+I", 10, "v_10", "creation", "02-28"));
+
+        if ("action".equals(invoker)) {
+            validateActionRunResult(action.build(), streamingExpected, batchExpected);
+        } else {
+            validateProcedureResult(procedureStatement, streamingExpected, batchExpected);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("testArguments")
+    public void testNotMatchedBySourceDelete(boolean qualified, String invoker) throws Exception {
+        // build MergeIntoAction
+        MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, database, "T");
+        action.withSourceSqls("CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
+                .withSourceTable(qualified ? "default.SS" : "SS")
+                .withMergeCondition("T.k = SS.k AND T.dt = SS.dt")
+                .withNotMatchedBySourceDelete(null);
+
+        String procedureStatement = "";
+        if ("procedure_indexed".equals(invoker)) {
+            procedureStatement =
+                    String.format(
+                            "CALL sys.merge_into('%s.T', '', '%s', '%s', 'T.k = SS.k AND T.dt = SS.dt', '', '', '', '', '', '', '', 'TRUE')",
+                            database,
+                            "CREATE TEMPORARY VIEW SS AS SELECT k, v, ''unknown'', dt FROM S",
+                            qualified ? "default.SS" : "SS");
+        } else if ("procedure_named".equals(invoker)) {
+            procedureStatement =
+                    String.format(
+                            "CALL sys.merge_into("
+                                    + "target_table => '%s.T', "
+                                    + "source_sqls => '%s', "
+                                    + "source_table => '%s', "
+                                    + "merge_condition => 'T.k = SS.k AND T.dt = SS.dt', "
+                                    + "not_matched_by_source_delete_condition => 'TRUE')",
+                            database,
+                            "CREATE TEMPORARY VIEW SS AS SELECT k, v, ''unknown'', dt FROM S",
+                            qualified ? "default.SS" : "SS");
+        }
+
+        List<Row> streamingExpected =
+                Arrays.asList(
+                        changelogRow("-D", 2, "v_2", "creation", "02-27"),
+                        changelogRow("-D", 3, "v_3", "creation", "02-27"),
+                        changelogRow("-D", 5, "v_5", "creation", "02-28"),
+                        changelogRow("-D", 6, "v_6", "creation", "02-28"),
+                        changelogRow("-D", 9, "v_9", "creation", "02-28"),
+                        changelogRow("-D", 10, "v_10", "creation", "02-28"));
+
+        List<Row> batchExpected =
+                Arrays.asList(
+                        changelogRow("+I", 1, "v_1", "creation", "02-27"),
+                        changelogRow("+I", 4, "v_4", "creation", "02-27"),
+                        changelogRow("+I", 7, "v_7", "creation", "02-28"),
+                        changelogRow("+I", 8, "v_8", "creation", "02-28"));
+
+        if ("action".equals(invoker)) {
+            validateActionRunResult(action.build(), streamingExpected, batchExpected);
+        } else {
+            validateProcedureResult(procedureStatement, streamingExpected, batchExpected);
+        }
+    }
+
     private void validateActionRunResult(
             MergeIntoAction action, List<Row> streamingExpected, List<Row> batchExpected)
             throws Exception {

@@ -34,9 +34,8 @@ class PaimonScanBuilder(table: Table)
   private var localScan: Option[Scan] = None
 
   override def pushLimit(limit: Int): Boolean = {
-    if (table.primaryKeys().isEmpty) {
-      pushDownLimit = Some(limit)
-    }
+    // It is safe, since we will do nothing if it is the primary table and the split is not `rawConvertible`
+    pushDownLimit = Some(limit)
     // just make a best effort to push down limit
     false
   }

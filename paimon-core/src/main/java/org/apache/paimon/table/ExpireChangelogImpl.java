@@ -37,6 +37,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
 
+import static org.apache.paimon.table.ExpireSnapshotsImpl.findSkippingTags;
+
 /** Cleanup the changelog in changelog directory. */
 public class ExpireChangelogImpl implements ExpireSnapshots {
 
@@ -137,8 +139,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
         List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
 
         List<Snapshot> skippingSnapshots =
-                SnapshotManager.findOverlappedSnapshots(
-                        taggedSnapshots, earliestId, endExclusiveId);
+                findSkippingTags(taggedSnapshots, earliestId, endExclusiveId);
         skippingSnapshots.add(snapshotManager.changelog(endExclusiveId));
         Set<String> manifestSkippSet = changelogDeletion.manifestSkippingSet(skippingSnapshots);
         for (long id = earliestId; id < endExclusiveId; id++) {

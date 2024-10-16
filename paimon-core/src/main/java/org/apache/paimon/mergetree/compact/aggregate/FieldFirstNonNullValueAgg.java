@@ -35,7 +35,7 @@ public class FieldFirstNonNullValueAgg extends FieldAggregator {
     }
 
     @Override
-    String name() {
+    public String name() {
         return NAME;
     }
 

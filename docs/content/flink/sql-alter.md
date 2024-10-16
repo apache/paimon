@@ -1,6 +1,6 @@
 ---
 title: "SQL Alter"
-weight: 6
+weight: 7
 type: docs
 aliases:
 - /flink/sql-alter.html

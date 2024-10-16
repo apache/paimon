@@ -188,7 +188,10 @@ public class TagManager {
             List<TagCallback> callbacks) {
         checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name '%s' is blank.", tagName);
-        checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
+        if (!tagExists(tagName)) {
+            LOG.warn("Tag '{}' doesn't exist.", tagName);
+            return;
+        }
 
         Snapshot taggedSnapshot = taggedSnapshot(tagName);
         List<Snapshot> taggedSnapshots;

@@ -183,7 +183,8 @@ public class IntervalPartitionTest {
                 Timestamp.fromEpochMillis(100000),
                 0L,
                 null,
-                FileSource.APPEND);
+                FileSource.APPEND,
+                null);
     }
 
     private List<Map<SortedRun, Integer>> toMultiset(List<List<SortedRun>> sections) {

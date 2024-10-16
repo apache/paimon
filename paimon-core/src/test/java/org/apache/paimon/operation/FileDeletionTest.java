@@ -789,6 +789,7 @@ public class FileDeletionTest {
         // commit
         try (FileStoreCommitImpl commit = store.newCommit()) {
             commit.tryCommitOnce(
+                    null,
                     delete,
                     Collections.emptyList(),
                     Collections.emptyList(),

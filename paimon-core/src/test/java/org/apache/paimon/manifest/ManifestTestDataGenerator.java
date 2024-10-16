@@ -113,7 +113,7 @@ public class ManifestTestDataGenerator {
                 entries.size() * 100L,
                 numAddedFiles,
                 numDeletedFiles,
-                serializer.toBinary(collector.extract()),
+                serializer.toBinaryAllMode(collector.extract()),
                 0);
     }
 

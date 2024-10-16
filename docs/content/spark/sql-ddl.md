@@ -209,3 +209,9 @@ CREATE TABLE my_table_all (
 );
 CREATE TABLE my_table_all_as PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 'dt,hh') AS SELECT * FROM my_table_all;
 ```
+
+## Show Tags
+The SHOW TAGS statement is used to list all tags of a table.
+```
+SHOW TAGS my_table;
+```

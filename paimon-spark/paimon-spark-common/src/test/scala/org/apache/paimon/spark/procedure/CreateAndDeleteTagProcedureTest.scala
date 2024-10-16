@@ -191,4 +191,12 @@ class CreateAndDeleteTagProcedureTest extends PaimonSparkTestBase with StreamTes
       }
     }
   }
+
+  test("Paimon Procedure: delete tag not failed if tag not exists") {
+    spark.sql("CREATE TABLE T (id STRING, name STRING) USING PAIMON")
+
+    checkAnswer(
+      spark.sql("CALL paimon.sys.delete_tag(table => 'test.T', tag => 'test_tag')"),
+      Row(true) :: Nil)
+  }
 }

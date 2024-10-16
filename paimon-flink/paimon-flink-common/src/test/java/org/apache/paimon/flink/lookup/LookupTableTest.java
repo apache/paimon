@@ -560,6 +560,129 @@ public class LookupTableTest extends TableTestBase {
     }
 
     @Test
+    public void testPkTableWithCacheRowFilter() throws Exception {
+        FileStoreTable storeTable = createTable(singletonList("f0"), new Options());
+        writeWithBucketAssigner(
+                storeTable, row -> 0, GenericRow.of(1, 11, 111), GenericRow.of(2, 22, 222));
+
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        storeTable,
+                        new int[] {0, 1, 2},
+                        null,
+                        null,
+                        tempDir.toFile(),
+                        singletonList("f0"),
+                        null);
+        table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        assertThat(table).isInstanceOf(PrimaryKeyLookupTable.class);
+        table.specifyCacheRowFilter(row -> row.getInt(0) < 2);
+        table.open();
+
+        List<InternalRow> res = table.get(GenericRow.of(1));
+        assertThat(res).hasSize(1);
+        assertRow(res.get(0), 1, 11, 111);
+
+        res = table.get(GenericRow.of(2));
+        assertThat(res).isEmpty();
+
+        writeWithBucketAssigner(
+                storeTable, row -> 0, GenericRow.of(0, 0, 0), GenericRow.of(3, 33, 333));
+        res = table.get(GenericRow.of(0));
+        assertThat(res).isEmpty();
+
+        table.refresh();
+        res = table.get(GenericRow.of(0));
+        assertThat(res).hasSize(1);
+        assertRow(res.get(0), 0, 0, 0);
+
+        res = table.get(GenericRow.of(3));
+        assertThat(res).isEmpty();
+    }
+
+    @Test
+    public void testNoPkTableWithCacheRowFilter() throws Exception {
+        FileStoreTable storeTable = createTable(emptyList(), new Options());
+        writeWithBucketAssigner(
+                storeTable, row -> 0, GenericRow.of(1, 11, 111), GenericRow.of(2, 22, 222));
+
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        storeTable,
+                        new int[] {0, 1, 2},
+                        null,
+                        null,
+                        tempDir.toFile(),
+                        singletonList("f0"),
+                        null);
+        table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        assertThat(table).isInstanceOf(NoPrimaryKeyLookupTable.class);
+        table.specifyCacheRowFilter(row -> row.getInt(0) < 2);
+        table.open();
+
+        List<InternalRow> res = table.get(GenericRow.of(1));
+        assertThat(res).hasSize(1);
+        assertRow(res.get(0), 1, 11, 111);
+
+        res = table.get(GenericRow.of(2));
+        assertThat(res).isEmpty();
+
+        writeWithBucketAssigner(
+                storeTable, row -> 0, GenericRow.of(0, 0, 0), GenericRow.of(3, 33, 333));
+        res = table.get(GenericRow.of(0));
+        assertThat(res).isEmpty();
+
+        table.refresh();
+        res = table.get(GenericRow.of(0));
+        assertThat(res).hasSize(1);
+        assertRow(res.get(0), 0, 0, 0);
+
+        res = table.get(GenericRow.of(3));
+        assertThat(res).isEmpty();
+    }
+
+    @Test
+    public void testSecKeyTableWithCacheRowFilter() throws Exception {
+        FileStoreTable storeTable = createTable(singletonList("f0"), new Options());
+        writeWithBucketAssigner(
+                storeTable, row -> 0, GenericRow.of(1, 11, 111), GenericRow.of(2, 22, 222));
+
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        storeTable,
+                        new int[] {0, 1, 2},
+                        null,
+                        null,
+                        tempDir.toFile(),
+                        singletonList("f1"),
+                        null);
+        table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        assertThat(table).isInstanceOf(SecondaryIndexLookupTable.class);
+        table.specifyCacheRowFilter(row -> row.getInt(1) < 22);
+        table.open();
+
+        List<InternalRow> res = table.get(GenericRow.of(11));
+        assertThat(res).hasSize(1);
+        assertRow(res.get(0), 1, 11, 111);
+
+        res = table.get(GenericRow.of(22));
+        assertThat(res).isEmpty();
+
+        writeWithBucketAssigner(
+                storeTable, row -> 0, GenericRow.of(0, 0, 0), GenericRow.of(3, 33, 333));
+        res = table.get(GenericRow.of(0));
+        assertThat(res).isEmpty();
+
+        table.refresh();
+        res = table.get(GenericRow.of(0));
+        assertThat(res).hasSize(1);
+        assertRow(res.get(0), 0, 0, 0);
+
+        res = table.get(GenericRow.of(33));
+        assertThat(res).isEmpty();
+    }
+
+    @Test
     public void testPartialLookupTable() throws Exception {
         FileStoreTable dimTable = createDimTable();
         PrimaryKeyPartialLookupTable table =
@@ -590,6 +713,27 @@ public class LookupTableTest extends TableTestBase {
         table.refresh();
         result = table.get(row(1, -1));
         assertThat(result).hasSize(0);
+    }
+
+    @Test
+    public void testPartialLookupTableWithRowFilter() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET.key(), "2");
+        options.set(CoreOptions.BUCKET_KEY.key(), "f0");
+        FileStoreTable dimTable = createTable(singletonList("f0"), options);
+        write(dimTable, GenericRow.of(1, 11, 111), GenericRow.of(2, 22, 222));
+
+        PrimaryKeyPartialLookupTable table =
+                PrimaryKeyPartialLookupTable.createLocalTable(
+                        dimTable, new int[] {0, 2}, tempDir.toFile(), ImmutableList.of("f0"), null);
+        table.specifyCacheRowFilter(row -> row.getInt(0) < 2);
+        table.open();
+
+        List<InternalRow> result = table.get(row(1, 11));
+        assertThat(result).hasSize(1);
+
+        result = table.get(row(2, 22));
+        assertThat(result).isEmpty();
     }
 
     @Test

@@ -21,9 +21,13 @@ package org.apache.paimon.iceberg.metadata;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -55,15 +59,18 @@ public class IcebergDataField {
     @JsonProperty(FIELD_TYPE)
     private final String type;
 
+    @JsonIgnore private final DataType dataType;
+
     @JsonProperty(FIELD_DOC)
     private final String doc;
 
-    public IcebergDataField(DataField dataField) {
+    public IcebergDataField(DataField dataField, int bias) {
         this(
-                dataField.id(),
+                dataField.id() + bias,
                 dataField.name(),
                 !dataField.type().isNullable(),
                 toTypeString(dataField.type()),
+                dataField.type(),
                 dataField.description());
     }
 
@@ -74,10 +81,16 @@ public class IcebergDataField {
             @JsonProperty(FIELD_REQUIRED) boolean required,
             @JsonProperty(FIELD_TYPE) String type,
             @JsonProperty(FIELD_DOC) String doc) {
+        this(id, name, required, type, null, doc);
+    }
+
+    public IcebergDataField(
+            int id, String name, boolean required, String type, DataType dataType, String doc) {
         this.id = id;
         this.name = name;
         this.required = required;
         this.type = type;
+        this.dataType = dataType;
         this.doc = doc;
     }
 
@@ -106,6 +119,11 @@ public class IcebergDataField {
         return doc;
     }
 
+    @JsonIgnore
+    public DataType dataType() {
+        return Preconditions.checkNotNull(dataType);
+    }
+
     private static String toTypeString(DataType dataType) {
         switch (dataType.getTypeRoot()) {
             case BOOLEAN:
@@ -130,6 +148,18 @@ public class IcebergDataField {
                 DecimalType decimalType = (DecimalType) dataType;
                 return String.format(
                         "decimal(%d, %d)", decimalType.getPrecision(), decimalType.getScale());
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                int timestampPrecision = ((TimestampType) dataType).getPrecision();
+                Preconditions.checkArgument(
+                        timestampPrecision > 3 && timestampPrecision <= 6,
+                        "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 6.");
+                return "timestamp";
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                int timestampLtzPrecision = ((LocalZonedTimestampType) dataType).getPrecision();
+                Preconditions.checkArgument(
+                        timestampLtzPrecision > 3 && timestampLtzPrecision <= 6,
+                        "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 6.");
+                return "timestamptz";
             default:
                 throw new UnsupportedOperationException("Unsupported data type: " + dataType);
         }

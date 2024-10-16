@@ -86,11 +86,22 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
 
     spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
 
+    withSQLConf("spark.paimon.scan.timestamp-millis" -> System.currentTimeMillis.toString) {
+      checkAnswer(
+        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
+        Row(2, 0, 2, "{ }"))
+    }
+
     spark.sql(s"INSERT INTO T VALUES ('3', 'b', 2, 1)")
     spark.sql(s"INSERT INTO T VALUES ('4', 'bbb', 3, 2)")
 
     spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
 
+    withSQLConf("spark.paimon.scan.timestamp-millis" -> System.currentTimeMillis.toString) {
+      checkAnswer(
+        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
+        Row(5, 0, 4, "{ }"))
+    }
     // create tag
     checkAnswer(
       spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 'test_tag5', snapshot => 5)"),
@@ -129,13 +140,6 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
         sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
         Row(5, 0, 4, "{ }"))
     }
-
-    withSQLConf("spark.paimon.scan.snapshot-id" -> "100") {
-      checkAnswer(
-        sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat FROM `T$statistics`"),
-        Row(5, 0, 4, "{ }"))
-    }
-
   }
 
   test("Paimon analyze: analyze table without snapshot") {
@@ -403,7 +407,7 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
 
     val stats = getScanStatistic("SELECT * FROM T")
-    Assertions.assertEquals(2L, stats.rowCount.get.longValue())
+    Assertions.assertEquals(2L, stats.rowCount.get.longValue)
   }
 
   test("Paimon analyze: spark use col stats") {
@@ -418,7 +422,7 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS FOR ALL COLUMNS")
 
     val stats = getScanStatistic("SELECT * FROM T")
-    Assertions.assertEquals(2L, stats.rowCount.get.longValue())
+    Assertions.assertEquals(2L, stats.rowCount.get.longValue)
     Assertions.assertEquals(if (gteqSpark3_4) 4 else 0, stats.attributeStats.size)
   }
 
@@ -437,19 +441,19 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     var sql = "SELECT * FROM T WHERE pt < 1"
     Assertions.assertEquals(
       if (gteqSpark3_4) 0L else 4L,
-      getScanStatistic(sql).rowCount.get.longValue())
+      getScanStatistic(sql).rowCount.get.longValue)
     checkAnswer(spark.sql(sql), Nil)
 
     // partition push down hit and select without it
     sql = "SELECT id FROM T WHERE pt < 1"
     Assertions.assertEquals(
       if (gteqSpark3_4) 0L else 4L,
-      getScanStatistic(sql).rowCount.get.longValue())
+      getScanStatistic(sql).rowCount.get.longValue)
     checkAnswer(spark.sql(sql), Nil)
 
     // partition push down not hit
     sql = "SELECT * FROM T WHERE id < 1"
-    Assertions.assertEquals(4L, getScanStatistic(sql).rowCount.get.longValue())
+    Assertions.assertEquals(4L, getScanStatistic(sql).rowCount.get.longValue)
     checkAnswer(spark.sql(sql), Nil)
   }
 
@@ -468,10 +472,10 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
 
           // For col type such as char, varchar that don't have min and max, filter estimation on stats has no effect.
           var sqlText = "SELECT * FROM T WHERE pt < '1'"
-          Assertions.assertEquals(4L, getScanStatistic(sqlText).rowCount.get.longValue())
+          Assertions.assertEquals(4L, getScanStatistic(sqlText).rowCount.get.longValue)
 
           sqlText = "SELECT id FROM T WHERE pt < '1'"
-          Assertions.assertEquals(4L, getScanStatistic(sqlText).rowCount.get.longValue())
+          Assertions.assertEquals(4L, getScanStatistic(sqlText).rowCount.get.longValue)
         }
       })
   }

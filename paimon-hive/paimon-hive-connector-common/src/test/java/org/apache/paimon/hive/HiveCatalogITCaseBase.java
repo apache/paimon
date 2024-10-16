@@ -1349,6 +1349,26 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
+    public void testCreatePartitionsToMetastore() throws Exception {
+        prepareTestAddPartitionsToMetastore();
+
+        // add partition
+        tEnv.executeSql(
+                        "ALTER TABLE t ADD PARTITION (ptb = '1c', pta = 1) PARTITION (ptb = '1d', pta = 6)")
+                .await();
+        assertThat(hiveShell.executeQuery("show partitions t"))
+                .containsExactlyInAnyOrder(
+                        "ptb=1a/pta=1",
+                        "ptb=1b/pta=1",
+                        "ptb=1c/pta=1",
+                        "ptb=1d/pta=6",
+                        "ptb=2a/pta=2",
+                        "ptb=2b/pta=2",
+                        "ptb=3a/pta=3",
+                        "ptb=3b/pta=3");
+    }
+
+    @Test
     public void testAddPartitionsForTag() throws Exception {
         tEnv.executeSql(
                 String.join(

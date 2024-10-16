@@ -37,7 +37,7 @@ public class FieldProductAgg extends FieldAggregator {
     }
 
     @Override
-    String name() {
+    public String name() {
         return NAME;
     }
 
