@@ -227,15 +227,15 @@ public class BranchSqlITCase extends CatalogITCaseBase {
 
         assertThat(
                         collectResult(
-                                "SELECT branch_name, created_from_tag, created_from_snapshot FROM `T$branches`"))
-                .containsExactlyInAnyOrder("+I[test, tag1, 1]", "+I[test2, tag2, 2]");
+                                "SELECT branch_name FROM `T$branches`"))
+                .containsExactlyInAnyOrder("+I[test]", "+I[test2]");
 
         sql("CALL sys.delete_branch('default.T', 'test')");
 
         assertThat(
                         collectResult(
-                                "SELECT branch_name, created_from_tag, created_from_snapshot FROM `T$branches`"))
-                .containsExactlyInAnyOrder("+I[test2, tag2, 2]");
+                                "SELECT branch_name FROM `T$branches`"))
+                .containsExactlyInAnyOrder("+I[test2]");
     }
 
     @Test

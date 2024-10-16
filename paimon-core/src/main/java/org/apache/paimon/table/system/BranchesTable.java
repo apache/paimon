@@ -83,10 +83,7 @@ public class BranchesTable implements ReadonlyTable {
                     Arrays.asList(
                             new DataField(
                                     0, "branch_name", SerializationUtils.newStringType(false)),
-                            new DataField(
-                                    1, "created_from_tag", SerializationUtils.newStringType(true)),
-                            new DataField(2, "created_from_snapshot", new BigIntType(true)),
-                            new DataField(3, "create_time", new TimestampType(false, 3))));
+                            new DataField(1, "create_time", new TimestampType(false, 3))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -112,7 +109,7 @@ public class BranchesTable implements ReadonlyTable {
 
     @Override
     public List<String> primaryKeys() {
-        return Arrays.asList("branch_name", "tag_name");
+        return Collections.singletonList("branch_name");
     }
 
     @Override
@@ -226,7 +223,6 @@ public class BranchesTable implements ReadonlyTable {
 
         private List<InternalRow> branches(FileStoreTable table) throws IOException {
             BranchManager branchManager = table.branchManager();
-            SchemaManager schemaManager = new SchemaManager(fileIO, table.location());
 
             List<Pair<Path, Long>> paths =
                     listVersionedDirectories(fileIO, branchManager.branchDirectory(), BRANCH_PREFIX)
@@ -236,38 +232,10 @@ public class BranchesTable implements ReadonlyTable {
 
             for (Pair<Path, Long> path : paths) {
                 String branchName = path.getLeft().getName().substring(BRANCH_PREFIX.length());
-                String basedTag = null;
-                Long basedSnapshotId = null;
                 long creationTime = path.getRight();
-
-                Optional<TableSchema> tableSchema =
-                        schemaManager.copyWithBranch(branchName).latest();
-                if (tableSchema.isPresent()) {
-                    FileStoreTable branchTable =
-                            FileStoreTableFactory.create(
-                                    fileIO, new Path(branchPath(table.location(), branchName)));
-                    SortedMap<Snapshot, List<String>> snapshotTags =
-                            branchTable.tagManager().tags();
-                    Long earliestSnapshotId = branchTable.snapshotManager().earliestSnapshotId();
-
-                    if (!snapshotTags.isEmpty()) {
-                        Snapshot snapshot = snapshotTags.firstKey();
-                        if (earliestSnapshotId >= snapshot.id()) {
-                            List<String> tags =
-                                    branchTable
-                                            .tagManager()
-                                            .sortTagsOfOneSnapshot(snapshotTags.get(snapshot));
-                            basedTag = tags.get(0);
-                            basedSnapshotId = snapshot.id();
-                        }
-                    }
-                }
-
                 result.add(
                         GenericRow.of(
                                 BinaryString.fromString(branchName),
-                                BinaryString.fromString(basedTag),
-                                basedSnapshotId,
                                 Timestamp.fromLocalDateTime(
                                         DateTimeUtils.toLocalDateTime(creationTime))));
             }
