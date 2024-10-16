@@ -86,12 +86,12 @@ public class RocksDBValueState<K, V> extends RocksDBState<K, V, RocksDBState.Ref
         }
     }
 
-    public V deserializeValue(byte[] valueBytes) throws IOException {
+    public synchronized V deserializeValue(byte[] valueBytes) throws IOException {
         valueInputView.setBuffer(valueBytes);
         return valueSerializer.deserialize(valueInputView);
     }
 
-    public byte[] serializeValue(V value) throws IOException {
+    public synchronized byte[] serializeValue(V value) throws IOException {
         valueOutputView.clear();
         valueSerializer.serialize(value, valueOutputView);
         return valueOutputView.getCopyOfBuffer();

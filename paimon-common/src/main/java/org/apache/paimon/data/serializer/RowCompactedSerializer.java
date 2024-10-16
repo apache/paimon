@@ -101,14 +101,15 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
     }
 
     @Override
-    public void serialize(InternalRow record, DataOutputView target) throws IOException {
+    public synchronized void serialize(InternalRow record, DataOutputView target)
+            throws IOException {
         byte[] bytes = serializeToBytes(record);
         VarLengthIntUtils.encodeInt(target, bytes.length);
         target.write(bytes);
     }
 
     @Override
-    public InternalRow deserialize(DataInputView source) throws IOException {
+    public synchronized InternalRow deserialize(DataInputView source) throws IOException {
         int len = VarLengthIntUtils.decodeInt(source);
         byte[] bytes = new byte[len];
         source.readFully(bytes);
@@ -132,7 +133,7 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
         return Objects.hash(rowType);
     }
 
-    public byte[] serializeToBytes(InternalRow record) {
+    public synchronized byte[] serializeToBytes(InternalRow record) {
         if (rowWriter == null) {
             rowWriter = new RowWriter(calculateBitSetInBytes(getters.length));
         }
@@ -149,7 +150,7 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
         return rowWriter.copyBuffer();
     }
 
-    public InternalRow deserialize(byte[] bytes) {
+    public synchronized InternalRow deserialize(byte[] bytes) {
         if (rowReader == null) {
             rowReader = new RowReader(calculateBitSetInBytes(getters.length));
         }

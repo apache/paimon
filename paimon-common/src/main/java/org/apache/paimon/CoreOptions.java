@@ -1450,6 +1450,13 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("The serialized refresh handler of materialized table.");
 
+    @ExcludeFromDocumentation("Internal use only")
+    public static final ConfigOption<Integer> LOOKUP_HASH_ASYNC_THREAD_NUMBER =
+            key("lookup.hash.async-thread-number")
+                    .intType()
+                    .defaultValue(16)
+                    .withDescription("The thread number for lookup async for hash store.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {

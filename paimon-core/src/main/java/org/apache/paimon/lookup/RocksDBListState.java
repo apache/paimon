@@ -72,13 +72,13 @@ public class RocksDBListState<K, V> extends RocksDBState<K, V, List<V>> {
                 });
     }
 
-    public byte[] serializeValue(V value) throws IOException {
+    public synchronized byte[] serializeValue(V value) throws IOException {
         valueOutputView.clear();
         valueSerializer.serialize(value, valueOutputView);
         return valueOutputView.getCopyOfBuffer();
     }
 
-    public byte[] serializeList(List<byte[]> valueList) throws IOException {
+    public synchronized byte[] serializeList(List<byte[]> valueList) throws IOException {
         return listSerializer.serializeList(valueList);
     }
 }

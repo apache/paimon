@@ -39,7 +39,8 @@ public final class ListDelimitedSerializer {
     private final DataInputDeserializer dataInputView = new DataInputDeserializer();
     private final DataOutputSerializer dataOutputView = new DataOutputSerializer(128);
 
-    public <T> List<T> deserializeList(byte[] valueBytes, Serializer<T> elementSerializer) {
+    public synchronized <T> List<T> deserializeList(
+            byte[] valueBytes, Serializer<T> elementSerializer) {
         if (valueBytes == null) {
             return null;
         }
@@ -54,7 +55,7 @@ public final class ListDelimitedSerializer {
         return result;
     }
 
-    public <T> byte[] serializeList(List<T> valueList, Serializer<T> elementSerializer)
+    public synchronized <T> byte[] serializeList(List<T> valueList, Serializer<T> elementSerializer)
             throws IOException {
 
         dataOutputView.clear();
@@ -74,7 +75,7 @@ public final class ListDelimitedSerializer {
         return dataOutputView.getCopyOfBuffer();
     }
 
-    public byte[] serializeList(List<byte[]> valueList) throws IOException {
+    public synchronized byte[] serializeList(List<byte[]> valueList) throws IOException {
 
         dataOutputView.clear();
         boolean first = true;

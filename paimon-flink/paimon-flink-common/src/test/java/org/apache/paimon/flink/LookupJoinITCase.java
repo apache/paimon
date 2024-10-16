@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
@@ -55,6 +56,10 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                 "CREATE TABLE PARTITIONED_DIM (i INT, j INT, k1 INT, k2 INT, PRIMARY KEY (i, j) NOT ENFORCED)"
                         + "PARTITIONED BY (`i`) WITH ('continuous.discovery-interval'='1 ms' %s)";
 
+        String bucketDim =
+                "CREATE TABLE DIM_BUCKET (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) "
+                        + " WITH ('continuous.discovery-interval'='1 ms', 'bucket' = '16' %s)";
+
         String fullOption = ", 'lookup.cache' = 'full'";
 
         String lruOption = ", 'changelog-producer'='lookup'";
@@ -63,10 +68,12 @@ public class LookupJoinITCase extends CatalogITCaseBase {
             case FULL:
                 tEnv.executeSql(String.format(dim, fullOption));
                 tEnv.executeSql(String.format(partitioned, fullOption));
+                tEnv.executeSql(String.format(bucketDim, fullOption));
                 break;
             case AUTO:
                 tEnv.executeSql(String.format(dim, lruOption));
                 tEnv.executeSql(String.format(partitioned, lruOption));
+                tEnv.executeSql(String.format(bucketDim, lruOption));
                 break;
             default:
                 throw new UnsupportedOperationException();
@@ -979,6 +986,232 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                         Row.of(2, 22, 222, 2222),
                         Row.of(3, 33, 333, 3333),
                         Row.of(4, null, null, null));
+
+        iterator.close();
+    }
+
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testAsyncLookupFullCacheSmallData(LookupCacheMode cacheMode) throws Exception {
+        initTable(cacheMode);
+        batchSql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+
+        String query =
+                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM/*+OPTIONS('lookup.async'='true')*/ for system_time "
+                        + "as of "
+                        + "T.proctime AS D"
+                        + " ON T.i = D.i";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        batchSql("INSERT INTO T VALUES (1), (2), (3)");
+        List<Row> result = iterator.collect(3);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111, 1111),
+                        Row.of(2, 22, 222, 2222),
+                        Row.of(3, null, null, null));
+
+        batchSql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+        Thread.sleep(2000); // wait refresh
+        batchSql("INSERT INTO T VALUES (1), (2), (3), (4)");
+        result = iterator.collect(4);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111, 1111),
+                        Row.of(2, 44, 444, 4444),
+                        Row.of(3, 33, 333, 3333),
+                        Row.of(4, null, null, null));
+
+        iterator.close();
+    }
+
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testAsyncLookupHashCacheSmallData(LookupCacheMode cacheMode) throws Exception {
+        initTable(cacheMode);
+        batchSql("INSERT INTO BUCKET_DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+
+        String query =
+                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN BUCKET_DIM/*+OPTIONS('lookup.async'='true')*/ for system_time "
+                        + "as of "
+                        + "T.proctime AS D"
+                        + " ON T.i = D.i";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        batchSql("INSERT INTO T VALUES (1), (2), (3)");
+        List<Row> result = iterator.collect(3);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111, 1111),
+                        Row.of(2, 22, 222, 2222),
+                        Row.of(3, null, null, null));
+
+        batchSql("INSERT INTO BUCKET_DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+        Thread.sleep(2000); // wait refresh
+        batchSql("INSERT INTO T VALUES (1), (2), (3), (4)");
+        result = iterator.collect(4);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111, 1111),
+                        Row.of(2, 44, 444, 4444),
+                        Row.of(3, 33, 333, 3333),
+                        Row.of(4, null, null, null));
+
+        iterator.close();
+    }
+
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testAsyncLookupHashCacheBigData(LookupCacheMode cacheMode) throws Exception {
+        initTable(cacheMode);
+        StringBuilder sb = new StringBuilder();
+        // insert the dim table
+        String sql = "INSERT INTO BUCKET_DIM VALUES ";
+        sb.append(sql);
+        int dimTableCount = 1000;
+        for (int i = 1; i <= dimTableCount; i++) {
+            sql = String.format("(%d, %d, %d, %d),", i, i * 10, i * 100, i * 1000);
+            sb.append(sql);
+        }
+        sb.deleteCharAt(sb.length() - 1);
+        batchSql(sb.toString());
+
+        String query =
+                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN BUCKET_DIM/*+OPTIONS('lookup.async'='true')*/ for system_time "
+                        + "as of "
+                        + "T.proctime AS D"
+                        + " ON T.i = D.i";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        // insert the dynamic table
+        int dynamicTableCount = dimTableCount / 2;
+        sb.setLength(0);
+        sb.append("INSERT INTO T VALUES ");
+        for (int i = 1; i <= dynamicTableCount; i++) {
+            if (i % 2 == 0) {
+                sb.append(String.format("(%d),", i));
+            }
+        }
+        sb.deleteCharAt(sb.length() - 1);
+        batchSql(sb.toString());
+
+        // construct the result
+        List<Row> result = iterator.collect(dynamicTableCount / 2);
+        List<Row> expectList = new ArrayList<>();
+        for (int i = 1; i <= dynamicTableCount; i++) {
+            if (i % 2 == 0) {
+                expectList.add(Row.of(i, i * 10, i * 100, i * 1000));
+            }
+        }
+        assertThat(result).containsExactlyInAnyOrderElementsOf(expectList);
+
+        // insert the dynamic table
+        sb.setLength(0);
+        sb.append("INSERT INTO T VALUES ");
+        for (int i = 1; i <= dynamicTableCount; i++) {
+            if (i % 2 == 0) {
+                sb.append(String.format("(%d),", i));
+            }
+        }
+        sb.deleteCharAt(sb.length() - 1);
+        batchSql(sb.toString());
+        batchSql(String.format("INSERT INTO T VALUES (%d)", dimTableCount + 1));
+
+        // update the dim table
+        batchSql("INSERT INTO BUCKET_DIM VALUES (2, 22, 222, 2222), (4, 44, 444, 4444)");
+
+        // check result
+        Thread.sleep(2000); // wait refresh
+        result = iterator.collect(dynamicTableCount / 2 + 1);
+        expectList.clear();
+        for (int i = 1; i <= dynamicTableCount; i++) {
+            if (i % 2 == 0 && i != 2 && i != 4) {
+                expectList.add(Row.of(i, i * 10, i * 100, i * 1000));
+            }
+        }
+        expectList.add(Row.of(2, 22, 222, 2222));
+        expectList.add(Row.of(4, 44, 444, 4444));
+        expectList.add(Row.of(dimTableCount + 1, null, null, null));
+
+        assertThat(result).containsExactlyInAnyOrderElementsOf(expectList);
+
+        iterator.close();
+    }
+
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testAsyncLookupFullCacheBigData(LookupCacheMode cacheMode) throws Exception {
+        initTable(cacheMode);
+        StringBuilder sb = new StringBuilder();
+        // insert the dim table
+        String sql = "INSERT INTO DIM VALUES ";
+        sb.append(sql);
+        int dimTableCount = 1000;
+        for (int i = 1; i <= dimTableCount; i++) {
+            sql = String.format("(%d, %d, %d, %d),", i, i * 10, i * 100, i * 1000);
+            sb.append(sql);
+        }
+        sb.deleteCharAt(sb.length() - 1);
+        batchSql(sb.toString());
+
+        String query =
+                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM/*+OPTIONS('lookup.async'='true')*/ for system_time "
+                        + "as of "
+                        + "T.proctime AS D"
+                        + " ON T.i = D.i";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        // insert the dynamic table
+        int dynamicTableCount = dimTableCount / 2;
+        sb.setLength(0);
+        sb.append("INSERT INTO T VALUES ");
+        for (int i = 1; i <= dynamicTableCount; i++) {
+            if (i % 2 == 0) {
+                sb.append(String.format("(%d),", i));
+            }
+        }
+        sb.deleteCharAt(sb.length() - 1);
+        batchSql(sb.toString());
+
+        // construct the result
+        List<Row> result = iterator.collect(dynamicTableCount / 2);
+        List<Row> expectList = new ArrayList<>();
+        for (int i = 1; i <= dynamicTableCount; i++) {
+            if (i % 2 == 0) {
+                expectList.add(Row.of(i, i * 10, i * 100, i * 1000));
+            }
+        }
+        assertThat(result).containsExactlyInAnyOrderElementsOf(expectList);
+
+        // insert the dynamic table
+        sb.setLength(0);
+        sb.append("INSERT INTO T VALUES ");
+        for (int i = 1; i <= dynamicTableCount; i++) {
+            if (i % 2 == 0) {
+                sb.append(String.format("(%d),", i));
+            }
+        }
+        sb.deleteCharAt(sb.length() - 1);
+        batchSql(sb.toString());
+        batchSql(String.format("INSERT INTO T VALUES (%d)", dimTableCount + 1));
+
+        // update the dim table
+        batchSql("INSERT INTO DIM VALUES (2, 22, 222, 2222), (4, 44, 444, 4444)");
+
+        // check result
+        Thread.sleep(2000); // wait refresh
+        result = iterator.collect(dynamicTableCount / 2 + 1);
+        expectList.clear();
+        for (int i = 1; i <= dynamicTableCount; i++) {
+            if (i % 2 == 0 && i != 2 && i != 4) {
+                expectList.add(Row.of(i, i * 10, i * 100, i * 1000));
+            }
+        }
+        expectList.add(Row.of(2, 22, 222, 2222));
+        expectList.add(Row.of(4, 44, 444, 4444));
+        expectList.add(Row.of(dimTableCount + 1, null, null, null));
+
+        assertThat(result).containsExactlyInAnyOrderElementsOf(expectList);
 
         iterator.close();
     }

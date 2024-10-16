@@ -37,7 +37,7 @@ import java.util.List;
 
 /** A {@link LookupTable} for primary key table. */
 public class PrimaryKeyLookupTable extends FullCacheLookupTable {
-
+    private final Object lock = new Object();
     protected final long lruCacheSize;
 
     protected final KeyProjectedRow primaryKeyRow;
@@ -86,8 +86,10 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
 
     @Override
     public List<InternalRow> innerGet(InternalRow key) throws IOException {
-        if (keyRearrange != null) {
-            key = keyRearrange.replaceRow(key);
+        synchronized (lock) {
+            if (keyRearrange != null) {
+                key = keyRearrange.replaceRow(key);
+            }
         }
         InternalRow value = tableState.get(key);
         return value == null ? Collections.emptyList() : Collections.singletonList(value);
