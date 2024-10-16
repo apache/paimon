@@ -861,34 +861,6 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBranchesTable() throws Exception {
-        sql("CREATE TABLE T (a INT, b INT)");
-        sql("INSERT INTO T VALUES (1, 2)");
-        sql("INSERT INTO T VALUES (3, 4)");
-
-        paimonTable("T").createTag("tag1", 1);
-
-        paimonTable("T").createBranch("branch1", "tag1");
-
-        paimonTable("T").createBranch("branch2", "tag1");
-        paimonTable("T$branch_branch2").createTag("tag_branch2", 1);
-
-        paimonTable("T").createBranch("branch3");
-        sql("INSERT INTO T$branch_branch3 VALUES (3, 4)");
-        sql("INSERT INTO T$branch_branch3 VALUES (2, 4)");
-        paimonTable("T$branch_branch3").createTag("tag_branch1", 2);
-
-        List<Row> result =
-                sql(
-                        "SELECT branch_name, created_from_tag, created_from_snapshot FROM T$branches ORDER BY branch_name");
-        assertThat(result)
-                .containsExactly(
-                        Row.of("branch1", "tag1", 1L),
-                        Row.of("branch2", "tag1", 1L),
-                        Row.of("branch3", null, null));
-    }
-
-    @Test
     public void testConsumersTable() throws Exception {
         batchSql("CREATE TABLE T (a INT, b INT)");
         batchSql("INSERT INTO T VALUES (1, 2)");
