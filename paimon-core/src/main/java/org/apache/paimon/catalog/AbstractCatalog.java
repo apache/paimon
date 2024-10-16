@@ -41,9 +41,6 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Preconditions;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -72,9 +69,6 @@ public abstract class AbstractCatalog implements Catalog {
     protected final FileIO fileIO;
     protected final Map<String, String> tableDefaultOptions;
     protected final Options catalogOptions;
-    public MetastoreClient metastoreClient;
-
-    private static final Logger LOG = LoggerFactory.getLogger(AbstractCatalog.class);
 
     @Nullable protected final LineageMetaFactory lineageMetaFactory;
 
@@ -162,23 +156,29 @@ public abstract class AbstractCatalog implements Catalog {
     protected abstract Map<String, String> loadDatabasePropertiesImpl(String name)
             throws DatabaseNotExistException;
 
+    @Override
     public void createPartition(Identifier identifier, Map<String, String> partitionSpec)
             throws TableNotExistException {
-        TableSchema tableSchema = getDataTableSchema(identifier);
-        if (!tableSchema.partitionKeys().isEmpty()
-                && new CoreOptions(tableSchema.options()).partitionedTableInMetastore()) {
-            try {
-                // Do not close client, it is for HiveCatalog
-                if (metastoreClient == null) {
-                    throw new UnsupportedOperationException(
-                            "Only Support HiveCatalog in create partition!");
-                }
-                metastoreClient.addPartition(new LinkedHashMap<>(partitionSpec));
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        } else {
-            throw new RuntimeException("the table is not partitioned table in metastore!");
+        Identifier tableIdentifier =
+                Identifier.create(identifier.getDatabaseName(), identifier.getTableName());
+        FileStoreTable table = (FileStoreTable) getTable(tableIdentifier);
+
+        if (table.partitionKeys().isEmpty() || !table.coreOptions().partitionedTableInMetastore()) {
+            throw new UnsupportedOperationException(
+                    "The table is not partitioned table in metastore.");
+        }
+
+        MetastoreClient.Factory metastoreFactory =
+                table.catalogEnvironment().metastoreClientFactory();
+        if (metastoreFactory == null) {
+            throw new UnsupportedOperationException(
+                    "The catalog must have metastore to create partition.");
+        }
+
+        try (MetastoreClient client = metastoreFactory.create()) {
+            client.addPartition(new LinkedHashMap<>(partitionSpec));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 

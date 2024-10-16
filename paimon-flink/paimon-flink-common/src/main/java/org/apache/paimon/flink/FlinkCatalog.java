@@ -101,7 +101,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.lang.reflect.Method;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -1156,10 +1155,8 @@ public class FlinkCatalog extends AbstractCatalog {
 
         try {
             Identifier identifier = toIdentifier(tablePath);
-            Method func =
-                    catalog.getClass().getMethod("createPartition", Identifier.class, Map.class);
-            func.invoke(catalog, identifier, partitionSpec.getPartitionSpec());
-        } catch (Exception e) {
+            catalog.createPartition(identifier, partitionSpec.getPartitionSpec());
+        } catch (Catalog.TableNotExistException e) {
             throw new CatalogException(e);
         }
     }

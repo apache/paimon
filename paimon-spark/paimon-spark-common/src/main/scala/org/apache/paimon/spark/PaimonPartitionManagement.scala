@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.metastore.MetastoreClient
 import org.apache.paimon.operation.FileStoreCommit
 import org.apache.paimon.table.FileStoreTable
@@ -32,7 +31,8 @@ import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.catalog.SupportsAtomicPartitionManagement
 import org.apache.spark.sql.types.StructType
 
-import java.util.{LinkedHashMap, Map => JMap, Objects, UUID}
+import java.util
+import java.util.{Map => JMap, Objects, UUID}
 
 import scala.collection.JavaConverters._
 
@@ -43,7 +43,8 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
 
   override lazy val partitionSchema: StructType = SparkTypeUtils.fromPaimonRowType(partitionRowType)
 
-  override def dropPartitions(internalRows: Array[InternalRow]): Boolean = {
+  private def toPaimonPartitions(
+      rows: Array[InternalRow]): Array[java.util.LinkedHashMap[String, String]] = {
     table match {
       case fileStoreTable: FileStoreTable =>
         val rowConverter = CatalystTypeConverters
@@ -53,12 +54,20 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
           partitionRowType,
           table.partitionKeys().asScala.toArray)
 
-        val partitions = internalRows.map {
+        rows.map {
           r =>
             rowDataPartitionComputer
               .generatePartValues(new SparkRow(partitionRowType, rowConverter(r).asInstanceOf[Row]))
-              .asInstanceOf[JMap[String, String]]
         }
+      case _ =>
+        throw new UnsupportedOperationException("Only FileStoreTable supports partitions.")
+    }
+  }
+
+  override def dropPartitions(rows: Array[InternalRow]): Boolean = {
+    table match {
+      case fileStoreTable: FileStoreTable =>
+        val partitions = toPaimonPartitions(rows).map(_.asInstanceOf[JMap[String, String]])
         val commit: FileStoreCommit = fileStoreTable.store.newCommit(UUID.randomUUID.toString)
         try {
           commit.dropPartitions(partitions.toSeq.asJava, BatchWriteBuilder.COMMIT_IDENTIFIER)
@@ -114,35 +123,24 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
   }
 
   override def createPartitions(
-      internalRows: Array[InternalRow],
+      rows: Array[InternalRow],
       maps: Array[JMap[String, String]]): Unit = {
     table match {
       case fileStoreTable: FileStoreTable =>
-        val rowConverter = CatalystTypeConverters
-          .createToScalaConverter(CharVarcharUtils.replaceCharVarcharWithString(partitionSchema))
-        val rowDataPartitionComputer = new InternalRowPartitionComputer(
-          fileStoreTable.coreOptions().partitionDefaultName(),
-          partitionRowType,
-          table.partitionKeys().asScala.toArray)
-        val partitions = internalRows.map {
-          r =>
-            rowDataPartitionComputer
-              .generatePartValues(new SparkRow(partitionRowType, rowConverter(r).asInstanceOf[Row]))
-              .asInstanceOf[JMap[String, String]]
+        val partitions = toPaimonPartitions(rows)
+        val metastoreFactory = fileStoreTable.catalogEnvironment().metastoreClientFactory()
+        if (metastoreFactory == null) {
+          throw new UnsupportedOperationException(
+            "The table must have metastore to create partition.")
         }
-        val metastoreClient: MetastoreClient =
-          fileStoreTable.catalogEnvironment().metastoreClientFactory().create
-        partitions.foreach {
-          partition =>
-            metastoreClient.addPartition(partition.asInstanceOf[LinkedHashMap[String, String]])
+        val metastoreClient: MetastoreClient = metastoreFactory.create
+        try {
+          partitions.foreach(metastoreClient.addPartition)
+        } finally {
+          metastoreClient.close()
         }
       case _ =>
         throw new UnsupportedOperationException("Only FileStoreTable supports create partitions.")
     }
-  }
-
-  def getIdentifierFromTableName(tableName: String): Identifier = {
-    val name: Array[String] = tableName.split("\\.")
-    new Identifier(name.apply(0), name.apply(1))
   }
 }

@@ -140,14 +140,10 @@ public class DelegateCatalog implements Catalog {
         return wrapped.getTableLocation(identifier);
     }
 
+    @Override
     public void createPartition(Identifier identifier, Map<String, String> partitions)
             throws TableNotExistException {
-        if (wrapped instanceof AbstractCatalog) {
-            ((AbstractCatalog) wrapped).createPartition(identifier, partitions);
-        } else {
-            throw new UnsupportedOperationException(
-                    "Only Support HiveCatalog in create partition!");
-        }
+        wrapped.createPartition(identifier, partitions);
     }
 
     @Override

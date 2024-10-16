@@ -263,6 +263,16 @@ public interface Catalog extends AutoCloseable {
     default void invalidateTable(Identifier identifier) {}
 
     /**
+     * Create the partition of the specify table.
+     *
+     * @param identifier path of the table to drop partition
+     * @param partitionSpec the partition to be created
+     * @throws TableNotExistException if the table does not exist
+     */
+    void createPartition(Identifier identifier, Map<String, String> partitionSpec)
+            throws TableNotExistException;
+
+    /**
      * Drop the partition of the specify table.
      *
      * @param identifier path of the table to drop partition
