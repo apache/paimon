@@ -1913,20 +1913,27 @@ public abstract class HiveCatalogITCaseBase {
 
     @Test
     public void testView() throws Exception {
-        tEnv.executeSql("CREATE TABLE t ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )").await();
+        tEnv.executeSql("CREATE TABLE t ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
+                .await();
         tEnv.executeSql("INSERT INTO t VALUES (1, 'Hi'), (2, 'Hello')").await();
 
         // test flink view
         tEnv.executeSql("CREATE VIEW flink_v AS SELECT a + 1, b FROM t").await();
-        assertThat(collect("SELECT * FROM flink_v")).containsExactlyInAnyOrder(Row.of(2, "Hi"), Row.of(3, "Hello"));
+        assertThat(collect("SELECT * FROM flink_v"))
+                .containsExactlyInAnyOrder(Row.of(2, "Hi"), Row.of(3, "Hello"));
 
-        // hive cannot query flink view, flink view will expand table name to `my_hive`.`test_db`.`t`
+        // hive cannot query flink view, flink view will expand table name to
+        // `my_hive`.`test_db`.`t`
 
         // test hive view
         hiveShell.executeQuery("CREATE VIEW hive_v AS SELECT a + 1, b FROM t");
-        assertThat(collect("SELECT * FROM hive_v")).containsExactlyInAnyOrder(Row.of(2, "Hi"), Row.of(3, "Hello"));
+        assertThat(collect("SELECT * FROM hive_v"))
+                .containsExactlyInAnyOrder(Row.of(2, "Hi"), Row.of(3, "Hello"));
         assertThat(hiveShell.executeQuery("SELECT * FROM hive_v"))
                 .containsExactlyInAnyOrder("2\tHi", "3\tHello");
+
+        collect("DROP VIEW flink_v");
+        collect("DROP VIEW hive_v");
     }
 
     /** Prepare to update a paimon table with a custom path in the paimon file system. */

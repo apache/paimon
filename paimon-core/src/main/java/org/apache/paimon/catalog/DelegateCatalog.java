@@ -142,12 +142,14 @@ public class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public void dropView(Identifier identifier, boolean ignoreIfNotExists) throws ViewNotExistException {
+    public void dropView(Identifier identifier, boolean ignoreIfNotExists)
+            throws ViewNotExistException {
         wrapped.dropView(identifier, ignoreIfNotExists);
     }
 
     @Override
-    public void createView(Identifier identifier, View view, boolean ignoreIfExists) throws ViewAlreadyExistException, DatabaseNotExistException {
+    public void createView(Identifier identifier, View view, boolean ignoreIfExists)
+            throws ViewAlreadyExistException, DatabaseNotExistException {
         wrapped.createView(identifier, view, ignoreIfExists);
     }
 

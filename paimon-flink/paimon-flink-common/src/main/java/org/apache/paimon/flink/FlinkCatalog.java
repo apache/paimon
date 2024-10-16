@@ -347,15 +347,25 @@ public class FlinkCatalog extends AbstractCatalog {
 
     @Override
     public boolean tableExists(ObjectPath tablePath) throws CatalogException {
-        return catalog.tableExists(toIdentifier(tablePath));
+        Identifier identifier = toIdentifier(tablePath);
+        return catalog.tableExists(identifier) || catalog.viewExists(identifier);
     }
 
     @Override
     public void dropTable(ObjectPath tablePath, boolean ignoreIfNotExists)
             throws TableNotExistException, CatalogException {
         Identifier identifier = toIdentifier(tablePath);
-        Table table = null;
+        if (catalog.viewExists(identifier)) {
+            try {
+                catalog.dropView(identifier, ignoreIfNotExists);
+                return;
+            } catch (Catalog.ViewNotExistException e) {
+                throw new RuntimeException("Unexpected exception.", e);
+            }
+        }
+
         try {
+            Table table = null;
             if (logStoreAutoRegister && catalog.tableExists(identifier)) {
                 table = catalog.getTable(identifier);
             }
@@ -384,9 +394,24 @@ public class FlinkCatalog extends AbstractCatalog {
 
         if (table instanceof CatalogView) {
             ResolvedCatalogView viewTable = (ResolvedCatalogView) table;
-            org.apache.paimon.types.RowType.Builder builder = org.apache.paimon.types.RowType.builder();
-            viewTable.getResolvedSchema().getColumns().forEach(column -> builder.field(column.getName(), toDataType(column.getDataType().getLogicalType()), column.getComment().orElse(null)));
-            View view = new ViewImpl(identifier, builder.build(), viewTable.getExpandedQuery(), viewTable.getComment(), viewTable.getOptions());
+            org.apache.paimon.types.RowType.Builder builder =
+                    org.apache.paimon.types.RowType.builder();
+            viewTable
+                    .getResolvedSchema()
+                    .getColumns()
+                    .forEach(
+                            column ->
+                                    builder.field(
+                                            column.getName(),
+                                            toDataType(column.getDataType().getLogicalType()),
+                                            column.getComment().orElse(null)));
+            View view =
+                    new ViewImpl(
+                            identifier,
+                            builder.build(),
+                            viewTable.getExpandedQuery(),
+                            viewTable.getComment(),
+                            viewTable.getOptions());
             try {
                 catalog.createView(identifier, view, ignoreIfExists);
             } catch (Catalog.ViewAlreadyExistException e) {
@@ -401,8 +426,6 @@ public class FlinkCatalog extends AbstractCatalog {
             fillOptionsForMaterializedTable((CatalogMaterializedTable) table, options);
         }
         Schema paimonSchema = buildPaimonSchema(identifier, table, options);
-
-
 
         boolean unRegisterLogSystem = false;
         try {

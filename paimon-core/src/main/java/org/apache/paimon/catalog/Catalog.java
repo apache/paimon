@@ -301,6 +301,20 @@ public interface Catalog extends AutoCloseable {
     }
 
     /**
+     * Check if a view exists in this catalog.
+     *
+     * @param identifier Path of the view
+     * @return true if the given view exists in the catalog false otherwise
+     */
+    default boolean viewExists(Identifier identifier) {
+        try {
+            return getView(identifier) != null;
+        } catch (ViewNotExistException e) {
+            return false;
+        }
+    }
+
+    /**
      * Return a {@link View} identified by the given {@link Identifier}.
      *
      * @param identifier Path of the view
@@ -308,7 +322,7 @@ public interface Catalog extends AutoCloseable {
      * @throws ViewNotExistException if the target does not exist
      */
     default View getView(Identifier identifier) throws ViewNotExistException {
-        throw new UnsupportedOperationException();
+        throw new ViewNotExistException(identifier);
     }
 
     /**

@@ -87,16 +87,20 @@ public class ViewImpl implements View {
         return new ViewImpl(identifier, rowType, query, comment, newOptions);
     }
 
-  @Override
-  public boolean equals(Object o) {
-    if (this == o) return true;
-    if (o == null || getClass() != o.getClass()) return false;
-    ViewImpl view = (ViewImpl) o;
-    return Objects.equals(identifier, view.identifier) && Objects.equals(rowType, view.rowType) && Objects.equals(query, view.query) && Objects.equals(comment, view.comment) && Objects.equals(options, view.options);
-  }
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        ViewImpl view = (ViewImpl) o;
+        return Objects.equals(identifier, view.identifier)
+                && Objects.equals(rowType, view.rowType)
+                && Objects.equals(query, view.query)
+                && Objects.equals(comment, view.comment)
+                && Objects.equals(options, view.options);
+    }
 
-  @Override
-  public int hashCode() {
-    return Objects.hash(identifier, rowType, query, comment, options);
-  }
+    @Override
+    public int hashCode() {
+        return Objects.hash(identifier, rowType, query, comment, options);
+    }
 }

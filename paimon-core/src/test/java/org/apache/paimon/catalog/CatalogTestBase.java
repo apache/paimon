@@ -51,7 +51,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assertions.fail;
 
 /** Base test class of paimon catalog in {@link Catalog}. */
 public abstract class CatalogTestBase {
@@ -848,7 +847,11 @@ public abstract class CatalogTestBase {
         }
 
         Identifier identifier = new Identifier("view_db", "my_view");
-        RowType rowType = RowType.builder().field("str", DataTypes.STRING()).field("int", DataTypes.INT()).build();
+        RowType rowType =
+                RowType.builder()
+                        .field("str", DataTypes.STRING())
+                        .field("int", DataTypes.INT())
+                        .build();
         String query = "SELECT * FROM OTHER_TABLE";
         String comment = "it is my view";
         Map<String, String> options = new HashMap<>();
@@ -856,13 +859,17 @@ public abstract class CatalogTestBase {
         options.put("key2", "v2");
         View view = new ViewImpl(identifier, rowType, query, comment, options);
 
-        assertThatThrownBy(() -> catalog.createView(identifier, view, false)).isInstanceOf(Catalog.DatabaseNotExistException.class);
+        assertThatThrownBy(() -> catalog.createView(identifier, view, false))
+                .isInstanceOf(Catalog.DatabaseNotExistException.class);
 
         catalog.createDatabase(identifier.getDatabaseName(), false);
 
-        assertThatThrownBy(() -> catalog.getView(identifier)).isInstanceOf(Catalog.ViewNotExistException.class);
+        assertThatThrownBy(() -> catalog.getView(identifier))
+                .isInstanceOf(Catalog.ViewNotExistException.class);
 
         catalog.createView(identifier, view, false);
+
+        assertThat(catalog.viewExists(identifier)).isTrue();
 
         View catalogView = catalog.getView(identifier);
         assertThat(catalogView.fullName()).isEqualTo(view.fullName());
@@ -872,6 +879,14 @@ public abstract class CatalogTestBase {
         assertThat(catalogView.options()).containsAllEntriesOf(view.options());
 
         catalog.createView(identifier, view, true);
-        assertThatThrownBy(() -> catalog.createView(identifier, view, false)).isInstanceOf(Catalog.ViewAlreadyExistException.class);
+        assertThatThrownBy(() -> catalog.createView(identifier, view, false))
+                .isInstanceOf(Catalog.ViewAlreadyExistException.class);
+
+        catalog.dropView(identifier, false);
+        assertThat(catalog.viewExists(identifier)).isFalse();
+
+        catalog.dropView(identifier, true);
+        assertThatThrownBy(() -> catalog.dropView(identifier, false))
+                .isInstanceOf(Catalog.ViewNotExistException.class);
     }
 }
