@@ -299,6 +299,44 @@ public interface Catalog extends AutoCloseable {
         alterTable(identifier, Collections.singletonList(change), ignoreIfNotExists);
     }
 
+    /**
+     * Return a {@link Table} identified by the given {@link Identifier}.
+     *
+     * <p>System tables can be got by '$' splitter.
+     *
+     * @param identifier Path of the table
+     * @return The requested table
+     * @throws TableNotExistException if the target does not exist
+     */
+    Table getView(Identifier identifier) throws TableNotExistException;
+
+    /**
+     * Drop a table.
+     *
+     * <p>NOTE: System tables can not be dropped.
+     *
+     * @param identifier Path of the table to be dropped
+     * @param ignoreIfNotExists Flag to specify behavior when the table does not exist: if set to
+     *     false, throw an exception, if set to true, do nothing.
+     * @throws TableNotExistException if the table does not exist
+     */
+    void dropTable(Identifier identifier, boolean ignoreIfNotExists) throws TableNotExistException;
+
+    /**
+     * Create a new table.
+     *
+     * <p>NOTE: System tables can not be created.
+     *
+     * @param identifier path of the table to be created
+     * @param schema the table definition
+     * @param ignoreIfExists flag to specify behavior when a table already exists at the given path:
+     *     if set to false, it throws a TableAlreadyExistException, if set to true, do nothing.
+     * @throws TableAlreadyExistException if table already exists and ignoreIfExists is false
+     * @throws DatabaseNotExistException if the database in identifier doesn't exist
+     */
+    void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
+            throws TableAlreadyExistException, DatabaseNotExistException;
+
     /** Return a boolean that indicates whether this catalog allow upper case. */
     boolean allowUpperCase();
 
