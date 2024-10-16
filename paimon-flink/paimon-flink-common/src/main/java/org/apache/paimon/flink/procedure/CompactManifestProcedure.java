@@ -32,7 +32,7 @@ import java.util.Collections;
 /** Compact manifest file to reduce deleted manifest entries. */
 public class CompactManifestProcedure extends ProcedureBase {
 
-    private static final String commitUser = "Compact-Manifest-Procedure-Committer";
+    private static final String COMMIT_USER = "Compact-Manifest-Procedure-Committer";
 
     @Override
     public String identifier() {
@@ -47,7 +47,7 @@ public class CompactManifestProcedure extends ProcedureBase {
                         table(tableId)
                                 .copy(
                                         Collections.singletonMap(
-                                                CoreOptions.COMMIT_USER_PREFIX.key(), commitUser));
+                                                CoreOptions.COMMIT_USER_PREFIX.key(), COMMIT_USER));
 
         try (FileStoreCommit commit =
                 table.store()
