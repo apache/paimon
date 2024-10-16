@@ -46,12 +46,15 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.view.View;
+import org.apache.paimon.view.ViewImpl;
 
 import org.apache.flink.table.hive.LegacyHiveClasses;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
+import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
@@ -440,7 +443,7 @@ public class HiveCatalog extends AbstractCatalog {
 
         if (formatTableEnabled()) {
             try {
-                HiveFormatTableUtils.convertToFormatTable(table);
+                HiveTableUtils.convertToFormatTable(table);
                 return true;
             } catch (UnsupportedOperationException e) {
                 return false;
@@ -469,6 +472,139 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
+    public View getView(Identifier identifier) throws ViewNotExistException {
+        Table table;
+        try {
+            table =
+                    clients.run(
+                            client ->
+                                    client.getTable(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName()));
+        } catch (NoSuchObjectException e) {
+            throw new ViewNotExistException(identifier);
+        } catch (TException e) {
+            throw new RuntimeException(e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+
+        if (!isView(table)) {
+            throw new ViewNotExistException(identifier);
+        }
+
+        RowType rowType = HiveTableUtils.createRowType(table);
+        Map<String, String> options = new HashMap<>(table.getParameters());
+        String comment = options.remove(COMMENT_PROP);
+        return new ViewImpl(identifier, rowType, table.getViewExpandedText(), comment, options);
+    }
+
+    @Override
+    public void createView(Identifier identifier, View view, boolean ignoreIfExists)
+            throws ViewAlreadyExistException, DatabaseNotExistException {
+        if (!databaseExists(identifier.getDatabaseName())) {
+            throw new DatabaseNotExistException(identifier.getDatabaseName());
+        }
+
+        try {
+            getView(identifier);
+            if (ignoreIfExists) {
+                return;
+            }
+            throw new ViewAlreadyExistException(identifier);
+        } catch (ViewNotExistException ignored) {
+        }
+
+        Table hiveTable =
+                org.apache.hadoop.hive.ql.metadata.Table.getEmptyTable(
+                        identifier.getDatabaseName(), identifier.getObjectName());
+        hiveTable.setCreateTime((int) (System.currentTimeMillis() / 1000));
+
+        Map<String, String> properties = new HashMap<>(view.options());
+        // Table comment
+        if (view.comment().isPresent()) {
+            properties.put(COMMENT_PROP, view.comment().get());
+        }
+        hiveTable.setParameters(properties);
+        hiveTable.setPartitionKeys(new ArrayList<>());
+        hiveTable.setViewOriginalText(view.query());
+        hiveTable.setViewExpandedText(view.query());
+        hiveTable.setTableType(TableType.VIRTUAL_VIEW.name());
+
+        StorageDescriptor sd = hiveTable.getSd();
+        List<FieldSchema> columns =
+                view.rowType().getFields().stream()
+                        .map(this::convertToFieldSchema)
+                        .collect(Collectors.toList());
+        sd.setCols(columns);
+
+        try {
+            clients.execute(client -> client.createTable(hiveTable));
+        } catch (Exception e) {
+            // we don't need to delete directories since HMS will roll back db and fs if failed.
+            throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
+        }
+    }
+
+    @Override
+    public void dropView(Identifier identifier, boolean ignoreIfNotExists)
+            throws ViewNotExistException {
+        try {
+            getView(identifier);
+        } catch (ViewNotExistException e) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw e;
+        }
+
+        try {
+            clients.execute(
+                    client ->
+                            client.dropTable(
+                                    identifier.getDatabaseName(),
+                                    identifier.getTableName(),
+                                    false,
+                                    false,
+                                    false));
+        } catch (TException e) {
+            throw new RuntimeException("Failed to drop view " + identifier.getFullName(), e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(
+                    "Interrupted in call to drop view " + identifier.getFullName(), e);
+        }
+    }
+
+    @Override
+    public List<String> listViews(String databaseName) throws DatabaseNotExistException {
+        if (isSystemDatabase(databaseName)) {
+            return Collections.emptyList();
+        }
+        if (!databaseExists(databaseName)) {
+            throw new DatabaseNotExistException(databaseName);
+        }
+
+        try {
+            List<String> tables = clients.run(client -> client.getAllTables(databaseName));
+            List<String> views = new ArrayList<>();
+            for (String tableName : tables) {
+                Table table = clients.run(client -> client.getTable(databaseName, tableName));
+                if (isView(table)) {
+                    views.add(tableName);
+                }
+            }
+            return views;
+        } catch (TException e) {
+            throw new RuntimeException("Failed to list all tables in database " + databaseName, e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted in call to listTables " + databaseName, e);
+        }
+    }
+
+    @Override
     public FormatTable getFormatTable(Identifier identifier) throws TableNotExistException {
         if (!formatTableEnabled()) {
             throw new TableNotExistException(identifier);
@@ -491,12 +627,13 @@ public class HiveCatalog extends AbstractCatalog {
             throw new RuntimeException(e);
         }
         try {
-            return HiveFormatTableUtils.convertToFormatTable(table);
+            return HiveTableUtils.convertToFormatTable(table);
         } catch (UnsupportedOperationException e) {
             throw new TableNotExistException(identifier);
         }
     }
 
+    @Override
     public void createFormatTable(Identifier identifier, Schema schema) {
         if (!formatTableEnabled()) {
             throw new UnsupportedOperationException(
@@ -1133,5 +1270,9 @@ public class HiveCatalog extends AbstractCatalog {
 
     public static String possibleHiveConfPath() {
         return System.getenv("HIVE_CONF_DIR");
+    }
+
+    private static boolean isView(Table table) {
+        return TableType.valueOf(table.getTableType()) == TableType.VIRTUAL_VIEW;
     }
 }
