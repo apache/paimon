@@ -82,6 +82,7 @@ import org.apache.flink.table.catalog.exceptions.DatabaseAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.catalog.exceptions.FunctionNotExistException;
+import org.apache.flink.table.catalog.exceptions.PartitionAlreadyExistsException;
 import org.apache.flink.table.catalog.exceptions.PartitionNotExistException;
 import org.apache.flink.table.catalog.exceptions.ProcedureNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
@@ -100,6 +101,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.lang.reflect.Method;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -1145,8 +1147,21 @@ public class FlinkCatalog extends AbstractCatalog {
             CatalogPartitionSpec partitionSpec,
             CatalogPartition partition,
             boolean ignoreIfExists)
-            throws CatalogException {
-        throw new UnsupportedOperationException();
+            throws CatalogException, PartitionAlreadyExistsException {
+        if (partitionExists(tablePath, partitionSpec)) {
+            if (!ignoreIfExists) {
+                throw new PartitionAlreadyExistsException(getName(), tablePath, partitionSpec);
+            }
+        }
+
+        try {
+            Identifier identifier = toIdentifier(tablePath);
+            Method func =
+                    catalog.getClass().getMethod("createPartition", Identifier.class, Map.class);
+            func.invoke(catalog, identifier, partitionSpec.getPartitionSpec());
+        } catch (Exception e) {
+            throw new CatalogException(e);
+        }
     }
 
     @Override

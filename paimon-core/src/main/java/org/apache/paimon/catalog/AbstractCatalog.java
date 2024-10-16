@@ -24,6 +24,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.lineage.LineageMetaFactory;
+import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
@@ -40,12 +41,16 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Preconditions;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -67,6 +72,9 @@ public abstract class AbstractCatalog implements Catalog {
     protected final FileIO fileIO;
     protected final Map<String, String> tableDefaultOptions;
     protected final Options catalogOptions;
+    public MetastoreClient metastoreClient;
+
+    private static final Logger LOG = LoggerFactory.getLogger(AbstractCatalog.class);
 
     @Nullable protected final LineageMetaFactory lineageMetaFactory;
 
@@ -153,6 +161,26 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected abstract Map<String, String> loadDatabasePropertiesImpl(String name)
             throws DatabaseNotExistException;
+
+    public void createPartition(Identifier identifier, Map<String, String> partitionSpec)
+            throws TableNotExistException {
+        TableSchema tableSchema = getDataTableSchema(identifier);
+        if (!tableSchema.partitionKeys().isEmpty()
+                && new CoreOptions(tableSchema.options()).partitionedTableInMetastore()) {
+            try {
+                // Do not close client, it is for HiveCatalog
+                if (metastoreClient == null) {
+                    throw new UnsupportedOperationException(
+                            "Only Support HiveCatalog in create partition!");
+                }
+                metastoreClient.addPartition(new LinkedHashMap<>(partitionSpec));
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        } else {
+            throw new RuntimeException("the table is not partitioned table in metastore!");
+        }
+    }
 
     @Override
     public void dropPartition(Identifier identifier, Map<String, String> partitionSpec)

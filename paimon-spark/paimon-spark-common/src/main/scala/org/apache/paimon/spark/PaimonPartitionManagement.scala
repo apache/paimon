@@ -18,6 +18,8 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.metastore.MetastoreClient
 import org.apache.paimon.operation.FileStoreCommit
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
@@ -30,7 +32,7 @@ import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.catalog.SupportsAtomicPartitionManagement
 import org.apache.spark.sql.types.StructType
 
-import java.util.{Map => JMap, Objects, UUID}
+import java.util.{LinkedHashMap, Map => JMap, Objects, UUID}
 
 import scala.collection.JavaConverters._
 
@@ -114,6 +116,33 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
   override def createPartitions(
       internalRows: Array[InternalRow],
       maps: Array[JMap[String, String]]): Unit = {
-    throw new UnsupportedOperationException("Create partition is not supported")
+    table match {
+      case fileStoreTable: FileStoreTable =>
+        val rowConverter = CatalystTypeConverters
+          .createToScalaConverter(CharVarcharUtils.replaceCharVarcharWithString(partitionSchema))
+        val rowDataPartitionComputer = new InternalRowPartitionComputer(
+          fileStoreTable.coreOptions().partitionDefaultName(),
+          partitionRowType,
+          table.partitionKeys().asScala.toArray)
+        val partitions = internalRows.map {
+          r =>
+            rowDataPartitionComputer
+              .generatePartValues(new SparkRow(partitionRowType, rowConverter(r).asInstanceOf[Row]))
+              .asInstanceOf[JMap[String, String]]
+        }
+        val metastoreClient: MetastoreClient =
+          fileStoreTable.catalogEnvironment().metastoreClientFactory().create
+        partitions.foreach {
+          partition =>
+            metastoreClient.addPartition(partition.asInstanceOf[LinkedHashMap[String, String]])
+        }
+      case _ =>
+        throw new UnsupportedOperationException("Only FileStoreTable supports create partitions.")
+    }
+  }
+
+  def getIdentifierFromTableName(tableName: String): Identifier = {
+    val name: Array[String] = tableName.split("\\.")
+    new Identifier(name.apply(0), name.apply(1))
   }
 }
