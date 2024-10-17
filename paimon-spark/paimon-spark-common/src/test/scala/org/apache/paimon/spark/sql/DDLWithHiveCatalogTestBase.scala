@@ -165,7 +165,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                              |CREATE TABLE paimon_db.paimon_tbl2 (id STRING, name STRING, pt STRING)
                              |USING PAIMON
                              |PARTITIONED BY (name, pt)
-                             |TBLPROPERTIES('metastore.partitioned-table' = 'true')
+                             |TBLPROPERTIES('metastore.partitioned-table' = 'false')
                              |""".stripMargin)
                 Assertions.assertEquals(
                   getTableLocation("paimon_db.paimon_tbl2"),
