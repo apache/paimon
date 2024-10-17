@@ -623,11 +623,12 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testRemoveRecordOnDelete() {
+    public void testRemoveRecordOnDelete() throws Exception {
         sql(
                 "CREATE TABLE remove_record_on_delete (pk INT PRIMARY KEY NOT ENFORCED, a STRING, b STRING) WITH ("
                         + " 'merge-engine' = 'partial-update',"
-                        + " 'partial-update.remove-record-on-delete' = 'true'"
+                        + " 'partial-update.remove-record-on-delete' = 'true',"
+                        + " 'changelog-producer' = 'lookup'"
                         + ")");
 
         sql("INSERT INTO remove_record_on_delete VALUES (1, CAST (NULL AS STRING), 'apple')");
@@ -645,5 +646,18 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         // batch read
         assertThat(sql("SELECT * FROM remove_record_on_delete"))
                 .containsExactlyInAnyOrder(Row.of(1, "A", "apache"));
+
+        // streaming read results has -U
+        BlockingIterator<Row, Row> iterator =
+                streamSqlBlockIter(
+                        "SELECT * FROM remove_record_on_delete /*+ OPTIONS('scan.timestamp-millis' = '0') */");
+        assertThat(iterator.collect(5))
+                .containsExactly(
+                        Row.ofKind(RowKind.INSERT, 1, null, "apple"),
+                        Row.ofKind(RowKind.DELETE, 1, null, "apple"),
+                        Row.ofKind(RowKind.INSERT, 1, null, "apache"),
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 1, null, "apache"),
+                        Row.ofKind(RowKind.UPDATE_AFTER, 1, "A", "apache"));
+        iterator.close();
     }
 }
