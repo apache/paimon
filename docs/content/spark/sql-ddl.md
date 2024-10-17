@@ -214,19 +214,19 @@ CREATE TABLE my_table_all_as PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 
 ### Create Tag
 Create a tag based on snapshot or retention.
 ```sql
--- create a tag based on lastest snapshot and no retention.
+-- create a tag based on the latest snapshot and no retention.
 ALTER TABLE T CREATE TAG `TAG-1`;
 
--- create a tag based on lastest snapshot and no retention if it doesn't exist.
+-- create a tag based on the latest snapshot and no retention if it doesn't exist.
 ALTER TABLE T CREATE TAG IF NOT EXISTS `TAG-1`;
 
--- create a tag based on lastest snapshot and retain it for 7 day.
+-- create a tag based on the latest snapshot and retain it for 7 day.
 ALTER TABLE T CREATE TAG `TAG-2` RETAIN 7 DAYS;
 
--- create a tag based on snapshot 1 and no retention.
+-- create a tag based on snapshot-1 and no retention.
 ALTER TABLE T CREATE TAG `TAG-3` AS OF VERSION 1;
 
--- create a tag based on snapshot 2 and retain it for 12 hour.
+-- create a tag based on snapshot-2 and retain it for 12 hour.
 ALTER TABLE T CREATE TAG `TAG-4` AS OF VERSION 2 RETAIN 12 HOURS;
 ```
 
