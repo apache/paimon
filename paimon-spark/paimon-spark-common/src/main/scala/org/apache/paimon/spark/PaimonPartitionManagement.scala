@@ -37,7 +37,7 @@ import java.util.{Map => JMap, Objects, UUID}
 
 import scala.collection.JavaConverters._
 
-trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with Logging {
+trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
   self: SparkTable =>
 
   private lazy val partitionRowType: RowType = TypeUtils.project(table.rowType, table.partitionKeys)
