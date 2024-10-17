@@ -488,8 +488,7 @@ public class HiveCatalog extends AbstractCatalog {
             throw new RuntimeException(e);
         }
 
-        boolean isView = TableType.valueOf(table.getTableType()) == TableType.VIRTUAL_VIEW;
-        if (!isView) {
+        if (!isView(table)) {
             throw new ViewNotExistException(identifier);
         }
 
@@ -590,7 +589,7 @@ public class HiveCatalog extends AbstractCatalog {
             List<String> views = new ArrayList<>();
             for (String tableName : tables) {
                 Table table = clients.run(client -> client.getTable(databaseName, tableName));
-                if (TableType.valueOf(table.getTableType()) == TableType.VIRTUAL_VIEW) {
+                if (isView(table)) {
                     views.add(tableName);
                 }
             }
@@ -1261,5 +1260,9 @@ public class HiveCatalog extends AbstractCatalog {
 
     public static String possibleHiveConfPath() {
         return System.getenv("HIVE_CONF_DIR");
+    }
+
+    private static boolean isView(Table table) {
+        return TableType.valueOf(table.getTableType()) != TableType.VIRTUAL_VIEW;
     }
 }
