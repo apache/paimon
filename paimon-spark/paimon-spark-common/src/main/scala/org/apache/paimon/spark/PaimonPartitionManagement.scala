@@ -75,13 +75,9 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
         try {
           commit.dropPartitions(partitions.toSeq.asJava, BatchWriteBuilder.COMMIT_IDENTIFIER)
           // sync to metastore with delete partitions
-          if (clientFactory != null) {
+          if (clientFactory != null && fileStoreTable.coreOptions().partitionedTableInMetastore()) {
             metastoreClient = clientFactory.create()
             toPaimonPartitions(rows).foreach(metastoreClient.deletePartition)
-          }
-        } catch {
-          case e: Exception => {
-            logWarning(s"Not drop partition in metastore due to $e")
           }
         } finally {
           commit.close()
@@ -150,10 +146,8 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
         }
         val metastoreClient: MetastoreClient = metastoreFactory.create
         try {
-          partitions.foreach(metastoreClient.addPartition)
-        } catch {
-          case e: Exception => {
-            logWarning(s"Not add partition in metastore due to s{e}")
+          if (fileStoreTable.coreOptions().partitionedTableInMetastore()) {
+            partitions.foreach(metastoreClient.addPartition)
           }
         } finally {
           metastoreClient.close()
