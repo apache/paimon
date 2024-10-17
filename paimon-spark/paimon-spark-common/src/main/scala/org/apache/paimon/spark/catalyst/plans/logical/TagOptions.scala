@@ -16,6 +16,8 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.sql
+package org.apache.paimon.spark.catalyst.plans.logical
 
-class ShowTagsTest extends PaimonShowTagsTestBase {}
+import java.time.Duration
+
+case class TagOptions(snapshotId: Option[Long], timeRetained: Option[Duration])

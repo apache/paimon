@@ -19,7 +19,8 @@
 package org.apache.spark.sql.catalyst.parser.extensions
 
 import org.apache.paimon.spark.catalyst.plans.logical
-import org.apache.paimon.spark.catalyst.plans.logical.{PaimonCallArgument, PaimonCallStatement, PaimonNamedArgument, PaimonPositionalArgument, ShowTagsCommand}
+import org.apache.paimon.spark.catalyst.plans.logical.{CreateTagCommand, DeleteTagCommand, PaimonCallArgument, PaimonCallStatement, PaimonNamedArgument, PaimonPositionalArgument, RenameTagCommand, ShowTagsCommand, TagOptions}
+import org.apache.paimon.utils.TimeUtils
 
 import org.antlr.v4.runtime._
 import org.antlr.v4.runtime.misc.Interval
@@ -92,8 +93,51 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
       ctx.parts.asScala.map(_.getText).toSeq
     }
 
-  override def visitShowTags(ctx: ShowTagsContext): AnyRef = withOrigin(ctx) {
+  /** Create a SHOW TAGS logical command. */
+  override def visitShowTags(ctx: ShowTagsContext): ShowTagsCommand = withOrigin(ctx) {
     ShowTagsCommand(typedVisit[Seq[String]](ctx.multipartIdentifier))
+  }
+
+  /** Create a CREATE TAG logical command. */
+  override def visitCreateTag(ctx: CreateTagContext): CreateTagCommand = withOrigin(ctx) {
+    val tagName = ctx.identifier().getText
+    val tagOptionsContext = Option(ctx.tagOptions())
+    val snapshotId =
+      tagOptionsContext.flatMap(tagOptions => Option(tagOptions.snapshotId())).map(_.getText.toLong)
+    val timeRetainCtx = tagOptionsContext.flatMap(tagOptions => Option(tagOptions.timeRetain()))
+    val timeRetained = if (timeRetainCtx.nonEmpty) {
+      val (number, timeUnit) =
+        timeRetainCtx.map(retain => (retain.number().getText.toLong, retain.timeUnit().getText)).get
+      Option(TimeUtils.parseDuration(number, timeUnit))
+    } else {
+      None
+    }
+    val tagOptions = TagOptions(
+      snapshotId,
+      timeRetained
+    )
+    val ifNotExists = ctx.EXISTS() != null
+    CreateTagCommand(
+      typedVisit[Seq[String]](ctx.multipartIdentifier),
+      tagName,
+      tagOptions,
+      ifNotExists)
+  }
+
+  /** Create a DELETE TAG logical command. */
+  override def visitDeleteTag(ctx: DeleteTagContext): DeleteTagCommand = withOrigin(ctx) {
+    DeleteTagCommand(
+      typedVisit[Seq[String]](ctx.multipartIdentifier),
+      ctx.identifier().getText,
+      ctx.EXISTS() != null)
+  }
+
+  /** Create a RENAME TAG logical command. */
+  override def visitRenameTag(ctx: RenameTagContext): RenameTagCommand = withOrigin(ctx) {
+    RenameTagCommand(
+      typedVisit[Seq[String]](ctx.multipartIdentifier),
+      ctx.identifier(0).getText,
+      ctx.identifier(1).getText)
   }
 
   private def toBuffer[T](list: java.util.List[T]) = list.asScala
