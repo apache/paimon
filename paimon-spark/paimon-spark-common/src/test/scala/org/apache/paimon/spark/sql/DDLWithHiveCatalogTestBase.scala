@@ -98,6 +98,34 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                   Row("name=n/pt=cc") :: Nil)
 
               }
+
+              // disable metastore.partitioned-table
+              withTable("paimon_db.paimon_tbl2") {
+                spark.sql(s"""
+                             |CREATE TABLE paimon_db.paimon_tbl2 (id STRING, name STRING, pt STRING)
+                             |USING PAIMON
+                             |PARTITIONED BY (name, pt)
+                             |TBLPROPERTIES('metastore.partitioned-table' = 'false')
+                             |""".stripMargin)
+                Assertions.assertEquals(
+                  getTableLocation("paimon_db.paimon_tbl2"),
+                  s"${dBLocation.getCanonicalPath}/paimon_tbl2")
+                spark.sql("insert into paimon_db.paimon_tbl2 select '1', 'n', 'cc'")
+                spark.sql("insert into paimon_db.paimon_tbl2 select '1', 'n1', 'aa'")
+                spark.sql("insert into paimon_db.paimon_tbl2 select '1', 'n2', 'bb'")
+
+                spark.sql("show partitions paimon_db.paimon_tbl2")
+                checkAnswer(
+                  spark.sql("show partitions paimon_db.paimon_tbl2"),
+                  Row("name=n/pt=cc") :: Row("name=n1/pt=aa") :: Row("name=n2/pt=bb") :: Nil)
+                spark.sql(
+                  "alter table paimon_db.paimon_tbl2 drop partition (name='n1', `pt`='aa'), partition (name='n2', `pt`='bb')")
+                spark.sql("show partitions paimon_db.paimon_tbl2")
+                checkAnswer(
+                  spark.sql("show partitions paimon_db.paimon_tbl2"),
+                  Row("name=n/pt=cc") :: Nil)
+
+              }
             }
         }
     }
@@ -129,6 +157,22 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 spark.sql("insert into paimon_db.paimon_tbl select '1', 'n', 'cc'")
 
                 spark.sql("alter table paimon_db.paimon_tbl add partition(name='cc', `pt`='aa') ")
+              }
+
+              // disable metastore.partitioned-table
+              withTable("paimon_db.paimon_tbl2") {
+                spark.sql(s"""
+                             |CREATE TABLE paimon_db.paimon_tbl2 (id STRING, name STRING, pt STRING)
+                             |USING PAIMON
+                             |PARTITIONED BY (name, pt)
+                             |TBLPROPERTIES('metastore.partitioned-table' = 'true')
+                             |""".stripMargin)
+                Assertions.assertEquals(
+                  getTableLocation("paimon_db.paimon_tbl2"),
+                  s"${dBLocation.getCanonicalPath}/paimon_tbl2")
+                spark.sql("insert into paimon_db.paimon_tbl2 select '1', 'n', 'cc'")
+
+                spark.sql("alter table paimon_db.paimon_tbl2 add partition(name='cc', `pt`='aa') ")
               }
             }
         }

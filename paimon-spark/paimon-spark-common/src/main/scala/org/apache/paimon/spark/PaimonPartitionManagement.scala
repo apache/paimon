@@ -25,6 +25,7 @@ import org.apache.paimon.table.sink.BatchWriteBuilder
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.{InternalRowPartitionComputer, TypeUtils}
 
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.{CatalystTypeConverters, InternalRow}
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
@@ -36,7 +37,7 @@ import java.util.{Map => JMap, Objects, UUID}
 
 import scala.collection.JavaConverters._
 
-trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
+trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with Logging {
   self: SparkTable =>
 
   private lazy val partitionRowType: RowType = TypeUtils.project(table.rowType, table.partitionKeys)
@@ -77,6 +78,10 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
           if (clientFactory != null) {
             metastoreClient = clientFactory.create()
             toPaimonPartitions(rows).foreach(metastoreClient.deletePartition)
+          }
+        } catch {
+          case e: Exception => {
+            logWarning(s"Not drop partition in metastore due to $e")
           }
         } finally {
           commit.close()
@@ -146,6 +151,10 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
         val metastoreClient: MetastoreClient = metastoreFactory.create
         try {
           partitions.foreach(metastoreClient.addPartition)
+        } catch {
+          case e: Exception => {
+            logWarning(s"Not add partition in metastore due to s{e}")
+          }
         } finally {
           metastoreClient.close()
         }
