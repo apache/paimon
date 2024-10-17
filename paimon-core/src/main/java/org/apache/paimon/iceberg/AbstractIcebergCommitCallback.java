@@ -23,6 +23,8 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.factories.FactoryException;
+import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.manifest.IcebergConversions;
 import org.apache.paimon.iceberg.manifest.IcebergDataFileMeta;
@@ -57,6 +59,8 @@ import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
@@ -84,9 +88,11 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
 
     protected final FileStoreTable table;
     private final String commitUser;
-    private final IcebergPathFactory pathFactory;
-    private final FileStorePathFactory fileStorePathFactory;
 
+    private final IcebergPathFactory pathFactory;
+    private final @Nullable IcebergMetadataCommitter metadataCommitter;
+
+    private final FileStorePathFactory fileStorePathFactory;
     private final IcebergManifestFile manifestFile;
     private final IcebergManifestList manifestList;
 
@@ -105,6 +111,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                 this.pathFactory = new IcebergPathFactory(new Path(table.location(), "metadata"));
                 break;
             case HADOOP_CATALOG:
+            case HIVE_CATALOG:
                 Path dbPath = table.location().getParent();
                 final String dbSuffix = ".db";
                 if (dbPath.getName().endsWith(dbSuffix)) {
@@ -126,6 +133,19 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                 throw new UnsupportedOperationException(
                         "Unknown storage type " + storageType.name());
         }
+
+        IcebergMetadataCommitterFactory metadataCommitterFactory;
+        try {
+            metadataCommitterFactory =
+                    FactoryUtil.discoverFactory(
+                            AbstractIcebergCommitCallback.class.getClassLoader(),
+                            IcebergMetadataCommitterFactory.class,
+                            storageType.toString());
+        } catch (FactoryException ignore) {
+            metadataCommitterFactory = null;
+        }
+        this.metadataCommitter =
+                metadataCommitterFactory == null ? null : metadataCommitterFactory.create(table);
 
         this.fileStorePathFactory = table.store().pathFactory();
         this.manifestFile = IcebergManifestFile.create(table, pathFactory);
@@ -241,13 +261,19 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                                         IcebergPartitionField.FIRST_FIELD_ID - 1),
                         Collections.singletonList(snapshot),
                         (int) snapshotId);
-        table.fileIO().tryToWriteAtomic(pathFactory.toMetadataPath(snapshotId), metadata.toJson());
+
+        Path metadataPath = pathFactory.toMetadataPath(snapshotId);
+        table.fileIO().tryToWriteAtomic(metadataPath, metadata.toJson());
         table.fileIO()
                 .overwriteFileUtf8(
                         new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
                         String.valueOf(snapshotId));
 
         expireAllBefore(snapshotId);
+
+        if (metadataCommitter != null) {
+            metadataCommitter.commitMetadata(metadataPath, null);
+        }
     }
 
     private List<IcebergManifestEntry> dataSplitToManifestEntries(
@@ -384,7 +410,9 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                         baseMetadata.lastPartitionId(),
                         snapshots,
                         (int) snapshotId);
-        table.fileIO().tryToWriteAtomic(pathFactory.toMetadataPath(snapshotId), metadata.toJson());
+
+        Path metadataPath = pathFactory.toMetadataPath(snapshotId);
+        table.fileIO().tryToWriteAtomic(metadataPath, metadata.toJson());
         table.fileIO()
                 .overwriteFileUtf8(
                         new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
@@ -395,6 +423,10 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
             expireManifestList(
                     new Path(toExpireExceptLast.get(i).manifestList()).getName(),
                     new Path(toExpireExceptLast.get(i + 1).manifestList()).getName());
+        }
+
+        if (metadataCommitter != null) {
+            metadataCommitter.commitMetadata(metadataPath, baseMetadataPath);
         }
     }
 

@@ -205,7 +205,7 @@ public class IcebergDataFileMeta {
                         128,
                         "upper_bounds",
                         DataTypes.MAP(DataTypes.INT().notNull(), DataTypes.BYTES().notNull())));
-        return new RowType(fields);
+        return new RowType(false, fields);
     }
 
     @Override
