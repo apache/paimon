@@ -577,6 +577,33 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
+    public List<String> listViews(String databaseName) throws DatabaseNotExistException {
+        if (isSystemDatabase(databaseName)) {
+            return Collections.emptyList();
+        }
+        if (!databaseExists(databaseName)) {
+            throw new DatabaseNotExistException(databaseName);
+        }
+
+        try {
+            List<String> tables = clients.run(client -> client.getAllTables(databaseName));
+            List<String> views = new ArrayList<>();
+            for (String tableName : tables) {
+                Table table = clients.run(client -> client.getTable(databaseName, tableName));
+                if (TableType.valueOf(table.getTableType()) == TableType.VIRTUAL_VIEW) {
+                    views.add(tableName);
+                }
+            }
+            return views;
+        } catch (TException e) {
+            throw new RuntimeException("Failed to list all tables in database " + databaseName, e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted in call to listTables " + databaseName, e);
+        }
+    }
+
+    @Override
     public FormatTable getFormatTable(Identifier identifier) throws TableNotExistException {
         if (!formatTableEnabled()) {
             throw new TableNotExistException(identifier);

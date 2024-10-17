@@ -353,6 +353,16 @@ public interface Catalog extends AutoCloseable {
         throw new UnsupportedOperationException();
     }
 
+    /**
+     * Get names of all views under this database. An empty list is returned if none exists.
+     *
+     * @return a list of the names of all views in this database
+     * @throws DatabaseNotExistException if the database does not exist
+     */
+    default List<String> listViews(String databaseName) throws DatabaseNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
     /** Return a boolean that indicates whether this catalog allow upper case. */
     boolean allowUpperCase();
 

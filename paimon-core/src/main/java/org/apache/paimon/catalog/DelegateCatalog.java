@@ -154,6 +154,11 @@ public class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public List<String> listViews(String databaseName) throws DatabaseNotExistException {
+        return wrapped.listViews(databaseName);
+    }
+
+    @Override
     public Path getTableLocation(Identifier identifier) {
         return wrapped.getTableLocation(identifier);
     }

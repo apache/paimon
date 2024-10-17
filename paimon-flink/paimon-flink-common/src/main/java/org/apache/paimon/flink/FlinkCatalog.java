@@ -284,7 +284,6 @@ public class FlinkCatalog extends AbstractCatalog {
 
     private CatalogBaseTable getTable(ObjectPath tablePath, @Nullable Long timestamp)
             throws TableNotExistException {
-        Identifier identifier = toIdentifier(tablePath);
         Table table;
         try {
             table = catalog.getTable(toIdentifier(tablePath));
@@ -387,41 +386,15 @@ public class FlinkCatalog extends AbstractCatalog {
                     "Creating table in default database is disabled, please specify a database name.");
         }
 
+        if (table instanceof CatalogView) {
+            createView(tablePath, (ResolvedCatalogView) table, ignoreIfExists);
+            return;
+        }
+
         Identifier identifier = toIdentifier(tablePath);
         // the returned value of "table.getOptions" may be unmodifiable (for example from
         // TableDescriptor)
         Map<String, String> options = new HashMap<>(table.getOptions());
-
-        if (table instanceof CatalogView) {
-            ResolvedCatalogView viewTable = (ResolvedCatalogView) table;
-            org.apache.paimon.types.RowType.Builder builder =
-                    org.apache.paimon.types.RowType.builder();
-            viewTable
-                    .getResolvedSchema()
-                    .getColumns()
-                    .forEach(
-                            column ->
-                                    builder.field(
-                                            column.getName(),
-                                            toDataType(column.getDataType().getLogicalType()),
-                                            column.getComment().orElse(null)));
-            View view =
-                    new ViewImpl(
-                            identifier,
-                            builder.build(),
-                            viewTable.getExpandedQuery(),
-                            viewTable.getComment(),
-                            viewTable.getOptions());
-            try {
-                catalog.createView(identifier, view, ignoreIfExists);
-            } catch (Catalog.ViewAlreadyExistException e) {
-                throw new TableAlreadyExistException(getName(), tablePath);
-            } catch (Catalog.DatabaseNotExistException e) {
-                throw new DatabaseNotExistException(getName(), tablePath.getDatabaseName());
-            }
-            return;
-        }
-
         if (table instanceof CatalogMaterializedTable) {
             fillOptionsForMaterializedTable((CatalogMaterializedTable) table, options);
         }
@@ -440,6 +413,34 @@ public class FlinkCatalog extends AbstractCatalog {
             if (logStoreAutoRegister && unRegisterLogSystem) {
                 unRegisterLogSystem(identifier, options, classLoader);
             }
+        }
+    }
+
+    private void createView(ObjectPath tablePath, ResolvedCatalogView table, boolean ignoreIfExists)
+            throws TableAlreadyExistException, DatabaseNotExistException {
+        Identifier identifier = toIdentifier(tablePath);
+        org.apache.paimon.types.RowType.Builder builder = org.apache.paimon.types.RowType.builder();
+        table.getResolvedSchema()
+                .getColumns()
+                .forEach(
+                        column ->
+                                builder.field(
+                                        column.getName(),
+                                        toDataType(column.getDataType().getLogicalType()),
+                                        column.getComment().orElse(null)));
+        View view =
+                new ViewImpl(
+                        identifier,
+                        builder.build(),
+                        table.getOriginalQuery(),
+                        table.getComment(),
+                        table.getOptions());
+        try {
+            catalog.createView(identifier, view, ignoreIfExists);
+        } catch (Catalog.ViewAlreadyExistException e) {
+            throw new TableAlreadyExistException(getName(), tablePath);
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new DatabaseNotExistException(getName(), tablePath.getDatabaseName());
         }
     }
 
@@ -1096,8 +1097,13 @@ public class FlinkCatalog extends AbstractCatalog {
     }
 
     @Override
-    public final List<String> listViews(String databaseName) throws CatalogException {
-        return Collections.emptyList();
+    public final List<String> listViews(String databaseName)
+            throws DatabaseNotExistException, CatalogException {
+        try {
+            return catalog.listViews(databaseName);
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new DatabaseNotExistException(getName(), databaseName);
+        }
     }
 
     @Override

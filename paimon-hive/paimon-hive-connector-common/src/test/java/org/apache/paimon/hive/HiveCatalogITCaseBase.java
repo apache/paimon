@@ -1921,9 +1921,8 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("CREATE VIEW flink_v AS SELECT a + 1, b FROM t").await();
         assertThat(collect("SELECT * FROM flink_v"))
                 .containsExactlyInAnyOrder(Row.of(2, "Hi"), Row.of(3, "Hello"));
-
-        // hive cannot query flink view, flink view will expand table name to
-        // `my_hive`.`test_db`.`t`
+        assertThat(hiveShell.executeQuery("SELECT * FROM flink_v"))
+                .containsExactlyInAnyOrder("2\tHi", "3\tHello");
 
         // test hive view
         hiveShell.executeQuery("CREATE VIEW hive_v AS SELECT a + 1, b FROM t");
@@ -1931,6 +1930,9 @@ public abstract class HiveCatalogITCaseBase {
                 .containsExactlyInAnyOrder(Row.of(2, "Hi"), Row.of(3, "Hello"));
         assertThat(hiveShell.executeQuery("SELECT * FROM hive_v"))
                 .containsExactlyInAnyOrder("2\tHi", "3\tHello");
+
+        assertThat(collect("SHOW VIEWS"))
+                .containsExactlyInAnyOrder(Row.of("flink_v"), Row.of("hive_v"));
 
         collect("DROP VIEW flink_v");
         collect("DROP VIEW hive_v");

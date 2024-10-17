@@ -862,6 +862,9 @@ public abstract class CatalogTestBase {
         assertThatThrownBy(() -> catalog.createView(identifier, view, false))
                 .isInstanceOf(Catalog.DatabaseNotExistException.class);
 
+        assertThatThrownBy(() -> catalog.listViews(identifier.getDatabaseName()))
+                .isInstanceOf(Catalog.DatabaseNotExistException.class);
+
         catalog.createDatabase(identifier.getDatabaseName(), false);
 
         assertThatThrownBy(() -> catalog.getView(identifier))
@@ -877,6 +880,9 @@ public abstract class CatalogTestBase {
         assertThat(catalogView.query()).isEqualTo(view.query());
         assertThat(catalogView.comment()).isEqualTo(view.comment());
         assertThat(catalogView.options()).containsAllEntriesOf(view.options());
+
+        List<String> views = catalog.listViews(identifier.getDatabaseName());
+        assertThat(views).containsOnly(identifier.getObjectName());
 
         catalog.createView(identifier, view, true);
         assertThatThrownBy(() -> catalog.createView(identifier, view, false))
