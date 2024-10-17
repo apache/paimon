@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -28,12 +29,16 @@ import org.apache.flink.table.connector.source.abilities.SupportsDynamicFilterin
 import org.apache.flink.table.connector.source.abilities.SupportsStatisticReport;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
+import org.apache.flink.table.plan.stats.ColumnStats;
 import org.apache.flink.table.plan.stats.TableStats;
 
 import javax.annotation.Nullable;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -114,6 +119,58 @@ public class DataTableSource extends BaseDataTableSource
             return TableStats.UNKNOWN;
         }
 
+        Optional<Statistics> optionStatistics = table.statistics();
+        if (optionStatistics.isPresent()) {
+            Statistics statistics = optionStatistics.get();
+            if (statistics.mergedRecordCount().isPresent()) {
+                Map<String, ColumnStats> flinkColStats = new HashMap<>();
+                statistics
+                        .colStats()
+                        .forEach(
+                                (column, columnStats) ->
+                                        flinkColStats.put(
+                                                column,
+                                                ColumnStats.Builder.builder()
+                                                        .setNdv(
+                                                                columnStats
+                                                                                .distinctCount()
+                                                                                .isPresent()
+                                                                        ? columnStats
+                                                                                .distinctCount()
+                                                                                .getAsLong()
+                                                                        : null)
+                                                        .setNullCount(
+                                                                columnStats.nullCount().isPresent()
+                                                                        ? columnStats
+                                                                                .nullCount()
+                                                                                .getAsLong()
+                                                                        : null)
+                                                        .setAvgLen(
+                                                                columnStats.avgLen().isPresent()
+                                                                        ? (double)
+                                                                                columnStats
+                                                                                        .avgLen()
+                                                                                        .getAsLong()
+                                                                        : null)
+                                                        .setMaxLen(
+                                                                columnStats.maxLen().isPresent()
+                                                                        ? (int)
+                                                                                columnStats
+                                                                                        .maxLen()
+                                                                                        .getAsLong()
+                                                                        : null)
+                                                        .setMax(
+                                                                columnStats.max().isPresent()
+                                                                        ? columnStats.max().get()
+                                                                        : null)
+                                                        .setMin(
+                                                                columnStats.min().isPresent()
+                                                                        ? columnStats.min().get()
+                                                                        : null)
+                                                        .build()));
+                return new TableStats(statistics.mergedRecordCount().getAsLong(), flinkColStats);
+            }
+        }
         scanSplitsForInference();
         return new TableStats(splitStatistics.totalRowCount());
     }
