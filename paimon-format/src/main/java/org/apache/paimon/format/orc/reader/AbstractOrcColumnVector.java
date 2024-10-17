@@ -33,6 +33,7 @@ import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.MapColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.StructColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.TimestampColumnVector;
+import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 
 /** This column vector is used to adapt hive's ColumnVector to Paimon's ColumnVector. */
 public abstract class AbstractOrcColumnVector
@@ -40,37 +41,49 @@ public abstract class AbstractOrcColumnVector
 
     private final ColumnVector vector;
 
-    AbstractOrcColumnVector(ColumnVector vector) {
+    private final VectorizedRowBatch orcBatch;
+
+    AbstractOrcColumnVector(ColumnVector vector, VectorizedRowBatch orcBatch) {
         this.vector = vector;
+        this.orcBatch = orcBatch;
+    }
+
+    protected int rowMapper(int r) {
+        if (vector.isRepeating) {
+            return 0;
+        }
+        return this.orcBatch.selectedInUse ? this.orcBatch.getSelected()[r] : r;
     }
 
     @Override
     public boolean isNullAt(int i) {
-        return !vector.noNulls && vector.isNull[vector.isRepeating ? 0 : i];
+        return !vector.noNulls && vector.isNull[rowMapper(i)];
     }
 
     public static org.apache.paimon.data.columnar.ColumnVector createPaimonVector(
-            ColumnVector vector, DataType dataType) {
+            ColumnVector vector, VectorizedRowBatch orcBatch, DataType dataType) {
         if (vector instanceof LongColumnVector) {
             if (dataType.getTypeRoot() == DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE) {
-                return new OrcLegacyTimestampColumnVector((LongColumnVector) vector);
+                return new OrcLegacyTimestampColumnVector((LongColumnVector) vector, orcBatch);
             } else {
-                return new OrcLongColumnVector((LongColumnVector) vector);
+                return new OrcLongColumnVector((LongColumnVector) vector, orcBatch);
             }
         } else if (vector instanceof DoubleColumnVector) {
-            return new OrcDoubleColumnVector((DoubleColumnVector) vector);
+            return new OrcDoubleColumnVector((DoubleColumnVector) vector, orcBatch);
         } else if (vector instanceof BytesColumnVector) {
-            return new OrcBytesColumnVector((BytesColumnVector) vector);
+            return new OrcBytesColumnVector((BytesColumnVector) vector, orcBatch);
         } else if (vector instanceof DecimalColumnVector) {
-            return new OrcDecimalColumnVector((DecimalColumnVector) vector);
+            return new OrcDecimalColumnVector((DecimalColumnVector) vector, orcBatch);
         } else if (vector instanceof TimestampColumnVector) {
-            return new OrcTimestampColumnVector(vector);
+            return new OrcTimestampColumnVector(vector, orcBatch);
         } else if (vector instanceof ListColumnVector) {
-            return new OrcArrayColumnVector((ListColumnVector) vector, (ArrayType) dataType);
+            return new OrcArrayColumnVector(
+                    (ListColumnVector) vector, orcBatch, (ArrayType) dataType);
         } else if (vector instanceof StructColumnVector) {
-            return new OrcRowColumnVector((StructColumnVector) vector, (RowType) dataType);
+            return new OrcRowColumnVector(
+                    (StructColumnVector) vector, orcBatch, (RowType) dataType);
         } else if (vector instanceof MapColumnVector) {
-            return new OrcMapColumnVector((MapColumnVector) vector, (MapType) dataType);
+            return new OrcMapColumnVector((MapColumnVector) vector, orcBatch, (MapType) dataType);
         } else {
             throw new UnsupportedOperationException(
                     "Unsupported vector: " + vector.getClass().getName());
