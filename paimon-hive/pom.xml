@@ -49,6 +49,7 @@ under the License.
         <hiverunner.version>4.0.0</hiverunner.version>
         <reflections.version>0.9.8</reflections.version>
         <aws.version>1.12.319</aws.version>
+        <iceberg.flink.version>1.19</iceberg.flink.version>
     </properties>
 
     <dependencies>

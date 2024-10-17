@@ -27,9 +27,13 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -57,6 +61,7 @@ public class IcebergMetadata {
     private static final String FIELD_DEFAULT_SORT_ORDER_ID = "default-sort-order-id";
     private static final String FIELD_SNAPSHOTS = "snapshots";
     private static final String FIELD_CURRENT_SNAPSHOT_ID = "current-snapshot-id";
+    private static final String FIELD_PROPERTIES = "properties";
 
     @JsonProperty(FIELD_FORMAT_VERSION)
     private final int formatVersion;
@@ -103,6 +108,10 @@ public class IcebergMetadata {
     @JsonProperty(FIELD_CURRENT_SNAPSHOT_ID)
     private final int currentSnapshotId;
 
+    @JsonProperty(FIELD_PROPERTIES)
+    @Nullable
+    private final Map<String, String> properties;
+
     public IcebergMetadata(
             String tableUuid,
             String location,
@@ -129,7 +138,8 @@ public class IcebergMetadata {
                 Collections.singletonList(new IcebergSortOrder()),
                 IcebergSortOrder.ORDER_ID,
                 snapshots,
-                currentSnapshotId);
+                currentSnapshotId,
+                new HashMap<>());
     }
 
     @JsonCreator
@@ -148,7 +158,8 @@ public class IcebergMetadata {
             @JsonProperty(FIELD_SORT_ORDERS) List<IcebergSortOrder> sortOrders,
             @JsonProperty(FIELD_DEFAULT_SORT_ORDER_ID) int defaultSortOrderId,
             @JsonProperty(FIELD_SNAPSHOTS) List<IcebergSnapshot> snapshots,
-            @JsonProperty(FIELD_CURRENT_SNAPSHOT_ID) int currentSnapshotId) {
+            @JsonProperty(FIELD_CURRENT_SNAPSHOT_ID) int currentSnapshotId,
+            @JsonProperty(FIELD_PROPERTIES) @Nullable Map<String, String> properties) {
         this.formatVersion = formatVersion;
         this.tableUuid = tableUuid;
         this.location = location;
@@ -164,6 +175,7 @@ public class IcebergMetadata {
         this.defaultSortOrderId = defaultSortOrderId;
         this.snapshots = snapshots;
         this.currentSnapshotId = currentSnapshotId;
+        this.properties = properties;
     }
 
     @JsonGetter(FIELD_FORMAT_VERSION)
@@ -239,6 +251,11 @@ public class IcebergMetadata {
     @JsonGetter(FIELD_CURRENT_SNAPSHOT_ID)
     public int currentSnapshotId() {
         return currentSnapshotId;
+    }
+
+    @JsonGetter(FIELD_PROPERTIES)
+    public Map<String, String> properties() {
+        return properties == null ? new HashMap<>() : properties;
     }
 
     public IcebergSnapshot currentSnapshot() {

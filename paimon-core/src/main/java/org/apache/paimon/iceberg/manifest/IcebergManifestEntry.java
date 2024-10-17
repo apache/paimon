@@ -118,7 +118,7 @@ public class IcebergManifestEntry {
         fields.add(new DataField(4, "file_sequence_number", DataTypes.BIGINT()));
         fields.add(
                 new DataField(2, "data_file", IcebergDataFileMeta.schema(partitionType).notNull()));
-        return new RowType(fields);
+        return new RowType(false, fields);
     }
 
     @Override
