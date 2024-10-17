@@ -272,6 +272,16 @@ public interface FormatTable extends Table {
     }
 
     @Override
+    default void replaceTag(String tagName, Duration timeRetained) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    default void replaceTag(String tagName, long fromSnapshotId, Duration timeRetained) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     default void deleteTag(String tagName) {
         throw new UnsupportedOperationException();
     }

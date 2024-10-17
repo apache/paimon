@@ -172,19 +172,15 @@ class CreateAndDeleteTagProcedureTest extends PaimonSparkTestBase with StreamTes
                   "table => 'test.T', tag => 'test_tag', snapshot => 1)"),
               Row(true) :: Nil)
             checkAnswer(
-              spark.sql(
-                "SELECT count(time_retained) FROM paimon.test.`T$tags` where tag_name = 'test_tag'"),
-              Row(0) :: Nil)
+              spark.sql("SELECT count(*) FROM paimon.test.`T$tags` where tag_name = 'test_tag'"),
+              Row(1) :: Nil)
 
-            checkAnswer(
+            // throw exception "Tag test_tag already exists"
+            assertThrows[IllegalArgumentException] {
               spark.sql(
                 "CALL paimon.sys.create_tag(" +
-                  "table => 'test.T', tag => 'test_tag', time_retained => '5 d', snapshot => 1)"),
-              Row(true) :: Nil)
-            checkAnswer(
-              spark.sql(
-                "SELECT count(time_retained) FROM paimon.test.`T$tags` where tag_name = 'test_tag'"),
-              Row(1) :: Nil)
+                  "table => 'test.T', tag => 'test_tag', time_retained => '5 d', snapshot => 1)")
+            }
           } finally {
             stream.stop()
           }
