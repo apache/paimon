@@ -1065,15 +1065,30 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     public void compactManifest() {
-        compactManifest(null);
+        int cnt = 0;
+        ManifestCompactResult retryResult = null;
+        while (true) {
+            cnt++;
+            retryResult = compactManifest(retryResult);
+            if (retryResult.isSuccess()) {
+                break;
+            }
+
+            if (cnt >= commitMaxRetries) {
+                retryResult.cleanAll();
+                throw new RuntimeException(
+                        String.format(
+                                "Commit compact manifest failed after %s attempts, there maybe exist commit conflicts between multiple jobs.",
+                                commitMaxRetries));
+            }
+        }
     }
 
-    private void compactManifest(
-            @Nullable Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> lastResult) {
+    private ManifestCompactResult compactManifest(@Nullable ManifestCompactResult lastResult) {
         Snapshot latestSnapshot = snapshotManager.latestSnapshot();
 
         if (latestSnapshot == null) {
-            return;
+            return new SuccessManifestCompactResult();
         }
 
         List<ManifestFileMeta> mergeBeforeManifests =
@@ -1081,8 +1096,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<ManifestFileMeta> mergeAfterManifests;
 
         if (lastResult != null) {
-            List<ManifestFileMeta> oldMergeBeforeManifests = lastResult.getLeft();
-            List<ManifestFileMeta> oldMergeAfterManifests = lastResult.getRight();
+            List<ManifestFileMeta> oldMergeBeforeManifests = lastResult.mergeBeforeManifests;
+            List<ManifestFileMeta> oldMergeAfterManifests = lastResult.mergeAfterManifests;
 
             Set<String> retryMergeBefore =
                     oldMergeBeforeManifests.stream()
@@ -1100,7 +1115,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 mergeAfterManifests.addAll(manifestsFromOther);
             } else {
                 // manifest compact happens, quit
-                return;
+                lastResult.cleanAll();
+                return new SuccessManifestCompactResult();
             }
         } else {
             // the fist trial
@@ -1110,7 +1126,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             manifestFile,
                             manifestTargetSize.getBytes(),
                             1,
-                            manifestFullCompactionSize.getBytes(),
+                            1,
                             partitionType,
                             manifestReadParallelism);
         }
@@ -1144,7 +1160,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         : snapshotManager.copyWithBranch(branchName).snapshotPath(newSnapshot.id());
 
         if (!commitSnapshotImpl(newSnapshot, newSnapshotPath)) {
-            compactManifest(Pair.of(mergeBeforeManifests, mergeAfterManifests));
+            return new ManifestCompactResult(
+                    baseManifestList, deltaManifestList, mergeBeforeManifests, mergeAfterManifests);
+        } else {
+            return new SuccessManifestCompactResult();
         }
     }
 
@@ -1571,6 +1590,50 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         @Override
         public boolean isSuccess() {
             return false;
+        }
+    }
+
+    private class ManifestCompactResult implements CommitResult {
+
+        private final String baseManifestList;
+        private final String deltaManifestList;
+        private final List<ManifestFileMeta> mergeBeforeManifests;
+        private final List<ManifestFileMeta> mergeAfterManifests;
+
+        public ManifestCompactResult(
+                String baseManifestList,
+                String deltaManifestList,
+                List<ManifestFileMeta> mergeBeforeManifests,
+                List<ManifestFileMeta> mergeAfterManifests) {
+            this.baseManifestList = baseManifestList;
+            this.deltaManifestList = deltaManifestList;
+            this.mergeBeforeManifests = mergeBeforeManifests;
+            this.mergeAfterManifests = mergeAfterManifests;
+        }
+
+        public void cleanAll() {
+            manifestList.delete(deltaManifestList);
+            cleanUpNoReuseTmpManifests(baseManifestList, mergeBeforeManifests, mergeAfterManifests);
+        }
+
+        @Override
+        public boolean isSuccess() {
+            return false;
+        }
+    }
+
+    private class SuccessManifestCompactResult extends ManifestCompactResult {
+
+        public SuccessManifestCompactResult() {
+            super(null, null, null, null);
+        }
+
+        @Override
+        public void cleanAll() {}
+
+        @Override
+        public boolean isSuccess() {
+            return true;
         }
     }
 }
