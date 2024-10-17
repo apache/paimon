@@ -360,7 +360,7 @@ public interface Catalog extends AutoCloseable {
      * @throws DatabaseNotExistException if the database does not exist
      */
     default List<String> listViews(String databaseName) throws DatabaseNotExistException {
-        throw new UnsupportedOperationException();
+        return Collections.emptyList();
     }
 
     /** Return a boolean that indicates whether this catalog allow upper case. */
