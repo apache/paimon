@@ -147,14 +147,6 @@ public abstract class OrphanFilesClean implements Serializable {
     }
 
     protected void collectWithoutDataFile(
-            String branch, Consumer<String> usedFileConsumer, Consumer<String> manifestConsumer)
-            throws IOException {
-        for (Snapshot snapshot : safelyGetAllSnapshots(branch)) {
-            collectWithoutDataFile(branch, snapshot, usedFileConsumer, manifestConsumer);
-        }
-    }
-
-    protected void collectWithoutDataFile(
             String branch,
             Snapshot snapshot,
             Consumer<String> usedFileConsumer,
