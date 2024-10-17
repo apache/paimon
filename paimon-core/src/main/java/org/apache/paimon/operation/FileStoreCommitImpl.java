@@ -1129,6 +1129,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             1,
                             partitionType,
                             manifestReadParallelism);
+
+            if (mergeBeforeManifests.size() == mergeAfterManifests.size()
+                    && new HashSet<>(mergeBeforeManifests).containsAll(mergeAfterManifests)) {
+                // no need to commit this snapshot, because no compact were happened
+                return new SuccessManifestCompactResult();
+            }
         }
 
         String baseManifestList = manifestList.write(mergeAfterManifests);
