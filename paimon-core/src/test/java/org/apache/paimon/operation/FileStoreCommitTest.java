@@ -959,7 +959,7 @@ public class FileStoreCommitTest {
         Snapshot snapshot =
                 store.commitData(keyValues, s -> partition, kv -> 0, Collections.emptyMap()).get(0);
 
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < 100; i++) {
             snapshot =
                     store.overwriteData(keyValues, s -> partition, kv -> 0, Collections.emptyMap())
                             .get(0);
