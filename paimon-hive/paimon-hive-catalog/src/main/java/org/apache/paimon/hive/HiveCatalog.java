@@ -1263,6 +1263,6 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private static boolean isView(Table table) {
-        return TableType.valueOf(table.getTableType()) != TableType.VIRTUAL_VIEW;
+        return TableType.valueOf(table.getTableType()) == TableType.VIRTUAL_VIEW;
     }
 }

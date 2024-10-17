@@ -137,6 +137,16 @@ public class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public boolean tableExists(Identifier identifier) {
+        return wrapped.tableExists(identifier);
+    }
+
+    @Override
+    public boolean viewExists(Identifier identifier) {
+        return wrapped.viewExists(identifier);
+    }
+
+    @Override
     public View getView(Identifier identifier) throws ViewNotExistException {
         return wrapped.getView(identifier);
     }
