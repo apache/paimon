@@ -73,12 +73,11 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
         val clientFactory = fileStoreTable.catalogEnvironment().metastoreClientFactory
         try {
           commit.dropPartitions(partitions.toSeq.asJava, BatchWriteBuilder.COMMIT_IDENTIFIER)
-          // syn to metastore with delete partitions
+          // sync to metastore with delete partitions
           if (clientFactory != null) {
             metastoreClient = clientFactory.create()
             toPaimonPartitions(rows).foreach(metastoreClient.deletePartition)
           }
-
         } finally {
           commit.close()
           if (metastoreClient != null) {
