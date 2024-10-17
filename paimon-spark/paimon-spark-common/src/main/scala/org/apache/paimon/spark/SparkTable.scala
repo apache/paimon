@@ -107,4 +107,8 @@ case class SparkTable(table: Table)
         throw new RuntimeException("Only FileStoreTable can be written.")
     }
   }
+
+  override def toString: String = {
+    s"${table.getClass.getSimpleName}[${table.fullName()}]"
+  }
 }
