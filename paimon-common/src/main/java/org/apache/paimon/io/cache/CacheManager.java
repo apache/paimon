@@ -27,6 +27,7 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caff
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalCause;
 
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Cache manager to cache bytes to paged {@link MemorySegment}s. */
 public class CacheManager {
@@ -39,7 +40,7 @@ public class CacheManager {
 
     private final Cache<CacheKey, CacheValue> cache;
 
-    private int fileReadCount;
+    private final AtomicInteger fileReadCount;
 
     public CacheManager(MemorySize maxMemorySize) {
         this.cache =
@@ -49,7 +50,7 @@ public class CacheManager {
                         .removalListener(this::onRemoval)
                         .executor(Runnable::run)
                         .build();
-        this.fileReadCount = 0;
+        this.fileReadCount = new AtomicInteger(0);
     }
 
     @VisibleForTesting
@@ -61,7 +62,7 @@ public class CacheManager {
         CacheValue value = cache.getIfPresent(key);
         while (value == null || value.isClosed) {
             try {
-                this.fileReadCount++;
+                this.fileReadCount.incrementAndGet();
                 value = new CacheValue(MemorySegment.wrap(reader.read(key)), callback);
             } catch (IOException e) {
                 throw new RuntimeException(e);
@@ -87,7 +88,7 @@ public class CacheManager {
     }
 
     public int fileReadCount() {
-        return fileReadCount;
+        return fileReadCount.get();
     }
 
     private static class CacheValue {
