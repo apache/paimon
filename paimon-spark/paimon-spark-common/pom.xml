@@ -23,8 +23,8 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>paimon-spark</artifactId>
         <groupId>org.apache.paimon</groupId>
+        <artifactId>paimon-spark</artifactId>
         <version>1.0-SNAPSHOT</version>
     </parent>
 
@@ -34,13 +34,25 @@ under the License.
     <name>Paimon : Spark : Common</name>
 
     <properties>
-        <spark.version>3.5.3</spark.version>
+        <spark.version>${paimon-spark-common.spark.version}</spark.version>
     </properties>
 
     <dependencies>
         <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-bundle</artifactId>
+            <version>${project.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>${paimon-spark-x.x.common}</artifactId>
             <version>${project.version}</version>
             <exclusions>
                 <exclusion>
@@ -179,6 +191,10 @@ under the License.
                     <groupId>org.slf4j</groupId>
                     <artifactId>slf4j-log4j12</artifactId>
                 </exclusion>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-slf4j2-impl</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
         <dependency>
@@ -258,41 +274,7 @@ under the License.
     </dependencies>
 
     <build>
-        <pluginManagement>
-            <plugins>
-                <plugin>
-                    <groupId>net.alchim31.maven</groupId>
-                    <artifactId>scala-maven-plugin</artifactId>
-                    <version>${scala-maven-plugin.version}</version>
-                    <configuration>
-                        <args>
-                            <arg>-nobootcp</arg>
-                            <arg>-target:jvm-${target.java.version}</arg>
-                        </args>
-                        <checkMultipleScalaVersions>false</checkMultipleScalaVersions>
-                    </configuration>
-                </plugin>
-                <plugin>
-                    <groupId>org.apache.maven.plugins</groupId>
-                    <artifactId>maven-compiler-plugin</artifactId>
-                </plugin>
-            </plugins>
-        </pluginManagement>
-
         <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-jar-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <id>prepare-test-jar</id>
-                        <phase>test-compile</phase>
-                        <goals>
-                            <goal>test-jar</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
@@ -307,39 +289,14 @@ under the License.
                             <artifactSet>
                                 <includes combine.children="append">
                                     <include>org.apache.paimon:paimon-bundle</include>
+                                    <include>org.apache.paimon:${paimon-spark-x.x.common}</include>
                                 </includes>
                             </artifactSet>
                         </configuration>
                     </execution>
                 </executions>
             </plugin>
-            <plugin>
-                <groupId>net.alchim31.maven</groupId>
-                <artifactId>scala-maven-plugin</artifactId>
-                <version>${scala-maven-plugin.version}</version>
-                <executions>
-                    <!-- Run scala compiler in the process-resources phase, so that dependencies on
-                        scala classes can be resolved later in the (Java) compile phase -->
-                    <execution>
-                        <id>scala-compile-first</id>
-                        <phase>process-resources</phase>
-                        <goals>
-                            <goal>add-source</goal>
-                            <goal>compile</goal>
-                        </goals>
-                    </execution>
 
-                    <!-- Run scala compiler in the process-test-resources phase, so that dependencies on
-                         scala classes can be resolved later in the (Java) test-compile phase -->
-                    <execution>
-                        <id>scala-test-compile</id>
-                        <phase>process-test-resources</phase>
-                        <goals>
-                            <goal>testCompile</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
             <plugin>
                 <groupId>org.antlr</groupId>
                 <artifactId>antlr4-maven-plugin</artifactId>
@@ -357,26 +314,17 @@ under the License.
                     <sourceDirectory>src/main/antlr4</sourceDirectory>
                 </configuration>
             </plugin>
+
+            <!-- Used for submodules to utilize the test code -->
             <plugin>
-                <groupId>org.scalatest</groupId>
-                <artifactId>scalatest-maven-plugin</artifactId>
-                <version>${scalatest-maven-plugin.version}</version>
-                <configuration>
-                    <reportsDirectory>${project.build.directory}/surefire-reports</reportsDirectory>
-                    <junitxml>.</junitxml>
-                    <argLine>-ea -Xmx4g -Xss4m -XX:MaxMetaspaceSize=2g -XX:ReservedCodeCacheSize=${CodeCacheSize} ${extraJavaTestArgs} -Dio.netty.tryReflectionSetAccessible=true</argLine>
-                    <filereports>PaimonTestSuite.txt</filereports>
-                    <!--
-                      the plugin does not support always now, we must be careful w/ singletons.
-                      tracking at: https://github.com/scalatest/scalatest-maven-plugin/issues/99
-                      -->
-                    <forkMode>once</forkMode>
-                </configuration>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
                 <executions>
                     <execution>
-                        <id>test</id>
+                        <id>prepare-test-jar</id>
+                        <phase>test-compile</phase>
                         <goals>
-                            <goal>test</goal>
+                            <goal>test-jar</goal>
                         </goals>
                     </execution>
                 </executions>

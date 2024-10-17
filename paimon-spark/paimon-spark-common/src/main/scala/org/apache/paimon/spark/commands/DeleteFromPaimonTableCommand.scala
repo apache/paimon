@@ -47,8 +47,7 @@ case class DeleteFromPaimonTableCommand(
   extends PaimonLeafRunnableCommand
   with PaimonCommand
   with ExpressionHelper
-  with SupportsSubquery
-  with SQLHelper {
+  with SupportsSubquery {
 
   private lazy val writer = PaimonSparkWriter(table)
 
