@@ -18,6 +18,8 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.table.FileStoreTable;
+
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -26,16 +28,18 @@ import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
+import static org.apache.spark.sql.types.DataTypes.BooleanType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
-/** A procedure to rollback to a snapshot or a tag. */
+/** A procedure to rollback to a snapshot or a tag or a timestamp. */
 public class RollbackProcedure extends BaseProcedure {
 
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
-                // snapshot id or tag name
-                ProcedureParameter.required("version", StringType)
+                // snapshot id or tag name or timestamp
+                ProcedureParameter.required("version", StringType),
+                ProcedureParameter.optional("isTimestamp", BooleanType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -62,14 +66,24 @@ public class RollbackProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String version = args.getString(1);
+        Boolean isTimestamp = args.isNullAt(2) ? null : args.getBoolean(2);
 
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
+                    FileStoreTable fileStoreTable = (FileStoreTable) table;
                     if (version.chars().allMatch(Character::isDigit)) {
-                        table.rollbackTo(Long.parseLong(version));
+                        if (isTimestamp != null && isTimestamp) {
+                            fileStoreTable.rollbackTo(
+                                    fileStoreTable
+                                            .snapshotManager()
+                                            .earlierOrEqualTimeMills(Long.parseLong(version))
+                                            .id());
+                        } else {
+                            fileStoreTable.rollbackTo(Long.parseLong(version));
+                        }
                     } else {
-                        table.rollbackTo(version);
+                        fileStoreTable.rollbackTo(version);
                     }
                     InternalRow outputRow = newInternalRow(true);
                     return new InternalRow[] {outputRow};
