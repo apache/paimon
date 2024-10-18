@@ -1029,10 +1029,10 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     @EnumSource(LookupCacheMode.class)
     public void testAsyncLookupHashCacheSmallData(LookupCacheMode cacheMode) throws Exception {
         initTable(cacheMode);
-        batchSql("INSERT INTO BUCKET_DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+        batchSql("INSERT INTO DIM_BUCKET VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
-                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN BUCKET_DIM/*+OPTIONS('lookup.async'='true')*/ for system_time "
+                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM_BUCKET/*+OPTIONS('lookup.async'='true')*/ for system_time "
                         + "as of "
                         + "T.proctime AS D"
                         + " ON T.i = D.i";
@@ -1046,7 +1046,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                         Row.of(2, 22, 222, 2222),
                         Row.of(3, null, null, null));
 
-        batchSql("INSERT INTO BUCKET_DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+        batchSql("INSERT INTO DIM_BUCKET VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
         Thread.sleep(2000); // wait refresh
         batchSql("INSERT INTO T VALUES (1), (2), (3), (4)");
         result = iterator.collect(4);
@@ -1066,7 +1066,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         initTable(cacheMode);
         StringBuilder sb = new StringBuilder();
         // insert the dim table
-        String sql = "INSERT INTO BUCKET_DIM VALUES ";
+        String sql = "INSERT INTO DIM_BUCKET VALUES ";
         sb.append(sql);
         int dimTableCount = 1000;
         for (int i = 1; i <= dimTableCount; i++) {
@@ -1077,7 +1077,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         batchSql(sb.toString());
 
         String query =
-                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN BUCKET_DIM/*+OPTIONS('lookup.async'='true')*/ for system_time "
+                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM_BUCKET/*+OPTIONS('lookup.async'='true')*/ for system_time "
                         + "as of "
                         + "T.proctime AS D"
                         + " ON T.i = D.i";
@@ -1118,7 +1118,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         batchSql(String.format("INSERT INTO T VALUES (%d)", dimTableCount + 1));
 
         // update the dim table
-        batchSql("INSERT INTO BUCKET_DIM VALUES (2, 22, 222, 2222), (4, 44, 444, 4444)");
+        batchSql("INSERT INTO DIM_BUCKET VALUES (2, 22, 222, 2222), (4, 44, 444, 4444)");
 
         // check result
         Thread.sleep(2000); // wait refresh
