@@ -158,6 +158,7 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
         ArrowFieldWriterFactory valueWriterFactory = mapType.getValueType().accept(this);
         return fieldVector -> {
             MapVector mapVector = (MapVector) fieldVector;
+            mapVector.reAlloc();
             List<FieldVector> keyValueVectors = mapVector.getDataVector().getChildrenFromFields();
             return new ArrowFieldWriters.MapWriter(
                     fieldVector,
