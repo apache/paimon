@@ -87,7 +87,8 @@ public class FileStorePathFactoryTest {
                         "default",
                         CoreOptions.FILE_FORMAT.defaultValue().toString(),
                         CoreOptions.DATA_FILE_PREFIX.defaultValue(),
-                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue());
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue());
 
         assertPartition("20211224", 16, pathFactory, "/dt=20211224/hr=16");
         assertPartition("20211224", null, pathFactory, "/dt=20211224/hr=default");
@@ -124,6 +125,7 @@ public class FileStorePathFactoryTest {
                 PARTITION_DEFAULT_NAME.defaultValue(),
                 CoreOptions.FILE_FORMAT.defaultValue().toString(),
                 CoreOptions.DATA_FILE_PREFIX.defaultValue(),
-                CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue());
+                CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue());
     }
 }

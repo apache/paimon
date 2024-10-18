@@ -20,6 +20,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
 import java.util.Arrays;
@@ -35,11 +36,18 @@ public class InternalRowPartitionComputer {
     protected final String defaultPartValue;
     protected final String[] partitionColumns;
     protected final InternalRow.FieldGetter[] partitionFieldGetters;
+    protected final List<DataType> types;
+    protected final boolean legacyPartitionName;
 
     public InternalRowPartitionComputer(
-            String defaultPartValue, RowType rowType, String[] partitionColumns) {
+            String defaultPartValue,
+            RowType rowType,
+            String[] partitionColumns,
+            boolean legacyPartitionName) {
         this.defaultPartValue = defaultPartValue;
         this.partitionColumns = partitionColumns;
+        this.types = rowType.getFieldTypes();
+        this.legacyPartitionName = legacyPartitionName;
         List<String> columnList = rowType.getFieldNames();
         this.partitionFieldGetters =
                 Arrays.stream(partitionColumns)
@@ -56,7 +64,8 @@ public class InternalRowPartitionComputer {
 
         for (int i = 0; i < partitionFieldGetters.length; i++) {
             Object field = partitionFieldGetters[i].getFieldOrNull(in);
-            String partitionValue = field != null ? field.toString() : null;
+            String partitionValue =
+                    TypeUtils.castPartitionValueToString(field, types.get(i), legacyPartitionName);
             if (StringUtils.isNullOrWhitespaceOnly(partitionValue)) {
                 partitionValue = defaultPartValue;
             }

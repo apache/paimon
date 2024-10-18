@@ -71,7 +71,8 @@ public class PartitionMarkDone implements Closeable {
                 new InternalRowPartitionComputer(
                         coreOptions.partitionDefaultName(),
                         table.schema().logicalPartitionType(),
-                        table.partitionKeys().toArray(new String[0]));
+                        table.partitionKeys().toArray(new String[0]),
+                        coreOptions.legacyPartitionName());
 
         PartitionMarkDoneTrigger trigger =
                 PartitionMarkDoneTrigger.create(coreOptions, isRestored, stateStore);

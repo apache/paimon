@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.metastore.MetastoreClient
 import org.apache.paimon.operation.FileStoreCommit
 import org.apache.paimon.table.FileStoreTable
@@ -31,7 +32,6 @@ import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.catalog.SupportsAtomicPartitionManagement
 import org.apache.spark.sql.types.StructType
 
-import java.util
 import java.util.{Map => JMap, Objects, UUID}
 
 import scala.collection.JavaConverters._
@@ -52,7 +52,8 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
         val rowDataPartitionComputer = new InternalRowPartitionComputer(
           fileStoreTable.coreOptions().partitionDefaultName(),
           partitionRowType,
-          table.partitionKeys().asScala.toArray)
+          table.partitionKeys().asScala.toArray,
+          CoreOptions.fromMap(table.options()).legacyPartitionName)
 
         rows.map {
           r =>

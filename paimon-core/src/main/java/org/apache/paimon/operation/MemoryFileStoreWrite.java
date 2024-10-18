@@ -75,7 +75,8 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
                 tableName,
                 options.bucket(),
                 partitionType,
-                options.writeMaxWritersToSpill());
+                options.writeMaxWritersToSpill(),
+                options.legacyPartitionName());
         this.options = options;
         this.cacheManager = new CacheManager(options.lookupCacheMaxMemory());
     }

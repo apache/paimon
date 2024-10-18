@@ -49,12 +49,15 @@ private[spark] trait StreamHelper {
   private lazy val partitionSchema: StructType =
     SparkTypeUtils.fromPaimonRowType(TypeUtils.project(table.rowType(), table.partitionKeys()))
 
-  private lazy val partitionComputer: InternalRowPartitionComputer =
+  private lazy val partitionComputer: InternalRowPartitionComputer = {
+    val options = new CoreOptions(table.options)
     new InternalRowPartitionComputer(
-      new CoreOptions(table.options).partitionDefaultName,
+      options.partitionDefaultName,
       TypeUtils.project(table.rowType(), table.partitionKeys()),
-      table.partitionKeys().asScala.toArray
+      table.partitionKeys().asScala.toArray,
+      options.legacyPartitionName()
     )
+  }
 
   // Used to get the initial offset.
   lazy val streamScanStartingContext: StartingContext = streamScan.startingContext()

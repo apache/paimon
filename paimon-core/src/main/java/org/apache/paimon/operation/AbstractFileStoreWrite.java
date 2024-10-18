@@ -88,6 +88,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     protected CompactionMetrics compactionMetrics = null;
     protected final String tableName;
     private boolean isInsertOnly;
+    private boolean legacyPartitionName;
 
     protected AbstractFileStoreWrite(
             SnapshotManager snapshotManager,
@@ -97,7 +98,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             String tableName,
             int totalBuckets,
             RowType partitionType,
-            int writerNumberMax) {
+            int writerNumberMax,
+            boolean legacyPartitionName) {
         this.snapshotManager = snapshotManager;
         this.scan = scan;
         this.indexFactory = indexFactory;
@@ -107,6 +109,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         this.writers = new HashMap<>();
         this.tableName = tableName;
         this.writerNumberMax = writerNumberMax;
+        this.legacyPartitionName = legacyPartitionName;
     }
 
     @Override
@@ -469,7 +472,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 ? "partition "
                                         + getPartitionComputer(
                                                         partitionType,
-                                                        PARTITION_DEFAULT_NAME.defaultValue())
+                                                        PARTITION_DEFAULT_NAME.defaultValue(),
+                                                        legacyPartitionName)
                                                 .generatePartValues(partition)
                                 : "table";
                 throw new RuntimeException(
