@@ -37,6 +37,7 @@ import org.apache.paimon.spark.procedure.ProcedureBuilder;
 import org.apache.paimon.spark.procedure.RemoveOrphanFilesProcedure;
 import org.apache.paimon.spark.procedure.RenameTagProcedure;
 import org.apache.paimon.spark.procedure.RepairProcedure;
+import org.apache.paimon.spark.procedure.ReplaceTagTagProcedure;
 import org.apache.paimon.spark.procedure.ResetConsumerProcedure;
 import org.apache.paimon.spark.procedure.RollbackProcedure;
 
@@ -63,6 +64,7 @@ public class SparkProcedures {
                 ImmutableMap.builder();
         procedureBuilders.put("rollback", RollbackProcedure::builder);
         procedureBuilders.put("create_tag", CreateTagProcedure::builder);
+        procedureBuilders.put("replace_tag", ReplaceTagTagProcedure::builder);
         procedureBuilders.put("rename_tag", RenameTagProcedure::builder);
         procedureBuilders.put(
                 "create_tag_from_timestamp", CreateTagFromTimestampProcedure::builder);
