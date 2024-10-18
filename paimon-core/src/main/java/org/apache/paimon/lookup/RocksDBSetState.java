@@ -64,7 +64,10 @@ public class RocksDBSetState<K, V> extends RocksDBState<K, V, List<byte[]>> {
             }
             cache.put(keyBytes, valueBytes);
         }
+        return serializeValues(valueBytes);
+    }
 
+    private synchronized List<V> serializeValues(List<byte[]> valueBytes) throws IOException {
         List<V> values = new ArrayList<>(valueBytes.size());
         for (byte[] value : valueBytes) {
             valueInputView.setBuffer(value);
@@ -93,7 +96,7 @@ public class RocksDBSetState<K, V> extends RocksDBState<K, V, List<byte[]>> {
         }
     }
 
-    private byte[] invalidKeyAndGetKVBytes(K key, V value) throws IOException {
+    private synchronized byte[] invalidKeyAndGetKVBytes(K key, V value) throws IOException {
         checkArgument(value != null);
 
         keyOutView.clear();

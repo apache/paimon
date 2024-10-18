@@ -85,7 +85,7 @@ public abstract class RocksDBState<K, V, CacheV> {
                         .build();
     }
 
-    public byte[] serializeKey(K key) throws IOException {
+    public synchronized byte[] serializeKey(K key) throws IOException {
         keyOutView.clear();
         keySerializer.serialize(key, keyOutView);
         return keyOutView.getCopyOfBuffer();

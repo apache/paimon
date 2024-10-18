@@ -244,7 +244,8 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         boolean enableAsync = options.get(LOOKUP_ASYNC);
         int asyncThreadNumber = options.get(LOOKUP_ASYNC_THREAD_NUMBER);
         return LookupRuntimeProviderFactory.create(
-                new FileStoreLookupFunction(table, projection, joinKey, predicate),
+                new FileStoreLookupFunction(
+                        table, projection, joinKey, predicate, asyncThreadNumber),
                 enableAsync,
                 asyncThreadNumber);
     }

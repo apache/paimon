@@ -50,9 +50,9 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
@@ -85,7 +85,7 @@ public class LocalTableQuery implements TableQuery {
 
     public LocalTableQuery(FileStoreTable table) {
         this.options = table.coreOptions();
-        this.tableView = new HashMap<>();
+        this.tableView = new ConcurrentHashMap<>();
         FileStore<?> tableStore = table.store();
         if (!(tableStore instanceof KeyValueFileStore)) {
             throw new UnsupportedOperationException(
@@ -128,7 +128,7 @@ public class LocalTableQuery implements TableQuery {
             List<DataFileMeta> beforeFiles,
             List<DataFileMeta> dataFiles) {
         LookupLevels<KeyValue> lookupLevels =
-                tableView.computeIfAbsent(partition, k -> new HashMap<>()).get(bucket);
+                tableView.computeIfAbsent(partition, k -> new ConcurrentHashMap<>()).get(bucket);
         if (lookupLevels == null) {
             Preconditions.checkArgument(
                     beforeFiles.isEmpty(),
@@ -180,16 +180,17 @@ public class LocalTableQuery implements TableQuery {
                                         .getPathFile(),
                         lookupStoreFactory,
                         bfGenerator(options),
-                        lookupFileCache);
+                        lookupFileCache,
+                        options.get(CoreOptions.LOOKUP_HASH_ASYNC_THREAD_NUMBER));
 
-        tableView.computeIfAbsent(partition, k -> new HashMap<>()).put(bucket, lookupLevels);
+        tableView
+                .computeIfAbsent(partition, k -> new ConcurrentHashMap<>())
+                .put(bucket, lookupLevels);
     }
 
-    /** TODO remove synchronized and supports multiple thread to lookup. */
     @Nullable
     @Override
-    public synchronized InternalRow lookup(BinaryRow partition, int bucket, InternalRow key)
-            throws IOException {
+    public InternalRow lookup(BinaryRow partition, int bucket, InternalRow key) throws IOException {
         Map<Integer, LookupLevels<KeyValue>> buckets = tableView.get(partition);
         if (buckets == null || buckets.isEmpty()) {
             return null;
