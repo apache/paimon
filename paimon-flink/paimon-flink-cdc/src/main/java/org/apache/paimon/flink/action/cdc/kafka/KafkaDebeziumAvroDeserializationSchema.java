@@ -40,14 +40,12 @@ public class KafkaDebeziumAvroDeserializationSchema
 
     private static final long serialVersionUID = 1L;
 
-    private final String topic;
     private final String schemaRegistryUrl;
 
     /** The deserializer to deserialize Debezium Avro data. */
     private ConfluentAvroDeserializationSchema avroDeserializer;
 
     public KafkaDebeziumAvroDeserializationSchema(Configuration cdcSourceConfig) {
-        this.topic = KafkaActionUtils.findOneTopic(cdcSourceConfig);
         this.schemaRegistryUrl = cdcSourceConfig.getString(SCHEMA_REGISTRY_URL);
     }
 
@@ -67,6 +65,7 @@ public class KafkaDebeziumAvroDeserializationSchema
             initAvroDeserializer();
         }
 
+        String topic = message.topic();
         GenericContainerWithVersion keyContainerWithVersion =
                 this.avroDeserializer.deserialize(topic, true, message.key());
         GenericContainerWithVersion valueContainerWithVersion =
