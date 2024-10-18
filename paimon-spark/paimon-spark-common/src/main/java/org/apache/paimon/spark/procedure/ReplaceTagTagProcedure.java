@@ -24,33 +24,33 @@ import org.apache.spark.sql.connector.catalog.TableCatalog;
 
 import java.time.Duration;
 
-/** A procedure to create a tag. */
-public class CreateTagProcedure extends CreateOrReplaceTagBaseProcedure {
+/** A procedure to replace a tag. */
+public class ReplaceTagTagProcedure extends CreateOrReplaceTagBaseProcedure {
 
-    protected CreateTagProcedure(TableCatalog tableCatalog) {
+    protected ReplaceTagTagProcedure(TableCatalog tableCatalog) {
         super(tableCatalog);
     }
 
     @Override
     void createOrReplaceTag(Table table, String tagName, Long snapshotId, Duration timeRetained) {
         if (snapshotId == null) {
-            table.createTag(tagName, timeRetained);
+            table.replaceTag(tagName, timeRetained);
         } else {
-            table.createTag(tagName, snapshotId, timeRetained);
+            table.replaceTag(tagName, snapshotId, timeRetained);
         }
     }
 
     public static ProcedureBuilder builder() {
-        return new BaseProcedure.Builder<CreateTagProcedure>() {
+        return new BaseProcedure.Builder<ReplaceTagTagProcedure>() {
             @Override
-            public CreateTagProcedure doBuild() {
-                return new CreateTagProcedure(tableCatalog());
+            public ReplaceTagTagProcedure doBuild() {
+                return new ReplaceTagTagProcedure(tableCatalog());
             }
         };
     }
 
     @Override
     public String description() {
-        return "CreateTagProcedure";
+        return "ReplaceTagProcedure";
     }
 }
