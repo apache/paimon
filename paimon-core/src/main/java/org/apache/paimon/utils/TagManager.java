@@ -103,7 +103,7 @@ public class TagManager {
             List<TagCallback> callbacks) {
         checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name '%s' is blank.", tagName);
-        checkArgument(!tagExists(tagName), "Tag %s already exists.", tagName);
+        checkArgument(!tagExists(tagName), "Tag name '%s' already exists.", tagName);
         createOrReplaceTag(snapshot, tagName, timeRetained, callbacks);
     }
 
@@ -115,7 +115,7 @@ public class TagManager {
             List<TagCallback> callbacks) {
         checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name '%s' is blank.", tagName);
-        checkArgument(tagExists(tagName), "Tag %s does not exist.", tagName);
+        checkArgument(tagExists(tagName), "Tag name '%s' does not exist.", tagName);
         createOrReplaceTag(snapshot, tagName, timeRetained, callbacks);
     }
 
