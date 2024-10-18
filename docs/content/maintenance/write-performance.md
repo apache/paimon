@@ -167,9 +167,5 @@ If Flink's checkpoint interval is short (for example, 30 seconds) and the number
 each snapshot may produce lots of small changelog files.
 Too many files may put a burden on the distributed storage cluster.
 
-In order to compact small changelog files into large ones, you can set the table option `changelog.compact.parallelism`.
-This option will add a compact operator after the writer operator, which copies changelog files into large ones.
-If the parallelism becomes larger, file copying will become faster.
-However, the number of resulting files will also become larger.
-As file copying is fast in most storage system,
-we suggest that you start experimenting with `'changelog.compact.parallelism' = '1'` and increase the value if needed.
+In order to compact small changelog files into large ones, you can set the table option `changelog.precommit-compact = true`.
+Default value of this option is false, if true, it will add a compact coordinator and worker operator after the writer operator, which copies changelog files into large ones.

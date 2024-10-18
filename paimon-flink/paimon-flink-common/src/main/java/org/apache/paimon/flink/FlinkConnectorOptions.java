@@ -397,16 +397,14 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Optional endInput watermark used in case of batch mode or bounded stream.");
 
-    public static final ConfigOption<Integer> CHANGELOG_COMPACT_PARALLELISM =
-            key("changelog.compact.parallelism")
-                    .intType()
-                    .noDefaultValue()
+    public static final ConfigOption<Boolean> CHANGELOG_PRECOMMIT_COMPACT =
+            key("changelog.precommit-compact")
+                    .booleanType()
+                    .defaultValue(false)
                     .withDescription(
-                            "Compact several changelog files from the same partition into one file, "
-                                    + "in order to decrease the number of small files. "
-                                    + "This property sets the parallelism of the compact operator. "
-                                    + "More parallelism means faster file copy, "
-                                    + "however the number of resulting files will also become larger.");
+                            "If true, it will add a changelog compact coordinator and worker operator after the writer operator,"
+                                    + "in order to compact several changelog files from the same partition into large ones, "
+                                    + "which can decrease the number of small files. ");
 
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();

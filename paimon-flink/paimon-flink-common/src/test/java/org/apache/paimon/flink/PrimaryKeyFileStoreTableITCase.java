@@ -337,7 +337,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     @Test
     @Timeout(120)
-    public void testChangelogCompact() throws Exception {
+    public void testChangelogCompactInBatchWrite() throws Exception {
         TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
         String catalogDdl =
                 "CREATE CATALOG mycat WITH ( 'type' = 'paimon', 'warehouse' = '" + path + "' )";
@@ -347,9 +347,9 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                 "CREATE TABLE t ( pt INT, k INT, v INT, PRIMARY KEY (pt, k) NOT ENFORCED ) "
                         + "PARTITIONED BY (pt) "
                         + "WITH ("
-                        + "    'bucket' = '2',\n"
+                        + "    'bucket' = '10',\n"
                         + "    'changelog-producer' = 'lookup',\n"
-                        + "    'changelog.compact.parallelism' = '1',\n"
+                        + "    'changelog.precommit-compact' = 'true',\n"
                         + "    'snapshot.num-retained.min' = '3',\n"
                         + "    'snapshot.num-retained.max' = '3'\n"
                         + ")");
@@ -360,7 +360,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         sEnv.executeSql("USE CATALOG mycat");
 
         List<String> values = new ArrayList<>();
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < 1000; i++) {
             values.add(String.format("(0, %d, %d)", i, i));
             values.add(String.format("(1, %d, %d)", i, i));
         }
@@ -371,7 +371,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         assertThat(listAllFilesWithPrefix("changelog-")).isEmpty();
 
         List<Row> expected = new ArrayList<>();
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < 1000; i++) {
             expected.add(Row.ofKind(RowKind.INSERT, 0, i, i));
             expected.add(Row.ofKind(RowKind.INSERT, 1, i, i));
         }
@@ -380,7 +380,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                 expected);
 
         values.clear();
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < 1000; i++) {
             values.add(String.format("(0, %d, %d)", i, i + 1));
             values.add(String.format("(1, %d, %d)", i, i + 1));
         }
@@ -389,7 +389,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         assertThat(listAllFilesWithPrefix("compacted-changelog-")).hasSize(4);
         assertThat(listAllFilesWithPrefix("changelog-")).isEmpty();
 
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < 1000; i++) {
             expected.add(Row.ofKind(RowKind.UPDATE_BEFORE, 0, i, i));
             expected.add(Row.ofKind(RowKind.UPDATE_BEFORE, 1, i, i));
             expected.add(Row.ofKind(RowKind.UPDATE_AFTER, 0, i, i + 1));
@@ -400,7 +400,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                 expected);
 
         values.clear();
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < 1000; i++) {
             values.add(String.format("(0, %d, %d)", i, i + 2));
             values.add(String.format("(1, %d, %d)", i, i + 2));
         }
@@ -413,8 +413,8 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
             assertThat(fileIO.exists(new Path(p))).isFalse();
         }
 
-        expected = expected.subList(200, 600);
-        for (int i = 0; i < 100; i++) {
+        expected = expected.subList(2000, 6000);
+        for (int i = 0; i < 1000; i++) {
             expected.add(Row.ofKind(RowKind.UPDATE_BEFORE, 0, i, i + 1));
             expected.add(Row.ofKind(RowKind.UPDATE_BEFORE, 1, i, i + 1));
             expected.add(Row.ofKind(RowKind.UPDATE_AFTER, 0, i, i + 2));
@@ -423,6 +423,81 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         assertStreamingResult(
                 sEnv.executeSql("SELECT * FROM t /*+ OPTIONS('scan.snapshot-id' = '1') */"),
                 expected);
+    }
+
+    @Test
+    @Timeout(120)
+    public void testChangelogCompactInStreamWrite() throws Exception {
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(2000)
+                        .parallelism(4)
+                        .build();
+
+        sEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
+        sEnv.executeSql("USE CATALOG testCatalog");
+        sEnv.executeSql(
+                "CREATE TABLE t ( pt INT, k INT, v INT, PRIMARY KEY (pt, k) NOT ENFORCED ) "
+                        + "PARTITIONED BY (pt) "
+                        + "WITH ("
+                        + "    'bucket' = '10',\n"
+                        + "    'changelog-producer' = 'lookup',\n"
+                        + "    'changelog.precommit-compact' = 'true'\n"
+                        + ")");
+
+        Path inputPath = new Path(path, "input");
+        LocalFileIO.create().mkdirs(inputPath);
+        sEnv.executeSql(
+                "CREATE TABLE `default_catalog`.`default_database`.`s` ( pt INT, k INT, v INT, PRIMARY KEY (pt, k) NOT ENFORCED) "
+                        + "WITH ( 'connector' = 'filesystem', 'format' = 'testcsv', 'path' = '"
+                        + inputPath
+                        + "', 'source.monitor-interval' = '500ms' )");
+
+        sEnv.executeSql("INSERT INTO t SELECT * FROM `default_catalog`.`default_database`.`s`");
+        CloseableIterator<Row> it = sEnv.executeSql("SELECT * FROM t").collect();
+
+        // write initial data
+        List<String> values = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            values.add(String.format("(0, %d, %d)", i, i));
+            values.add(String.format("(1, %d, %d)", i, i));
+        }
+        sEnv.executeSql(
+                        "INSERT INTO `default_catalog`.`default_database`.`s` VALUES "
+                                + String.join(", ", values))
+                .await();
+
+        List<Row> expected = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            expected.add(Row.ofKind(RowKind.INSERT, 0, i, i));
+            expected.add(Row.ofKind(RowKind.INSERT, 1, i, i));
+        }
+        assertStreamingResult(it, expected);
+
+        List<String> compactedChangelogs2 = listAllFilesWithPrefix("compacted-changelog-");
+        assertThat(compactedChangelogs2).hasSize(2);
+        assertThat(listAllFilesWithPrefix("changelog-")).isEmpty();
+
+        //         write update data
+        values.clear();
+        for (int i = 0; i < 100; i++) {
+            values.add(String.format("(0, %d, %d)", i, i + 1));
+            values.add(String.format("(1, %d, %d)", i, i + 1));
+        }
+        sEnv.executeSql(
+                        "INSERT INTO `default_catalog`.`default_database`.`s` VALUES "
+                                + String.join(", ", values))
+                .await();
+        for (int i = 0; i < 100; i++) {
+            expected.add(Row.ofKind(RowKind.UPDATE_BEFORE, 0, i, i));
+            expected.add(Row.ofKind(RowKind.UPDATE_BEFORE, 1, i, i));
+            expected.add(Row.ofKind(RowKind.UPDATE_AFTER, 0, i, i + 1));
+            expected.add(Row.ofKind(RowKind.UPDATE_AFTER, 1, i, i + 1));
+        }
+        assertStreamingResult(it, expected.subList(200, 600));
+        assertThat(listAllFilesWithPrefix("compacted-changelog-")).hasSize(4);
+        assertThat(listAllFilesWithPrefix("changelog-")).isEmpty();
     }
 
     private List<String> listAllFilesWithPrefix(String prefix) throws Exception {
@@ -441,6 +516,15 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                 actual.add(it.next());
             }
         }
+        assertThat(actual).hasSameElementsAs(expected);
+    }
+
+    private void assertStreamingResult(CloseableIterator<Row> it, List<Row> expected) {
+        List<Row> actual = new ArrayList<>();
+        while (actual.size() < expected.size() && it.hasNext()) {
+            actual.add(it.next());
+        }
+
         assertThat(actual).hasSameElementsAs(expected);
     }
 
