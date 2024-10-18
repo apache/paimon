@@ -320,13 +320,13 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
         sql("CALL sys.create_branch('default.T', 'test', 'tag1')");
         sql("CALL sys.create_branch('default.T', 'test2', 'tag2')");
 
-        assertThat(collectToString("SELECT branch_name, created_from_snapshot FROM `T$branches`"))
-                .containsExactlyInAnyOrder("+I[test, 1]", "+I[test2, 2]");
+        assertThat(collectToString("SELECT branch_name FROM `T$branches`"))
+                .containsExactlyInAnyOrder("+I[test]", "+I[test2]");
 
         sql("CALL sys.delete_branch('default.T', 'test')");
 
-        assertThat(collectToString("SELECT branch_name, created_from_snapshot FROM `T$branches`"))
-                .containsExactlyInAnyOrder("+I[test2, 2]");
+        assertThat(collectToString("SELECT branch_name FROM `T$branches`"))
+                .containsExactlyInAnyOrder("+I[test2]");
 
         sql("CALL sys.fast_forward('default.T', 'test2')");
 
