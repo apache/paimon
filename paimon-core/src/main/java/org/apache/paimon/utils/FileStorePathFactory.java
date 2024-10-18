@@ -56,11 +56,13 @@ public class FileStorePathFactory {
             String defaultPartValue,
             String formatIdentifier,
             String dataFilePrefix,
-            String changelogFilePrefix) {
+            String changelogFilePrefix,
+            boolean legacyPartitionName) {
         this.root = root;
         this.uuid = UUID.randomUUID().toString();
 
-        this.partitionComputer = getPartitionComputer(partitionType, defaultPartValue);
+        this.partitionComputer =
+                getPartitionComputer(partitionType, defaultPartValue, legacyPartitionName);
         this.formatIdentifier = formatIdentifier;
         this.dataFilePrefix = dataFilePrefix;
         this.changelogFilePrefix = changelogFilePrefix;
@@ -78,9 +80,10 @@ public class FileStorePathFactory {
 
     @VisibleForTesting
     public static InternalRowPartitionComputer getPartitionComputer(
-            RowType partitionType, String defaultPartValue) {
+            RowType partitionType, String defaultPartValue, boolean legacyPartitionName) {
         String[] partitionColumns = partitionType.getFieldNames().toArray(new String[0]);
-        return new InternalRowPartitionComputer(defaultPartValue, partitionType, partitionColumns);
+        return new InternalRowPartitionComputer(
+                defaultPartValue, partitionType, partitionColumns, legacyPartitionName);
     }
 
     public Path newManifestFile() {

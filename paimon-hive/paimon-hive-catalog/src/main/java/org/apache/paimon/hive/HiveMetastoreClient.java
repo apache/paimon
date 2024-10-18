@@ -56,11 +56,13 @@ public class HiveMetastoreClient implements MetastoreClient {
             ClientPool<IMetaStoreClient, TException> clients)
             throws TException, InterruptedException {
         this.identifier = identifier;
+        CoreOptions options = new CoreOptions(schema.options());
         this.partitionComputer =
                 new InternalRowPartitionComputer(
-                        new CoreOptions(schema.options()).partitionDefaultName(),
+                        options.partitionDefaultName(),
                         schema.logicalPartitionType(),
-                        schema.partitionKeys().toArray(new String[0]));
+                        schema.partitionKeys().toArray(new String[0]),
+                        options.legacyPartitionName());
 
         this.clients = clients;
         this.sd =
