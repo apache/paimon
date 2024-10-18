@@ -38,18 +38,6 @@ under the License.
     <dependencies>
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-bundle</artifactId>
-            <version>${project.version}</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>*</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-spark-common</artifactId>
             <version>${project.version}</version>
         </dependency>
