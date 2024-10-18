@@ -18,10 +18,12 @@
 
 package org.apache.paimon.flink.source.assigners;
 
+import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.utils.BinPacking;
 
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
+import org.apache.flink.table.connector.source.DynamicFilteringData;
 
 import javax.annotation.Nullable;
 
@@ -47,17 +49,26 @@ public class PreAssignSplitAssigner implements SplitAssigner {
     /** Default batch splits size to avoid exceed `akka.framesize`. */
     private final int splitBatchSize;
 
+    private final int parallelism;
+
     private final Map<Integer, LinkedList<FileStoreSourceSplit>> pendingSplitAssignment;
 
     private final AtomicInteger numberOfPendingSplits;
+    private final Collection<FileStoreSourceSplit> splits;
 
     public PreAssignSplitAssigner(
             int splitBatchSize,
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Collection<FileStoreSourceSplit> splits) {
+        this(splitBatchSize, context.currentParallelism(), splits);
+    }
+
+    public PreAssignSplitAssigner(
+            int splitBatchSize, int parallelism, Collection<FileStoreSourceSplit> splits) {
         this.splitBatchSize = splitBatchSize;
-        this.pendingSplitAssignment =
-                createBatchFairSplitAssignment(splits, context.currentParallelism());
+        this.parallelism = parallelism;
+        this.splits = splits;
+        this.pendingSplitAssignment = createBatchFairSplitAssignment(splits, parallelism);
         this.numberOfPendingSplits = new AtomicInteger(splits.size());
     }
 
@@ -126,5 +137,11 @@ public class PreAssignSplitAssigner implements SplitAssigner {
     @Override
     public int numberOfRemainingSplits() {
         return numberOfPendingSplits.get();
+    }
+
+    public SplitAssigner ofDynamicPartitionPruning(
+            Projection partitionRowProjection, DynamicFilteringData dynamicFilteringData) {
+        return new DynamicPartitionPruningPreAssignSplitAssigner(
+                splitBatchSize, parallelism, splits, partitionRowProjection, dynamicFilteringData);
     }
 }
