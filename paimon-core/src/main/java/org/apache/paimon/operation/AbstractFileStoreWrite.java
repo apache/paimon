@@ -368,7 +368,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         CompletableFuture<Void> allTasksDone =
                 CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
         allTasksDone.get();
-        ExecutorUtils.gracefulShutdown(1, TimeUnit.MINUTES, closeWritersExecutor);
+        if (closeWritersExecutor != null) {
+            closeWritersExecutor.shutdownNow();
+        }
 
         writers.clear();
         if (lazyCompactExecutor != null && closeCompactExecutorWhenLeaving) {
