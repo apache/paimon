@@ -62,14 +62,25 @@ public class LookupReaderBenchmark extends AbstractLookupBenchmark {
         return getCountBloomList();
     }
 
+    /** Query data based on some keys that are definitely stored. */
     @TestTemplate
     void testLookupReader() throws IOException {
         readLookupDataBenchmark(
                 generateSequenceInputs(0, recordCount),
-                generateRandomInputs(0, recordCount, QUERY_KEY_COUNT));
+                generateRandomInputs(0, recordCount, QUERY_KEY_COUNT),
+                false);
     }
 
-    private void readLookupDataBenchmark(byte[][] inputs, byte[][] randomInputs)
+    /** Query data based on some keys that are definitely not stored. */
+    @TestTemplate
+    void testLookupReaderMiss() throws IOException {
+        readLookupDataBenchmark(
+                generateSequenceInputs(0, recordCount),
+                generateRandomInputs(recordCount + 1, recordCount * 2, QUERY_KEY_COUNT),
+                true);
+    }
+
+    private void readLookupDataBenchmark(byte[][] inputs, byte[][] randomInputs, boolean nullResult)
             throws IOException {
         Benchmark benchmark =
                 new Benchmark("reader-" + randomInputs.length, randomInputs.length)
@@ -91,7 +102,12 @@ public class LookupReaderBenchmark extends AbstractLookupBenchmark {
                         5,
                         () -> {
                             try {
-                                readData(options, randomInputs, pair.getLeft(), pair.getRight());
+                                readData(
+                                        options,
+                                        randomInputs,
+                                        pair.getLeft(),
+                                        pair.getRight(),
+                                        nullResult);
                             } catch (IOException e) {
                                 throw new RuntimeException(e);
                             }
@@ -106,7 +122,8 @@ public class LookupReaderBenchmark extends AbstractLookupBenchmark {
             CoreOptions options,
             byte[][] randomInputs,
             String filePath,
-            LookupStoreFactory.Context context)
+            LookupStoreFactory.Context context,
+            boolean nullResult)
             throws IOException {
         LookupStoreFactory factory =
                 LookupStoreFactory.create(
@@ -118,7 +135,11 @@ public class LookupReaderBenchmark extends AbstractLookupBenchmark {
         File file = new File(filePath);
         LookupStoreReader reader = factory.createReader(file, context);
         for (byte[] input : randomInputs) {
-            assertThat(reader.lookup(input)).isNotNull();
+            if (nullResult) {
+                assertThat(reader.lookup(input)).isNull();
+            } else {
+                assertThat(reader.lookup(input)).isNotNull();
+            }
         }
         reader.close();
     }

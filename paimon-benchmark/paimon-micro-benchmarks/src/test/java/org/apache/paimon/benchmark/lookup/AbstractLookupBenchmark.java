@@ -125,6 +125,6 @@ abstract class AbstractLookupBenchmark {
         if (!enabled) {
             return null;
         }
-        return BloomFilter.builder(100, 0.01);
+        return BloomFilter.builder(5000000, 0.01);
     }
 }
