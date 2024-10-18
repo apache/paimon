@@ -1467,4 +1467,89 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             }
         }
     }
+
+    @Test
+    @Timeout(60)
+    public void testComputedColumn() throws Exception {
+        // the first round checks for table creation
+        // the second round checks for running the action on an existing table
+        for (int i = 0; i < 2; i++) {
+            innerTestComputedColumn(i == 0);
+        }
+    }
+
+    private void innerTestComputedColumn(boolean executeMysql) throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "test_computed_column");
+
+        List<String> computedColumnDefs =
+                Arrays.asList(
+                        "_year_date=year(_date)",
+                        "_year_datetime=year(_datetime)",
+                        "_year_timestamp=year(_timestamp)",
+                        "_constant=cast(11,INT)");
+
+        MultiTablesSinkMode mode = DIVIDED;
+
+        MySqlSyncDatabaseAction action =
+                syncDatabaseActionBuilder(mySqlConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withMode(mode.configString())
+                        .withPartitionKeys("_year_date")
+                        .withPrimaryKeys("pk", "_year_date")
+                        .withComputedColumnArgs(computedColumnDefs)
+                        .build();
+
+        runActionWithDefaultEnv(action);
+
+        if (executeMysql) {
+            try (Statement statement = getStatement()) {
+                statement.executeUpdate(
+                        "INSERT INTO test_computed_column.t1 VALUES (1, '2023-03-23', '2022-01-01 14:30', '2021-09-15 15:00:10')");
+                statement.executeUpdate(
+                        "INSERT INTO test_computed_column.t2 VALUES (2, '2023-03-23')");
+            }
+        }
+
+        FileStoreTable table = getFileStoreTable("t1");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.DATE(),
+                            DataTypes.TIMESTAMP(0),
+                            DataTypes.TIMESTAMP(0),
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT()
+                        },
+                        new String[] {
+                            "pk",
+                            "_date",
+                            "_datetime",
+                            "_timestamp",
+                            "_year_date",
+                            "_year_datetime",
+                            "_year_timestamp",
+                            "_constant"
+                        });
+        List<String> expected =
+                Arrays.asList(
+                        "+I[1, 19439, 2022-01-01T14:30, 2021-09-15T15:00:10, 2023, 2022, 2021, 11]");
+        waitForResult(expected, table, rowType, Arrays.asList("pk", "_year_date"));
+
+        FileStoreTable table2 = getFileStoreTable("t2");
+        RowType rowType2 =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.DATE(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT()
+                        },
+                        new String[] {"pk", "_date", "_year_date", "_constant"});
+        List<String> expected2 = Arrays.asList("+I[2, 19439, 2023, 11]");
+        waitForResult(expected2, table2, rowType2, Arrays.asList("pk", "_year_date"));
+    }
 }

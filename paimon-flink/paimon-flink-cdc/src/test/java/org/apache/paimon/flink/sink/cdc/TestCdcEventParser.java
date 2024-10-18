@@ -48,4 +48,7 @@ public class TestCdcEventParser implements EventParser<TestCdcEvent> {
     public List<CdcRecord> parseRecords() {
         return ObjectUtils.coalesce(raw.records(), Collections.emptyList());
     }
+
+    @Override
+    public void evalComputedColumns(List<DataField> fields) {}
 }
