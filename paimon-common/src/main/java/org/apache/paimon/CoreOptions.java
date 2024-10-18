@@ -1381,6 +1381,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to enable asynchronous IO writing when writing files.");
 
+    public static final ConfigOption<Integer> TABLE_CLOSE_WRITERS_THREAD_NUMBER =
+            key("table.close-writers-thread-number")
+                    .intType()
+                    .defaultValue(1)
+                    .withDescription(
+                            "The number of threads used to flush data and close files during checkpoint.");
+
     @ExcludeFromDocumentation("Only used internally to support materialized table")
     public static final ConfigOption<Long> MATERIALIZED_TABLE_SNAPSHOT =
             key("materialized-table.snapshot")
@@ -1827,6 +1834,10 @@ public class CoreOptions implements Serializable {
 
     public int numSortedRunCompactionTrigger() {
         return options.get(NUM_SORTED_RUNS_COMPACTION_TRIGGER);
+    }
+
+    public int tableCloseWritersThreadNumber() {
+        return options.get(TABLE_CLOSE_WRITERS_THREAD_NUMBER);
     }
 
     @Nullable
