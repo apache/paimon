@@ -48,14 +48,15 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -201,8 +202,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         }
 
         List<CompletableFuture<CommitMessage>> futures = new ArrayList<>();
-        Set<BinaryRow> partitionsToRemove = new HashSet<>();
-        Map<BinaryRow, Set<Integer>> bucketsToRemovePerPartition = new HashMap<>();
+        Set<BinaryRow> partitionsToRemove = ConcurrentHashMap.newKeySet();
+        Map<BinaryRow, Set<Integer>> bucketsToRemovePerPartition = new ConcurrentHashMap<>();
 
         writers.forEach(
                 (partition, bucketMap) -> {
@@ -341,33 +342,30 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     @Override
     public void close() throws Exception {
-        List<CompletableFuture<Void>> futures =
-                writers.values().stream()
-                        .flatMap(
-                                bucketWriters ->
-                                        bucketWriters.values().stream()
-                                                .map(
-                                                        writerContainer ->
-                                                                CompletableFuture.runAsync(
-                                                                        () -> {
-                                                                            try {
-                                                                                writerContainer
-                                                                                        .writer
-                                                                                        .close();
-                                                                            } catch (Exception e) {
-                                                                                LOG.error(
-                                                                                        "Failed to close writer: ",
-                                                                                        e);
-                                                                            }
-                                                                        },
-                                                                        closeWritersExecutor)))
-                        .collect(Collectors.toList());
-
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        // Close each writer in parallel
+        for (Map<Integer, WriterContainer<T>> bucketWriter : writers.values()) {
+            for (WriterContainer<?> writerContainer : bucketWriter.values()) {
+                futures.add(
+                        CompletableFuture.runAsync(
+                                () -> {
+                                    try {
+                                        writerContainer.writer.close();
+                                    } catch (Exception e) {
+                                        LOG.error("Failed to close writer: ", e);
+                                    }
+                                },
+                                closeWritersExecutor));
+            }
+        }
         CompletableFuture<Void> allTasksDone =
                 CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
         allTasksDone.get();
         if (closeWritersExecutor != null) {
-            closeWritersExecutor.shutdownNow();
+            closeWritersExecutor.shutdown();
+            if (!closeWritersExecutor.awaitTermination(1, TimeUnit.MINUTES)) {
+                closeWritersExecutor.shutdownNow();
+            }
         }
 
         writers.clear();
