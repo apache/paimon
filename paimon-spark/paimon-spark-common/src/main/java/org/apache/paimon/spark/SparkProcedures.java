@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.spark.procedure.CompactManifestProcedure;
 import org.apache.paimon.spark.procedure.CompactProcedure;
 import org.apache.paimon.spark.procedure.CreateBranchProcedure;
 import org.apache.paimon.spark.procedure.CreateTagFromTimestampProcedure;
@@ -81,6 +82,7 @@ public class SparkProcedures {
         procedureBuilders.put("fast_forward", FastForwardProcedure::builder);
         procedureBuilders.put("reset_consumer", ResetConsumerProcedure::builder);
         procedureBuilders.put("mark_partition_done", MarkPartitionDoneProcedure::builder);
+        procedureBuilders.put("compact_manifest", CompactManifestProcedure::builder);
         return procedureBuilders.build();
     }
 }
