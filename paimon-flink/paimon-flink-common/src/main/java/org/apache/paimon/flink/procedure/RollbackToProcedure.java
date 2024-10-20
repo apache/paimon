@@ -18,10 +18,12 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
@@ -68,8 +70,10 @@ public class RollbackToProcedure extends ProcedureBase {
             table.rollbackTo(snapshotId);
         } else {
             FileStoreTable fileStoreTable = (FileStoreTable) table;
-            fileStoreTable.rollbackTo(
-                    fileStoreTable.snapshotManager().earlierOrEqualTimeMills(timestamp).id());
+            Snapshot snapshot = fileStoreTable.snapshotManager().earlierOrEqualTimeMills(timestamp);
+            Preconditions.checkNotNull(
+                    snapshot, String.format("count not find snapshot earlier than %s", timestamp));
+            fileStoreTable.rollbackTo(snapshot.id());
         }
         return new String[] {"Success"};
     }

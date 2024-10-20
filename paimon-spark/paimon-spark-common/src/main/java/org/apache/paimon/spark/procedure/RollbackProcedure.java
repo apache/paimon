@@ -39,7 +39,7 @@ public class RollbackProcedure extends BaseProcedure {
                 ProcedureParameter.required("table", StringType),
                 // snapshot id or tag name or timestamp
                 ProcedureParameter.required("version", StringType),
-                ProcedureParameter.optional("isTimestamp", BooleanType)
+                ProcedureParameter.optional("is_timestamp", BooleanType)
             };
 
     private static final StructType OUTPUT_TYPE =

@@ -325,12 +325,15 @@ All available procedures are listed below.
          CALL sys.rollback_to(`table` => 'identifier', snapshot_id => snapshotId)<br/><br/>
          -- rollback to a tag<br/>
          CALL sys.rollback_to(`table` => 'identifier', tag => 'tagName')
+         -- rollback to a timestamp<br/>
+         CALL sys.rollback_to(`table` => 'identifier', timestamp => 'timestamp')
       </td>
       <td>
          To rollback to a specific version of target table. Argument:
             <li>identifier: the target table identifier. Cannot be empty.</li>
             <li>snapshotId (Long): id of the snapshot that will roll back to.</li>
             <li>tagName: name of the tag that will roll back to.</li>
+            <li>timestamp: earlier or equal to the timestamp that will roll back to.</li>
       </td>
       <td>
          -- for Flink 1.18<br/>
