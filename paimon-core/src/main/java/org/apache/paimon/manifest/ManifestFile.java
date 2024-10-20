@@ -93,9 +93,14 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         RollingFileWriter<ManifestEntry, ManifestFileMeta> writer = createRollingWriter();
         try {
             writer.write(entries);
-            writer.close();
         } catch (Exception e) {
             throw new RuntimeException(e);
+        } finally {
+            try {
+                writer.close();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
         }
         return writer.result();
     }

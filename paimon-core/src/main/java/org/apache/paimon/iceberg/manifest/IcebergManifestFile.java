@@ -110,9 +110,10 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                         () -> createWriter(sequenceNumber), targetFileSize.getBytes());
         try {
             writer.write(entries);
-            writer.close();
         } catch (Exception e) {
             throw new RuntimeException(e);
+        } finally {
+            writer.close();
         }
         return writer.result();
     }
