@@ -98,7 +98,8 @@ public class ProcedureTest {
     }
 
     private Method getMethodFromName(Class<?> clazz, String methodName) {
-        Method[] methods = clazz.getDeclaredMethods();
+        // get all methods of current and parent class
+        Method[] methods = clazz.getMethods();
 
         for (Method method : methods) {
             if (method.getName().equals(methodName)) {
