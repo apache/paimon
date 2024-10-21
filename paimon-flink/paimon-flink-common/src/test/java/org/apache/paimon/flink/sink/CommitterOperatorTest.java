@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.utils.TestingMetricUtils;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.CompactIncrement;
@@ -37,6 +38,7 @@ import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.ThrowingConsumer;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.apache.flink.api.common.ExecutionConfig;
@@ -279,6 +281,34 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         Assertions.assertThat(actual.size()).isEqualTo(1);
 
         Assertions.assertThat(actual).hasSameElementsAs(Lists.newArrayList(commitUser));
+    }
+
+    @Test
+    public void testRestoreEmptyMarkDoneState() throws Exception {
+        FileStoreTable table = createFileStoreTable(o -> {}, Collections.singletonList("b"));
+
+        String commitUser = UUID.randomUUID().toString();
+
+        // 1. Generate operatorSubtaskState
+        OperatorSubtaskState snapshot;
+        {
+            OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                    createLossyTestHarness(table, commitUser);
+
+            testHarness.open();
+            snapshot = writeAndSnapshot(table, commitUser, 1, 1, testHarness);
+            testHarness.close();
+        }
+        // 2. enable mark done.
+        table =
+                table.copy(
+                        ImmutableMap.of(
+                                FlinkConnectorOptions.PARTITION_IDLE_TIME_TO_DONE.key(), "1h"));
+
+        // 3. restore from state.
+        OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createLossyTestHarness(table);
+        testHarness.initializeState(snapshot);
     }
 
     @Test
