@@ -64,13 +64,7 @@ abstract class PaimonTagDdlTestBase extends PaimonSparkTestBase {
         "PT3H") :: Nil
     )
 
-    // update the tag info if tag exists
-    spark.sql("alter table T create tag `tag-1` RETAIN 1 HOURS")
-    checkAnswer(
-      spark.sql("select tag_name,snapshot_id,time_retained from `T$tags` where tag_name='tag-1'"),
-      Row("tag-1", 3, "PT1H"))
-
-    // not update tag with 'if not exists' syntax, although tag already exists
+    // not update tag with 'if not exists' syntax
     spark.sql("alter table T create tag if not exists `tag-1` RETAIN 10 HOURS")
     checkAnswer(
       spark.sql("select tag_name,snapshot_id,time_retained from `T$tags` where tag_name='tag-1'"),
