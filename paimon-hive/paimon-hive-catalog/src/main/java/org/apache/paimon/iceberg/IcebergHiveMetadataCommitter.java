@@ -92,7 +92,7 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
                             + "either set {} for paimon table or set hive.metastore.uris "
                             + "in hive-site.xml or hadoop configurations. "
                             + "Will use empty metastore uris, which means we may use a embedded metastore. "
-                            + "The may cause unpredictable consensus problem.",
+                            + "This may cause unpredictable consensus problem.",
                     IcebergOptions.URI.key());
         }
 
@@ -112,7 +112,7 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
         }
     }
 
-    public void commitMetadataImpl(Path newMetadataPath, @Nullable Path baseMetadataPath)
+    private void commitMetadataImpl(Path newMetadataPath, @Nullable Path baseMetadataPath)
             throws Exception {
         if (!databaseExists(identifier.getDatabaseName())) {
             createDatabase(identifier.getDatabaseName());
