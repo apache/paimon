@@ -24,6 +24,7 @@ import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 
@@ -515,5 +516,34 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
         Thread.sleep(1000);
         assertThat(sql("CALL sys.expire_tags('default.T')"))
                 .containsExactlyInAnyOrder(Row.of("tag-3"));
+    }
+
+    @Test
+    public void testReplaceTags() throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " id INT,"
+                        + " NAME STRING,"
+                        + " PRIMARY KEY (id) NOT ENFORCED"
+                        + ") WITH ('bucket' = '1'"
+                        + ")");
+        sql("INSERT INTO T VALUES (1, 'a')");
+        sql("INSERT INTO T VALUES (2, 'b')");
+        assertThat(paimonTable("T").snapshotManager().snapshotCount()).isEqualTo(2L);
+
+        Assertions.assertThatThrownBy(() -> sql("CALL sys.replace_tag('default.T', 'test_tag')"))
+                .hasMessageContaining("Tag name 'test_tag' does not exist.");
+
+        sql("CALL sys.create_tag('default.T', 'test_tag')");
+        assertThat(sql("select tag_name,snapshot_id,time_retained from `T$tags`"))
+                .containsExactly(Row.of("test_tag", 2L, null));
+
+        sql("CALL sys.replace_tag('default.T', 'test_tag', 1)");
+        assertThat(sql("select tag_name,snapshot_id,time_retained from `T$tags`"))
+                .containsExactly(Row.of("test_tag", 1L, null));
+
+        sql("CALL sys.replace_tag('default.T', 'test_tag', 2, '1 d')");
+        assertThat(sql("select tag_name,snapshot_id,time_retained from `T$tags`"))
+                .containsExactly(Row.of("test_tag", 2L, "PT24H"));
     }
 }

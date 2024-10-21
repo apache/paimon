@@ -580,19 +580,13 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public void replaceTag(String tagName, @Nullable Duration timeRetained) {
         Snapshot latestSnapshot = snapshotManager().latestSnapshot();
         SnapshotNotExistException.checkNotNull(
-                latestSnapshot, "Cannot create tag because latest snapshot doesn't exist.");
-        tagManager()
-                .replaceTag(latestSnapshot, tagName, timeRetained, store().createTagCallbacks());
+                latestSnapshot, "Cannot replace tag because latest snapshot doesn't exist.");
+        tagManager().replaceTag(latestSnapshot, tagName, timeRetained);
     }
 
     @Override
     public void replaceTag(String tagName, long fromSnapshotId, @Nullable Duration timeRetained) {
-        tagManager()
-                .replaceTag(
-                        findSnapshot(fromSnapshotId),
-                        tagName,
-                        timeRetained,
-                        store().createTagCallbacks());
+        tagManager().replaceTag(findSnapshot(fromSnapshotId), tagName, timeRetained);
     }
 
     @Override

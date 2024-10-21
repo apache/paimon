@@ -16,41 +16,28 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.procedure;
+package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.table.Table;
 
-import org.apache.spark.sql.connector.catalog.TableCatalog;
-
 import java.time.Duration;
 
-/** A procedure to create a tag. */
-public class CreateTagProcedure extends CreateOrReplaceTagBaseProcedure {
+/** A procedure to replace a tag. */
+public class ReplaceTagProcedure extends CreateOrReplaceTagBaseProcedure {
 
-    private CreateTagProcedure(TableCatalog tableCatalog) {
-        super(tableCatalog);
-    }
+    private static final String IDENTIFIER = "replace_tag";
 
     @Override
     void createOrReplaceTag(Table table, String tagName, Long snapshotId, Duration timeRetained) {
         if (snapshotId == null) {
-            table.createTag(tagName, timeRetained);
+            table.replaceTag(tagName, timeRetained);
         } else {
-            table.createTag(tagName, snapshotId, timeRetained);
+            table.replaceTag(tagName, snapshotId, timeRetained);
         }
     }
 
-    public static ProcedureBuilder builder() {
-        return new BaseProcedure.Builder<CreateTagProcedure>() {
-            @Override
-            public CreateTagProcedure doBuild() {
-                return new CreateTagProcedure(tableCatalog());
-            }
-        };
-    }
-
     @Override
-    public String description() {
-        return "CreateTagProcedure";
+    public String identifier() {
+        return IDENTIFIER;
     }
 }

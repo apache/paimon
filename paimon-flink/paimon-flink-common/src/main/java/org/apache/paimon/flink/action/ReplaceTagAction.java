@@ -16,41 +16,40 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.procedure;
+package org.apache.paimon.flink.action;
 
-import org.apache.paimon.table.Table;
-
-import org.apache.spark.sql.connector.catalog.TableCatalog;
+import javax.annotation.Nullable;
 
 import java.time.Duration;
+import java.util.Map;
 
-/** A procedure to replace a tag. */
-public class ReplaceTagTagProcedure extends CreateOrReplaceTagBaseProcedure {
+/** Replace tag action for Flink. */
+public class ReplaceTagAction extends TableActionBase {
 
-    protected ReplaceTagTagProcedure(TableCatalog tableCatalog) {
-        super(tableCatalog);
+    private final String tagName;
+    private final @Nullable Long snapshotId;
+    private final @Nullable Duration timeRetained;
+
+    public ReplaceTagAction(
+            String warehouse,
+            String databaseName,
+            String tableName,
+            Map<String, String> catalogConfig,
+            String tagName,
+            @Nullable Long snapshotId,
+            @Nullable Duration timeRetained) {
+        super(warehouse, databaseName, tableName, catalogConfig);
+        this.tagName = tagName;
+        this.timeRetained = timeRetained;
+        this.snapshotId = snapshotId;
     }
 
     @Override
-    void createOrReplaceTag(Table table, String tagName, Long snapshotId, Duration timeRetained) {
+    public void run() throws Exception {
         if (snapshotId == null) {
             table.replaceTag(tagName, timeRetained);
         } else {
             table.replaceTag(tagName, snapshotId, timeRetained);
         }
-    }
-
-    public static ProcedureBuilder builder() {
-        return new BaseProcedure.Builder<ReplaceTagTagProcedure>() {
-            @Override
-            public ReplaceTagTagProcedure doBuild() {
-                return new ReplaceTagTagProcedure(tableCatalog());
-            }
-        };
-    }
-
-    @Override
-    public String description() {
-        return "ReplaceTagProcedure";
     }
 }
