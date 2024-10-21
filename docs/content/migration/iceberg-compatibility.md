@@ -53,6 +53,7 @@ Set the following table options, so that Paimon tables can generate Iceberg comp
           <li>disabled: Disable Iceberg compatibility support.</li>
           <li>table-location: Store Iceberg metadata in each table's directory.</li>
           <li>hadoop-catalog: Store Iceberg metadata in a separate directory. This directory can be specified as the warehouse directory of an Iceberg Hadoop catalog.</li>
+          <li>hive-catalog: Not only store Iceberg metadata like hadoop-catalog, but also create Iceberg external table in Hive.</li>
         </ul>
       </td>
     </tr>
@@ -131,18 +132,14 @@ Now let's query this Paimon table with Iceberg connector.
 
 {{< tab "Flink SQL" >}}
 ```sql
-CREATE TABLE cities (
-    country STRING,
-    name STRING
-) WITH (
-    'connector' = 'iceberg',
+CREATE CATALOG iceberg_catalog WITH (
+    'type' = 'iceberg',
     'catalog-type' = 'hadoop',
-    'catalog-name' = 'test',
-    'catalog-database' = 'default',
-    'warehouse' = '<path-to-warehouse>/iceberg'
+    'warehouse' = '<path-to-warehouse>/iceberg',
+    'cache-enabled' = 'false' -- disable iceberg catalog caching to quickly see the result
 );
 
-SELECT * FROM cities WHERE country = 'germany';
+SELECT * FROM iceberg_catalog.`default`.cities WHERE country = 'germany';
 /*
 +----+--------------------------------+--------------------------------+
 | op |                        country |                           name |
@@ -174,7 +171,7 @@ Let's insert more data and query again.
 ```sql
 INSERT INTO paimon_catalog.`default`.cities VALUES ('usa', 'houston'), ('germany', 'munich');
 
-SELECT * FROM cities WHERE country = 'germany';
+SELECT * FROM iceberg_catalog.`default`.cities WHERE country = 'germany';
 /*
 +----+--------------------------------+--------------------------------+
 | op |                        country |                           name |
@@ -225,19 +222,14 @@ CREATE TABLE paimon_catalog.`default`.orders (
 
 INSERT INTO paimon_catalog.`default`.orders VALUES (1, 'SUBMITTED', CAST(NULL AS DOUBLE)), (2, 'COMPLETED', 200.0), (3, 'SUBMITTED', CAST(NULL AS DOUBLE));
 
-CREATE TABLE orders (
-    order_id BIGINT,
-    status STRING,
-    payment DOUBLE
-) WITH (
-    'connector' = 'iceberg',
+CREATE CATALOG iceberg_catalog WITH (
+    'type' = 'iceberg',
     'catalog-type' = 'hadoop',
-    'catalog-name' = 'test',
-    'catalog-database' = 'default',
-    'warehouse' = '<path-to-warehouse>/iceberg'
+    'warehouse' = '<path-to-warehouse>/iceberg',
+    'cache-enabled' = 'false' -- disable iceberg catalog caching to quickly see the result
 );
 
-SELECT * FROM orders WHERE status = 'COMPLETED';
+SELECT * FROM iceberg_catalog.`default`.orders WHERE status = 'COMPLETED';
 /*
 +----+----------------------+--------------------------------+--------------------------------+
 | op |             order_id |                         status |                        payment |
@@ -248,7 +240,7 @@ SELECT * FROM orders WHERE status = 'COMPLETED';
 
 INSERT INTO paimon_catalog.`default`.orders VALUES (1, 'COMPLETED', 100.0);
 
-SELECT * FROM orders WHERE status = 'COMPLETED';
+SELECT * FROM iceberg_catalog.`default`.orders WHERE status = 'COMPLETED';
 /*
 +----+----------------------+--------------------------------+--------------------------------+
 | op |             order_id |                         status |                        payment |
@@ -345,25 +337,65 @@ You can configure the following table option, so that Paimon is forced to perfor
 Note that full compaction is a resource-consuming process, so the value of this table option should not be too small.
 We recommend full compaction to be performed once or twice per hour.
 
+## Access Paimon Table from Iceberg Hive Catalog
+
+When creating Paimon table, set `'metadata.iceberg.storage' = 'hive-catalog'`.
+This option value not only store Iceberg metadata like hadoop-catalog, but also create Iceberg external table in Hive.
+This Paimon table can be accessed from Iceberg Hive catalog later.
+
+To provide information about Hive metastore,
+you also need to set some (or all) of the following table options when creating Paimon table.
+
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 20%">Option</th>
+      <th class="text-left" style="width: 5%">Default</th>
+      <th class="text-left" style="width: 10%">Type</th>
+      <th class="text-left" style="width: 60%">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><h5>metadata.iceberg.uri</h5></td>
+      <td style="word-wrap: break-word;"></td>
+      <td>String</td>
+      <td>Hive metastore uri for Iceberg Hive catalog.</td>
+    </tr>
+    <tr>
+      <td><h5>metadata.iceberg.hive-conf-dir</h5></td>
+      <td style="word-wrap: break-word;"></td>
+      <td>String</td>
+      <td>hive-conf-dir for Iceberg Hive catalog.</td>
+    </tr>
+    <tr>
+      <td><h5>metadata.iceberg.hadoop-conf-dir</h5></td>
+      <td style="word-wrap: break-word;"></td>
+      <td>String</td>
+      <td>hadoop-conf-dir for Iceberg Hive catalog.</td>
+    </tr>
+    </tbody>
+</table>
+
 ## Supported Types
 
 Paimon Iceberg compatibility currently supports the following data types.
 
-| Paimon Data Type           | Iceberg Data Type |
-|----------------------------|-------------------|
-| `BOOLEAN`                  | `boolean`         |
-| `INT`                      | `int`             |
-| `BIGINT`                   | `long`            |
-| `FLOAT`                    | `float`           |
-| `DOUBLE`                   | `double`          |
-| `DECIMAL`                  | `decimal`         |
-| `CHAR`                     | `string`          |
-| `VARCHAR`                  | `string`          |
-| `BINARY`                   | `binary`          |
-| `VARBINARY`                | `binary`          |
-| `DATE`                     | `date` |
-| `TIMESTAMP`*     | `timestamp`       |
-| `TIMESTAMP_LTZ`* | `timestamptz`      |
+| Paimon Data Type  | Iceberg Data Type |
+|-------------------|-------------------|
+| `BOOLEAN`         | `boolean`         |
+| `INT`             | `int`             |
+| `BIGINT`          | `long`            |
+| `FLOAT`           | `float`           |
+| `DOUBLE`          | `double`          |
+| `DECIMAL`         | `decimal`         |
+| `CHAR`            | `string`          |
+| `VARCHAR`         | `string`          |
+| `BINARY`          | `binary`          |
+| `VARBINARY`       | `binary`          |
+| `DATE`            | `date`            |
+| `TIMESTAMP`*      | `timestamp`       |
+| `TIMESTAMP_LTZ`*  | `timestamptz`     |
 
 *: `TIMESTAMP` and `TIMESTAMP_LTZ` type only support precision from 4 to 6
 

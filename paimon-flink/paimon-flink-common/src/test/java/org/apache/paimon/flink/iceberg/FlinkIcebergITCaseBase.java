@@ -78,21 +78,18 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                 .await();
 
         tEnv.executeSql(
-                "CREATE TABLE T (\n"
-                        + "  pt INT,\n"
-                        + "  k INT,\n"
-                        + "  v1 INT,\n"
-                        + "  v2 STRING\n"
-                        + ") PARTITIONED BY (pt) WITH (\n"
-                        + "  'connector' = 'iceberg',\n"
+                "CREATE CATALOG iceberg WITH (\n"
+                        + "  'type' = 'iceberg',\n"
                         + "  'catalog-type' = 'hadoop',\n"
-                        + "  'catalog-name' = 'test',\n"
-                        + "  'catalog-database' = 'default',\n"
                         + "  'warehouse' = '"
                         + warehouse
-                        + "/iceberg'\n"
+                        + "/iceberg',\n"
+                        + "  'cache-enabled' = 'false'\n"
                         + ")");
-        assertThat(collect(tEnv.executeSql("SELECT v1, k, v2, pt FROM T ORDER BY pt, k")))
+        assertThat(
+                        collect(
+                                tEnv.executeSql(
+                                        "SELECT v1, k, v2, pt FROM iceberg.`default`.T ORDER BY pt, k")))
                 .containsExactly(
                         Row.of(100, 10, "apple", 1),
                         Row.of(110, 11, "banana", 1),
@@ -106,7 +103,10 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                                 + "(2, 20, 201, 'blue'), "
                                 + "(2, 22, 221, 'yellow')")
                 .await();
-        assertThat(collect(tEnv.executeSql("SELECT v1, k, v2, pt FROM T ORDER BY pt, k")))
+        assertThat(
+                        collect(
+                                tEnv.executeSql(
+                                        "SELECT v1, k, v2, pt FROM iceberg.`default`.T ORDER BY pt, k")))
                 .containsExactly(
                         Row.of(101, 10, "red", 1),
                         Row.of(110, 11, "banana", 1),
@@ -147,19 +147,15 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                 .await();
 
         tEnv.executeSql(
-                "CREATE TABLE cities (\n"
-                        + "  country STRING,\n"
-                        + "  name STRING\n"
-                        + ") WITH (\n"
-                        + "  'connector' = 'iceberg',\n"
+                "CREATE CATALOG iceberg WITH (\n"
+                        + "  'type' = 'iceberg',\n"
                         + "  'catalog-type' = 'hadoop',\n"
-                        + "  'catalog-name' = 'test',\n"
-                        + "  'catalog-database' = 'default',\n"
                         + "  'warehouse' = '"
                         + warehouse
-                        + "/iceberg'\n"
+                        + "/iceberg',\n"
+                        + "  'cache-enabled' = 'false'\n"
                         + ")");
-        assertThat(collect(tEnv.executeSql("SELECT name, country FROM cities")))
+        assertThat(collect(tEnv.executeSql("SELECT name, country FROM iceberg.`default`.cities")))
                 .containsExactlyInAnyOrder(
                         Row.of("new york", "usa"),
                         Row.of("chicago", "usa"),
@@ -171,7 +167,10 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                                 + "('usa', 'houston'), "
                                 + "('germany', 'munich')")
                 .await();
-        assertThat(collect(tEnv.executeSql("SELECT name FROM cities WHERE country = 'germany'")))
+        assertThat(
+                        collect(
+                                tEnv.executeSql(
+                                        "SELECT name FROM iceberg.`default`.cities WHERE country = 'germany'")))
                 .containsExactlyInAnyOrder(Row.of("berlin"), Row.of("hamburg"), Row.of("munich"));
     }
 
@@ -217,28 +216,15 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                 .await();
 
         tEnv.executeSql(
-                "CREATE TABLE T (\n"
-                        + "  pt INT,\n"
-                        + "  id INT,"
-                        + "  v_int INT,\n"
-                        + "  v_boolean BOOLEAN,\n"
-                        + "  v_bigint BIGINT,\n"
-                        + "  v_float FLOAT,\n"
-                        + "  v_double DOUBLE,\n"
-                        + "  v_decimal DECIMAL(8, 3),\n"
-                        + "  v_varchar STRING,\n"
-                        + "  v_varbinary VARBINARY(20),\n"
-                        + "  v_date DATE,\n"
-                        + "  v_timestamp TIMESTAMP(6)\n"
-                        + ") PARTITIONED BY (pt) WITH (\n"
-                        + "  'connector' = 'iceberg',\n"
+                "CREATE CATALOG iceberg WITH (\n"
+                        + "  'type' = 'iceberg',\n"
                         + "  'catalog-type' = 'hadoop',\n"
-                        + "  'catalog-name' = 'test',\n"
-                        + "  'catalog-database' = 'default',\n"
                         + "  'warehouse' = '"
                         + warehouse
-                        + "/iceberg'\n"
+                        + "/iceberg',\n"
+                        + "  'cache-enabled' = 'false'\n"
                         + ")");
+        tEnv.executeSql("USE CATALOG iceberg");
         assertThat(collect(tEnv.executeSql("SELECT id FROM T where pt = 1")))
                 .containsExactly(Row.of(1));
         assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_int = 1")))
@@ -373,19 +359,15 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                 .await();
 
         tEnv.executeSql(
-                "CREATE TABLE cities (\n"
-                        + "  country STRING,\n"
-                        + "  name STRING\n"
-                        + ") WITH (\n"
-                        + "  'connector' = 'iceberg',\n"
+                "CREATE CATALOG iceberg WITH (\n"
+                        + "  'type' = 'iceberg',\n"
                         + "  'catalog-type' = 'hadoop',\n"
-                        + "  'catalog-name' = 'test',\n"
-                        + "  'catalog-database' = 'default',\n"
                         + "  'warehouse' = '"
                         + warehouse
-                        + "/iceberg'\n"
+                        + "/iceberg',\n"
+                        + "  'cache-enabled' = 'false'\n"
                         + ")");
-        assertThat(collect(tEnv.executeSql("SELECT name, country FROM cities")))
+        assertThat(collect(tEnv.executeSql("SELECT name, country FROM iceberg.`default`.cities")))
                 .containsExactlyInAnyOrder(Row.of("new york", "usa"), Row.of("berlin", "germany"));
 
         tEnv.executeSql(
@@ -393,7 +375,7 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                                 + "('usa', 'chicago'), "
                                 + "('germany', 'hamburg')")
                 .await();
-        assertThat(collect(tEnv.executeSql("SELECT name, country FROM cities")))
+        assertThat(collect(tEnv.executeSql("SELECT name, country FROM iceberg.`default`.cities")))
                 .containsExactlyInAnyOrder(
                         Row.of("new york", "usa"),
                         Row.of("chicago", "usa"),
@@ -407,7 +389,7 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                                 + "('usa', 'houston'), "
                                 + "('germany', 'munich')")
                 .await();
-        assertThat(collect(tEnv.executeSql("SELECT name, country FROM cities")))
+        assertThat(collect(tEnv.executeSql("SELECT name, country FROM iceberg.`default`.cities")))
                 .containsExactlyInAnyOrder(Row.of("houston", "usa"), Row.of("munich", "germany"));
 
         tEnv.executeSql(
@@ -415,7 +397,10 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                                 + "('usa', 'san francisco'), "
                                 + "('germany', 'cologne')")
                 .await();
-        assertThat(collect(tEnv.executeSql("SELECT name FROM cities WHERE country = 'germany'")))
+        assertThat(
+                        collect(
+                                tEnv.executeSql(
+                                        "SELECT name FROM iceberg.`default`.cities WHERE country = 'germany'")))
                 .containsExactlyInAnyOrder(Row.of("munich"), Row.of("cologne"));
     }
 
