@@ -68,7 +68,7 @@ abstract class PaimonTagDdlTestBase extends PaimonSparkTestBase {
     spark.sql("alter table T create tag if not exists `tag-1` RETAIN 10 HOURS")
     checkAnswer(
       spark.sql("select tag_name,snapshot_id,time_retained from `T$tags` where tag_name='tag-1'"),
-      Row("tag-1", 3, "PT1H"))
+      Row("tag-1", 3, null))
   }
 
   test("Tag ddl: alter table t delete tag syntax") {
