@@ -1384,7 +1384,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> TABLE_CLOSE_WRITERS_THREAD_NUMBER =
             key("table.close-writers-thread-number")
                     .intType()
-                    .defaultValue(1)
+                    .defaultValue(4)
                     .withDescription(
                             "The number of threads used to flush data and close files during checkpoint.");
 
