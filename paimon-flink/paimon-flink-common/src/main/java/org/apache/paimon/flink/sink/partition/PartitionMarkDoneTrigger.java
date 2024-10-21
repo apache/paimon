@@ -183,7 +183,10 @@ public class PartitionMarkDoneTrigger {
         public List<String> restore() throws Exception {
             List<String> pendingPartitions = new ArrayList<>();
             if (isRestored) {
-                pendingPartitions.addAll(pendingPartitionsState.get().iterator().next());
+                Iterator<List<String>> state = pendingPartitionsState.get().iterator();
+                if (state.hasNext()) {
+                    pendingPartitions.addAll(state.next());
+                }
             }
             return pendingPartitions;
         }
