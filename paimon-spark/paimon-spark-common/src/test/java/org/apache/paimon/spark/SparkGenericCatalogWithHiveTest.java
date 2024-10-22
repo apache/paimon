@@ -171,5 +171,7 @@ public class SparkGenericCatalogWithHiveTest {
                 .rootCause()
                 .isInstanceOf(FileNotFoundException.class)
                 .hasMessageContaining("nonExistentPath");
+
+        spark.close();
     }
 }
