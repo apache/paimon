@@ -62,7 +62,9 @@ class HiveFormatTableUtils {
         if (Options.fromMap(options).get(TYPE) == FORMAT_TABLE) {
             format = Format.valueOf(options.get(FILE_FORMAT.key()).toUpperCase());
             if (format.equals(Format.CSV)) {
-                options.put(FIELD_DELIMITER.key(), serdeInfo.getParameters().getOrDefault(FIELD_DELIM, "\u0001"));
+                options.put(
+                        FIELD_DELIMITER.key(),
+                        serdeInfo.getParameters().getOrDefault(FIELD_DELIM, "\u0001"));
             }
         } else {
             String serLib = serdeInfo.getSerializationLib().toLowerCase();
