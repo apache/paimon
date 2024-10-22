@@ -58,11 +58,13 @@ class HiveFormatTableUtils {
         String comment = options.remove(COMMENT_PROP);
         String location = hiveTable.getSd().getLocation();
         Format format;
+        SerDeInfo serdeInfo = hiveTable.getSd().getSerdeInfo();
         if (Options.fromMap(options).get(TYPE) == FORMAT_TABLE) {
             format = Format.valueOf(options.get(FILE_FORMAT.key()).toUpperCase());
-            // field delimiter for csv leaves untouched
+            if (format.equals(Format.CSV)) {
+                options.put(FIELD_DELIMITER.key(), serdeInfo.getParameters().getOrDefault(FIELD_DELIM, "\u0001"));
+            }
         } else {
-            SerDeInfo serdeInfo = hiveTable.getSd().getSerdeInfo();
             String serLib = serdeInfo.getSerializationLib().toLowerCase();
             String inputFormat = hiveTable.getSd().getInputFormat();
             if (serLib.contains("parquet")) {

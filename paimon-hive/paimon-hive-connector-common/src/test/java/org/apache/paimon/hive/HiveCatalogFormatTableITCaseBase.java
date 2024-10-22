@@ -136,6 +136,24 @@ public abstract class HiveCatalogFormatTableITCaseBase {
         doTestFormatTable("partition_table");
     }
 
+    @Test
+    public void testFlinkCreateCsvFormatTable() throws Exception {
+        tEnv.executeSql("CREATE TABLE flink_csv_table (a INT, b STRING) with ('type'='format-table', 'file.format'='csv')").await();
+        doTestFormatTable("flink_csv_table");
+    }
+
+    @Test
+    public void testFlinkCreateFormatTableWithDelimiter() throws Exception {
+        tEnv.executeSql("CREATE TABLE flink_csv_table_delimiter (a INT, b STRING) with ('type'='format-table', 'file.format'='csv', 'csv.field-delimiter'=';')");
+        doTestFormatTable("flink_csv_table_delimiter");
+    }
+
+    @Test
+    public void testFlinkCreatePartitionTable() throws Exception {
+        tEnv.executeSql("CREATE TABLE flink_partition_table (a INT,b STRING) PARTITIONED BY (b) with ('type'='format-table', 'file.format'='csv')");
+        doTestFormatTable("flink_partition_table");
+    }
+
     private void doTestFormatTable(String tableName) throws Exception {
         hiveShell.execute(
                 String.format("INSERT INTO %s VALUES (100, 'Hive'), (200, 'Table')", tableName));
