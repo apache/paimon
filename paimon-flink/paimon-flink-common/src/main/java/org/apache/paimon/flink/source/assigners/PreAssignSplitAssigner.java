@@ -18,10 +18,15 @@
 
 package org.apache.paimon.flink.source.assigners;
 
+import org.apache.paimon.codegen.Projection;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.utils.BinPacking;
 
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
+import org.apache.flink.table.connector.source.DynamicFilteringData;
 
 import javax.annotation.Nullable;
 
@@ -35,29 +40,53 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Queue;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.utils.TableScanUtils.getSnapshotId;
 
 /**
- * Pre-calculate which splits each task should process according to the weight, and then distribute
- * the splits fairly.
+ * Pre-calculate which splits each task should process according to the weight or given
+ * DynamicFilteringData, and then distribute the splits fairly.
  */
 public class PreAssignSplitAssigner implements SplitAssigner {
 
     /** Default batch splits size to avoid exceed `akka.framesize`. */
     private final int splitBatchSize;
 
+    private final int parallelism;
+
     private final Map<Integer, LinkedList<FileStoreSourceSplit>> pendingSplitAssignment;
 
     private final AtomicInteger numberOfPendingSplits;
+    private final Collection<FileStoreSourceSplit> splits;
 
     public PreAssignSplitAssigner(
             int splitBatchSize,
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Collection<FileStoreSourceSplit> splits) {
+        this(splitBatchSize, context.currentParallelism(), splits);
+    }
+
+    public PreAssignSplitAssigner(
+            int splitBatchSize,
+            int parallelism,
+            Collection<FileStoreSourceSplit> splits,
+            Projection partitionRowProjection,
+            DynamicFilteringData dynamicFilteringData) {
+        this(
+                splitBatchSize,
+                parallelism,
+                splits.stream()
+                        .filter(s -> filter(partitionRowProjection, dynamicFilteringData, s))
+                        .collect(Collectors.toList()));
+    }
+
+    public PreAssignSplitAssigner(
+            int splitBatchSize, int parallelism, Collection<FileStoreSourceSplit> splits) {
         this.splitBatchSize = splitBatchSize;
-        this.pendingSplitAssignment =
-                createBatchFairSplitAssignment(splits, context.currentParallelism());
+        this.parallelism = parallelism;
+        this.splits = splits;
+        this.pendingSplitAssignment = createBatchFairSplitAssignment(splits, parallelism);
         this.numberOfPendingSplits = new AtomicInteger(splits.size());
     }
 
@@ -126,5 +155,21 @@ public class PreAssignSplitAssigner implements SplitAssigner {
     @Override
     public int numberOfRemainingSplits() {
         return numberOfPendingSplits.get();
+    }
+
+    public SplitAssigner ofDynamicPartitionPruning(
+            Projection partitionRowProjection, DynamicFilteringData dynamicFilteringData) {
+        return new PreAssignSplitAssigner(
+                splitBatchSize, parallelism, splits, partitionRowProjection, dynamicFilteringData);
+    }
+
+    private static boolean filter(
+            Projection partitionRowProjection,
+            DynamicFilteringData dynamicFilteringData,
+            FileStoreSourceSplit sourceSplit) {
+        DataSplit dataSplit = (DataSplit) sourceSplit.split();
+        BinaryRow partition = dataSplit.partition();
+        FlinkRowData projected = new FlinkRowData(partitionRowProjection.apply(partition));
+        return dynamicFilteringData.contains(projected);
     }
 }
