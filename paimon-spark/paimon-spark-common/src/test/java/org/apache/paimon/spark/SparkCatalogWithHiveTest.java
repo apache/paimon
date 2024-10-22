@@ -51,7 +51,7 @@ public class SparkCatalogWithHiveTest {
 
     @Test
     public void testCreateFormatTable(@TempDir java.nio.file.Path tempDir) {
-        // firstly, we use hive metastore to creata table, and check the result.
+        // firstly, we use hive metastore to create table, and check the result.
         Path warehousePath = new Path("file:" + tempDir.toString());
         SparkSession spark =
                 SparkSession.builder()
