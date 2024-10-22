@@ -51,7 +51,7 @@ import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION;
-import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
+import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class PartitionMarkDoneTest extends TableTestBase {

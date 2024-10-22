@@ -36,6 +36,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
@@ -316,6 +317,20 @@ public class SparkWriteITCase {
         spark.sql("INSERT INTO T VALUES (2, 2, 'bb')");
         FileStatus[] files2 = fileIO.listStatus(new Path(tabLocation, "bucket-0"));
         Assertions.assertEquals(1, dataFileCount(files2, "test-changelog-"));
+    }
+
+    @Test
+    public void testMarkDone() throws IOException {
+        spark.sql(
+                "CREATE TABLE T (a INT, b INT, c STRING) PARTITIONED BY (c) TBLPROPERTIES ("
+                        + "'partition.end-input-to-done' = 'true', 'partition.mark-done-action' = 'success-file')");
+        spark.sql("INSERT INTO T VALUES (1, 1, 'aa')");
+
+        FileStoreTable table = getTable("T");
+        FileIO fileIO = table.fileIO();
+        Path tabLocation = table.location();
+
+        Assertions.assertTrue(fileIO.exists(new Path(tabLocation, "c=aa/_SUCCESS")));
     }
 
     protected static FileStoreTable getTable(String tableName) {
