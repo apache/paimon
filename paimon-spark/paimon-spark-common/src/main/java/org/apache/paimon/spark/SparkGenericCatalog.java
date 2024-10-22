@@ -21,6 +21,7 @@ package org.apache.paimon.spark;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.hive.HiveCatalogOptions;
 import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
 import org.apache.paimon.spark.util.SQLConfUtils;
 import org.apache.paimon.utils.Preconditions;
@@ -286,6 +287,7 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
         Map<String, String> newOptions = new HashMap<>(options.asCaseSensitiveMap());
         fillAliyunConfigurations(newOptions, hadoopConf);
         fillCommonConfigurations(newOptions, sqlConf);
+        fillHiveCatalogOptions(newOptions, sqlConf);
 
         // if spark is case-insensitive, set allow upper case to catalog
         if (!sqlConf.caseSensitiveAnalysis()) {
@@ -329,6 +331,14 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
             }
         } else {
             options.put(DEFAULT_DATABASE.key(), sessionCatalogDefaultDatabase);
+        }
+    }
+
+    private void fillHiveCatalogOptions(Map<String, String> options, SQLConf sqlConf) {
+        for (ConfigOption<?> option : HiveCatalogOptions.getOptions()) {
+            if (sqlConf.contains(option.key())) {
+                options.put(option.key(), sqlConf.getConfString(option.key()));
+            }
         }
     }
 

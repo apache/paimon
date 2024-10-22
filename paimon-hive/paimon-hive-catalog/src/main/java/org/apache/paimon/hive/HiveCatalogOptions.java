@@ -22,6 +22,9 @@ import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.description.Description;
 
+import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.options.description.TextElement.text;
@@ -93,6 +96,21 @@ public final class HiveCatalogOptions {
                             "Whether to support format tables, format table corresponds to a regular Hive table, allowing read and write operations. "
                                     + "However, during these processes, it does not connect to the metastore; hence, newly added partitions will not be reflected in"
                                     + " the metastore and need to be manually added as separate partition operations.");
+
+    public static List<ConfigOption<?>> getOptions() {
+        final Field[] fields = HiveCatalogOptions.class.getFields();
+        final List<ConfigOption<?>> list = new ArrayList<>(fields.length);
+        for (Field field : fields) {
+            if (ConfigOption.class.isAssignableFrom(field.getType())) {
+                try {
+                    list.add((ConfigOption<?>) field.get(HiveCatalogOptions.class));
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }
+        return list;
+    }
 
     private HiveCatalogOptions() {}
 }
