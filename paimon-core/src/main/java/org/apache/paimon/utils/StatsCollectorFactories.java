@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.statistics.TruncateSimpleColStatsCollector;
-import org.apache.paimon.table.SystemFields;
+import org.apache.paimon.table.SpecialFields;
 
 import java.util.List;
 
@@ -47,7 +47,7 @@ public class StatsCollectorFactories {
                                     .noDefaultValue());
             if (fieldMode != null) {
                 modes[i] = SimpleColStatsCollector.from(fieldMode);
-            } else if (SystemFields.isSystemField(field)) {
+            } else if (SpecialFields.isSystemField(field)) {
                 modes[i] = () -> new TruncateSimpleColStatsCollector(128);
             } else {
                 modes[i] = SimpleColStatsCollector.from(cfg.get(CoreOptions.METADATA_STATS_MODE));

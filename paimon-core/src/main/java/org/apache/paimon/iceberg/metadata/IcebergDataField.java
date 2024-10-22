@@ -64,9 +64,9 @@ public class IcebergDataField {
     @JsonProperty(FIELD_DOC)
     private final String doc;
 
-    public IcebergDataField(DataField dataField, int bias) {
+    public IcebergDataField(DataField dataField) {
         this(
-                dataField.id() + bias,
+                dataField.id(),
                 dataField.name(),
                 !dataField.type().isNullable(),
                 toTypeString(dataField.type()),

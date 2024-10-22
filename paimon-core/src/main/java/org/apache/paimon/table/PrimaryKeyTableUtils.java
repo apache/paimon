@@ -34,8 +34,8 @@ import org.apache.paimon.types.RowType;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.table.SystemFields.KEY_FIELD_ID_START;
-import static org.apache.paimon.table.SystemFields.KEY_FIELD_PREFIX;
+import static org.apache.paimon.table.SpecialFields.KEY_FIELD_ID_START;
+import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
 
 /** Utils for creating changelog table with primary keys. */
 public class PrimaryKeyTableUtils {
