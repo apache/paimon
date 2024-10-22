@@ -252,7 +252,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Boolean> PARTITION_GENERATE_LEGCY_NAME =
             key("partition.legacy-name")
                     .booleanType()
-                    .defaultValue(false)
+                    .defaultValue(true)
                     .withDescription(
                             "The legacy partition name is using `toString` fpr all types. If false, using "
                                     + "cast to string for all types.");
