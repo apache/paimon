@@ -27,7 +27,10 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.FileNotFoundException;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Base tests for spark read. */
 public class SparkCatalogWithHiveTest {
@@ -106,5 +109,28 @@ public class SparkCatalogWithHiveTest {
                                 .count())
                 .isGreaterThan(0);
         spark1.close();
+    }
+
+    @Test
+    public void testSpecifyHiveConfDir(@TempDir java.nio.file.Path tempDir) {
+        Path warehousePath = new Path("file:" + tempDir.toString());
+        SparkSession spark =
+                SparkSession.builder()
+                        .config("spark.sql.catalog.spark_catalog.hive-conf-dir", "nonExistentPath")
+                        .config("spark.sql.warehouse.dir", warehousePath.toString())
+                        // with hive metastore
+                        .config("spark.sql.catalogImplementation", "hive")
+                        .config(
+                                "spark.sql.catalog.spark_catalog",
+                                SparkGenericCatalog.class.getName())
+                        .master("local[2]")
+                        .getOrCreate();
+
+        assertThatThrownBy(() -> spark.sql("CREATE DATABASE my_db"))
+                .rootCause()
+                .isInstanceOf(FileNotFoundException.class)
+                .hasMessageContaining("nonExistentPath");
+
+        spark.close();
     }
 }
