@@ -146,6 +146,9 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     @Override
     public void close() throws Exception {
         commit.close();
+        if (partitionMarkDone != null) {
+            partitionMarkDone.close();
+        }
     }
 
     private void calcNumBytesAndRecordsOut(List<ManifestCommittable> committables) {
