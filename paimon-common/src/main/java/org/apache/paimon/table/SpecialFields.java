@@ -27,8 +27,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * Special fields in a {@link org.apache.paimon.types.RowType} representing a key-value pair in LSM
- * trees.
+ * Special fields in a {@link org.apache.paimon.types.RowType} with specific field ids.
  *
  * <p><b>System fields</b>:
  *
