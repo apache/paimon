@@ -67,11 +67,11 @@ case class WriteIntoPaimonTable(
     val commitMessages = writer.write(data)
     writer.commit(commitMessages)
 
-    markDone(commitMessages)
+    markDoneIfNeeded(commitMessages)
     Seq.empty
   }
 
-  private def markDone(commitMessages: Seq[CommitMessage]): Unit = {
+  private def markDoneIfNeeded(commitMessages: Seq[CommitMessage]): Unit = {
     val coreOptions = table.coreOptions()
     if (coreOptions.toConfiguration.get(CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT)) {
       val actions = PartitionMarkDoneAction.createActions(table, table.coreOptions())
@@ -83,8 +83,8 @@ case class WriteIntoPaimonTable(
       val partitions = commitMessages
         .map(c => c.partition())
         .map(p => PartitionPathUtils.generatePartitionPath(partitionComputer.generatePartValues(p)))
-      for (elem <- partitions) {
-        actions.forEach(a => a.markDone(elem))
+      for (partition <- partitions) {
+        actions.forEach(a => a.markDone(partition))
       }
     }
   }
