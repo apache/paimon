@@ -27,11 +27,10 @@ import org.apache.paimon.spark.schema.SparkSystemColumns
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.utils.{InternalRowPartitionComputer, PartitionPathUtils, TypeUtils}
-
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.command.RunnableCommand
+import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 
 import scala.collection.JavaConverters._
 
@@ -74,7 +73,7 @@ case class WriteIntoPaimonTable(
   private def markDone(commitMessages: Seq[CommitMessage]): Unit = {
     val coreOptions = table.coreOptions()
     if (coreOptions.toConfiguration.get(CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT)) {
-      val actions = PartitionMarkDoneAction.createActions(originTable, table.coreOptions())
+      val actions = PartitionMarkDoneAction.createActions(table, table.coreOptions())
       val partitionComputer = new InternalRowPartitionComputer(
         coreOptions.partitionDefaultName,
         TypeUtils.project(table.rowType(), table.partitionKeys()),
