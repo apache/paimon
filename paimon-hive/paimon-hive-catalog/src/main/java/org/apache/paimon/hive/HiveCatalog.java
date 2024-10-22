@@ -950,7 +950,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     private Map<String, String> setSerDeInfoParam(String provider) {
         Map<String, String> param = new HashMap<>();
-        if (provider.equalsIgnoreCase("csv")) {
+        if (provider != null && provider.equalsIgnoreCase("csv")) {
             param.put(FIELD_DELIM, options.get(FIELD_DELIMITER));
         }
         return param;
