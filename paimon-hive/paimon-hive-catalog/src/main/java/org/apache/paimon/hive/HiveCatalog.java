@@ -953,6 +953,11 @@ public class HiveCatalog extends AbstractCatalog {
         if (provider == null) {
             provider = PAIMON_TABLE_TYPE_VALUE;
         }
+        CoreOptions coreOptions = CoreOptions.fromMap(tableParameters);
+        java.time.Duration partitionExpireTime = coreOptions.partitionExpireTime();
+        if (partitionExpireTime != null && partitionExpireTime.toDays() > 0) {
+            tableParameters.put("dlf.lifecycle", String.valueOf(partitionExpireTime.toDays()));
+        }
         Table table =
                 new Table(
                         identifier.getTableName(),
