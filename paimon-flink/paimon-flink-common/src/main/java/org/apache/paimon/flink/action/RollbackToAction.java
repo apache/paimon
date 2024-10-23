@@ -18,7 +18,10 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.table.DataTable;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,14 +35,18 @@ public class RollbackToAction extends TableActionBase {
 
     private final String version;
 
+    private final Boolean isTimestamp;
+
     public RollbackToAction(
             String warehouse,
             String databaseName,
             String tableName,
             String version,
+            Boolean isTimestamp,
             Map<String, String> catalogConfig) {
         super(warehouse, databaseName, tableName, catalogConfig);
         this.version = version;
+        this.isTimestamp = isTimestamp;
     }
 
     @Override
@@ -50,8 +57,20 @@ public class RollbackToAction extends TableActionBase {
             throw new IllegalArgumentException("Unknown table: " + identifier);
         }
 
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
         if (version.chars().allMatch(Character::isDigit)) {
-            table.rollbackTo(Long.parseLong(version));
+            if (isTimestamp != null && isTimestamp) {
+                Snapshot snapshot =
+                        fileStoreTable
+                                .snapshotManager()
+                                .earlierOrEqualTimeMills(Long.parseLong(version));
+                Preconditions.checkNotNull(
+                        snapshot,
+                        String.format("count not find snapshot earlier than %s", version));
+                fileStoreTable.rollbackTo(snapshot.id());
+            } else {
+                table.rollbackTo(Long.parseLong(version));
+            }
         } else {
             table.rollbackTo(version);
         }

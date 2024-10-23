@@ -18,9 +18,12 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
@@ -50,16 +53,27 @@ public class RollbackToProcedure extends ProcedureBase {
                 @ArgumentHint(
                         name = "snapshot_id",
                         type = @DataTypeHint("BIGINT"),
-                        isOptional = true)
+                        isOptional = true),
+                @ArgumentHint(name = "timestamp", type = @DataTypeHint("BIGINT"), isOptional = true)
             })
     public String[] call(
-            ProcedureContext procedureContext, String tableId, String tagName, Long snapshotId)
+            ProcedureContext procedureContext,
+            String tableId,
+            String tagName,
+            Long snapshotId,
+            Long timestamp)
             throws Catalog.TableNotExistException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
         if (!StringUtils.isNullOrWhitespaceOnly(tagName)) {
             table.rollbackTo(tagName);
-        } else {
+        } else if (snapshotId != null) {
             table.rollbackTo(snapshotId);
+        } else {
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+            Snapshot snapshot = fileStoreTable.snapshotManager().earlierOrEqualTimeMills(timestamp);
+            Preconditions.checkNotNull(
+                    snapshot, String.format("count not find snapshot earlier than %s", timestamp));
+            fileStoreTable.rollbackTo(snapshot.id());
         }
         return new String[] {"Success"};
     }
