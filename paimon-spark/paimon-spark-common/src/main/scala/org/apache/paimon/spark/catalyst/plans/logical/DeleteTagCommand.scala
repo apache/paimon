@@ -16,6 +16,18 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.sql
+package org.apache.paimon.spark.catalyst.plans.logical
 
-class ShowTagsTest extends PaimonShowTagsTestBase {}
+import org.apache.paimon.spark.leafnode.PaimonLeafCommand
+
+import org.apache.spark.sql.catalyst.expressions.Attribute
+
+case class DeleteTagCommand(table: Seq[String], tagStr: String, ifExists: Boolean)
+  extends PaimonLeafCommand {
+
+  override def output: Seq[Attribute] = Nil
+
+  override def simpleString(maxFields: Int): String = {
+    s"Delete tag: $tagStr for table: $table"
+  }
+}
