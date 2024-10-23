@@ -25,6 +25,7 @@ import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.view.View;
 
 import java.io.Serializable;
 import java.util.Arrays;
@@ -299,6 +300,69 @@ public interface Catalog extends AutoCloseable {
         alterTable(identifier, Collections.singletonList(change), ignoreIfNotExists);
     }
 
+    /**
+     * Check if a view exists in this catalog.
+     *
+     * @param identifier Path of the view
+     * @return true if the given view exists in the catalog false otherwise
+     */
+    default boolean viewExists(Identifier identifier) {
+        try {
+            return getView(identifier) != null;
+        } catch (ViewNotExistException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Return a {@link View} identified by the given {@link Identifier}.
+     *
+     * @param identifier Path of the view
+     * @return The requested view
+     * @throws ViewNotExistException if the target does not exist
+     */
+    default View getView(Identifier identifier) throws ViewNotExistException {
+        throw new ViewNotExistException(identifier);
+    }
+
+    /**
+     * Drop a view.
+     *
+     * @param identifier Path of the view to be dropped
+     * @param ignoreIfNotExists Flag to specify behavior when the view does not exist: if set to
+     *     false, throw an exception, if set to true, do nothing.
+     * @throws ViewNotExistException if the view does not exist
+     */
+    default void dropView(Identifier identifier, boolean ignoreIfNotExists)
+            throws ViewNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Create a new view.
+     *
+     * @param identifier path of the view to be created
+     * @param view the view definition
+     * @param ignoreIfExists flag to specify behavior when a view already exists at the given path:
+     *     if set to false, it throws a ViewAlreadyExistException, if set to true, do nothing.
+     * @throws ViewAlreadyExistException if view already exists and ignoreIfExists is false
+     * @throws DatabaseNotExistException if the database in identifier doesn't exist
+     */
+    default void createView(Identifier identifier, View view, boolean ignoreIfExists)
+            throws ViewAlreadyExistException, DatabaseNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Get names of all views under this database. An empty list is returned if none exists.
+     *
+     * @return a list of the names of all views in this database
+     * @throws DatabaseNotExistException if the database does not exist
+     */
+    default List<String> listViews(String databaseName) throws DatabaseNotExistException {
+        return Collections.emptyList();
+    }
+
     /** Return a boolean that indicates whether this catalog allow upper case. */
     boolean allowUpperCase();
 
@@ -529,6 +593,48 @@ public interface Catalog extends AutoCloseable {
 
         public String column() {
             return column;
+        }
+    }
+
+    /** Exception for trying to create a view that already exists. */
+    class ViewAlreadyExistException extends Exception {
+
+        private static final String MSG = "View %s already exists.";
+
+        private final Identifier identifier;
+
+        public ViewAlreadyExistException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public ViewAlreadyExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+    }
+
+    /** Exception for trying to operate on a view that doesn't exist. */
+    class ViewNotExistException extends Exception {
+
+        private static final String MSG = "View %s does not exist.";
+
+        private final Identifier identifier;
+
+        public ViewNotExistException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public ViewNotExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
         }
     }
 
