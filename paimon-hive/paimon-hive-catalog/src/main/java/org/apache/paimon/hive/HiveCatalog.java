@@ -85,6 +85,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTOREWAREHOUSE;
+import static org.apache.hadoop.hive.serde.serdeConstants.FIELD_DELIM;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
@@ -99,6 +100,7 @@ import static org.apache.paimon.options.CatalogOptions.ALLOW_UPPER_CASE;
 import static org.apache.paimon.options.CatalogOptions.SYNC_ALL_PROPERTIES;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
+import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.HadoopUtils.addHadoopConfIfFound;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -600,11 +602,11 @@ public class HiveCatalog extends AbstractCatalog {
 
     private Table createHiveTable(Identifier identifier, TableSchema tableSchema) {
         Map<String, String> tblProperties;
-        String provider = "paimon";
+        String provider = PAIMON_TABLE_TYPE_VALUE;
         if (Options.fromMap(tableSchema.options()).get(TYPE) == FORMAT_TABLE) {
             provider = tableSchema.options().get(FILE_FORMAT.key());
         }
-        if (syncAllProperties() || !provider.equals("paimon")) {
+        if (syncAllProperties() || !provider.equals(PAIMON_TABLE_TYPE_VALUE)) {
             tblProperties = new HashMap<>(tableSchema.options());
 
             // add primary-key, partition-key to tblproperties
@@ -812,7 +814,7 @@ public class HiveCatalog extends AbstractCatalog {
                         hiveConf.get(TABLE_TYPE.key(), CatalogTableType.MANAGED.toString()),
                         CatalogTableType.class);
         if (provider == null) {
-            provider = "paimon";
+            provider = PAIMON_TABLE_TYPE_VALUE;
         }
         Table table =
                 new Table(
@@ -830,7 +832,7 @@ public class HiveCatalog extends AbstractCatalog {
                         null,
                         tableType.toString().toUpperCase(Locale.ROOT) + "_TABLE");
         table.getParameters().put(TABLE_TYPE_PROP, provider.toUpperCase());
-        if ("paimon".equalsIgnoreCase(provider)) {
+        if (PAIMON_TABLE_TYPE_VALUE.equalsIgnoreCase(provider)) {
             table.getParameters()
                     .put(hive_metastoreConstants.META_TABLE_STORAGE, STORAGE_HANDLER_CLASS_NAME);
         } else {
@@ -844,7 +846,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private String getSerdeClassName(String provider) {
-        if (provider == null || provider.equalsIgnoreCase("paimon")) {
+        if (provider == null || provider.equalsIgnoreCase(PAIMON_TABLE_TYPE_VALUE)) {
             return SERDE_CLASS_NAME;
         } else if (provider.equalsIgnoreCase("csv")) {
             return "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe";
@@ -858,7 +860,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private String getInputFormatName(String provider) {
-        if (provider == null || provider.equalsIgnoreCase("paimon")) {
+        if (provider == null || provider.equalsIgnoreCase(PAIMON_TABLE_TYPE_VALUE)) {
             return INPUT_FORMAT_CLASS_NAME;
         } else if (provider.equalsIgnoreCase("csv")) {
             return "org.apache.hadoop.mapred.TextInputFormat";
@@ -872,7 +874,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private String getOutputFormatClassName(String provider) {
-        if (provider == null || provider.equalsIgnoreCase("paimon")) {
+        if (provider == null || provider.equalsIgnoreCase(PAIMON_TABLE_TYPE_VALUE)) {
             return OUTPUT_FORMAT_CLASS_NAME;
         } else if (provider.equalsIgnoreCase("csv")) {
             return "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat";
@@ -893,7 +895,7 @@ public class HiveCatalog extends AbstractCatalog {
         sd.setOutputFormat(getOutputFormatClassName(provider));
 
         SerDeInfo serDeInfo = sd.getSerdeInfo() != null ? sd.getSerdeInfo() : new SerDeInfo();
-        serDeInfo.setParameters(new HashMap<>());
+        serDeInfo.setParameters(setSerDeInfoParam(provider));
         serDeInfo.setSerializationLib(getSerdeClassName(provider));
         sd.setSerdeInfo(serDeInfo);
 
@@ -944,6 +946,14 @@ public class HiveCatalog extends AbstractCatalog {
 
         // update location
         locationHelper.specifyTableLocation(table, getTableLocation(identifier).toString());
+    }
+
+    private Map<String, String> setSerDeInfoParam(String provider) {
+        Map<String, String> param = new HashMap<>();
+        if (provider != null && provider.equalsIgnoreCase("csv")) {
+            param.put(FIELD_DELIM, options.get(FIELD_DELIMITER));
+        }
+        return param;
     }
 
     private void updateHmsTablePars(Table table, TableSchema schema) {
