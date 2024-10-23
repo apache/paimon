@@ -473,7 +473,11 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
               .writeTo("t")
               .overwrite($"c1" === ($"c2" + 1))
           }.getMessage
-          assert(msg3.contains("cannot translate expression to source filter"))
+          if (gteqSpark4_0) {
+            assert(msg3.contains("Table does not support overwrite by expression"))
+          } else {
+            assert(msg3.contains("cannot translate expression to source filter"))
+          }
 
           val msg4 = intercept[Exception] {
             spark

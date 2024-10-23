@@ -42,6 +42,12 @@
         <value>true</value>
     </property>
 
+    <!-- Spark has deleted the dependency of `bonecp` and recommends this conf since 4.0, see https://issues.apache.org/jira/browse/SPARK-48538 -->
+    <property>
+        <name>datanucleus.connectionPoolingType</name>
+        <value>DBCP</value>
+    </property>
+
     <property>
         <name>hive.metastore.uris</name>
         <value>thrift://localhost:9083</value>
