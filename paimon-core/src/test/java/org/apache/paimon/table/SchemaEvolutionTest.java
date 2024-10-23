@@ -57,8 +57,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 
-import static org.apache.paimon.table.SystemFields.KEY_FIELD_PREFIX;
-import static org.apache.paimon.table.SystemFields.SYSTEM_FIELD_NAMES;
+import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
+import static org.apache.paimon.table.SpecialFields.SYSTEM_FIELD_NAMES;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

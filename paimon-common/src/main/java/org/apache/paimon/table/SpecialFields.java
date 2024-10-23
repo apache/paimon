@@ -26,8 +26,38 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-/** System fields. */
-public class SystemFields {
+/**
+ * Special fields in a {@link org.apache.paimon.types.RowType} with specific field ids.
+ *
+ * <p><b>System fields</b>:
+ *
+ * <ul>
+ *   <li><code>_KEY_&lt;key-field&gt;</code>: Keys of a key-value. ID = 1073741823 + <code>
+ *       (field-id)
+ *       </code>.
+ *   <li><code>_SEQUENCE_NUMBER</code>: Sequence number of a key-value. ID = 2147483646.
+ *   <li><code>_VALUE_KIND</code>: Type of a key-value. See {@link org.apache.paimon.types.RowKind}.
+ *       ID = 2147483645.
+ *   <li><code>_LEVEL</code>: Which LSM tree level does this key-value stay in. ID = 2147483644.
+ *   <li><code>rowkind</code>: THw rowkind field in audit-log system tables. ID = 2147483643.
+ * </ul>
+ *
+ * <p><b>Structured type fields</b>:
+ *
+ * <p>These ids are mainly used as field ids in parquet files, so compute engines can read a field
+ * directly by id. These ids are not stored in {@link org.apache.paimon.types.DataField}.
+ *
+ * <ul>
+ *   <li>Array element field: ID = 536870911 + <code>(array-field-id)</code>.
+ *   <li>Map key field: ID = 536870911 + <code>(array-field-id)</code>.
+ *   <li>Map value field: ID = 536870911 - <code>(array-field-id)</code>.
+ * </ul>
+ */
+public class SpecialFields {
+
+    // ----------------------------------------------------------------------------------------
+    // System fields
+    // ----------------------------------------------------------------------------------------
 
     public static final int SYSTEM_FIELD_ID_START = Integer.MAX_VALUE / 2;
 
@@ -58,5 +88,23 @@ public class SystemFields {
 
     public static boolean isSystemField(String field) {
         return field.startsWith(KEY_FIELD_PREFIX) || SYSTEM_FIELD_NAMES.contains(field);
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // Structured type fields
+    // ----------------------------------------------------------------------------------------
+
+    public static final int STRUCTURED_TYPE_FIELD_ID_BASE = Integer.MAX_VALUE / 4;
+
+    public static int getArrayElementFieldId(int arrayFieldId) {
+        return STRUCTURED_TYPE_FIELD_ID_BASE + arrayFieldId;
+    }
+
+    public static int getMapKeyFieldId(int mapFieldId) {
+        return STRUCTURED_TYPE_FIELD_ID_BASE + mapFieldId;
+    }
+
+    public static int getMapValueFieldId(int mapFieldId) {
+        return STRUCTURED_TYPE_FIELD_ID_BASE - mapFieldId;
     }
 }

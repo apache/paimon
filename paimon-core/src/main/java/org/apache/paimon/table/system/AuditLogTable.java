@@ -42,7 +42,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
-import org.apache.paimon.table.SystemFields;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -137,7 +137,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     @Override
     public RowType rowType() {
         List<DataField> fields = new ArrayList<>();
-        fields.add(SystemFields.ROW_KIND);
+        fields.add(SpecialFields.ROW_KIND);
         fields.addAll(wrapped.rowType().getFields());
         return new RowType(fields);
     }
@@ -566,7 +566,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
             boolean rowKindAppeared = false;
             for (int i = 0; i < fields.size(); i++) {
                 String fieldName = fields.get(i).name();
-                if (fieldName.equals(SystemFields.ROW_KIND.name())) {
+                if (fieldName.equals(SpecialFields.ROW_KIND.name())) {
                     rowKindAppeared = true;
                     readProjection[i] = -1;
                 } else {
