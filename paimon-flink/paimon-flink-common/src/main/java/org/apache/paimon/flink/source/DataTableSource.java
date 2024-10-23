@@ -128,12 +128,11 @@ public class DataTableSource extends BaseDataTableSource
                 Map<String, ColumnStats> flinkColStats =
                         statistics.colStats().entrySet().stream()
                                 .map(
-                                        entry -> new AbstractMap.SimpleEntry<>(
-                                                entry.getKey(),
-                                                toFlinkColumnStats(entry.getValue())))
-                                .collect(
-                                        Collectors.toMap(
-                                                Map.Entry::getKey, Map.Entry::getValue));
+                                        entry ->
+                                                new AbstractMap.SimpleEntry<>(
+                                                        entry.getKey(),
+                                                        toFlinkColumnStats(entry.getValue())))
+                                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
                 return new TableStats(statistics.mergedRecordCount().getAsLong(), flinkColStats);
             }
         }
