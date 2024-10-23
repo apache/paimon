@@ -78,7 +78,8 @@ case class WriteIntoPaimonTable(
       val partitionComputer = new InternalRowPartitionComputer(
         coreOptions.partitionDefaultName,
         TypeUtils.project(table.rowType(), table.partitionKeys()),
-        table.partitionKeys().asScala.toArray
+        table.partitionKeys().asScala.toArray,
+        coreOptions.legacyPartitionName()
       )
       val partitions = commitMessages
         .map(c => c.partition())
