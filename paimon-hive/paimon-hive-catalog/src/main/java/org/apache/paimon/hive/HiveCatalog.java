@@ -814,6 +814,12 @@ public class HiveCatalog extends AbstractCatalog {
         if (provider == null) {
             provider = "paimon";
         }
+        CoreOptions coreOptions = CoreOptions.fromMap(tableParameters);
+        java.time.Duration partitionExpireTime = coreOptions.partitionExpireTime();
+        int retention = Integer.MAX_VALUE;
+        if (partitionExpireTime != null && partitionExpireTime.getSeconds() <= Integer.MAX_VALUE) {
+            retention = (int) partitionExpireTime.getSeconds();
+        }
         Table table =
                 new Table(
                         identifier.getTableName(),
@@ -822,7 +828,7 @@ public class HiveCatalog extends AbstractCatalog {
                         System.getProperty("user.name"),
                         (int) (currentTimeMillis / 1000),
                         (int) (currentTimeMillis / 1000),
-                        Integer.MAX_VALUE,
+                        retention,
                         null,
                         Collections.emptyList(),
                         tableParameters,
