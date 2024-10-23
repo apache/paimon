@@ -576,6 +576,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>The expiration interval of a partition. A partition will be expired if it‘s lifetime is over this value. Partition time is extracted from the partition value.</td>
         </tr>
         <tr>
+            <td><h5>partition.legacy-name</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>The legacy partition name is using `toString` fpr all types. If false, using cast to string for all types.</td>
+        </tr>
+        <tr>
             <td><h5>partition.mark-done-action</h5></td>
             <td style="word-wrap: break-word;">"success-file"</td>
             <td>String</td>

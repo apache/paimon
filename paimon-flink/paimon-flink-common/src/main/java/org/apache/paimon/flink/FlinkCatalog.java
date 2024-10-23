@@ -1075,9 +1075,12 @@ public class FlinkCatalog extends AbstractCatalog {
                 getPartitionEntries(table, tablePath, partitionSpec);
         org.apache.paimon.types.RowType partitionRowType = table.schema().logicalPartitionType();
 
+        CoreOptions options = new CoreOptions(table.options());
         InternalRowPartitionComputer partitionComputer =
                 FileStorePathFactory.getPartitionComputer(
-                        partitionRowType, new CoreOptions(table.options()).partitionDefaultName());
+                        partitionRowType,
+                        options.partitionDefaultName(),
+                        options.legacyPartitionName());
 
         return partitionEntries.stream()
                 .map(

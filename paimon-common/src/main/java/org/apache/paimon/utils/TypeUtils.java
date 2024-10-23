@@ -18,6 +18,8 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.casting.CastExecutor;
+import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
@@ -86,6 +88,24 @@ public class TypeUtils {
                 names.stream()
                         .map(k -> fields.get(fieldNames.indexOf(k)))
                         .collect(Collectors.toList()));
+    }
+
+    public static String castPartitionValueToString(
+            Object value, DataType type, boolean legacyPartitionName) {
+        if (value == null) {
+            return null;
+        }
+        if (legacyPartitionName) {
+            return value.toString();
+        }
+
+        CastExecutor<Object, Object> castExecutor =
+                (CastExecutor<Object, Object>) CastExecutors.resolve(type, VarCharType.STRING_TYPE);
+        if (castExecutor == null) {
+            throw new UnsupportedOperationException(type + " is not supported");
+        }
+        Object result = castExecutor.cast(value);
+        return result == null ? null : result.toString();
     }
 
     public static Object castFromString(String s, DataType type) {
