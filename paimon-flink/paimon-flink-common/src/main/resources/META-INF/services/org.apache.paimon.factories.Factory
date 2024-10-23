@@ -26,6 +26,7 @@ org.apache.paimon.flink.action.CreateTagFromTimestampActionFactory
 org.apache.paimon.flink.action.CreateTagFromWatermarkActionFactory
 org.apache.paimon.flink.action.DeleteTagActionFactory
 org.apache.paimon.flink.action.ExpireTagsActionFactory
+org.apache.paimon.flink.action.ReplaceTagActionFactory
 org.apache.paimon.flink.action.ResetConsumerActionFactory
 org.apache.paimon.flink.action.MigrateTableActionFactory
 org.apache.paimon.flink.action.MigrateFileActionFactory
@@ -51,6 +52,7 @@ org.apache.paimon.flink.procedure.CreateTagFromTimestampProcedure
 org.apache.paimon.flink.procedure.CreateTagFromWatermarkProcedure
 org.apache.paimon.flink.procedure.DeleteTagProcedure
 org.apache.paimon.flink.procedure.ExpireTagsProcedure
+org.apache.paimon.flink.procedure.ReplaceTagProcedure
 org.apache.paimon.flink.procedure.CreateBranchProcedure
 org.apache.paimon.flink.procedure.DeleteBranchProcedure
 org.apache.paimon.flink.procedure.DropPartitionProcedure

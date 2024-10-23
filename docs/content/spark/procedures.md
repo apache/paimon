@@ -122,6 +122,19 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>replace_tag</td>
+      <td>
+         Replace an existing tag with new tag info. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>tag: name of the existed tag. Cannot be empty.</li>
+            <li>snapshot(Long):  id of the snapshot which the tag is based on, it is optional.</li>
+            <li>time_retained: The maximum time retained for the existing tag, it is optional.</li>
+      </td>
+      <td>
+         CALL sys.replace_tag(table => 'default.T', tag_name => 'tag1', snapshot => 10, time_retained => '1 d')
+      </td>
+    </tr>
+    <tr>
       <td>delete_tag</td>
       <td>
          To delete a tag. Arguments:

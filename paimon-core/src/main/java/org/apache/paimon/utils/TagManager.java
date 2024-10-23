@@ -97,13 +97,26 @@ public class TagManager {
 
     /** Create a tag from given snapshot and save it in the storage. */
     public void createTag(
+            Snapshot snapshot, String tagName, Duration timeRetained, List<TagCallback> callbacks) {
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name '%s' is blank.", tagName);
+        checkArgument(!tagExists(tagName), "Tag name '%s' already exists.", tagName);
+        createOrReplaceTag(snapshot, tagName, timeRetained, callbacks);
+    }
+
+    /** Replace a tag from given snapshot and save it in the storage. */
+    public void replaceTag(Snapshot snapshot, String tagName, Duration timeRetained) {
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name '%s' is blank.", tagName);
+        checkArgument(tagExists(tagName), "Tag name '%s' does not exist.", tagName);
+        createOrReplaceTag(snapshot, tagName, timeRetained, null);
+    }
+
+    public void createOrReplaceTag(
             Snapshot snapshot,
             String tagName,
             @Nullable Duration timeRetained,
-            List<TagCallback> callbacks) {
-        checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name '%s' is blank.", tagName);
-
+            @Nullable List<TagCallback> callbacks) {
         // When timeRetained is not defined, please do not write the tagCreatorTime field,
         // as this will cause older versions (<= 0.7) of readers to be unable to read this
         // tag.
@@ -117,15 +130,7 @@ public class TagManager {
         Path tagPath = tagPath(tagName);
 
         try {
-            if (tagExists(tagName)) {
-                Snapshot tagged = taggedSnapshot(tagName);
-                Preconditions.checkArgument(
-                        tagged.id() == snapshot.id(), "Tag name '%s' already exists.", tagName);
-                // update tag metadata into for the same snapshot of the same tag name.
-                fileIO.overwriteFileUtf8(tagPath, content);
-            } else {
-                fileIO.writeFile(tagPath, content, false);
-            }
+            fileIO.overwriteFileUtf8(tagPath, content);
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
@@ -135,11 +140,13 @@ public class TagManager {
                     e);
         }
 
-        try {
-            callbacks.forEach(callback -> callback.notifyCreation(tagName));
-        } finally {
-            for (TagCallback tagCallback : callbacks) {
-                IOUtils.closeQuietly(tagCallback);
+        if (callbacks != null) {
+            try {
+                callbacks.forEach(callback -> callback.notifyCreation(tagName));
+            } finally {
+                for (TagCallback tagCallback : callbacks) {
+                    IOUtils.closeQuietly(tagCallback);
+                }
             }
         }
     }

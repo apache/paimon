@@ -23,10 +23,10 @@ import org.apache.flink.api.java.tuple.Tuple3;
 import java.time.Duration;
 import java.util.Map;
 
-/** Factory to create {@link CreateTagAction}. */
-public class CreateTagActionFactory extends CreateOrReplaceTagActionFactory {
+/** Factory to create {@link ReplaceTagAction}. */
+public class ReplaceTagActionFactory extends CreateOrReplaceTagActionFactory {
 
-    public static final String IDENTIFIER = "create_tag";
+    public static final String IDENTIFIER = "replace_tag";
 
     @Override
     public String identifier() {
@@ -40,7 +40,7 @@ public class CreateTagActionFactory extends CreateOrReplaceTagActionFactory {
             String tagName,
             Long snapshot,
             Duration timeRetained) {
-        return new CreateTagAction(
+        return new ReplaceTagAction(
                 tablePath.f0,
                 tablePath.f1,
                 tablePath.f2,
@@ -52,13 +52,13 @@ public class CreateTagActionFactory extends CreateOrReplaceTagActionFactory {
 
     @Override
     public void printHelp() {
-        System.out.println("Action \"create_tag\" creates a tag from given snapshot.");
+        System.out.println("Action \"replace_tag\" to replace an existing tag with new tag info.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  create_tag --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> --tag_name <tag_name> [--snapshot <snapshot_id>]");
+                "  replace_tag --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> --tag_name <tag_name> [--snapshot <snapshot_id>] [--time_retained <time_retained>]");
         System.out.println();
     }
 }
