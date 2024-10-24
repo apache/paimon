@@ -120,7 +120,6 @@ public class DataTableSource extends BaseDataTableSource
         if (streaming) {
             return TableStats.UNKNOWN;
         }
-        scanSplitsForInference();
         Optional<Statistics> optionStatistics = table.statistics();
         if (optionStatistics.isPresent()) {
             Statistics statistics = optionStatistics.get();
@@ -136,6 +135,7 @@ public class DataTableSource extends BaseDataTableSource
                 return new TableStats(statistics.mergedRecordCount().getAsLong(), flinkColStats);
             }
         }
+        scanSplitsForInference();
         return new TableStats(splitStatistics.totalRowCount());
     }
 
