@@ -85,13 +85,14 @@ public class ResetConsumerProcedure extends BaseProcedure {
                 table -> {
                     FileStoreTable fileStoreTable = (FileStoreTable) table;
                     SnapshotManager snapshotManager = fileStoreTable.snapshotManager();
-                    if (nextSnapshotId != null && !snapshotManager.snapshotExists(nextSnapshotId)) {
-                        Long latestSnapshotId = snapshotManager.latestSnapshotId();
-                        Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+                    Long latestSnapshotId = snapshotManager.latestSnapshotId();
+                    if (nextSnapshotId != null
+                            && latestSnapshotId != null
+                            && nextSnapshotId > latestSnapshotId) {
                         throw new SnapshotNotExistException(
                                 String.format(
-                                        "the snapshot id is not exist, you can set it between %s and %s",
-                                        earliestSnapshotId, latestSnapshotId));
+                                        "the snapshot id is not exist, you can set it <= %s.",
+                                        latestSnapshotId));
                     }
 
                     ConsumerManager consumerManager =

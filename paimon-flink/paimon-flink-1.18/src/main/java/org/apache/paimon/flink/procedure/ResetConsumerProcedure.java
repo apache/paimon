@@ -52,13 +52,12 @@ public class ResetConsumerProcedure extends ProcedureBase {
         FileStoreTable fileStoreTable =
                 (FileStoreTable) catalog.getTable(Identifier.fromString(tableId));
         SnapshotManager snapshotManager = fileStoreTable.snapshotManager();
-        if (!snapshotManager.snapshotExists(nextSnapshotId)) {
-            Long latestSnapshotId = snapshotManager.latestSnapshotId();
-            Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        if (latestSnapshotId != null && nextSnapshotId > latestSnapshotId) {
             throw new SnapshotNotExistException(
                     String.format(
-                            "the snapshot id is not exist, you can set it between %s and %s",
-                            earliestSnapshotId, latestSnapshotId));
+                            "the snapshot id is not exist, you can set it <= %s.",
+                            latestSnapshotId));
         }
 
         ConsumerManager consumerManager =

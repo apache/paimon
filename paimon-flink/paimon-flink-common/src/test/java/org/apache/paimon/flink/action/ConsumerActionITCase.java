@@ -166,7 +166,8 @@ public class ConsumerActionITCase extends ActionITCaseBase {
             case "action":
                 assertThrows(
                         SnapshotNotExistException.class,
-                        () -> createAction(ResetConsumerAction.class, args1).run());
+                        () -> createAction(ResetConsumerAction.class, args1).run(),
+                        "the snapshot id is not exist, you can set it <= 3.");
                 break;
             case "procedure_indexed":
                 assertThrows(
@@ -176,7 +177,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                                         String.format(
                                                 "CALL sys.reset_consumer('%s.%s', 'myid', 10)",
                                                 database, tableName)),
-                        "the snapshot id is not exist, you can set it between 1 and 3.");
+                        "the snapshot id is not exist, you can set it <= 3.");
                 break;
             case "procedure_named":
                 assertThrows(
@@ -186,7 +187,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                                         String.format(
                                                 "CALL sys.reset_consumer(`table` => '%s.%s', consumer_id => 'myid', next_snapshot_id => cast(10 as bigint))",
                                                 database, tableName)),
-                        "the snapshot id is not exist, you can set it between 1 and 3.");
+                        "the snapshot id is not exist, you can set it <= 3.");
                 break;
             default:
                 throw new UnsupportedOperationException(invoker);

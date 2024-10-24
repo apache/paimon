@@ -52,13 +52,14 @@ public class ResetConsumerAction extends TableActionBase {
     public void run() throws Exception {
         FileStoreTable dataTable = (FileStoreTable) table;
         SnapshotManager snapshotManager = dataTable.snapshotManager();
-        if (nextSnapshotId != null && !snapshotManager.snapshotExists(nextSnapshotId)) {
-            Long latestSnapshotId = snapshotManager.latestSnapshotId();
-            Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        if (nextSnapshotId != null
+                && latestSnapshotId != null
+                && nextSnapshotId > latestSnapshotId) {
             throw new SnapshotNotExistException(
                     String.format(
-                            "the snapshot id is not exist, you can set it between %s and %s",
-                            earliestSnapshotId, latestSnapshotId));
+                            "the snapshot id is not exist, you can set it <= %s.",
+                            latestSnapshotId));
         }
 
         ConsumerManager consumerManager =
