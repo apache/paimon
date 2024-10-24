@@ -672,10 +672,6 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     @Test
     public void testReadFilter() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        if (table.coreOptions().fileFormat().getFormatIdentifier().equals("parquet")) {
-            // TODO support parquet reader filter push down
-            return;
-        }
 
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -789,6 +785,81 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                             conf.set(DELETION_VECTORS_ENABLED, true);
                         });
         innerTestWithShard(table);
+    }
+
+    @Test
+    public void testDeletionVectorsWithFileIndexInFile() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(BUCKET, 1);
+                            conf.set(DELETION_VECTORS_ENABLED, true);
+                            conf.set(TARGET_FILE_SIZE, MemorySize.ofBytes(1));
+                            conf.set("file-index.bloom-filter.columns", "b");
+                        });
+
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 1, 300L));
+        write.write(rowData(1, 2, 400L));
+        write.write(rowData(1, 3, 200L));
+        write.write(rowData(1, 4, 500L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(rowData(1, 5, 100L));
+        write.write(rowData(1, 6, 600L));
+        write.write(rowData(1, 7, 400L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(2);
+        TableRead read = table.newRead().withFilter(builder.equal(2, 300L));
+        assertThat(getResult(read, splits, BATCH_ROW_TO_STRING))
+                .hasSameElementsAs(
+                        Arrays.asList(
+                                "1|1|300|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|2|400|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|3|200|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|4|500|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
+    public void testDeletionVectorsWithFileIndexInMeta() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(BUCKET, 1);
+                            conf.set(DELETION_VECTORS_ENABLED, true);
+                            conf.set(TARGET_FILE_SIZE, MemorySize.ofBytes(1));
+                            conf.set("file-index.bloom-filter.columns", "b");
+                            conf.set("file-index.bloom-filter.b.items", "20");
+                        });
+
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 1, 300L));
+        write.write(rowData(1, 2, 400L));
+        write.write(rowData(1, 3, 200L));
+        write.write(rowData(1, 4, 500L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(rowData(1, 5, 100L));
+        write.write(rowData(1, 6, 600L));
+        write.write(rowData(1, 7, 400L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
+        Predicate predicate = builder.equal(2, 300L);
+
+        List<Split> splits =
+                toSplits(table.newSnapshotReader().withFilter(predicate).read().dataSplits());
+
+        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(1);
     }
 
     @Test
