@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action.cdc.format.ogg;
 
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.AbstractJsonRecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -58,8 +57,8 @@ public class OggRecordParser extends AbstractJsonRecordParser {
     private static final String OP_INSERT = "I";
     private static final String OP_DELETE = "D";
 
-    public OggRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        super(typeMapping, computedColumns);
+    public OggRecordParser(TypeMapping typeMapping) {
+        super(typeMapping);
     }
 
     @Override

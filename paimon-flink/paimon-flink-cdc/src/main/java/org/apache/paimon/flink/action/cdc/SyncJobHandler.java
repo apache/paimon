@@ -38,7 +38,6 @@ import org.apache.flink.connector.pulsar.common.config.PulsarOptions;
 import org.apache.flink.connector.pulsar.source.PulsarSourceOptions;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
 
-import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.KAFKA_CONF;
@@ -197,22 +196,18 @@ public class SyncJobHandler {
     }
 
     public FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> provideRecordParser(
-            List<ComputedColumn> computedColumns,
-            TypeMapping typeMapping,
-            CdcMetadataConverter[] metadataConverters) {
+            TypeMapping typeMapping, CdcMetadataConverter[] metadataConverters) {
         switch (sourceType) {
             case MYSQL:
-                return new MySqlRecordParser(
-                        cdcSourceConfig, computedColumns, typeMapping, metadataConverters);
+                return new MySqlRecordParser(cdcSourceConfig, typeMapping, metadataConverters);
             case POSTGRES:
-                return new PostgresRecordParser(
-                        cdcSourceConfig, computedColumns, typeMapping, metadataConverters);
+                return new PostgresRecordParser(cdcSourceConfig, typeMapping, metadataConverters);
             case KAFKA:
             case PULSAR:
                 DataFormat dataFormat = provideDataFormat();
-                return dataFormat.createParser(typeMapping, computedColumns);
+                return dataFormat.createParser(typeMapping);
             case MONGODB:
-                return new MongoDBRecordParser(computedColumns, cdcSourceConfig);
+                return new MongoDBRecordParser(cdcSourceConfig);
             default:
                 throw new UnsupportedOperationException("Unknown source type " + sourceType);
         }

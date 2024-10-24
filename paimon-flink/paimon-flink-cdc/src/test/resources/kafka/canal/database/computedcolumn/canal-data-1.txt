@@ -16,26 +16,5 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.format;
-
-import org.apache.paimon.flink.action.cdc.TypeMapping;
-
-/**
- * Represents a factory for creating instances of {@link AbstractRecordParser}.
- *
- * <p>This interface provides a method to create a new RecordParser with specific configurations
- * such as case sensitivity, table name conversion, and computed columns.
- *
- * @see AbstractRecordParser
- */
-@FunctionalInterface
-public interface RecordParserFactory {
-
-    /**
-     * Creates a new instance of {@link AbstractRecordParser} with the specified configurations.
-     *
-     * @param typeMapping Data type mapping options.
-     * @return A new instance of {@link AbstractRecordParser}.
-     */
-    AbstractRecordParser createParser(TypeMapping typeMapping);
-}
+{"data":[{"_id":"1","_date":"2023-03-23","_timestamp":"2022-01-01 14:30:00"}],"database":"paimon_sync_table","es":1683006706000,"id":92,"isDdl":false,"mysqlType":{"_id":"INT","_date":"DATE","_timestamp":"TIMESTAMP"},"old":null,"pkNames":["_id"],"sql":"","sqlType":{"_id":4,"_date":91,"_timestamp":95},"table":"test_computed_column1","ts":1683006706728,"type":"INSERT"}
+{"data":[{"_id":"2","_date":"2024-03-23"}],"database":"paimon_sync_table","es":1683006706000,"id":92,"isDdl":false,"mysqlType":{"_id":"INT","_date":"DATE"},"old":null,"pkNames":["_id"],"sql":"","sqlType":{"_id":4,"_date":91},"table":"test_computed_column2","ts":1683006706728,"type":"INSERT"}

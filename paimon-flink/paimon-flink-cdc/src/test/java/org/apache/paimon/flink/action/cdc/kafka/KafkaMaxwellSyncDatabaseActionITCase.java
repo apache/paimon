@@ -72,4 +72,10 @@ public class KafkaMaxwellSyncDatabaseActionITCase extends KafkaSyncDatabaseActio
     public void testIncludingAndExcludingTables() throws Exception {
         testIncludingAndExcludingTables(MAXWELL);
     }
+
+    @Test
+    @Timeout(60)
+    public void testComputedColumn() throws Exception {
+        testComputedColumn(MAXWELL);
+    }
 }

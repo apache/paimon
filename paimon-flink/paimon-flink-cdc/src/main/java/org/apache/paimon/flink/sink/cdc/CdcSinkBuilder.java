@@ -98,7 +98,9 @@ public class CdcSinkBuilder<T> {
 
         SingleOutputStreamOperator<CdcRecord> parsed =
                 input.forward()
-                        .process(new CdcParsingProcessFunction<>(parserFactory))
+                        .process(
+                                new CdcParsingProcessFunction<>(
+                                        parserFactory, dataTable.schema().fields()))
                         .name("Side Output")
                         .setParallelism(input.getParallelism());
 

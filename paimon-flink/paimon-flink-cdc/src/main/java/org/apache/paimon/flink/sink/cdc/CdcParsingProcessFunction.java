@@ -45,9 +45,11 @@ public class CdcParsingProcessFunction<T> extends ProcessFunction<T, CdcRecord> 
     private final EventParser.Factory<T> parserFactory;
 
     private transient EventParser<T> parser;
+    private final List<DataField> fields;
 
-    public CdcParsingProcessFunction(EventParser.Factory<T> parserFactory) {
+    public CdcParsingProcessFunction(EventParser.Factory<T> parserFactory, List<DataField> fields) {
         this.parserFactory = parserFactory;
+        this.fields = fields;
     }
 
     @Override
@@ -59,10 +61,12 @@ public class CdcParsingProcessFunction<T> extends ProcessFunction<T, CdcRecord> 
     public void processElement(T raw, Context context, Collector<CdcRecord> collector)
             throws Exception {
         parser.setRawEvent(raw);
+        parser.evalComputedColumns(fields);
         List<DataField> schemaChange = parser.parseSchemaChange();
         if (!schemaChange.isEmpty()) {
             context.output(NEW_DATA_FIELD_LIST_OUTPUT_TAG, schemaChange);
         }
+
         parser.parseRecords().forEach(collector::collect);
     }
 }
