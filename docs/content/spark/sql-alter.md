@@ -119,6 +119,14 @@ The following SQL drops the partitions of the paimon table. For spark sql, you n
 ALTER TABLE my_table DROP PARTITION (`id` = 1, `name` = 'paimon');
 ```
 
+## Adding Partitions
+
+The following SQL adds the partitions of the paimon table. For spark sql, you need to specify all the partition columns.
+
+```sql
+ALTER TABLE my_table ADD PARTITION (`id` = 1, `name` = 'paimon');
+```
+
 ## Changing Column Comment
 
 The following SQL changes comment of column `buy_count` to `buy count`.
