@@ -23,6 +23,8 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.SnapshotNotExistException;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
@@ -61,6 +63,16 @@ public class ResetConsumerProcedure extends ProcedureBase {
             throws Catalog.TableNotExistException {
         FileStoreTable fileStoreTable =
                 (FileStoreTable) catalog.getTable(Identifier.fromString(tableId));
+        SnapshotManager snapshotManager = fileStoreTable.snapshotManager();
+        if (nextSnapshotId != null && !snapshotManager.snapshotExists(nextSnapshotId)) {
+            Long latestSnapshotId = snapshotManager.latestSnapshotId();
+            Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+            throw new SnapshotNotExistException(
+                    String.format(
+                            "the snapshot id is not exist, you can set it between %s and %s",
+                            earliestSnapshotId, latestSnapshotId));
+        }
+
         ConsumerManager consumerManager =
                 new ConsumerManager(
                         fileStoreTable.fileIO(),
