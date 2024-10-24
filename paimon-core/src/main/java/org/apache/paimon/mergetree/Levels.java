@@ -187,6 +187,11 @@ public class Levels {
             List<DataFileMeta> files = new ArrayList<>(runOfLevel(level).files());
             files.removeAll(before);
             files.addAll(after);
+            for (DataFileMeta file : after) {
+                if (!files.contains(file)) {
+                    files.add(file);
+                }
+            }
             levels.set(level - 1, SortedRun.fromUnsorted(files, keyComparator));
         }
     }
