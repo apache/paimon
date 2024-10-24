@@ -114,6 +114,21 @@ ALTER TABLE my_table DROP PARTITION (`id` = 1), PARTITION (`id` = 2);
 
 ```
 
+## Adding Partitions
+
+The following SQL adds the partitions of the paimon table.
+
+For flink sql, you can specify the partial columns of partition columns, and you can also specify multiple partition values at the same time.
+
+```sql
+ALTER TABLE my_table ADD PARTITION (`id` = 1);
+
+ALTER TABLE my_table ADD PARTITION (`id` = 1, `name` = 'paimon');
+
+ALTER TABLE my_table ADD PARTITION (`id` = 1), PARTITION (`id` = 2);
+
+```
+
 ## Changing Column Nullability
 
 The following SQL changes nullability of column `coupon_info`.
