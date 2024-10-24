@@ -50,17 +50,18 @@ Set the following table options, so that Paimon tables can generate Iceberg comp
       <td>
         When set, produce Iceberg metadata after a snapshot is committed, so that Iceberg readers can read Paimon's raw data files.
         <ul>
-          <li>disabled: Disable Iceberg compatibility support.</li>
-          <li>table-location: Store Iceberg metadata in each table's directory.</li>
-          <li>hadoop-catalog: Store Iceberg metadata in a separate directory. This directory can be specified as the warehouse directory of an Iceberg Hadoop catalog.</li>
-          <li>hive-catalog: Not only store Iceberg metadata like hadoop-catalog, but also create Iceberg external table in Hive.</li>
+          <li><code>disabled</code>: Disable Iceberg compatibility support.</li>
+          <li><code>table-location</code>: Store Iceberg metadata in each table's directory.</li>
+          <li><code>hadoop-catalog</code>: Store Iceberg metadata in a separate directory. This directory can be specified as the warehouse directory of an Iceberg Hadoop catalog.</li>
+          <li><code>hive-catalog</code>: Not only store Iceberg metadata like hadoop-catalog, but also create Iceberg external table in Hive.</li>
         </ul>
       </td>
     </tr>
     </tbody>
 </table>
 
-For most SQL users, we recommend setting `'metadata.iceberg.storage' = 'hadoop-catalog'`,
+For most SQL users, we recommend setting `'metadata.iceberg.storage' = 'hadoop-catalog'`
+or `'metadata.iceberg.storage' = 'hive-catalog'`,
 so that all tables can be visited as an Iceberg warehouse.
 For Iceberg Java API users, you might consider setting `'metadata.iceberg.storage' = 'table-location'`,
 so you can visit each table with its table path.
