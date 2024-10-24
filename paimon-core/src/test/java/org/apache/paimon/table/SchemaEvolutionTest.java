@@ -41,7 +41,10 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -354,6 +357,51 @@ public class SchemaEvolutionTest {
     }
 
     @Test
+    public void testRenamePrimaryKeyColumn() throws Exception {
+        Schema schema =
+                new Schema(
+                        RowType.of(DataTypes.INT(), DataTypes.BIGINT()).getFields(),
+                        Lists.newArrayList("f0"),
+                        Lists.newArrayList("f0", "f1"),
+                        Maps.newHashMap(),
+                        "");
+
+        schemaManager.createTable(schema);
+        assertThat(schemaManager.latest().get().fieldNames()).containsExactly("f0", "f1");
+
+        schemaManager.commitChanges(SchemaChange.renameColumn("f1", "f1_"));
+        TableSchema newSchema = schemaManager.latest().get();
+        assertThat(newSchema.fieldNames()).containsExactly("f0", "f1_");
+        assertThat(newSchema.primaryKeys()).containsExactlyInAnyOrder("f0", "f1_");
+
+        assertThatThrownBy(
+                        () -> schemaManager.commitChanges(SchemaChange.renameColumn("f0", "f0_")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot rename partition column: [f0]");
+    }
+
+    @Test
+    public void testRenameBucketKeyColumn() throws Exception {
+        Schema schema =
+                new Schema(
+                        RowType.of(DataTypes.INT(), DataTypes.BIGINT()).getFields(),
+                        ImmutableList.of(),
+                        Lists.newArrayList("f0", "f1"),
+                        ImmutableMap.of(
+                                CoreOptions.BUCKET_KEY.key(),
+                                "f1,f0",
+                                CoreOptions.BUCKET.key(),
+                                "16"),
+                        "");
+
+        schemaManager.createTable(schema);
+        schemaManager.commitChanges(SchemaChange.renameColumn("f0", "f0_"));
+        TableSchema newSchema = schemaManager.latest().get();
+
+        assertThat(newSchema.options().get(CoreOptions.BUCKET_KEY.key())).isEqualTo("f1,f0_");
+    }
+
+    @Test
     public void testDropField() throws Exception {
         Schema schema =
                 new Schema(
@@ -379,14 +427,14 @@ public class SchemaEvolutionTest {
                                 schemaManager.commitChanges(
                                         Collections.singletonList(SchemaChange.dropColumn("f0"))))
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage(String.format("Cannot drop/rename partition key[%s]", "f0"));
+                .hasMessage(String.format("Cannot drop partition key or primary key: [%s]", "f0"));
 
         assertThatThrownBy(
                         () ->
                                 schemaManager.commitChanges(
                                         Collections.singletonList(SchemaChange.dropColumn("f2"))))
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage(String.format("Cannot drop/rename primary key[%s]", "f2"));
+                .hasMessage(String.format("Cannot drop partition key or primary key: [%s]", "f2"));
     }
 
     @Test
