@@ -46,6 +46,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 
 import static org.apache.paimon.utils.VarLengthIntUtils.MAX_VAR_LONG_SIZE;
@@ -67,6 +68,9 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     private final Cache<String, LookupFile> lookupFileCache;
     private final Set<String> ownCachedFiles;
 
+    private final ReentrantLock[] locks;
+    private final int lookupAsyncThreadNumber;
+
     public LookupLevels(
             Levels levels,
             Comparator<InternalRow> keyComparator,
@@ -76,7 +80,8 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             Function<String, File> localFileFactory,
             LookupStoreFactory lookupStoreFactory,
             Function<Long, BloomFilter.Builder> bfGenerator,
-            Cache<String, LookupFile> lookupFileCache) {
+            Cache<String, LookupFile> lookupFileCache,
+            int lookupAsyncThreadNumber) {
         this.levels = levels;
         this.keyComparator = keyComparator;
         this.keySerializer = new RowCompactedSerializer(keyType);
@@ -87,7 +92,35 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         this.bfGenerator = bfGenerator;
         this.lookupFileCache = lookupFileCache;
         this.ownCachedFiles = new HashSet<>();
+        this.lookupAsyncThreadNumber = lookupAsyncThreadNumber;
+        this.locks = new ReentrantLock[lookupAsyncThreadNumber];
+        for (int i = 0; i < lookupAsyncThreadNumber; i++) {
+            locks[i] = new ReentrantLock();
+        }
         levels.addDropFileCallback(this);
+    }
+
+    public LookupLevels(
+            Levels levels,
+            Comparator<InternalRow> keyComparator,
+            RowType keyType,
+            ValueProcessor<T> valueProcessor,
+            IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory,
+            Function<String, File> localFileFactory,
+            LookupStoreFactory lookupStoreFactory,
+            Function<Long, BloomFilter.Builder> bfGenerator,
+            Cache<String, LookupFile> lookupFileCache) {
+        this(
+                levels,
+                keyComparator,
+                keyType,
+                valueProcessor,
+                fileReaderFactory,
+                localFileFactory,
+                lookupStoreFactory,
+                bfGenerator,
+                lookupFileCache,
+                1);
     }
 
     public Levels getLevels() {
@@ -126,29 +159,37 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
 
     @Nullable
     private T lookup(InternalRow key, DataFileMeta file) throws IOException {
-        LookupFile lookupFile = lookupFileCache.getIfPresent(file.fileName());
-
-        boolean newCreatedLookupFile = false;
-        if (lookupFile == null) {
-            lookupFile = createLookupFile(file);
-            newCreatedLookupFile = true;
-        }
-
-        byte[] valueBytes;
+        ReentrantLock lock = locks[Math.abs(file.hashCode()) % lookupAsyncThreadNumber];
         try {
-            byte[] keyBytes = keySerializer.serializeToBytes(key);
-            valueBytes = lookupFile.get(keyBytes);
+            lock.lock();
+            LookupFile lookupFile = lookupFileCache.getIfPresent(file.fileName());
+
+            boolean newCreatedLookupFile = false;
+            if (lookupFile == null) {
+                lookupFile = createLookupFile(file);
+                newCreatedLookupFile = true;
+            }
+
+            byte[] valueBytes;
+            try {
+                byte[] keyBytes = keySerializer.serializeToBytes(key);
+                valueBytes = lookupFile.get(keyBytes);
+            } finally {
+                if (newCreatedLookupFile) {
+                    lookupFileCache.put(file.fileName(), lookupFile);
+                }
+            }
+            if (valueBytes == null) {
+                return null;
+            }
+
+            return valueProcessor.readFromDisk(
+                    key, lookupFile.remoteFile().level(), valueBytes, file.fileName());
         } finally {
-            if (newCreatedLookupFile) {
-                lookupFileCache.put(file.fileName(), lookupFile);
+            if (lock != null) {
+                lock.unlock();
             }
         }
-        if (valueBytes == null) {
-            return null;
-        }
-
-        return valueProcessor.readFromDisk(
-                key, lookupFile.remoteFile().level(), valueBytes, file.fileName());
     }
 
     private LookupFile createLookupFile(DataFileMeta file) throws IOException {

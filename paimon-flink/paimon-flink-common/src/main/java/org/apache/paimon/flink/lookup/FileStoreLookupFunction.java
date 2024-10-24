@@ -68,6 +68,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
+import static org.apache.paimon.CoreOptions.LOOKUP_HASH_ASYNC_THREAD_NUMBER;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_CACHE_MODE;
 import static org.apache.paimon.flink.query.RemoteTableQuery.isRemoteServiceAvailable;
 import static org.apache.paimon.lookup.RocksDBOptions.LOOKUP_CACHE_ROWS;
@@ -98,9 +99,14 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     protected FunctionContext functionContext;
 
     @Nullable private Filter<InternalRow> cacheRowFilter;
+    private final int lookupAsyncThreadNumber;
 
     public FileStoreLookupFunction(
-            Table table, int[] projection, int[] joinKeyIndex, @Nullable Predicate predicate) {
+            Table table,
+            int[] projection,
+            int[] joinKeyIndex,
+            @Nullable Predicate predicate,
+            int lookupAsyncThreadNumber) {
         if (!TableScanUtils.supportCompactDiffStreamingReading(table)) {
             TableScanUtils.streamingReadingValidate(table);
         }
@@ -131,9 +137,15 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         }
 
         this.predicate = predicate;
+        this.lookupAsyncThreadNumber = lookupAsyncThreadNumber;
     }
 
-    public void open(FunctionContext context) throws Exception {
+    public FileStoreLookupFunction(
+            Table table, int[] projection, int[] joinKeyIndex, @Nullable Predicate predicate) {
+        this(table, projection, joinKeyIndex, predicate, 1);
+    }
+
+    public synchronized void open(FunctionContext context) throws Exception {
         this.functionContext = context;
         String tmpDirectory = getTmpDirectory(context);
         open(tmpDirectory);
@@ -162,7 +174,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
         List<String> fieldNames = table.rowType().getFieldNames();
         int[] projection = projectFields.stream().mapToInt(fieldNames::indexOf).toArray();
-        FileStoreTable storeTable = (FileStoreTable) table;
+        FileStoreTable storeTable =
+                setDynamicOptions((FileStoreTable) table, lookupAsyncThreadNumber);
 
         if (options.get(LOOKUP_CACHE_MODE) == LookupCacheMode.AUTO
                 && new HashSet<>(table.primaryKeys()).equals(new HashSet<>(joinKeys))) {
@@ -202,6 +215,14 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             lookupTable.specifyCacheRowFilter(cacheRowFilter);
         }
         lookupTable.open();
+    }
+
+    private FileStoreTable setDynamicOptions(
+            FileStoreTable storeTable, int lookupAsyncThreadNumber) {
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(
+                LOOKUP_HASH_ASYNC_THREAD_NUMBER.key(), String.valueOf(lookupAsyncThreadNumber));
+        return storeTable.copy(dynamicOptions);
     }
 
     @Nullable
@@ -248,7 +269,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     }
 
     @Nullable
-    private BinaryRow refreshDynamicPartition(boolean reopen) throws Exception {
+    private synchronized BinaryRow refreshDynamicPartition(boolean reopen) throws Exception {
         if (partitionLoader == null) {
             return null;
         }
@@ -284,7 +305,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         return createPartitionPredicate(rowType, partitionMap);
     }
 
-    private void reopen() {
+    private synchronized void reopen() {
         try {
             close();
             open();
@@ -293,7 +314,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         }
     }
 
-    private void checkRefresh() throws Exception {
+    private synchronized void checkRefresh() throws Exception {
         if (nextLoadTime > System.currentTimeMillis()) {
             return;
         }
@@ -319,7 +340,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     }
 
     @Override
-    public void close() throws IOException {
+    public synchronized void close() throws IOException {
         if (lookupTable != null) {
             lookupTable.close();
             lookupTable = null;
