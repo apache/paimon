@@ -143,8 +143,8 @@ public abstract class SynchronizationActionBase extends ActionBase {
     protected void validateRuntimeExecutionMode() {
         checkArgument(
                 env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
-                        != RuntimeExecutionMode.BATCH,
-                "Don't support batch mode for flink-cdc sync table action.");
+                        == RuntimeExecutionMode.STREAMING,
+                "It's only support STREAMING mode for flink-cdc sync table action.");
     }
 
     private DataStreamSource<CdcSourceRecord> buildDataStreamSource(Object source) {
