@@ -57,8 +57,8 @@ expect a mode to have maximum writing throughput, the compaction can be done slo
 You can use the following strategies for your table:
 
 ```shell
-num-sorted-run.stop-trigger = 2147483647
-sort-spill-threshold = 10
+num-sorted-run.stop-trigger = 10
+sort-spill-threshold = 2147483647
 lookup-wait = false
 ```
 
