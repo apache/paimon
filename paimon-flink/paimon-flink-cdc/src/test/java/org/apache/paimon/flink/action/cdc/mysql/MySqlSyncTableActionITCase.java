@@ -1514,7 +1514,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "Don't support batch mode for flink-cdc sync table action"));
+                                "It's only support STREAMING mode for flink-cdc sync table action"));
 
         runActionWithDefaultEnv(action);
 
