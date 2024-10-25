@@ -54,6 +54,11 @@ under the License.
             <version>${spark.version}</version>
         </dependency>
 
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-bundle</artifactId>
+        </dependency>
+
         <!-- test -->
 
         <dependency>
