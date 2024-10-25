@@ -19,6 +19,7 @@
 package org.apache.paimon.privilege;
 
 import org.apache.paimon.FileStore;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.schema.TableSchema;
@@ -35,12 +36,14 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
 import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 /** {@link FileStoreTable} with privilege checks. */
 public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
@@ -53,6 +56,24 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
         super(wrapped);
         this.privilegeChecker = privilegeChecker;
         this.identifier = identifier;
+    }
+
+    @Override
+    public SnapshotManager snapshotManager() {
+        privilegeChecker.assertCanSelectOrInsert(identifier);
+        return wrapped.snapshotManager();
+    }
+
+    @Override
+    public OptionalLong latestSnapshotId() {
+        privilegeChecker.assertCanSelectOrInsert(identifier);
+        return wrapped.latestSnapshotId();
+    }
+
+    @Override
+    public Snapshot snapshot(long snapshotId) {
+        privilegeChecker.assertCanSelectOrInsert(identifier);
+        return wrapped.snapshot(snapshotId);
     }
 
     @Override
