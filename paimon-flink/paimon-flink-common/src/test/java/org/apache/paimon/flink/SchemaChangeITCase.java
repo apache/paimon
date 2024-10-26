@@ -1009,21 +1009,33 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
 
     @Test
     public void testSequenceFieldSortOrder() {
-        sql(
-                "CREATE TABLE T1 (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c BIGINT) WITH ('sequence.field'='c', 'sequence.field.sort.is.ascending'='false')");
-        sql("INSERT INTO T1 VALUES ('a', 'b', 1)");
-        sql("INSERT INTO T1 VALUES ('a', 'd', 3)");
-        sql("INSERT INTO T1 VALUES ('a', 'e', 2)");
-        List<Row> sql = sql("select * from T1");
-        assertThat(sql("select * from T1").toString()).isEqualTo("[+I[a, b, 1]]");
 
+        // test default condition
         sql(
-                "CREATE TABLE T2 (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c DOUBLE) WITH ('sequence.field'='c', 'sequence.field.sort.is.ascending'='true')");
-        sql("INSERT INTO T2 VALUES ('a', 'b', 1.0)");
-        sql("INSERT INTO T2 VALUES ('a', 'd', 3.0)");
-        sql("INSERT INTO T2 VALUES ('a', 'e', 2.0)");
+                "CREATE TABLE T1 (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c STRING) WITH ('sequence.field'='c')");
+        sql("INSERT INTO T1 VALUES ('a', 'b', 'l')");
+        sql("INSERT INTO T1 VALUES ('a', 'd', 'n')");
+        sql("INSERT INTO T1 VALUES ('a', 'e', 'm')");
+        List<Row> sql = sql("select * from T1");
+        assertThat(sql("select * from T1").toString()).isEqualTo("[+I[a, d, n]]");
+
+        // test for get largest record
+        sql(
+                "CREATE TABLE T2 (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c BIGINT) WITH ('sequence.field'='c', 'sequence.field.sort.is.ascending'='false')");
+        sql("INSERT INTO T2 VALUES ('a', 'b', 1)");
+        sql("INSERT INTO T2 VALUES ('a', 'd', 3)");
+        sql("INSERT INTO T2 VALUES ('a', 'e', 2)");
         sql = sql("select * from T2");
-        assertThat(sql("select * from T2").toString()).isEqualTo("[+I[a, d, 3.0]]");
+        assertThat(sql("select * from T2").toString()).isEqualTo("[+I[a, b, 1]]");
+
+        // test for get small record
+        sql(
+                "CREATE TABLE T3 (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c DOUBLE) WITH ('sequence.field'='c', 'sequence.field.sort.is.ascending'='true')");
+        sql("INSERT INTO T3 VALUES ('a', 'b', 1.0)");
+        sql("INSERT INTO T3 VALUES ('a', 'd', 3.0)");
+        sql("INSERT INTO T3 VALUES ('a', 'e', 2.0)");
+        sql = sql("select * from T3");
+        assertThat(sql("select * from T3").toString()).isEqualTo("[+I[a, d, 3.0]]");
     }
 
     @Test
