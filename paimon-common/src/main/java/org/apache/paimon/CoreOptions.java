@@ -2393,31 +2393,6 @@ public class CoreOptions implements Serializable {
         }
     }
 
-    /** Specifies the sort order for sequence field. */
-    public enum SequenceFieldSortORDER implements DescribedEnum {
-        Ascend("ascend", "keep the largest record."),
-
-        Descend("descend", "keep the small record");
-
-        private final String value;
-        private final String description;
-
-        SequenceFieldSortORDER(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-    }
-
     /** Specifies the log consistency mode for table. */
     public enum LogConsistency implements DescribedEnum {
         TRANSACTIONAL(
