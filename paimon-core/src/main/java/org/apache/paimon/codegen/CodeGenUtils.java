@@ -70,16 +70,20 @@ public class CodeGenUtils {
     }
 
     public static RecordComparator newRecordComparator(List<DataType> inputTypes) {
-        return newRecordComparator(inputTypes, IntStream.range(0, inputTypes.size()).toArray());
+        return newRecordComparator(
+                inputTypes, IntStream.range(0, inputTypes.size()).toArray(), true);
     }
 
     public static RecordComparator newRecordComparator(
-            List<DataType> inputTypes, int[] sortFields) {
+            List<DataType> inputTypes, int[] sortFields, boolean isAscendingOrder) {
         return generate(
                 RecordComparator.class,
                 inputTypes,
                 sortFields,
-                () -> getCodeGenerator().generateRecordComparator(inputTypes, sortFields));
+                () ->
+                        getCodeGenerator()
+                                .generateRecordComparator(
+                                        inputTypes, sortFields, isAscendingOrder));
     }
 
     public static RecordEqualiser newRecordEqualiser(List<DataType> fieldTypes) {

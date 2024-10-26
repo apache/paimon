@@ -1008,6 +1008,25 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testSequenceFieldSortOrder() {
+        sql(
+                "CREATE TABLE T1 (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c BIGINT) WITH ('sequence.field'='c', 'sequence.field.sort.is.ascending'='false')");
+        sql("INSERT INTO T1 VALUES ('a', 'b', 1)");
+        sql("INSERT INTO T1 VALUES ('a', 'd', 3)");
+        sql("INSERT INTO T1 VALUES ('a', 'e', 2)");
+        List<Row> sql = sql("select * from T1");
+        assertThat(sql("select * from T1").toString()).isEqualTo("[+I[a, b, 1]]");
+
+        sql(
+                "CREATE TABLE T2 (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c DOUBLE) WITH ('sequence.field'='c', 'sequence.field.sort.is.ascending'='true')");
+        sql("INSERT INTO T2 VALUES ('a', 'b', 1.0)");
+        sql("INSERT INTO T2 VALUES ('a', 'd', 3.0)");
+        sql("INSERT INTO T2 VALUES ('a', 'e', 2.0)");
+        sql = sql("select * from T2");
+        assertThat(sql("select * from T2").toString()).isEqualTo("[+I[a, d, 3.0]]");
+    }
+
+    @Test
     public void testAlterTableMetadataComment() {
         sql("CREATE TABLE T (a INT, name VARCHAR METADATA COMMENT 'header1', b INT)");
         List<Row> result = sql("SHOW CREATE TABLE T");

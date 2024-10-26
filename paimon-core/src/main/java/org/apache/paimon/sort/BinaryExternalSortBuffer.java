@@ -120,7 +120,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             int maxNumFileHandles,
             CompressOptions compression,
             MemorySize maxDiskSize) {
-        RecordComparator comparator = newRecordComparator(rowType.getFieldTypes(), keyFields);
+        RecordComparator comparator = newRecordComparator(rowType.getFieldTypes(), keyFields, true);
         BinaryInMemorySortBuffer sortBuffer =
                 BinaryInMemorySortBuffer.createBuffer(
                         newNormalizedKeyComputer(rowType.getFieldTypes(), keyFields),

@@ -610,6 +610,13 @@ public class CoreOptions implements Serializable {
                                     + " the sequence number determines which data is the most recent.");
 
     @Immutable
+    public static final ConfigOption<Boolean> SEQUENCE_FIELD_SORT_IS_ASCENDING =
+            key("sequence.field.sort.is.ascending")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription("Specify the order of sequence.field is ascending.");
+
+    @Immutable
     public static final ConfigOption<Boolean> PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE =
             key("partial-update.remove-record-on-delete")
                     .booleanType()
@@ -2043,6 +2050,10 @@ public class CoreOptions implements Serializable {
                 .orElse(Collections.emptyList());
     }
 
+    public Boolean sequenceFieldSortOrder() {
+        return options.get(SEQUENCE_FIELD_SORT_IS_ASCENDING);
+    }
+
     public boolean partialUpdateRemoveRecordOnDelete() {
         return options.get(PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE);
     }
@@ -2367,6 +2378,31 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         StartupMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Specifies the sort order for sequence field. */
+    public enum SequenceFieldSortORDER implements DescribedEnum {
+        Ascend("ascend", "keep the largest record."),
+
+        Descend("descend", "keep the small record");
+
+        private final String value;
+        private final String description;
+
+        SequenceFieldSortORDER(String value, String description) {
             this.value = value;
             this.description = description;
         }

@@ -338,6 +338,6 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     @Nullable
     public UserDefinedSeqComparator createUdsComparator() {
         return UserDefinedSeqComparator.create(
-                readerFactoryBuilder.readValueType(), sequenceFields);
+                readerFactoryBuilder.readValueType(), sequenceFields, true);
     }
 }

@@ -51,11 +51,12 @@ public class UserDefinedSeqComparator implements FieldsComparator {
 
     @Nullable
     public static UserDefinedSeqComparator create(RowType rowType, CoreOptions options) {
-        return create(rowType, options.sequenceField());
+        return create(rowType, options.sequenceField(), options.sequenceFieldSortOrder());
     }
 
     @Nullable
-    public static UserDefinedSeqComparator create(RowType rowType, List<String> sequenceFields) {
+    public static UserDefinedSeqComparator create(
+            RowType rowType, List<String> sequenceFields, boolean isAscendingOrder) {
         if (sequenceFields.isEmpty()) {
             return null;
         }
@@ -63,17 +64,19 @@ public class UserDefinedSeqComparator implements FieldsComparator {
         List<String> fieldNames = rowType.getFieldNames();
         int[] fields = sequenceFields.stream().mapToInt(fieldNames::indexOf).toArray();
 
-        return create(rowType, fields);
+        return create(rowType, fields, isAscendingOrder);
     }
 
     @Nullable
-    public static UserDefinedSeqComparator create(RowType rowType, int[] sequenceFields) {
+    public static UserDefinedSeqComparator create(
+            RowType rowType, int[] sequenceFields, boolean isAscendingOrder) {
         if (sequenceFields.length == 0) {
             return null;
         }
 
         RecordComparator comparator =
-                CodeGenUtils.newRecordComparator(rowType.getFieldTypes(), sequenceFields);
+                CodeGenUtils.newRecordComparator(
+                        rowType.getFieldTypes(), sequenceFields, isAscendingOrder);
         return new UserDefinedSeqComparator(sequenceFields, comparator);
     }
 }
