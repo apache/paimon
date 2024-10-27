@@ -28,9 +28,9 @@ under the License.
     <tbody>
         <tr>
             <td><h5>changelog.precommit-compact</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
+            <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>If true, it will compact several changelog files from the same partition into larger ones, in order to decrease the number of small files.</td>
+            <td>If true, it will add a changelog compact coordinator and worker operator after the writer operator,in order to compact several changelog files from the same partition into large ones, which can decrease the number of small files. </td>
         </tr>
         <tr>
             <td><h5>end-input.watermark</h5></td>
