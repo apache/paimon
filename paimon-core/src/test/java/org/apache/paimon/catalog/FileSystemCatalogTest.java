@@ -22,7 +22,8 @@ import org.apache.paimon.fs.Path;
 
 import org.junit.jupiter.api.BeforeEach;
 
-class FileSystemCatalogTest extends CatalogTestBase {
+/** Tests for {@link FileSystemCatalog}. */
+public class FileSystemCatalogTest extends CatalogTestBase {
 
     @BeforeEach
     public void setUp() throws Exception {

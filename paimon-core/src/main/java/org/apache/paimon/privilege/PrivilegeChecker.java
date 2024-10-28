@@ -24,6 +24,22 @@ import java.io.Serializable;
 
 /** Check if current user has privilege to perform related operations. */
 public interface PrivilegeChecker extends Serializable {
+    default void assertCanSelectOrInsert(Identifier identifier) {
+        try {
+            assertCanSelect(identifier);
+        } catch (NoPrivilegeException e) {
+            try {
+                assertCanInsert(identifier);
+            } catch (NoPrivilegeException e1) {
+                throw new NoPrivilegeException(
+                        e1.getUser(),
+                        e1.getObjectType(),
+                        e1.getIdentifier(),
+                        PrivilegeType.SELECT,
+                        PrivilegeType.INSERT);
+            }
+        }
+    }
 
     void assertCanSelect(Identifier identifier);
 
