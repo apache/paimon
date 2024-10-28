@@ -103,7 +103,7 @@ ALTER TABLE my_table DROP (c1, c2);
 
 The following SQL drops the partitions of the paimon table.
 
-For flink sql, you can specify the partial columns of partition columns, and you can also specify multiple partition values at the same time, only with metastore configured metastore.partitioned-table=true
+For flink sql, you can specify the partial columns of partition columns, and you can also specify multiple partition values at the same time.
 
 ```sql
 ALTER TABLE my_table DROP PARTITION (`id` = 1);
@@ -118,7 +118,7 @@ ALTER TABLE my_table DROP PARTITION (`id` = 1), PARTITION (`id` = 2);
 
 The following SQL adds the partitions of the paimon table.
 
-For flink sql, you can specify the partial columns of partition columns, and you can also specify multiple partition values at the same time.
+For flink sql, you can specify the partial columns of partition columns, and you can also specify multiple partition values at the same time, only with metastore configured metastore.partitioned-table=true
 
 ```sql
 ALTER TABLE my_table ADD PARTITION (`id` = 1);
