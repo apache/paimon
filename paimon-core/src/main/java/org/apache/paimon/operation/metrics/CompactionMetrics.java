@@ -20,6 +20,7 @@ package org.apache.paimon.operation.metrics;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.metrics.Counter;
 import org.apache.paimon.metrics.MetricGroup;
 import org.apache.paimon.metrics.MetricRegistry;
 
@@ -41,6 +42,9 @@ public class CompactionMetrics {
     public static final String AVG_LEVEL0_FILE_COUNT = "avgLevel0FileCount";
     public static final String COMPACTION_THREAD_BUSY = "compactionThreadBusy";
     public static final String AVG_COMPACTION_TIME = "avgCompactionTime";
+    public static final String COMPACTIONS_COMPLETED_COUNT = "compactionsCompletedCount";
+    public static final String COMPACTIONS_FAILED_COUNT = "compactionsFailedCount";
+    public static final String COMPACTIONS_QUEUED_COUNT = "compactionsQueuedCount";
     private static final long BUSY_MEASURE_MILLIS = 60_000;
     private static final int COMPACTION_TIME_WINDOW = 100;
 
@@ -48,6 +52,9 @@ public class CompactionMetrics {
     private final Map<PartitionAndBucket, ReporterImpl> reporters;
     private final Map<Long, CompactTimer> compactTimers;
     private final Queue<Long> compactionTimes;
+    private Counter compactionsCompletedCounter;
+    private Counter compactionsFailedCounter;
+    private Counter compactionsQueuedCounter;
 
     public CompactionMetrics(MetricRegistry registry, String tableName) {
         this.metricGroup = registry.tableMetricGroup(GROUP_NAME, tableName);
@@ -70,6 +77,10 @@ public class CompactionMetrics {
         metricGroup.gauge(
                 AVG_COMPACTION_TIME, () -> getCompactionTimeStream().average().orElse(0.0));
         metricGroup.gauge(COMPACTION_THREAD_BUSY, () -> getCompactBusyStream().sum());
+
+        compactionsCompletedCounter = metricGroup.counter(COMPACTIONS_COMPLETED_COUNT);
+        compactionsFailedCounter = metricGroup.counter(COMPACTIONS_FAILED_COUNT);
+        compactionsQueuedCounter = metricGroup.counter(COMPACTIONS_QUEUED_COUNT);
     }
 
     private LongStream getLevel0FileCountStream() {
@@ -97,6 +108,14 @@ public class CompactionMetrics {
         void reportLevel0FileCount(long count);
 
         void reportCompactionTime(long time);
+
+        void increaseCompactionsCompletedCount();
+
+        void increaseCompactionsFailedCount();
+
+        void increaseCompactionsQueuedCount();
+
+        void decreaseCompactionsQueuedCount();
 
         void unregister();
     }
@@ -131,6 +150,26 @@ public class CompactionMetrics {
         @Override
         public void reportLevel0FileCount(long count) {
             this.level0FileCount = count;
+        }
+
+        @Override
+        public void increaseCompactionsCompletedCount() {
+            compactionsCompletedCounter.inc();
+        }
+
+        @Override
+        public void increaseCompactionsFailedCount() {
+            compactionsFailedCounter.inc();
+        }
+
+        @Override
+        public void increaseCompactionsQueuedCount() {
+            compactionsQueuedCounter.inc();
+        }
+
+        @Override
+        public void decreaseCompactionsQueuedCount() {
+            compactionsQueuedCounter.dec();
         }
 
         @Override
