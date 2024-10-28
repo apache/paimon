@@ -51,8 +51,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.expressions.AggregateExpression;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.types.DataType;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -83,8 +81,6 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_
  */
 public abstract class BaseDataTableSource extends FlinkTableSource
         implements LookupTableSource, SupportsWatermarkPushDown, SupportsAggregatePushDown {
-
-    private static final Logger LOG = LoggerFactory.getLogger(BaseDataTableSource.class);
 
     private static final List<ConfigOption<?>> TIME_TRAVEL_OPTIONS =
             Arrays.asList(
