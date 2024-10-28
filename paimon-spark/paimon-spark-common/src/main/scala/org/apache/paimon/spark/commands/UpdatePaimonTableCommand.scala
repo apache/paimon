@@ -33,7 +33,7 @@ import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Assignment, Filter, Project, SupportsSubquery}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.lit
-import org.apache.spark.sql.shims.ExpressionUtils.column
+import org.apache.spark.sql.paimon.shims.ExpressionUtils.column
 
 case class UpdatePaimonTableCommand(
     relation: DataSourceV2Relation,

@@ -38,7 +38,7 @@ import org.apache.spark.sql.catalyst.expressions.codegen.GeneratePredicate
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, lit, monotonically_increasing_id, sum}
-import org.apache.spark.sql.shims.ExpressionUtils.{column, convertToExpression}
+import org.apache.spark.sql.paimon.shims.ExpressionUtils.{column, convertToExpression}
 import org.apache.spark.sql.types.{ByteType, StructField, StructType}
 
 import scala.collection.mutable
@@ -58,8 +58,6 @@ case class MergeIntoPaimonTable(
   import MergeIntoPaimonTable._
 
   override val table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
-
-  lazy val spark: SparkSession = SparkSession.active
 
   lazy val relation: DataSourceV2Relation = PaimonRelation.getPaimonRelation(targetTable)
 
@@ -211,9 +209,9 @@ case class MergeIntoPaimonTable(
 
     val targetOutput = filteredTargetPlan.output
     val targetRowNotMatched = resolveOnJoinedPlan(
-      Seq(convertToExpression(spark, col(SOURCE_ROW_COL).isNull))).head
+      Seq(convertToExpression(sparkSession, col(SOURCE_ROW_COL).isNull))).head
     val sourceRowNotMatched = resolveOnJoinedPlan(
-      Seq(convertToExpression(spark, col(TARGET_ROW_COL).isNull))).head
+      Seq(convertToExpression(sparkSession, col(TARGET_ROW_COL).isNull))).head
     val matchedExprs = matchedActions.map(_.condition.getOrElse(TrueLiteral))
     val notMatchedExprs = notMatchedActions.map(_.condition.getOrElse(TrueLiteral))
     val notMatchedBySourceExprs = notMatchedBySourceActions.map(_.condition.getOrElse(TrueLiteral))

@@ -352,7 +352,7 @@ under the License.
         <profile>
             <id>spark3</id>
             <modules>
-                <module>paimon-spark/paimon-spark-3.x-common</module>
+                <module>paimon-spark/paimon-spark3-common</module>
                 <module>paimon-spark/paimon-spark-3.5</module>
                 <module>paimon-spark/paimon-spark-3.4</module>
                 <module>paimon-spark/paimon-spark-3.3</module>
@@ -362,8 +362,10 @@ under the License.
                 <scala.binary.version>2.12</scala.binary.version>
                 <scala.version>${scala212.version}</scala.version>
                 <paimon-spark-common.spark.version>3.5.3</paimon-spark-common.spark.version>
-                <paimon-spark-x.x.common>paimon-spark-3.x-common</paimon-spark-x.x.common>
+                <paimon-sparkx-common>paimon-spark3-common</paimon-sparkx-common>
+                <!-- todo: support the latest spark in paimon e2e test2 -->
                 <test.spark.main.version>3.3</test.spark.main.version>
+                <test.spark.version>3.3.0</test.spark.version>
             </properties>
             <activation>
                 <activeByDefault>true</activeByDefault>
@@ -376,7 +378,7 @@ under the License.
         <profile>
             <id>spark4</id>
             <modules>
-                <module>paimon-spark/paimon-spark-4.x-common</module>
+                <module>paimon-spark/paimon-spark4-common</module>
                 <module>paimon-spark/paimon-spark-4.0</module>
             </modules>
             <properties>
@@ -385,8 +387,9 @@ under the License.
                 <scala.binary.version>2.13</scala.binary.version>
                 <scala.version>${scala213.version}</scala.version>
                 <paimon-spark-common.spark.version>4.0.0-preview2</paimon-spark-common.spark.version>
-                <paimon-spark-x.x.common>paimon-spark-4.x-common</paimon-spark-x.x.common>
+                <paimon-sparkx-common>paimon-spark4-common</paimon-sparkx-common>
                 <test.spark.main.version>4.0</test.spark.main.version>
+                <test.spark.version>4.0.0-preview2</test.spark.version>
             </properties>
             <activation>
                 <property>

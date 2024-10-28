@@ -40,7 +40,7 @@ under the License.
     <dependencies>
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>${paimon-spark-x.x.common}</artifactId>
+            <artifactId>${paimon-sparkx-common}</artifactId>
             <version>${project.version}</version>
             <exclusions>
                 <exclusion>
@@ -130,7 +130,7 @@ under the License.
                             <artifactSet>
                                 <includes combine.children="append">
                                     <include>org.apache.paimon:paimon-bundle</include>
-                                    <include>org.apache.paimon:${paimon-spark-x.x.common}</include>
+                                    <include>org.apache.paimon:${paimon-sparkx-common}</include>
                                 </includes>
                             </artifactSet>
                         </configuration>

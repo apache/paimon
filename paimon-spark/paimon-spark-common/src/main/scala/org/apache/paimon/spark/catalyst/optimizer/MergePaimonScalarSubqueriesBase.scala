@@ -28,7 +28,7 @@ import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreePattern.{SCALAR_SUBQUERY, SCALAR_SUBQUERY_REFERENCE, TreePattern}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.sql.shims
+import org.apache.spark.sql.paimon.shims
 import org.apache.spark.sql.types.{DataType, StructType}
 
 import scala.collection.mutable.ArrayBuffer
