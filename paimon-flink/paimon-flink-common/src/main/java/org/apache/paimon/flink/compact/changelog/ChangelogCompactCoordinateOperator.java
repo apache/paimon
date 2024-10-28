@@ -31,7 +31,7 @@ import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
-import org.apache.flink.util.OutputTag;
+import org.apache.flink.types.Either;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -46,18 +46,17 @@ import java.util.Map;
  * contained in all buckets within each partition from {@link Committable} message emitted from
  * writer operator. And emit {@link ChangelogCompactTask} to {@link ChangelogCompactWorkerOperator}.
  */
-public class ChangelogCompactCoordinateOperator extends AbstractStreamOperator<ChangelogCompactTask>
-        implements OneInputStreamOperator<Committable, ChangelogCompactTask>, BoundedOneInput {
+public class ChangelogCompactCoordinateOperator
+        extends AbstractStreamOperator<Either<Committable, ChangelogCompactTask>>
+        implements OneInputStreamOperator<Committable, Either<Committable, ChangelogCompactTask>>,
+                BoundedOneInput {
     private final FileStoreTable table;
-    private final OutputTag<Committable> committableOutputTag;
 
     private transient long checkpointId;
     private transient Map<BinaryRow, PartitionChangelog> partitionChangelogs;
 
-    public ChangelogCompactCoordinateOperator(
-            FileStoreTable table, OutputTag<Committable> committableOutputTag) {
+    public ChangelogCompactCoordinateOperator(FileStoreTable table) {
         this.table = table;
-        this.committableOutputTag = committableOutputTag;
     }
 
     @Override
@@ -72,14 +71,14 @@ public class ChangelogCompactCoordinateOperator extends AbstractStreamOperator<C
         Committable committable = record.getValue();
         checkpointId = Math.max(checkpointId, committable.checkpointId());
         if (committable.kind() != Committable.Kind.FILE) {
-            output.collect(committableOutputTag, record);
+            output.collect(new StreamRecord<>(Either.Left(record.getValue())));
             return;
         }
 
         CommitMessageImpl message = (CommitMessageImpl) committable.wrappedCommittable();
         if (message.newFilesIncrement().changelogFiles().isEmpty()
                 && message.compactIncrement().changelogFiles().isEmpty()) {
-            output.collect(committableOutputTag, record);
+            output.collect(new StreamRecord<>(Either.Left(record.getValue())));
             return;
         }
 
@@ -91,7 +90,7 @@ public class ChangelogCompactCoordinateOperator extends AbstractStreamOperator<C
                     .addNewChangelogFile(bucket, meta);
             PartitionChangelog partitionChangelog = partitionChangelogs.get(partition);
             if (partitionChangelog.totalFileSize >= table.coreOptions().targetFileSize(false)) {
-                emitPartitionChangelogCompactTask(partition);
+                emitPartitionChanglogCompactTask(partition);
             }
         }
         for (DataFileMeta meta : message.compactIncrement().changelogFiles()) {
@@ -100,7 +99,7 @@ public class ChangelogCompactCoordinateOperator extends AbstractStreamOperator<C
                     .addCompactChangelogFile(bucket, meta);
             PartitionChangelog partitionChangelog = partitionChangelogs.get(partition);
             if (partitionChangelog.totalFileSize >= table.coreOptions().targetFileSize(false)) {
-                emitPartitionChangelogCompactTask(partition);
+                emitPartitionChanglogCompactTask(partition);
             }
         }
 
@@ -119,7 +118,7 @@ public class ChangelogCompactCoordinateOperator extends AbstractStreamOperator<C
                         message.indexIncrement());
         Committable newCommittable =
                 new Committable(committable.checkpointId(), Committable.Kind.FILE, newMessage);
-        output.collect(committableOutputTag, new StreamRecord<>(newCommittable));
+        output.collect(new StreamRecord<>(Either.Left(newCommittable)));
     }
 
     public void prepareSnapshotPreBarrier(long checkpointId) {
@@ -130,22 +129,23 @@ public class ChangelogCompactCoordinateOperator extends AbstractStreamOperator<C
         emitAllPartitionsChanglogCompactTask();
     }
 
-    private void emitPartitionChangelogCompactTask(BinaryRow partition) {
+    private void emitPartitionChanglogCompactTask(BinaryRow partition) {
         PartitionChangelog partitionChangelog = partitionChangelogs.get(partition);
         output.collect(
                 new StreamRecord<>(
-                        new ChangelogCompactTask(
-                                checkpointId,
-                                partition,
-                                partitionChangelog.newFileChangelogFiles,
-                                partitionChangelog.compactChangelogFiles)));
+                        Either.Right(
+                                new ChangelogCompactTask(
+                                        checkpointId,
+                                        partition,
+                                        partitionChangelog.newFileChangelogFiles,
+                                        partitionChangelog.compactChangelogFiles))));
         partitionChangelogs.remove(partition);
     }
 
     private void emitAllPartitionsChanglogCompactTask() {
         List<BinaryRow> partitions = new ArrayList<>(partitionChangelogs.keySet());
         for (BinaryRow partition : partitions) {
-            emitPartitionChangelogCompactTask(partition);
+            emitPartitionChanglogCompactTask(partition);
         }
     }
 

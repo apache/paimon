@@ -24,6 +24,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.types.Either;
 
 import java.util.List;
 
@@ -32,17 +33,22 @@ import java.util.List;
  * ChangelogCompactCoordinateOperator}.
  */
 public class ChangelogCompactWorkerOperator extends AbstractStreamOperator<Committable>
-        implements OneInputStreamOperator<ChangelogCompactTask, Committable> {
+        implements OneInputStreamOperator<Either<Committable, ChangelogCompactTask>, Committable> {
     private final FileStoreTable table;
 
     public ChangelogCompactWorkerOperator(FileStoreTable table) {
         this.table = table;
     }
 
-    public void processElement(StreamRecord<ChangelogCompactTask> record) throws Exception {
+    public void processElement(StreamRecord<Either<Committable, ChangelogCompactTask>> record)
+            throws Exception {
 
-        ChangelogCompactTask task = record.getValue();
-        List<Committable> committables = task.doCompact(table);
-        committables.forEach(committable -> output.collect(new StreamRecord<>(committable)));
+        if (record.getValue().isLeft()) {
+            output.collect(new StreamRecord<>(record.getValue().left()));
+        } else {
+            ChangelogCompactTask task = record.getValue().right();
+            List<Committable> committables = task.doCompact(table);
+            committables.forEach(committable -> output.collect(new StreamRecord<>(committable)));
+        }
     }
 }

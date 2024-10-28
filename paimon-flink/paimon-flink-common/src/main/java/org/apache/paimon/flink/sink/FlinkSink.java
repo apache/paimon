@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.TagCreationMode;
 import org.apache.paimon.flink.compact.changelog.ChangelogCompactCoordinateOperator;
-import org.apache.paimon.flink.compact.changelog.ChangelogCompactTask;
 import org.apache.paimon.flink.compact.changelog.ChangelogCompactWorkerOperator;
 import org.apache.paimon.flink.compact.changelog.ChangelogTaskTypeInfo;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -35,6 +34,7 @@ import org.apache.paimon.utils.SerializableRunnable;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.operators.SlotSharingGroup;
 import org.apache.flink.api.dag.Transformation;
+import org.apache.flink.api.java.typeutils.EitherTypeInfo;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.CheckpointingMode;
@@ -47,7 +47,6 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
-import org.apache.flink.util.OutputTag;
 
 import javax.annotation.Nullable;
 
@@ -214,7 +213,7 @@ public abstract class FlinkSink<T> implements Serializable {
         boolean isStreaming = isStreaming(input);
 
         boolean writeOnly = table.coreOptions().writeOnly();
-        DataStream<Committable> written =
+        SingleOutputStreamOperator<Committable> written =
                 input.transform(
                                 (writeOnly ? WRITER_WRITE_ONLY_NAME : WRITER_NAME)
                                         + " : "
@@ -234,26 +233,18 @@ public abstract class FlinkSink<T> implements Serializable {
         }
 
         if (options.contains(CHANGELOG_PRECOMMIT_COMPACT)) {
-            final OutputTag<Committable> committableOutputTag =
-                    new OutputTag<Committable>(
-                            "coordinator-output-committables", new CommittableTypeInfo()) {};
-            SingleOutputStreamOperator<ChangelogCompactTask> coordinatorStream =
+            written =
                     written.transform(
                                     "Changelog Compact Coordinator",
-                                    new ChangelogTaskTypeInfo(),
-                                    new ChangelogCompactCoordinateOperator(
-                                            table, committableOutputTag))
-                            .forceNonParallel();
-            DataStream<Committable> committableStream =
-                    coordinatorStream.getSideOutput(committableOutputTag);
-            DataStream<Committable> workerCommittablesStream =
-                    coordinatorStream
+                                    new EitherTypeInfo<>(
+                                            new CommittableTypeInfo(), new ChangelogTaskTypeInfo()),
+                                    new ChangelogCompactCoordinateOperator(table))
+                            .forceNonParallel()
                             .transform(
                                     "Changelog Compact Worker",
                                     new CommittableTypeInfo(),
                                     new ChangelogCompactWorkerOperator(table))
                             .setParallelism(written.getParallelism());
-            written = committableStream.union(workerCommittablesStream);
         }
 
         return written;
