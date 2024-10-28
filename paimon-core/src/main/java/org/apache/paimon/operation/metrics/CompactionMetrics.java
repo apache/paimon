@@ -44,6 +44,10 @@ public class CompactionMetrics {
     public static final String AVG_COMPACTION_TIME = "avgCompactionTime";
     public static final String COMPACTION_COMPLETED_COUNT = "compactionCompletedCount";
     public static final String COMPACTION_QUEUED_COUNT = "compactionQueuedCount";
+    public static final String MAX_COMPACTION_INPUT_SIZE = "maxCompactionInputSize";
+    public static final String MAX_COMPACTION_OUTPUT_SIZE = "maxCompactionOutputSize";
+    public static final String AVG_COMPACTION_INPUT_SIZE = "avgCompactionInputSize";
+    public static final String AVG_COMPACTION_OUTPUT_SIZE = "avgCompactionOutputSize";
     private static final long BUSY_MEASURE_MILLIS = 60_000;
     private static final int COMPACTION_TIME_WINDOW = 100;
 
@@ -73,6 +77,17 @@ public class CompactionMetrics {
         metricGroup.gauge(
                 AVG_LEVEL0_FILE_COUNT, () -> getLevel0FileCountStream().average().orElse(-1));
         metricGroup.gauge(
+                MAX_COMPACTION_INPUT_SIZE, () -> getCompactionInputSizeStream().max().orElse(-1));
+        metricGroup.gauge(
+                MAX_COMPACTION_OUTPUT_SIZE, () -> getCompactionOutputSizeStream().max().orElse(-1));
+        metricGroup.gauge(
+                AVG_COMPACTION_INPUT_SIZE,
+                () -> getCompactionInputSizeStream().average().orElse(-1));
+        metricGroup.gauge(
+                AVG_COMPACTION_OUTPUT_SIZE,
+                () -> getCompactionOutputSizeStream().average().orElse(-1));
+
+        metricGroup.gauge(
                 AVG_COMPACTION_TIME, () -> getCompactionTimeStream().average().orElse(0.0));
         metricGroup.gauge(COMPACTION_THREAD_BUSY, () -> getCompactBusyStream().sum());
 
@@ -82,6 +97,14 @@ public class CompactionMetrics {
 
     private LongStream getLevel0FileCountStream() {
         return reporters.values().stream().mapToLong(r -> r.level0FileCount);
+    }
+
+    private LongStream getCompactionInputSizeStream() {
+        return reporters.values().stream().mapToLong(r -> r.compactionInputSize);
+    }
+
+    private LongStream getCompactionOutputSizeStream() {
+        return reporters.values().stream().mapToLong(r -> r.compactionOutputSize);
     }
 
     private DoubleStream getCompactBusyStream() {
@@ -112,6 +135,10 @@ public class CompactionMetrics {
 
         void decreaseCompactionsQueuedCount();
 
+        void reportCompactionInputSize(long bytes);
+
+        void reportCompactionOutputSize(long bytes);
+
         void unregister();
     }
 
@@ -119,6 +146,8 @@ public class CompactionMetrics {
 
         private final PartitionAndBucket key;
         private long level0FileCount;
+        private long compactionInputSize = 0;
+        private long compactionOutputSize = 0;
 
         private ReporterImpl(PartitionAndBucket key) {
             this.key = key;
@@ -140,6 +169,16 @@ public class CompactionMetrics {
                     compactionTimes.poll();
                 }
             }
+        }
+
+        @Override
+        public void reportCompactionInputSize(long bytes) {
+            this.compactionInputSize = bytes;
+        }
+
+        @Override
+        public void reportCompactionOutputSize(long bytes) {
+            this.compactionOutputSize = bytes;
         }
 
         @Override

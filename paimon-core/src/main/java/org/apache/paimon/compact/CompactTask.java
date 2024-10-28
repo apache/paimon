@@ -54,6 +54,16 @@ public abstract class CompactTask implements Callable<CompactResult> {
                             metricsReporter.reportCompactionTime(
                                     System.currentTimeMillis() - startMillis);
                             metricsReporter.increaseCompactionsCompletedCount();
+                            metricsReporter.reportCompactionInputSize(
+                                    result.before().stream()
+                                            .map(DataFileMeta::fileSize)
+                                            .reduce(Long::sum)
+                                            .orElse(0L));
+                            metricsReporter.reportCompactionOutputSize(
+                                    result.after().stream()
+                                            .map(DataFileMeta::fileSize)
+                                            .reduce(Long::sum)
+                                            .orElse(0L));
                         }
                     },
                     LOG);
