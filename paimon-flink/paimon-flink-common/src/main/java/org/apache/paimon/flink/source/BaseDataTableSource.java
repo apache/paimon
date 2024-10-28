@@ -244,8 +244,8 @@ public abstract class BaseDataTableSource extends FlinkTableSource
     @Override
     public LookupRuntimeProvider getLookupRuntimeProvider(LookupContext context) {
         if (!(table instanceof FileStoreTable)) {
-            throw new RuntimeException(
-                    "Lookup dim table should be FileStoreTable but is "
+            throw new UnsupportedOperationException(
+                    "Currently, lookup dim table only support FileStoreTable but is "
                             + table.getClass().getName());
         }
 
