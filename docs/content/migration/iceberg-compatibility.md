@@ -50,22 +50,23 @@ Set the following table options, so that Paimon tables can generate Iceberg comp
       <td>
         When set, produce Iceberg metadata after a snapshot is committed, so that Iceberg readers can read Paimon's raw data files.
         <ul>
-          <li>disabled: Disable Iceberg compatibility support.</li>
-          <li>table-location: Store Iceberg metadata in each table's directory.</li>
-          <li>hadoop-catalog: Store Iceberg metadata in a separate directory. This directory can be specified as the warehouse directory of an Iceberg Hadoop catalog.</li>
-          <li>hive-catalog: Not only store Iceberg metadata like hadoop-catalog, but also create Iceberg external table in Hive.</li>
+          <li><code>disabled</code>: Disable Iceberg compatibility support.</li>
+          <li><code>table-location</code>: Store Iceberg metadata in each table's directory.</li>
+          <li><code>hadoop-catalog</code>: Store Iceberg metadata in a separate directory. This directory can be specified as the warehouse directory of an Iceberg Hadoop catalog.</li>
+          <li><code>hive-catalog</code>: Not only store Iceberg metadata like hadoop-catalog, but also create Iceberg external table in Hive.</li>
         </ul>
       </td>
     </tr>
     </tbody>
 </table>
 
-For most SQL users, we recommend setting `'metadata.iceberg.storage' = 'hadoop-catalog'`,
+For most SQL users, we recommend setting `'metadata.iceberg.storage' = 'hadoop-catalog'`
+or `'metadata.iceberg.storage' = 'hive-catalog'`,
 so that all tables can be visited as an Iceberg warehouse.
 For Iceberg Java API users, you might consider setting `'metadata.iceberg.storage' = 'table-location'`,
 so you can visit each table with its table path.
 
-## Example: Query Paimon Append Only Tables with Iceberg Connector
+## Example: Query Paimon Append Only Tables on Flink/Spark with Iceberg Connector
 
 Let's walk through a simple example, where we query Paimon tables with Iceberg connectors in Flink and Spark.
 Before trying out this example, make sure that your compute engine already supports Iceberg.
@@ -101,7 +102,7 @@ Start `spark-sql` with the following command line.
 ```bash
 spark-sql --jars <path-to-paimon-jar> \
     --conf spark.sql.catalog.paimon_catalog=org.apache.paimon.spark.SparkCatalog \
-    --conf spark.sql.catalog.paimon_catalog.warehouse=/tmp/sparkware \
+    --conf spark.sql.catalog.paimon_catalog.warehouse=<path-to-warehouse> \
     --packages org.apache.iceberg:iceberg-spark-runtime-<iceberg-version> \
     --conf spark.sql.catalog.iceberg_catalog=org.apache.iceberg.spark.SparkCatalog \
     --conf spark.sql.catalog.iceberg_catalog.type=hadoop \
@@ -199,7 +200,7 @@ germany hamburg
 
 {{< /tabs >}}
 
-## Example: Query Paimon Primary Key Tables with Iceberg Connector
+## Example: Query Paimon Primary Key Tables on Flink/Spark with Iceberg Connector
 
 {{< tabs "paimon-primary-key-table" >}}
 
@@ -258,8 +259,8 @@ Start `spark-sql` with the following command line.
 ```bash
 spark-sql --jars <path-to-paimon-jar> \
     --conf spark.sql.catalog.paimon_catalog=org.apache.paimon.spark.SparkCatalog \
-    --conf spark.sql.catalog.paimon_catalog.warehouse=/tmp/sparkware \
-    --packages org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.6.1 \
+    --conf spark.sql.catalog.paimon_catalog.warehouse=<path-to-warehouse> \
+    --packages org.apache.iceberg:iceberg-spark-runtime-<iceberg-version> \
     --conf spark.sql.catalog.iceberg_catalog=org.apache.iceberg.spark.SparkCatalog \
     --conf spark.sql.catalog.iceberg_catalog.type=hadoop \
     --conf spark.sql.catalog.iceberg_catalog.warehouse=<path-to-warehouse>/iceberg \
@@ -376,6 +377,79 @@ you also need to set some (or all) of the following table options when creating 
     </tr>
     </tbody>
 </table>
+
+## Example: Query Paimon Append Only Tables on Trino with Iceberg Connector
+
+In this example, we use Trino Iceberg connector to access Paimon table through Iceberg Hive catalog.
+Before trying out this example, make sure that you have configured Trino Iceberg connector.
+See [Trino's document](https://trino.io/docs/current/connector/iceberg.html#general-configuration) for more information.
+
+Let's first create a Paimon table with Iceberg compatibility enabled.
+
+{{< tabs "paimon-append-only-table-trino-1" >}}
+
+{{< tab "Flink SQL" >}}
+```sql
+CREATE CATALOG paimon_catalog WITH (
+    'type' = 'paimon',
+    'warehouse' = '<path-to-warehouse>'
+);
+
+CREATE TABLE paimon_catalog.`default`.animals (
+    kind STRING,
+    name STRING
+) WITH (
+    'metadata.iceberg.storage' = 'hive-catalog',
+    'metadata.iceberg.uri' = 'thrift://<host>:<port>'
+);
+
+INSERT INTO paimon_catalog.`default`.animals VALUES ('mammal', 'cat'), ('mammal', 'dog'), ('reptile', 'snake'), ('reptile', 'lizard');
+```
+{{< /tab >}}
+
+{{< tab "Spark SQL" >}}
+Start `spark-sql` with the following command line.
+
+```bash
+spark-sql --jars <path-to-paimon-jar> \
+    --conf spark.sql.catalog.paimon_catalog=org.apache.paimon.spark.SparkCatalog \
+    --conf spark.sql.catalog.paimon_catalog.warehouse=<path-to-warehouse> \
+    --packages org.apache.iceberg:iceberg-spark-runtime-<iceberg-version> \
+    --conf spark.sql.catalog.iceberg_catalog=org.apache.iceberg.spark.SparkCatalog \
+    --conf spark.sql.catalog.iceberg_catalog.type=hadoop \
+    --conf spark.sql.catalog.iceberg_catalog.warehouse=<path-to-warehouse>/iceberg \
+    --conf spark.sql.catalog.iceberg_catalog.cache-enabled=false \ # disable iceberg catalog caching to quickly see the result
+    --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions,org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+```
+
+Run the following Spark SQL to create Paimon table, insert/update data, and query with Iceberg catalog.
+
+```sql
+CREATE TABLE paimon_catalog.`default`.animals (
+    kind STRING,
+    name STRING
+) TBLPROPERTIES (
+    'metadata.iceberg.storage' = 'hive-catalog',
+    'metadata.iceberg.uri' = 'thrift://<host>:<port>'
+);
+
+INSERT INTO paimon_catalog.`default`.animals VALUES ('mammal', 'cat'), ('mammal', 'dog'), ('reptile', 'snake'), ('reptile', 'lizard');
+```
+{{< /tab >}}
+
+{{< /tabs >}}
+
+Start Trino using Iceberg catalog and query from Paimon table.
+
+```sql
+SELECT * FROM animals WHERE class = 'mammal';
+/*
+   kind | name 
+--------+------
+ mammal | cat  
+ mammal | dog  
+*/
+```
 
 ## Supported Types
 
