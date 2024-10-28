@@ -1009,7 +1009,6 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
 
     @Test
     public void testSequenceFieldSortOrder() {
-
         // test default condition which get the largest record
         sql(
                 "CREATE TABLE T1 (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c STRING) WITH ('sequence.field'='c')");
