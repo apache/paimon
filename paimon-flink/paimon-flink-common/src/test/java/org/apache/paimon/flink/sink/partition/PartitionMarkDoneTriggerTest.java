@@ -20,6 +20,9 @@ package org.apache.paimon.flink.sink.partition;
 
 import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.testutils.assertj.PaimonAssertions;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,11 +33,13 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+/** Test for {@link PartitionMarkDoneTrigger}. */
 class PartitionMarkDoneTriggerTest {
 
     private static final Duration timeInterval = Duration.ofDays(1);
@@ -72,7 +77,14 @@ class PartitionMarkDoneTriggerTest {
                         timeInterval,
                         idleTime,
                         toEpochMillis("2024-02-01"),
-                        false);
+                        false,
+                        Collections.emptyList(),
+                        false,
+                        new InternalRowPartitionComputer(
+                                "",
+                                RowType.builder().field("p1", DataTypes.STRING()).build(),
+                                new String[] {"p1"},
+                                false));
 
         // test not reach partition end + idle time
         trigger.notifyPartition("dt=2024-02-02", toEpochMillis("2024-02-01"));
@@ -118,7 +130,14 @@ class PartitionMarkDoneTriggerTest {
                         timeInterval,
                         idleTime,
                         toEpochMillis("2024-02-06"),
-                        false);
+                        false,
+                        Collections.emptyList(),
+                        false,
+                        new InternalRowPartitionComputer(
+                                "",
+                                RowType.builder().field("p1", DataTypes.STRING()).build(),
+                                new String[] {"p1"},
+                                false));
         partitions = trigger.donePartitions(false, toEpochMillis("2024-02-06"));
         assertThat(partitions).isEmpty();
         partitions =
@@ -136,7 +155,14 @@ class PartitionMarkDoneTriggerTest {
                         timeInterval,
                         idleTime,
                         toEpochMillis("2024-02-01"),
-                        true);
+                        true,
+                        Collections.emptyList(),
+                        false,
+                        new InternalRowPartitionComputer(
+                                "",
+                                RowType.builder().field("p1", DataTypes.STRING()).build(),
+                                new String[] {"p1"},
+                                false));
 
         // test not reach partition end + idle time
         trigger.notifyPartition("dt=2024-02-02", toEpochMillis("2024-02-01"));
@@ -153,7 +179,14 @@ class PartitionMarkDoneTriggerTest {
                         timeInterval,
                         idleTime,
                         toEpochMillis("2024-02-01"),
-                        true);
+                        true,
+                        Collections.emptyList(),
+                        false,
+                        new InternalRowPartitionComputer(
+                                "",
+                                RowType.builder().field("p1", DataTypes.STRING()).build(),
+                                new String[] {"p1"},
+                                false));
 
         assertThatThrownBy(() -> trigger.extractDateTime("unknown"))
                 .satisfies(

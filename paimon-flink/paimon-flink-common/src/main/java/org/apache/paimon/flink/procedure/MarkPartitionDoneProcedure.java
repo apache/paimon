@@ -35,7 +35,7 @@ import org.apache.flink.table.procedure.ProcedureContext;
 import java.io.IOException;
 import java.util.List;
 
-import static org.apache.paimon.flink.sink.partition.PartitionMarkDone.markDone;
+import static org.apache.paimon.flink.sink.partition.PartitionMarkDoneTrigger.markDone;
 import static org.apache.paimon.utils.ParameterUtils.getPartitions;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 

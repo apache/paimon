@@ -20,9 +20,18 @@ package org.apache.paimon.flink.sink.partition;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionTimeExtractor;
+import org.apache.paimon.partition.actions.PartitionMarkDoneAction;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
+import org.apache.paimon.utils.PartitionPathUtils;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.state.ListState;
@@ -33,6 +42,7 @@ import org.apache.flink.api.common.typeutils.base.StringSerializer;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -40,9 +50,12 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_IDLE_TIME_TO_DONE;
@@ -50,7 +63,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_TIME_INTER
 import static org.apache.paimon.utils.PartitionPathUtils.extractPartitionSpecFromPath;
 
 /** Trigger to mark partitions done with streaming job. */
-public class PartitionMarkDoneTrigger {
+public class PartitionMarkDoneTrigger implements PartitionTrigger {
 
     private static final ListStateDescriptor<List<String>> PENDING_PARTITIONS_STATE_DESC =
             new ListStateDescriptor<>(
@@ -65,13 +78,19 @@ public class PartitionMarkDoneTrigger {
     @Nullable private final Long idleTime;
     private final boolean markDoneWhenEndInput;
     private final Map<String, Long> pendingPartitions;
+    private final List<PartitionMarkDoneAction> actions;
+    private final boolean waitCompaction;
+    private final InternalRowPartitionComputer partitionComputer;
 
     public PartitionMarkDoneTrigger(
             State state,
             PartitionTimeExtractor timeExtractor,
             @Nullable Duration timeInterval,
             @Nullable Duration idleTime,
-            boolean markDoneWhenEndInput)
+            boolean markDoneWhenEndInput,
+            List<PartitionMarkDoneAction> actions,
+            boolean waitCompaction,
+            InternalRowPartitionComputer partitionComputer)
             throws Exception {
         this(
                 state,
@@ -79,7 +98,10 @@ public class PartitionMarkDoneTrigger {
                 timeInterval,
                 idleTime,
                 System.currentTimeMillis(),
-                markDoneWhenEndInput);
+                markDoneWhenEndInput,
+                actions,
+                waitCompaction,
+                partitionComputer);
     }
 
     public PartitionMarkDoneTrigger(
@@ -88,7 +110,10 @@ public class PartitionMarkDoneTrigger {
             @Nullable Duration timeInterval,
             @Nullable Duration idleTime,
             long currentTimeMillis,
-            boolean markDoneWhenEndInput)
+            boolean markDoneWhenEndInput,
+            List<PartitionMarkDoneAction> actions,
+            boolean waitCompaction,
+            InternalRowPartitionComputer partitionComputer)
             throws Exception {
         this.pendingPartitions = new HashMap<>();
         this.state = state;
@@ -96,7 +121,35 @@ public class PartitionMarkDoneTrigger {
         this.timeInterval = timeInterval == null ? null : timeInterval.toMillis();
         this.idleTime = idleTime == null ? null : idleTime.toMillis();
         this.markDoneWhenEndInput = markDoneWhenEndInput;
+        this.actions = actions;
+        this.waitCompaction = waitCompaction;
+        this.partitionComputer = partitionComputer;
         state.restore().forEach(p -> pendingPartitions.put(p, currentTimeMillis));
+    }
+
+    @Override
+    public void notifyCommittable(List<ManifestCommittable> committables) {
+        Set<BinaryRow> partitions = new HashSet<>();
+        boolean endInput = false;
+        for (ManifestCommittable committable : committables) {
+            for (CommitMessage commitMessage : committable.fileCommittables()) {
+                CommitMessageImpl message = (CommitMessageImpl) commitMessage;
+                if (waitCompaction
+                        || !message.indexIncrement().isEmpty()
+                        || !message.newFilesIncrement().isEmpty()) {
+                    partitions.add(message.partition());
+                }
+            }
+            if (committable.identifier() == Long.MAX_VALUE) {
+                endInput = true;
+            }
+        }
+
+        partitions.stream()
+                .map(partitionComputer::generatePartValues)
+                .map(PartitionPathUtils::generatePartitionPath)
+                .forEach(this::notifyPartition);
+        markDone(donePartitions(endInput), actions);
     }
 
     public void notifyPartition(String partition) {
@@ -160,6 +213,23 @@ public class PartitionMarkDoneTrigger {
         state.update(new ArrayList<>(pendingPartitions.keySet()));
     }
 
+    public static void markDone(List<String> partitions, List<PartitionMarkDoneAction> actions) {
+        for (String partition : partitions) {
+            try {
+                for (PartitionMarkDoneAction action : actions) {
+                    action.markDone(partition);
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    @Override
+    public void close() throws IOException {
+        IOUtils.closeAllQuietly(actions);
+    }
+
     /** State to store partitions. */
     public interface State {
         List<String> restore() throws Exception;
@@ -197,17 +267,63 @@ public class PartitionMarkDoneTrigger {
         }
     }
 
-    public static PartitionMarkDoneTrigger create(
-            CoreOptions coreOptions, boolean isRestored, OperatorStateStore stateStore)
+    private static boolean disablePartitionMarkDone(
+            boolean isStreaming, FileStoreTable table, Options options) {
+        boolean partitionMarkDoneWhenEndInput = options.get(PARTITION_MARK_DONE_WHEN_END_INPUT);
+        if (!isStreaming && !partitionMarkDoneWhenEndInput) {
+            return true;
+        }
+
+        Duration idleToDone = options.get(PARTITION_IDLE_TIME_TO_DONE);
+        if (isStreaming && idleToDone == null) {
+            return true;
+        }
+
+        return table.partitionKeys().isEmpty();
+    }
+
+    public static Optional<PartitionTrigger> create(
+            CoreOptions coreOptions,
+            boolean isStreaming,
+            boolean isRestored,
+            OperatorStateStore stateStore,
+            FileStoreTable table)
             throws Exception {
+
+        if (disablePartitionMarkDone(isStreaming, table, coreOptions.toConfiguration())) {
+            return Optional.empty();
+        }
+
+        List<PartitionMarkDoneAction> actions =
+                PartitionMarkDoneAction.createActions(table, coreOptions);
+
+        // if batch read skip level 0 files, we should wait compaction to mark done
+        // otherwise, some data may not be readable, and there might be data delays
+        boolean waitCompaction =
+                !table.primaryKeys().isEmpty()
+                        && (coreOptions.deletionVectorsEnabled()
+                                || coreOptions.mergeEngine() == CoreOptions.MergeEngine.FIRST_ROW);
+
+        InternalRowPartitionComputer partitionComputer =
+                new InternalRowPartitionComputer(
+                        coreOptions.partitionDefaultName(),
+                        table.schema().logicalPartitionType(),
+                        table.partitionKeys().toArray(new String[0]),
+                        coreOptions.legacyPartitionName());
+
         Options options = coreOptions.toConfiguration();
-        return new PartitionMarkDoneTrigger(
-                new PartitionMarkDoneTrigger.PartitionMarkDoneTriggerState(isRestored, stateStore),
-                new PartitionTimeExtractor(
-                        coreOptions.partitionTimestampPattern(),
-                        coreOptions.partitionTimestampFormatter()),
-                options.get(PARTITION_TIME_INTERVAL),
-                options.get(PARTITION_IDLE_TIME_TO_DONE),
-                options.get(PARTITION_MARK_DONE_WHEN_END_INPUT));
+        return Optional.of(
+                new PartitionMarkDoneTrigger(
+                        new PartitionMarkDoneTrigger.PartitionMarkDoneTriggerState(
+                                isRestored, stateStore),
+                        new PartitionTimeExtractor(
+                                coreOptions.partitionTimestampPattern(),
+                                coreOptions.partitionTimestampFormatter()),
+                        options.get(PARTITION_TIME_INTERVAL),
+                        options.get(PARTITION_IDLE_TIME_TO_DONE),
+                        options.get(PARTITION_MARK_DONE_WHEN_END_INPUT),
+                        actions,
+                        waitCompaction,
+                        partitionComputer));
     }
 }
