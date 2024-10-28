@@ -114,6 +114,8 @@ under the License.
                                     <artifact>*</artifact>
                                     <excludes>
                                         <exclude>com/github/luben/zstd/**</exclude>
+                                        <exclude>**/*libzstd-jni-*.so</exclude>
+                                        <exclude>**/*libzstd-jni-*.dll</exclude>
                                     </excludes>
                                 </filter>
                             </filters>
