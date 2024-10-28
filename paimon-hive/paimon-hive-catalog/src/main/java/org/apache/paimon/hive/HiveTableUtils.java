@@ -44,7 +44,7 @@ import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
 import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
 
-class HiveFormatTableUtils {
+class HiveTableUtils {
 
     public static FormatTable convertToFormatTable(Table hiveTable) {
         if (TableType.valueOf(hiveTable.getTableType()) == TableType.VIRTUAL_VIEW) {
@@ -54,7 +54,7 @@ class HiveFormatTableUtils {
         Identifier identifier = new Identifier(hiveTable.getDbName(), hiveTable.getTableName());
         Map<String, String> options = new HashMap<>(hiveTable.getParameters());
         List<String> partitionKeys = getFieldNames(hiveTable.getPartitionKeys());
-        RowType rowType = createRowType(hiveTable.getSd().getCols(), hiveTable.getPartitionKeys());
+        RowType rowType = createRowType(hiveTable);
         String comment = options.remove(COMMENT_PROP);
         String location = hiveTable.getSd().getLocation();
         Format format;
@@ -104,10 +104,9 @@ class HiveFormatTableUtils {
     }
 
     /** Create a Paimon's Schema from Hive table's columns and partition keys. */
-    private static RowType createRowType(
-            List<FieldSchema> nonPartCols, List<FieldSchema> partitionKeys) {
-        List<FieldSchema> allCols = new ArrayList<>(nonPartCols);
-        allCols.addAll(partitionKeys);
+    public static RowType createRowType(Table table) {
+        List<FieldSchema> allCols = new ArrayList<>(table.getSd().getCols());
+        allCols.addAll(table.getPartitionKeys());
         Pair<String[], DataType[]> columnInformation = extractColumnInformation(allCols);
         return RowType.builder()
                 .fields(columnInformation.getRight(), columnInformation.getLeft())
