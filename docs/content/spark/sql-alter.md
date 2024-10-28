@@ -121,7 +121,7 @@ ALTER TABLE my_table DROP PARTITION (`id` = 1, `name` = 'paimon');
 
 ## Adding Partitions
 
-The following SQL adds the partitions of the paimon table. For spark sql, you need to specify all the partition columns.
+The following SQL adds the partitions of the paimon table. For spark sql, you need to specify all the partition columns, only with metastore configured metastore.partitioned-table=true
 
 ```sql
 ALTER TABLE my_table ADD PARTITION (`id` = 1, `name` = 'paimon');
