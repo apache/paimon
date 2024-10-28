@@ -182,7 +182,7 @@ public class RetryingMetaStoreClientFactory {
             Class<?> baseClass = Class.forName(clientClassName, false, JavaUtils.getClassLoader());
 
             // Configuration.class or HiveConf.class
-            Class<?> firstParamType = getProxyMethod.getParameterTypes()[0];
+            Class<?> firstParamType = hiveConf.getClass();
 
             Class<?>[] fullParams =
                     new Class[] {firstParamType, HiveMetaHookLoader.class, Boolean.TYPE};
