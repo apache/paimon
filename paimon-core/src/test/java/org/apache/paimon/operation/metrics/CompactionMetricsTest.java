@@ -74,7 +74,7 @@ public class CompactionMetricsTest {
         assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_COMPLETED_COUNT)).isEqualTo(0L);
         assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_QUEUED_COUNT)).isEqualTo(3L);
 
-        // completed compactions and failed compactions
+        // completed compactions and remove them from queue
         reporters[0].increaseCompactionsCompletedCount();
         reporters[0].decreaseCompactionsQueuedCount();
         reporters[1].decreaseCompactionsQueuedCount();
