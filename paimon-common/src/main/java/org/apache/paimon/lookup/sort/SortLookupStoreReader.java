@@ -54,9 +54,11 @@ public class SortLookupStoreReader implements LookupStoreReader {
     private final FileChannel fileChannel;
     private final String filePath;
     private final long fileSize;
+    private final CacheManager cacheManager;
 
     private final BlockIterator indexBlockIterator;
     @Nullable private FileBasedBloomFilter bloomFilter;
+    @Nullable private PageFileInput fileInput;
 
     public SortLookupStoreReader(
             Comparator<MemorySlice> comparator,
@@ -70,12 +72,13 @@ public class SortLookupStoreReader implements LookupStoreReader {
         this.fileChannel = new FileInputStream(file).getChannel();
         this.filePath = file.getAbsolutePath();
         this.fileSize = context.fileSize();
+        this.cacheManager = cacheManager;
 
         Footer footer = readFooter();
         this.indexBlockIterator = readBlock(footer.getIndexBlockHandle()).iterator();
         BloomFilterHandle handle = footer.getBloomFilterHandle();
         if (handle != null) {
-            PageFileInput fileInput = PageFileInput.create(file, blockSize, null, fileSize, null);
+            this.fileInput = PageFileInput.create(file, blockSize, null, fileSize, null);
             this.bloomFilter =
                     new FileBasedBloomFilter(
                             fileInput,
@@ -178,6 +181,10 @@ public class SortLookupStoreReader implements LookupStoreReader {
     @Override
     public void close() throws IOException {
         this.fileChannel.close();
+        if (bloomFilter != null) {
+            bloomFilter.close();
+            fileInput.close();
+        }
         // TODO clear cache too
     }
 }

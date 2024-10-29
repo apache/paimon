@@ -59,7 +59,8 @@ public class FileBasedBloomFilterTest {
 
         Arrays.stream(inputs)
                 .forEach(i -> Assertions.assertThat(filter.testHash(Integer.hashCode(i))).isTrue());
-        cacheManager.cache().invalidateAll();
+        filter.close();
+        Assertions.assertThat(cacheManager.cache().asMap()).isEmpty();
         Assertions.assertThat(filter.bloomFilter().getMemorySegment()).isNull();
     }
 
