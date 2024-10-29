@@ -29,7 +29,7 @@ import org.apache.hadoop.hive.metastore.api.MetaException;
 public class CustomConstructorMetastoreClient {
 
     /**
-     * A {@link HiveMetaStoreClient} to test custom Hive metastore client with (HiveConf,
+     * A {@link HiveMetaStoreClient} to test custom Hive metastore client with (Configuration,
      * HiveMetaHookLoader) constructor.
      */
     public static class TwoParameterConstructorMetastoreClient extends HiveMetaStoreClient
@@ -42,7 +42,7 @@ public class CustomConstructorMetastoreClient {
     }
 
     /**
-     * A {@link HiveMetaStoreClient} to test custom Hive metastore client with (HiveConf)
+     * A {@link HiveMetaStoreClient} to test custom Hive metastore client with (Configuration)
      * constructor.
      */
     public static class OneParameterConstructorMetastoreClient extends HiveMetaStoreClient
@@ -53,6 +53,10 @@ public class CustomConstructorMetastoreClient {
         }
     }
 
+    /**
+     * A {@link HiveMetaStoreClient} to test custom Hive metastore client with (HiveConf)
+     * constructor.
+     */
     public static class OtherParameterConstructorMetastoreClient extends HiveMetaStoreClient
             implements IMetaStoreClient {
 
