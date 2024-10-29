@@ -23,8 +23,8 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import java.io.Closeable;
 import java.util.List;
 
-/** The partition trigger. */
-public interface PartitionTrigger extends Closeable {
+/** The partition listener. */
+public interface PartitionListener extends Closeable {
 
     void notifyCommittable(List<ManifestCommittable> committables);
 

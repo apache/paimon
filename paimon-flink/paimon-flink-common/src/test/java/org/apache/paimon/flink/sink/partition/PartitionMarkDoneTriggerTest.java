@@ -39,21 +39,21 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Test for {@link PartitionMarkDoneTrigger}. */
+/** Test for {@link PartitionMarkDoneListener}. */
 class PartitionMarkDoneTriggerTest {
 
     private static final Duration timeInterval = Duration.ofDays(1);
     private static final Duration idleTime = Duration.ofMinutes(15);
 
     private List<String> pendingPartitions;
-    private PartitionMarkDoneTrigger.State state;
+    private PartitionMarkDoneListener.State state;
     private PartitionTimeExtractor extractor;
 
     @BeforeEach
     public void before() throws Exception {
         this.pendingPartitions = new ArrayList<>();
         this.state =
-                new PartitionMarkDoneTrigger.State() {
+                new PartitionMarkDoneListener.State() {
                     @Override
                     public List<String> restore() {
                         return new ArrayList<>(pendingPartitions);
@@ -70,8 +70,8 @@ class PartitionMarkDoneTriggerTest {
 
     @Test
     public void testWithoutEndInput() throws Exception {
-        PartitionMarkDoneTrigger trigger =
-                new PartitionMarkDoneTrigger(
+        PartitionMarkDoneListener trigger =
+                new PartitionMarkDoneListener(
                         state,
                         extractor,
                         timeInterval,
@@ -124,7 +124,7 @@ class PartitionMarkDoneTriggerTest {
         // test restore
         pendingPartitions.add("dt=2024-02-04");
         trigger =
-                new PartitionMarkDoneTrigger(
+                new PartitionMarkDoneListener(
                         state,
                         extractor,
                         timeInterval,
@@ -148,8 +148,8 @@ class PartitionMarkDoneTriggerTest {
 
     @Test
     public void testWithEndInput() throws Exception {
-        PartitionMarkDoneTrigger trigger =
-                new PartitionMarkDoneTrigger(
+        PartitionMarkDoneListener trigger =
+                new PartitionMarkDoneListener(
                         state,
                         extractor,
                         timeInterval,
@@ -172,8 +172,8 @@ class PartitionMarkDoneTriggerTest {
 
     @Test
     public void testParseNonDateFormattedPartition() throws Exception {
-        PartitionMarkDoneTrigger trigger =
-                new PartitionMarkDoneTrigger(
+        PartitionMarkDoneListener trigger =
+                new PartitionMarkDoneListener(
                         state,
                         extractor,
                         timeInterval,

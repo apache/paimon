@@ -26,7 +26,7 @@ import org.apache.paimon.utils.PartitionPathUtils;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.flink.sink.partition.PartitionMarkDoneTrigger.markDone;
+import static org.apache.paimon.flink.sink.partition.PartitionMarkDoneListener.markDone;
 
 /** Table partition mark done action for Flink. */
 public class MarkPartitionDoneAction extends TableActionBase {

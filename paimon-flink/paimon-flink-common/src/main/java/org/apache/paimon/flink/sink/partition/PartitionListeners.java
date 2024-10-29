@@ -30,42 +30,42 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Partition collector. */
-public class PartitionCollector implements Closeable {
+public class PartitionListeners implements Closeable {
 
-    private final List<PartitionTrigger> triggers;
+    private final List<PartitionListener> listeners;
 
-    private PartitionCollector(List<PartitionTrigger> triggers) {
-        this.triggers = triggers;
+    private PartitionListeners(List<PartitionListener> listeners) {
+        this.listeners = listeners;
     }
 
     public void notifyCommittable(List<ManifestCommittable> committables) {
-        for (PartitionTrigger trigger : triggers) {
+        for (PartitionListener trigger : listeners) {
             trigger.notifyCommittable(committables);
         }
     }
 
     public void snapshotState() throws Exception {
-        for (PartitionTrigger trigger : triggers) {
+        for (PartitionListener trigger : listeners) {
             trigger.snapshotState();
         }
     }
 
     @Override
     public void close() throws IOException {
-        IOUtils.closeAllQuietly(triggers);
+        IOUtils.closeAllQuietly(listeners);
     }
 
-    public static PartitionCollector create(
+    public static PartitionListeners create(
             boolean isStreaming,
             boolean isRestored,
             OperatorStateStore stateStore,
             FileStoreTable table)
             throws Exception {
-        List<PartitionTrigger> triggers = new ArrayList<>();
-        PartitionMarkDoneTrigger.create(
+        List<PartitionListener> listeners = new ArrayList<>();
+        PartitionMarkDoneListener.create(
                         table.coreOptions(), isStreaming, isRestored, stateStore, table)
-                .ifPresent(triggers::add);
+                .ifPresent(listeners::add);
 
-        return new PartitionCollector(triggers);
+        return new PartitionListeners(listeners);
     }
 }

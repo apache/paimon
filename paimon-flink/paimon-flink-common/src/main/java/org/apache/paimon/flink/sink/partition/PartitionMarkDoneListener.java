@@ -63,7 +63,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_TIME_INTER
 import static org.apache.paimon.utils.PartitionPathUtils.extractPartitionSpecFromPath;
 
 /** Trigger to mark partitions done with streaming job. */
-public class PartitionMarkDoneTrigger implements PartitionTrigger {
+public class PartitionMarkDoneListener implements PartitionListener {
 
     private static final ListStateDescriptor<List<String>> PENDING_PARTITIONS_STATE_DESC =
             new ListStateDescriptor<>(
@@ -82,7 +82,7 @@ public class PartitionMarkDoneTrigger implements PartitionTrigger {
     private final boolean waitCompaction;
     private final InternalRowPartitionComputer partitionComputer;
 
-    public PartitionMarkDoneTrigger(
+    public PartitionMarkDoneListener(
             State state,
             PartitionTimeExtractor timeExtractor,
             @Nullable Duration timeInterval,
@@ -104,7 +104,7 @@ public class PartitionMarkDoneTrigger implements PartitionTrigger {
                 partitionComputer);
     }
 
-    public PartitionMarkDoneTrigger(
+    public PartitionMarkDoneListener(
             State state,
             PartitionTimeExtractor timeExtractor,
             @Nullable Duration timeInterval,
@@ -282,7 +282,7 @@ public class PartitionMarkDoneTrigger implements PartitionTrigger {
         return table.partitionKeys().isEmpty();
     }
 
-    public static Optional<PartitionTrigger> create(
+    public static Optional<PartitionListener> create(
             CoreOptions coreOptions,
             boolean isStreaming,
             boolean isRestored,
@@ -313,8 +313,8 @@ public class PartitionMarkDoneTrigger implements PartitionTrigger {
 
         Options options = coreOptions.toConfiguration();
         return Optional.of(
-                new PartitionMarkDoneTrigger(
-                        new PartitionMarkDoneTrigger.PartitionMarkDoneTriggerState(
+                new PartitionMarkDoneListener(
+                        new PartitionMarkDoneListener.PartitionMarkDoneTriggerState(
                                 isRestored, stateStore),
                         new PartitionTimeExtractor(
                                 coreOptions.partitionTimestampPattern(),

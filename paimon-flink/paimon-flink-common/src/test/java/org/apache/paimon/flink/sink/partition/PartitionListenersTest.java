@@ -54,7 +54,7 @@ import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
 import static org.assertj.core.api.Assertions.assertThat;
 
-class PartitionCollectorTest extends TableTestBase {
+class PartitionListenersTest extends TableTestBase {
 
     @Test
     public void testTriggerByCompaction() throws Exception {
@@ -85,8 +85,8 @@ class PartitionCollectorTest extends TableTestBase {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
         Path location = catalog.getTableLocation(identifier);
         Path successFile = new Path(location, "a=0/_SUCCESS");
-        PartitionCollector markDone =
-                PartitionCollector.create(false, false, new MockOperatorStateStore(), table);
+        PartitionListeners markDone =
+                PartitionListeners.create(false, false, new MockOperatorStateStore(), table);
 
         notifyCommits(markDone, true);
         assertThat(table.fileIO().exists(successFile)).isEqualTo(deletionVectors);
@@ -97,7 +97,7 @@ class PartitionCollectorTest extends TableTestBase {
         }
     }
 
-    private void notifyCommits(PartitionCollector markDone, boolean isCompact) {
+    private void notifyCommits(PartitionListeners markDone, boolean isCompact) {
         ManifestCommittable committable = new ManifestCommittable(Long.MAX_VALUE);
         DataFileMeta file = DataFileTestUtils.newFile();
         CommitMessageImpl compactMessage;
