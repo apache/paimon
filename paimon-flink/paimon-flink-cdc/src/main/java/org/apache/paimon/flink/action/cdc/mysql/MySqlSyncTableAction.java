@@ -102,6 +102,7 @@ public class MySqlSyncTableAction extends SyncTableActionBase {
 
     @Override
     protected MySqlSource<CdcSourceRecord> buildSource() {
+        validateRuntimeExecutionMode();
         String tableList =
                 String.format(
                         "(%s)\\.(%s)",
