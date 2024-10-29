@@ -106,10 +106,6 @@ public class UnawareBucketCompactor {
                                                 },
                                                 LOG);
                                         return commitMessage;
-                                    } catch (Exception e) {
-                                        MetricUtils.safeCall(
-                                                this::increaseCompactionsFailedCount, LOG);
-                                        throw e;
                                     } finally {
                                         MetricUtils.safeCall(this::stopTimer, LOG);
                                         MetricUtils.safeCall(
@@ -128,12 +124,6 @@ public class UnawareBucketCompactor {
     private void decreaseCompactionsQueuedCount() {
         if (metricsReporter != null) {
             metricsReporter.decreaseCompactionsQueuedCount();
-        }
-    }
-
-    private void increaseCompactionsFailedCount() {
-        if (metricsReporter != null) {
-            metricsReporter.increaseCompactionsFailedCount();
         }
     }
 

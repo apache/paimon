@@ -62,9 +62,6 @@ public abstract class CompactTask implements Callable<CompactResult> {
                 logMetric(startMillis, result.before(), result.after());
             }
             return result;
-        } catch (Exception e) {
-            MetricUtils.safeCall(this::increaseCompactionsFailedCount, LOG);
-            throw e;
         } finally {
             MetricUtils.safeCall(this::stopTimer, LOG);
             MetricUtils.safeCall(this::decreaseCompactionsQueuedCount, LOG);
@@ -74,12 +71,6 @@ public abstract class CompactTask implements Callable<CompactResult> {
     private void decreaseCompactionsQueuedCount() {
         if (metricsReporter != null) {
             metricsReporter.decreaseCompactionsQueuedCount();
-        }
-    }
-
-    private void increaseCompactionsFailedCount() {
-        if (metricsReporter != null) {
-            metricsReporter.increaseCompactionsFailedCount();
         }
     }
 

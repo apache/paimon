@@ -38,9 +38,8 @@ public class CompactionMetricsTest {
         assertThat(getMetric(metrics, CompactionMetrics.AVG_LEVEL0_FILE_COUNT)).isEqualTo(-1.0);
         assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_THREAD_BUSY)).isEqualTo(0.0);
         assertThat(getMetric(metrics, CompactionMetrics.AVG_COMPACTION_TIME)).isEqualTo(0.0);
-        assertThat(getMetric(metrics, CompactionMetrics.COMPACTIONS_COMPLETED_COUNT)).isEqualTo(0L);
-        assertThat(getMetric(metrics, CompactionMetrics.COMPACTIONS_FAILED_COUNT)).isEqualTo(0L);
-        assertThat(getMetric(metrics, CompactionMetrics.COMPACTIONS_QUEUED_COUNT)).isEqualTo(0L);
+        assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_COMPLETED_COUNT)).isEqualTo(0L);
+        assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_QUEUED_COUNT)).isEqualTo(0L);
         CompactionMetrics.Reporter[] reporters = new CompactionMetrics.Reporter[3];
         for (int i = 0; i < reporters.length; i++) {
             reporters[i] = metrics.createReporter(BinaryRow.EMPTY_ROW, i);
@@ -49,9 +48,8 @@ public class CompactionMetricsTest {
         assertThat(getMetric(metrics, CompactionMetrics.MAX_LEVEL0_FILE_COUNT)).isEqualTo(0L);
         assertThat(getMetric(metrics, CompactionMetrics.AVG_LEVEL0_FILE_COUNT)).isEqualTo(0.0);
         assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_THREAD_BUSY)).isEqualTo(0.0);
-        assertThat(getMetric(metrics, CompactionMetrics.COMPACTIONS_COMPLETED_COUNT)).isEqualTo(0L);
-        assertThat(getMetric(metrics, CompactionMetrics.COMPACTIONS_FAILED_COUNT)).isEqualTo(0L);
-        assertThat(getMetric(metrics, CompactionMetrics.COMPACTIONS_QUEUED_COUNT)).isEqualTo(0L);
+        assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_COMPLETED_COUNT)).isEqualTo(0L);
+        assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_QUEUED_COUNT)).isEqualTo(0L);
 
         reporters[0].reportLevel0FileCount(5);
         reporters[1].reportLevel0FileCount(3);
@@ -73,18 +71,15 @@ public class CompactionMetricsTest {
         reporters[0].increaseCompactionsQueuedCount();
         reporters[1].increaseCompactionsQueuedCount();
         reporters[2].increaseCompactionsQueuedCount();
-        assertThat(getMetric(metrics, CompactionMetrics.COMPACTIONS_COMPLETED_COUNT)).isEqualTo(0L);
-        assertThat(getMetric(metrics, CompactionMetrics.COMPACTIONS_FAILED_COUNT)).isEqualTo(0L);
-        assertThat(getMetric(metrics, CompactionMetrics.COMPACTIONS_QUEUED_COUNT)).isEqualTo(3L);
+        assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_COMPLETED_COUNT)).isEqualTo(0L);
+        assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_QUEUED_COUNT)).isEqualTo(3L);
 
         // completed compactions and failed compactions
         reporters[0].increaseCompactionsCompletedCount();
         reporters[0].decreaseCompactionsQueuedCount();
-        reporters[1].increaseCompactionsFailedCount();
         reporters[1].decreaseCompactionsQueuedCount();
-        assertThat(getMetric(metrics, CompactionMetrics.COMPACTIONS_COMPLETED_COUNT)).isEqualTo(1L);
-        assertThat(getMetric(metrics, CompactionMetrics.COMPACTIONS_FAILED_COUNT)).isEqualTo(1L);
-        assertThat(getMetric(metrics, CompactionMetrics.COMPACTIONS_QUEUED_COUNT)).isEqualTo(1L);
+        assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_COMPLETED_COUNT)).isEqualTo(1L);
+        assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_QUEUED_COUNT)).isEqualTo(1L);
     }
 
     private Object getMetric(CompactionMetrics metrics, String metricName) {

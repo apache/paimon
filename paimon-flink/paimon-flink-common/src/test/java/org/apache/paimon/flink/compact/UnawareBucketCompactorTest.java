@@ -50,9 +50,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import static org.apache.paimon.operation.metrics.CompactionMetrics.AVG_COMPACTION_TIME;
-import static org.apache.paimon.operation.metrics.CompactionMetrics.COMPACTIONS_COMPLETED_COUNT;
-import static org.apache.paimon.operation.metrics.CompactionMetrics.COMPACTIONS_FAILED_COUNT;
-import static org.apache.paimon.operation.metrics.CompactionMetrics.COMPACTIONS_QUEUED_COUNT;
+import static org.apache.paimon.operation.metrics.CompactionMetrics.COMPACTION_COMPLETED_COUNT;
+import static org.apache.paimon.operation.metrics.CompactionMetrics.COMPACTION_QUEUED_COUNT;
 import static org.apache.paimon.operation.metrics.CompactionMetrics.COMPACTION_THREAD_BUSY;
 
 /** Test for {@link UnawareBucketCompactor}. */
@@ -109,14 +108,12 @@ public class UnawareBucketCompactorTest {
 
         double compactionThreadBusy = (double) gaugeMap.get(COMPACTION_THREAD_BUSY).getValue();
         double compactionAvgTime = (double) gaugeMap.get(AVG_COMPACTION_TIME).getValue();
-        long compactionsCompletedCount = counterMap.get(COMPACTIONS_COMPLETED_COUNT).getCount();
-        long compactionsFailedCount = counterMap.get(COMPACTIONS_FAILED_COUNT).getCount();
-        long compactionsQueuedCount = counterMap.get(COMPACTIONS_QUEUED_COUNT).getCount();
+        long compactionsCompletedCount = counterMap.get(COMPACTION_COMPLETED_COUNT).getCount();
+        long compactionsQueuedCount = counterMap.get(COMPACTION_QUEUED_COUNT).getCount();
 
         Assertions.assertThat(compactionThreadBusy).isGreaterThan(45).isLessThan(55);
         Assertions.assertThat(compactionAvgTime).isGreaterThan(120).isLessThan(140);
         Assertions.assertThat(compactionsCompletedCount).isEqualTo(320L);
-        Assertions.assertThat(compactionsFailedCount).isEqualTo(0L);
         Assertions.assertThat(compactionsQueuedCount).isEqualTo(0L);
     }
 

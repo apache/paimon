@@ -42,9 +42,8 @@ public class CompactionMetrics {
     public static final String AVG_LEVEL0_FILE_COUNT = "avgLevel0FileCount";
     public static final String COMPACTION_THREAD_BUSY = "compactionThreadBusy";
     public static final String AVG_COMPACTION_TIME = "avgCompactionTime";
-    public static final String COMPACTIONS_COMPLETED_COUNT = "compactionsCompletedCount";
-    public static final String COMPACTIONS_FAILED_COUNT = "compactionsFailedCount";
-    public static final String COMPACTIONS_QUEUED_COUNT = "compactionsQueuedCount";
+    public static final String COMPACTION_COMPLETED_COUNT = "compactionCompletedCount";
+    public static final String COMPACTION_QUEUED_COUNT = "compactionQueuedCount";
     private static final long BUSY_MEASURE_MILLIS = 60_000;
     private static final int COMPACTION_TIME_WINDOW = 100;
 
@@ -53,7 +52,6 @@ public class CompactionMetrics {
     private final Map<Long, CompactTimer> compactTimers;
     private final Queue<Long> compactionTimes;
     private Counter compactionsCompletedCounter;
-    private Counter compactionsFailedCounter;
     private Counter compactionsQueuedCounter;
 
     public CompactionMetrics(MetricRegistry registry, String tableName) {
@@ -78,9 +76,8 @@ public class CompactionMetrics {
                 AVG_COMPACTION_TIME, () -> getCompactionTimeStream().average().orElse(0.0));
         metricGroup.gauge(COMPACTION_THREAD_BUSY, () -> getCompactBusyStream().sum());
 
-        compactionsCompletedCounter = metricGroup.counter(COMPACTIONS_COMPLETED_COUNT);
-        compactionsFailedCounter = metricGroup.counter(COMPACTIONS_FAILED_COUNT);
-        compactionsQueuedCounter = metricGroup.counter(COMPACTIONS_QUEUED_COUNT);
+        compactionsCompletedCounter = metricGroup.counter(COMPACTION_COMPLETED_COUNT);
+        compactionsQueuedCounter = metricGroup.counter(COMPACTION_QUEUED_COUNT);
     }
 
     private LongStream getLevel0FileCountStream() {
@@ -110,8 +107,6 @@ public class CompactionMetrics {
         void reportCompactionTime(long time);
 
         void increaseCompactionsCompletedCount();
-
-        void increaseCompactionsFailedCount();
 
         void increaseCompactionsQueuedCount();
 
@@ -155,11 +150,6 @@ public class CompactionMetrics {
         @Override
         public void increaseCompactionsCompletedCount() {
             compactionsCompletedCounter.inc();
-        }
-
-        @Override
-        public void increaseCompactionsFailedCount() {
-            compactionsFailedCounter.inc();
         }
 
         @Override
