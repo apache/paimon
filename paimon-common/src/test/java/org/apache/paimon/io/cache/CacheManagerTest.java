@@ -18,6 +18,7 @@
 
 package org.apache.paimon.io.cache;
 
+import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
 
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.File;
 import java.io.RandomAccessFile;
 import java.nio.file.Path;
+import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -46,9 +48,20 @@ public class CacheManagerTest {
         CacheKey key2 = CacheKey.forPageIndex(new RandomAccessFile(file2, "r"), 0, 0);
 
         CacheManager cacheManager = new CacheManager(MemorySize.ofBytes(10));
+        byte[] value = new byte[6];
+        Arrays.fill(value, (byte) 1);
         for (int i = 0; i < 10; i++) {
             for (int j = 0; j < 10; j++) {
-                cacheManager.getPage(j < 5 ? key1 : key2, key -> new byte[6], key -> {});
+                MemorySegment segment =
+                        cacheManager.getPage(
+                                j < 5 ? key1 : key2,
+                                key -> {
+                                    byte[] result = new byte[6];
+                                    Arrays.fill(result, (byte) 1);
+                                    return result;
+                                },
+                                key -> {});
+                assertThat(segment.getHeapMemory()).isEqualTo(value);
             }
         }
     }
