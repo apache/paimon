@@ -51,7 +51,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.flink.configuration.CoreOptions.DEFAULT_PARALLELISM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SAMPLE_FACTOR;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.MIN_CLUSTERING_SAMPLE_FACTOR;
@@ -318,11 +317,11 @@ public class FlinkSinkBuilder {
                     parallelismSource = "input parallelism";
                     parallelism = input.getParallelism();
                 } else {
-                    parallelismSource = DEFAULT_PARALLELISM.key();
+                    parallelismSource = "AdaptiveBatchScheduler's default max parallelism";
                     parallelism =
-                            input.getExecutionEnvironment()
-                                    .getConfiguration()
-                                    .get(DEFAULT_PARALLELISM);
+                            AdaptiveParallelism.getDefaultMaxParallelism(
+                                    input.getExecutionEnvironment().getConfiguration(),
+                                    input.getExecutionConfig());
                 }
                 String msg =
                         String.format(
