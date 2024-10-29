@@ -59,7 +59,7 @@ public class CacheManager {
 
     public MemorySegment getPage(CacheKey key, CacheReader reader, CacheCallback callback) {
         CacheValue value = cache.getIfPresent(key);
-        while (value == null || value.isClosed) {
+        while (value == null) {
             try {
                 this.fileReadCount++;
                 value = new CacheValue(MemorySegment.wrap(reader.read(key)), callback);
@@ -81,7 +81,6 @@ public class CacheManager {
 
     private void onRemoval(CacheKey key, CacheValue value, RemovalCause cause) {
         if (value != null) {
-            value.isClosed = true;
             value.callback.onRemoval(key);
         }
     }
@@ -94,8 +93,6 @@ public class CacheManager {
 
         private final MemorySegment segment;
         private final CacheCallback callback;
-
-        private boolean isClosed = false;
 
         private CacheValue(MemorySegment segment, CacheCallback callback) {
             this.segment = segment;
