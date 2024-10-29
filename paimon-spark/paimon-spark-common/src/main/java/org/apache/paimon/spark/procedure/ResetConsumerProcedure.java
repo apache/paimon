@@ -92,7 +92,7 @@ public class ResetConsumerProcedure extends BaseProcedure {
                         throw new SnapshotNotExistException(
                                 String.format(
                                         "The specified snapshot id %s should be smaller than the latest snapshot id %s.",
-                                        latestSnapshotId));
+                                        nextSnapshotId, latestSnapshotId));
                     }
 
                     ConsumerManager consumerManager =
