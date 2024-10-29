@@ -120,7 +120,6 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     currentDeleteRow = true;
                     row = new GenericRow(getters.length);
                 }
-                // ignore -U records
                 return;
             }
 
@@ -254,10 +253,9 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         if (reused == null) {
             reused = new KeyValue();
         }
-        if (currentDeleteRow) {
-            return null;
-        }
-        return reused.replace(currentKey, latestSequenceNumber, RowKind.INSERT, row);
+
+        RowKind rowKind = currentDeleteRow ? RowKind.DELETE : RowKind.INSERT;
+        return reused.replace(currentKey, latestSequenceNumber, rowKind, row);
     }
 
     public static MergeFunctionFactory<KeyValue> factory(
