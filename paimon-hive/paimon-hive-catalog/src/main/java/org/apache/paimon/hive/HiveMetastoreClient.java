@@ -40,6 +40,7 @@ import org.apache.thrift.TException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /** {@link MetastoreClient} for Hive tables. */
 public class HiveMetastoreClient implements MetastoreClient {
@@ -110,6 +111,32 @@ public class HiveMetastoreClient implements MetastoreClient {
 
             clients.execute(client -> client.add_partition(hivePartition));
         }
+    }
+
+    @Override
+    public void alterPartition(
+            LinkedHashMap<String, String> partitionSpec,
+            Map<String, String> parameters,
+            long modifyTime)
+            throws Exception {
+        List<String> partitionValues = new ArrayList<>(partitionSpec.values());
+        int currentTime = (int) (modifyTime / 1000);
+        Partition hivePartition =
+                clients.run(
+                        client ->
+                                client.getPartition(
+                                        identifier.getDatabaseName(),
+                                        identifier.getObjectName(),
+                                        partitionValues));
+        hivePartition.setValues(partitionValues);
+        hivePartition.setLastAccessTime(currentTime);
+        hivePartition.getParameters().putAll(parameters);
+        clients.execute(
+                client ->
+                        client.alter_partition(
+                                identifier.getDatabaseName(),
+                                identifier.getObjectName(),
+                                hivePartition));
     }
 
     @Override

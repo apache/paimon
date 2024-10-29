@@ -18,18 +18,17 @@
 
 package org.apache.paimon.flink.sink.partition;
 
+import org.apache.paimon.flink.sink.Committer;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.IOUtils;
-
-import org.apache.flink.api.common.state.OperatorStateStore;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Partition collector. */
+/** Partition listeners. */
 public class PartitionListeners implements Closeable {
 
     private final List<PartitionListener> listeners;
@@ -55,13 +54,19 @@ public class PartitionListeners implements Closeable {
         IOUtils.closeAllQuietly(listeners);
     }
 
-    public static PartitionListeners create(
-            boolean isStreaming,
-            boolean isRestored,
-            OperatorStateStore stateStore,
-            FileStoreTable table)
+    public static PartitionListeners create(Committer.Context context, FileStoreTable table)
             throws Exception {
+        List<PartitionListener> listeners = new ArrayList<>();
 
-        return new PartitionListeners(new ArrayList<>());
+        ReportHmsListener.create(context.isRestored(), context.stateStore(), table)
+                .ifPresent(listeners::add);
+        PartitionMarkDone.create(
+                        context.streamingCheckpointEnabled(),
+                        context.isRestored(),
+                        context.stateStore(),
+                        table)
+                .ifPresent(listeners::add);
+
+        return new PartitionListeners(listeners);
     }
 }

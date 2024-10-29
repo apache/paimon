@@ -86,7 +86,7 @@ class PartitionMarkDoneTest extends TableTestBase {
         Path location = catalog.getTableLocation(identifier);
         Path successFile = new Path(location, "a=0/_SUCCESS");
         PartitionMarkDone markDone =
-                PartitionMarkDone.create(false, false, new MockOperatorStateStore(), table);
+                PartitionMarkDone.create(false, false, new MockOperatorStateStore(), table).get();
 
         notifyCommits(markDone, true);
         assertThat(table.fileIO().exists(successFile)).isEqualTo(deletionVectors);
