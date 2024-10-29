@@ -89,7 +89,8 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
         EnvironmentSettings settings = EnvironmentSettings.newInstance().inBatchMode().build();
         Class<?>[] customConstructorMetastoreClientClass = {
             CustomConstructorMetastoreClient.TwoParameterConstructorMetastoreClient.class,
-            CustomConstructorMetastoreClient.OneParameterConstructorMetastoreClient.class
+            CustomConstructorMetastoreClient.OneParameterConstructorMetastoreClient.class,
+            CustomConstructorMetastoreClient.OtherParameterConstructorMetastoreClient.class
         };
 
         for (Class<?> clazz : customConstructorMetastoreClientClass) {

@@ -19,6 +19,7 @@
 package org.apache.paimon.hive;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaHookLoader;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
@@ -48,6 +49,14 @@ public class CustomConstructorMetastoreClient {
             implements IMetaStoreClient {
 
         public OneParameterConstructorMetastoreClient(Configuration conf) throws MetaException {
+            super(conf);
+        }
+    }
+
+    public static class OtherParameterConstructorMetastoreClient extends HiveMetaStoreClient
+            implements IMetaStoreClient {
+
+        public OtherParameterConstructorMetastoreClient(HiveConf conf) throws MetaException {
             super(conf);
         }
     }
