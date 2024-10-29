@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
+import org.apache.paimon.flink.sink.partition.PartitionListeners;
 import org.apache.paimon.flink.sink.partition.PartitionMarkDone;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -44,6 +45,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     private final TableCommitImpl commit;
     @Nullable private final CommitterMetrics committerMetrics;
     @Nullable private final PartitionMarkDone partitionMarkDone;
+    private final PartitionListeners partitionListeners;
 
     public StoreCommitter(FileStoreTable table, TableCommit commit, Context context) {
         this.commit = (TableCommitImpl) commit;
@@ -58,6 +60,12 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
         try {
             this.partitionMarkDone =
                     PartitionMarkDone.create(
+                            context.streamingCheckpointEnabled(),
+                            context.isRestored(),
+                            context.stateStore(),
+                            table);
+            this.partitionListeners =
+                    PartitionListeners.create(
                             context.streamingCheckpointEnabled(),
                             context.isRestored(),
                             context.stateStore(),
@@ -114,6 +122,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
         if (partitionMarkDone != null) {
             partitionMarkDone.notifyCommittable(committables);
         }
+        partitionListeners.notifyCommittable(committables);
     }
 
     @Override
@@ -123,17 +132,19 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
         if (partitionMarkDone != null) {
             partitionMarkDone.notifyCommittable(globalCommittables);
         }
+        partitionListeners.notifyCommittable(globalCommittables);
         return committed;
     }
 
     @Override
     public Map<Long, List<Committable>> groupByCheckpoint(Collection<Committable> committables) {
-        if (partitionMarkDone != null) {
-            try {
+        try {
+            if (partitionMarkDone != null) {
                 partitionMarkDone.snapshotState();
-            } catch (Exception e) {
-                throw new RuntimeException(e);
             }
+            partitionListeners.snapshotState();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
 
         Map<Long, List<Committable>> grouped = new HashMap<>();
@@ -149,6 +160,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
         if (partitionMarkDone != null) {
             partitionMarkDone.close();
         }
+        partitionListeners.close();
     }
 
     private void calcNumBytesAndRecordsOut(List<ManifestCommittable> committables) {
