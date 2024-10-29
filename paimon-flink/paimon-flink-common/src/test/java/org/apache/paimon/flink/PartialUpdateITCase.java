@@ -623,7 +623,32 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testRemoveRecordOnDelete() throws Exception {
+    public void testRemoveRecordOnDelete() {
+        sql(
+                "CREATE TABLE remove_record_on_delete (pk INT PRIMARY KEY NOT ENFORCED, a STRING, b STRING) WITH ("
+                        + " 'merge-engine' = 'partial-update',"
+                        + " 'partial-update.remove-record-on-delete' = 'true'"
+                        + ")");
+
+        sql("INSERT INTO remove_record_on_delete VALUES (1, CAST (NULL AS STRING), 'apple')");
+
+        // delete record
+        sql("DELETE FROM remove_record_on_delete WHERE pk = 1");
+
+        // batch read
+        assertThat(sql("SELECT * FROM remove_record_on_delete")).isEmpty();
+
+        // insert records
+        sql("INSERT INTO remove_record_on_delete VALUES (1, CAST (NULL AS STRING), 'apache')");
+        sql("INSERT INTO remove_record_on_delete VALUES (1, 'A', CAST (NULL AS STRING))");
+
+        // batch read
+        assertThat(sql("SELECT * FROM remove_record_on_delete"))
+                .containsExactlyInAnyOrder(Row.of(1, "A", "apache"));
+    }
+
+    @Test
+    public void testRemoveRecordOnDeleteLookup() throws Exception {
         sql(
                 "CREATE TABLE remove_record_on_delete (pk INT PRIMARY KEY NOT ENFORCED, a STRING, b STRING) WITH ("
                         + " 'merge-engine' = 'partial-update',"
