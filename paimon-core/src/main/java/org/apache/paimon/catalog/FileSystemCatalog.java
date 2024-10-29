@@ -70,7 +70,14 @@ public class FileSystemCatalog extends AbstractCatalog {
                     "Currently filesystem catalog can't store database properties, discard properties: {}",
                     properties);
         }
-        uncheck(() -> fileIO.mkdirs(newDatabasePath(name)));
+
+        Path databasePath = newDatabasePath(name);
+        if (!uncheck(() -> fileIO.mkdirs(databasePath))) {
+            throw new RuntimeException(
+                    String.format(
+                            "Create database location failed, " + "database: %s, location: %s",
+                            name, databasePath));
+        }
     }
 
     @Override
