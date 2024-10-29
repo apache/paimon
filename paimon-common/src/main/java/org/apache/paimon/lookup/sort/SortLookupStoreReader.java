@@ -20,12 +20,13 @@ package org.apache.paimon.lookup.sort;
 
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.BlockDecompressor;
+import org.apache.paimon.io.PageFileInput;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.LookupStoreReader;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
-import org.apache.paimon.utils.BloomFilter;
+import org.apache.paimon.utils.FileBasedBloomFilter;
 import org.apache.paimon.utils.MurmurHashUtils;
 
 import javax.annotation.Nullable;
@@ -55,11 +56,12 @@ public class SortLookupStoreReader implements LookupStoreReader {
     private final long fileSize;
 
     private final BlockIterator indexBlockIterator;
-    @Nullable private final BloomFilter bloomFilter;
+    @Nullable private FileBasedBloomFilter bloomFilter;
 
     public SortLookupStoreReader(
             Comparator<MemorySlice> comparator,
             File file,
+            int blockSize,
             SortContext context,
             CacheManager cacheManager)
             throws IOException {
@@ -71,18 +73,17 @@ public class SortLookupStoreReader implements LookupStoreReader {
 
         Footer footer = readFooter();
         this.indexBlockIterator = readBlock(footer.getIndexBlockHandle()).iterator();
-        this.bloomFilter = readBloomFilter(footer.getBloomFilterHandle());
-    }
-
-    private BloomFilter readBloomFilter(@Nullable BloomFilterHandle bloomFilterHandle)
-            throws IOException {
-        BloomFilter bloomFilter = null;
-        if (bloomFilterHandle != null) {
-            MemorySegment segment = read(bloomFilterHandle.offset(), bloomFilterHandle.size());
-            bloomFilter = new BloomFilter(bloomFilterHandle.expectedEntries(), segment.size());
-            bloomFilter.setMemorySegment(segment, 0);
+        BloomFilterHandle handle = footer.getBloomFilterHandle();
+        if (handle != null) {
+            PageFileInput fileInput = PageFileInput.create(file, blockSize, null, fileSize, null);
+            this.bloomFilter =
+                    new FileBasedBloomFilter(
+                            fileInput,
+                            cacheManager,
+                            handle.expectedEntries(),
+                            handle.offset(),
+                            handle.size());
         }
-        return bloomFilter;
     }
 
     private Footer readFooter() throws IOException {
