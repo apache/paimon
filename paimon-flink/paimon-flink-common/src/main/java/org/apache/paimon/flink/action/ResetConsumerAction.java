@@ -58,7 +58,7 @@ public class ResetConsumerAction extends TableActionBase {
                 && nextSnapshotId > latestSnapshotId) {
             throw new SnapshotNotExistException(
                     String.format(
-                            "the snapshot id is not exist, you can set it <= %s.",
+                            "The specified snapshot id %s should be smaller than the latest snapshot id %s.",
                             latestSnapshotId));
         }
 
