@@ -19,6 +19,7 @@
 package org.apache.paimon.hive;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaHookLoader;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
@@ -28,7 +29,7 @@ import org.apache.hadoop.hive.metastore.api.MetaException;
 public class CustomConstructorMetastoreClient {
 
     /**
-     * A {@link HiveMetaStoreClient} to test custom Hive metastore client with (HiveConf,
+     * A {@link HiveMetaStoreClient} to test custom Hive metastore client with (Configuration,
      * HiveMetaHookLoader) constructor.
      */
     public static class TwoParameterConstructorMetastoreClient extends HiveMetaStoreClient
@@ -41,13 +42,25 @@ public class CustomConstructorMetastoreClient {
     }
 
     /**
-     * A {@link HiveMetaStoreClient} to test custom Hive metastore client with (HiveConf)
+     * A {@link HiveMetaStoreClient} to test custom Hive metastore client with (Configuration)
      * constructor.
      */
     public static class OneParameterConstructorMetastoreClient extends HiveMetaStoreClient
             implements IMetaStoreClient {
 
         public OneParameterConstructorMetastoreClient(Configuration conf) throws MetaException {
+            super(conf);
+        }
+    }
+
+    /**
+     * A {@link HiveMetaStoreClient} to test custom Hive metastore client with (HiveConf)
+     * constructor.
+     */
+    public static class OtherParameterConstructorMetastoreClient extends HiveMetaStoreClient
+            implements IMetaStoreClient {
+
+        public OtherParameterConstructorMetastoreClient(HiveConf conf) throws MetaException {
             super(conf);
         }
     }

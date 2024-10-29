@@ -32,6 +32,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
@@ -182,25 +183,30 @@ public class RetryingMetaStoreClientFactory {
             Class<?> baseClass = Class.forName(clientClassName, false, JavaUtils.getClassLoader());
 
             // Configuration.class or HiveConf.class
-            Class<?> firstParamType = getProxyMethod.getParameterTypes()[0];
+            List<Class<?>> possibleFirstParamTypes =
+                    Arrays.asList(getProxyMethod.getParameterTypes()[0], hiveConf.getClass());
 
-            Class<?>[] fullParams =
-                    new Class[] {firstParamType, HiveMetaHookLoader.class, Boolean.TYPE};
-            Object[] fullParamValues =
-                    new Object[] {hiveConf, (HiveMetaHookLoader) (tbl -> null), Boolean.TRUE};
+            for (Class<?> possibleFirstParamType : possibleFirstParamTypes) {
+                Class<?>[] fullParams =
+                        new Class[] {
+                            possibleFirstParamType, HiveMetaHookLoader.class, Boolean.TYPE
+                        };
+                Object[] fullParamValues =
+                        new Object[] {hiveConf, (HiveMetaHookLoader) (tbl -> null), Boolean.TRUE};
 
-            for (int i = fullParams.length; i >= 1; i--) {
-                try {
-                    baseClass.getConstructor(Arrays.copyOfRange(fullParams, 0, i));
-                    return (IMetaStoreClient)
-                            getProxyMethod.invoke(
-                                    null,
-                                    hiveConf,
-                                    Arrays.copyOfRange(fullParams, 0, i),
-                                    Arrays.copyOfRange(fullParamValues, 0, i),
-                                    new ConcurrentHashMap<>(),
-                                    clientClassName);
-                } catch (NoSuchMethodException ignored) {
+                for (int i = fullParams.length; i >= 1; i--) {
+                    try {
+                        baseClass.getConstructor(Arrays.copyOfRange(fullParams, 0, i));
+                        return (IMetaStoreClient)
+                                getProxyMethod.invoke(
+                                        null,
+                                        hiveConf,
+                                        Arrays.copyOfRange(fullParams, 0, i),
+                                        Arrays.copyOfRange(fullParamValues, 0, i),
+                                        new ConcurrentHashMap<>(),
+                                        clientClassName);
+                    } catch (NoSuchMethodException ignored) {
+                    }
                 }
             }
 
