@@ -101,8 +101,14 @@ class PaimonSparkSqlExtensionsParser(delegate: ParserInterface)
       .replaceAll("\\s+", " ")
       .replaceAll("/\\*.*?\\*/", " ")
       .trim()
-    normalized.startsWith("call") ||
-    normalized.contains("show tags")
+    normalized.startsWith("call") || isTagRefDdl(normalized)
+  }
+
+  private def isTagRefDdl(normalized: String): Boolean = {
+    normalized.startsWith("show tags") || (normalized
+      .startsWith("alter table") && (normalized.contains("create tag") ||
+      normalized.contains("rename tag") ||
+      normalized.contains("delete tag")))
   }
 
   protected def parse[T](command: String)(toResult: PaimonSqlExtensionsParser => T): T = {

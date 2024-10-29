@@ -16,6 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.sql
+package org.apache.paimon.spark.catalyst.plans.logical
 
-class ShowTagsTest extends PaimonShowTagsTestBase {}
+import org.apache.paimon.spark.leafnode.PaimonLeafCommand
+
+import org.apache.spark.sql.catalyst.expressions.Attribute
+
+case class CreateTagCommand(
+    table: Seq[String],
+    tagName: String,
+    tagOptions: TagOptions,
+    ifNotExists: Boolean)
+  extends PaimonLeafCommand {
+
+  override def output: Seq[Attribute] = Nil
+
+  override def simpleString(maxFields: Int): String = {
+    s"Create tag: $tagName for table: $table"
+  }
+}

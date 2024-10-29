@@ -71,12 +71,33 @@ singleStatement
 statement
     : CALL multipartIdentifier '(' (callArgument (',' callArgument)*)? ')'                  #call
     | SHOW TAGS multipartIdentifier                                                         #showTags
-    ;
+    | ALTER TABLE multipartIdentifier CREATE TAG (IF NOT EXISTS)? identifier tagOptions     #createTag
+    | ALTER TABLE multipartIdentifier DELETE TAG (IF EXISTS)? identifier                    #deleteTag
+    | ALTER TABLE multipartIdentifier RENAME TAG identifier TO identifier                   #renameTag
+  ;
 
 callArgument
     : expression                    #positionalArgument
     | identifier '=>' expression    #namedArgument
     ;
+
+tagOptions
+  : (AS OF VERSION snapshotId)? (timeRetain)?
+  ;
+
+snapshotId
+  : number
+  ;
+
+timeRetain
+  : RETAIN number timeUnit
+  ;
+
+timeUnit
+  : DAYS
+  | HOURS
+  | MINUTES
+  ;
 
 expression
     : constant
@@ -125,14 +146,32 @@ quotedIdentifier
     ;
 
 nonReserved
-    : CALL
+    : ALTER | AS | CALL | CREATE | DAYS | DELETE | EXISTS | HOURS | IF | NOT | OF | TABLE
+    | RETAIN | VERSION | TAG
     | TRUE | FALSE
     | MAP
     ;
 
+ALTER: 'ALTER';
+AS: 'AS';
 CALL: 'CALL';
+CREATE: 'CREATE';
+DAYS: 'DAYS';
+DELETE: 'DELETE';
+EXISTS: 'EXISTS';
+HOURS: 'HOURS';
+IF : 'IF';
+MINUTES: 'MINUTES';
+NOT: 'NOT';
+OF: 'OF';
+RENAME: 'RENAME';
+RETAIN: 'RETAIN';
 SHOW: 'SHOW';
+TABLE: 'TABLE';
+TAG: 'TAG';
 TAGS: 'TAGS';
+TO: 'TO';
+VERSION: 'VERSION';
 
 TRUE: 'TRUE';
 FALSE: 'FALSE';

@@ -210,8 +210,48 @@ CREATE TABLE my_table_all (
 CREATE TABLE my_table_all_as PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 'dt,hh') AS SELECT * FROM my_table_all;
 ```
 
-## Show Tags
-The SHOW TAGS statement is used to list all tags of a table.
+## Tag DDL
+### Create Tag
+Create a tag based on snapshot or retention.
+```sql
+-- create a tag based on the latest snapshot and no retention.
+ALTER TABLE T CREATE TAG `TAG-1`;
+
+-- create a tag based on the latest snapshot and no retention if it doesn't exist.
+ALTER TABLE T CREATE TAG IF NOT EXISTS `TAG-1`;
+
+-- create a tag based on the latest snapshot and retain it for 7 day.
+ALTER TABLE T CREATE TAG `TAG-2` RETAIN 7 DAYS;
+
+-- create a tag based on snapshot-1 and no retention.
+ALTER TABLE T CREATE TAG `TAG-3` AS OF VERSION 1;
+
+-- create a tag based on snapshot-2 and retain it for 12 hour.
+ALTER TABLE T CREATE TAG `TAG-4` AS OF VERSION 2 RETAIN 12 HOURS;
 ```
-SHOW TAGS my_table;
+
+### Delete Tag
+Delete a tag or multiple tags of a table.
+```sql
+-- delete a tag.
+ALTER TABLE T DELETE TAG `TAG-1`;
+
+-- delete a tag if it exists.
+ALTER TABLE T DELETE TAG IF EXISTS `TAG-1`
+
+-- delete multiple tags, delimiter is ','.
+ALTER TABLE T DELETE TAG `TAG-1,TAG-2`;
 ```
+
+### Rename Tag
+Rename an existing tag with a new tag name.
+```sql
+ALTER TABLE T RENAME TAG `TAG-1` TO `TAG-2`;
+```
+
+### Show Tags
+List all tags of a table.
+```sql
+SHOW TAGS T;
+```
+
