@@ -101,7 +101,7 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     public boolean tableExists(Identifier identifier) {
-        if (isSystemTable(identifier)) {
+        if (isTableInSystemDatabase(identifier)) {
             return super.tableExists(identifier);
         }
 

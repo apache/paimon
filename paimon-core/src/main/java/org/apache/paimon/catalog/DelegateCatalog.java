@@ -74,7 +74,8 @@ public class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public Optional<MetastoreClient.Factory> metastoreClientFactory(Identifier identifier) {
+    public Optional<MetastoreClient.Factory> metastoreClientFactory(Identifier identifier)
+            throws TableNotExistException {
         return wrapped.metastoreClientFactory(identifier);
     }
 

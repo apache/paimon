@@ -355,54 +355,44 @@ public abstract class AbstractCatalog implements Catalog {
             }
             return table;
         } else if (isSpecifiedSystemTable(identifier)) {
-            FileStoreTable originTable =
-                    getDataTable(
+            Table originTable =
+                    getDataOrFormatTable(
                             new Identifier(
                                     identifier.getDatabaseName(),
                                     identifier.getTableName(),
                                     identifier.getBranchName(),
                                     null));
+            if (!(originTable instanceof FileStoreTable)) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Only data table support system tables, but this table %s is %s.",
+                                identifier, originTable.getClass()));
+            }
             Table table =
                     SystemTableLoader.load(
                             Preconditions.checkNotNull(identifier.getSystemTableName()),
-                            originTable);
+                            (FileStoreTable) originTable);
             if (table == null) {
                 throw new TableNotExistException(identifier);
             }
             return table;
         } else {
-            try {
-                return getDataTable(identifier);
-            } catch (TableNotExistException e) {
-                return getFormatTable(identifier);
-            }
+            return getDataOrFormatTable(identifier);
         }
     }
 
-    private FileStoreTable getDataTable(Identifier identifier) throws TableNotExistException {
+    protected Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
         Preconditions.checkArgument(identifier.getSystemTableName() == null);
-        TableSchema tableSchema = getDataTableSchema(identifier);
         return FileStoreTableFactory.create(
                 fileIO,
                 getTableLocation(identifier),
-                tableSchema,
+                getDataTableSchema(identifier),
                 new CatalogEnvironment(
                         identifier,
                         Lock.factory(
                                 lockFactory().orElse(null), lockContext().orElse(null), identifier),
                         metastoreClientFactory(identifier).orElse(null),
                         lineageMetaFactory));
-    }
-
-    /**
-     * Return a {@link FormatTable} identified by the given {@link Identifier}.
-     *
-     * @param identifier Path of the table
-     * @return The requested table
-     * @throws Catalog.TableNotExistException if the target does not exist
-     */
-    public FormatTable getFormatTable(Identifier identifier) throws Catalog.TableNotExistException {
-        throw new Catalog.TableNotExistException(identifier);
     }
 
     /**
@@ -473,12 +463,12 @@ public abstract class AbstractCatalog implements Catalog {
         return identifier.getSystemTableName() != null;
     }
 
-    protected static boolean isSystemTable(Identifier identifier) {
+    protected static boolean isTableInSystemDatabase(Identifier identifier) {
         return isSystemDatabase(identifier.getDatabaseName()) || isSpecifiedSystemTable(identifier);
     }
 
     protected static void checkNotSystemTable(Identifier identifier, String method) {
-        if (isSystemTable(identifier)) {
+        if (isTableInSystemDatabase(identifier)) {
             throw new IllegalArgumentException(
                     String.format(
                             "Cannot '%s' for system table '%s', please use data table.",
