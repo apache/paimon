@@ -28,6 +28,8 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Remo
 
 import java.io.IOException;
 
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
+
 /** Cache manager to cache bytes to paged {@link MemorySegment}s. */
 public class CacheManager {
 
@@ -58,17 +60,19 @@ public class CacheManager {
     }
 
     public MemorySegment getPage(CacheKey key, CacheReader reader, CacheCallback callback) {
-        CacheValue value = cache.getIfPresent(key);
-        while (value == null || value.isClosed) {
-            try {
-                this.fileReadCount++;
-                value = new CacheValue(MemorySegment.wrap(reader.read(key)), callback);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            cache.put(key, value);
-        }
-        return value.segment;
+        CacheValue value =
+                cache.get(
+                        key,
+                        k -> {
+                            this.fileReadCount++;
+                            try {
+                                return new CacheValue(MemorySegment.wrap(reader.read(k)), callback);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
+
+        return checkNotNull(value, String.format("Cache result for key(%s) is null", key)).segment;
     }
 
     public void invalidPage(CacheKey key) {
@@ -81,7 +85,6 @@ public class CacheManager {
 
     private void onRemoval(CacheKey key, CacheValue value, RemovalCause cause) {
         if (value != null) {
-            value.isClosed = true;
             value.callback.onRemoval(key);
         }
     }
@@ -94,8 +97,6 @@ public class CacheManager {
 
         private final MemorySegment segment;
         private final CacheCallback callback;
-
-        private boolean isClosed = false;
 
         private CacheValue(MemorySegment segment, CacheCallback callback) {
             this.segment = segment;

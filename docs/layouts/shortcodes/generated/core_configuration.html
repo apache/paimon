@@ -552,6 +552,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>The default partition name in case the dynamic partition column value is null/empty string.</td>
         </tr>
         <tr>
+            <td><h5>partition.end-input-to-done</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether mark the done status to indicate that the data is ready when end input.</td>
+        </tr>
+        <tr>
             <td><h5>partition.expiration-check-interval</h5></td>
             <td style="word-wrap: break-word;">1 h</td>
             <td>Duration</td>
@@ -568,6 +574,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
             <td>The expiration interval of a partition. A partition will be expired if it‘s lifetime is over this value. Partition time is extracted from the partition value.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.legacy-name</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>The legacy partition name is using `toString` fpr all types. If false, using cast to string for all types.</td>
         </tr>
         <tr>
             <td><h5>partition.mark-done-action</h5></td>
@@ -700,6 +712,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>The field that generates the sequence number for primary key table, the sequence number determines which data is the most recent.</td>
+        </tr>
+        <tr>
+            <td><h5>sequence.field.sort-order</h5></td>
+            <td style="word-wrap: break-word;">ascending</td>
+            <td><p>Enum</p></td>
+            <td>Specify the order of sequence.field.<br /><br />Possible values:<ul><li>"ascending": specifies sequence.field sort order is ascending.</li><li>"descending": specifies sequence.field sort order is descending.</li></ul></td>
         </tr>
         <tr>
             <td><h5>sink.watermark-time-zone</h5></td>

@@ -172,6 +172,11 @@ public class ParquetFilters {
         }
 
         if (value instanceof Number) {
+            if (value instanceof Byte) {
+                return ((Byte) value).intValue();
+            } else if (value instanceof Short) {
+                return ((Short) value).intValue();
+            }
             return (Comparable<?>) value;
         } else if (value instanceof String) {
             return Binary.fromString((String) value);

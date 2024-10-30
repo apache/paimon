@@ -29,6 +29,8 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.view.View;
+import org.apache.paimon.view.ViewImpl;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
@@ -40,7 +42,9 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -830,5 +834,65 @@ public abstract class CatalogTestBase {
 
         table = catalog.getTable(identifier);
         assertThat(table.comment().isPresent()).isFalse();
+    }
+
+    protected boolean supportsView() {
+        return false;
+    }
+
+    @Test
+    public void testView() throws Exception {
+        if (!supportsView()) {
+            return;
+        }
+
+        Identifier identifier = new Identifier("view_db", "my_view");
+        RowType rowType =
+                RowType.builder()
+                        .field("str", DataTypes.STRING())
+                        .field("int", DataTypes.INT())
+                        .build();
+        String query = "SELECT * FROM OTHER_TABLE";
+        String comment = "it is my view";
+        Map<String, String> options = new HashMap<>();
+        options.put("key1", "v1");
+        options.put("key2", "v2");
+        View view = new ViewImpl(identifier, rowType, query, comment, options);
+
+        assertThatThrownBy(() -> catalog.createView(identifier, view, false))
+                .isInstanceOf(Catalog.DatabaseNotExistException.class);
+
+        assertThatThrownBy(() -> catalog.listViews(identifier.getDatabaseName()))
+                .isInstanceOf(Catalog.DatabaseNotExistException.class);
+
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+
+        assertThatThrownBy(() -> catalog.getView(identifier))
+                .isInstanceOf(Catalog.ViewNotExistException.class);
+
+        catalog.createView(identifier, view, false);
+
+        assertThat(catalog.viewExists(identifier)).isTrue();
+
+        View catalogView = catalog.getView(identifier);
+        assertThat(catalogView.fullName()).isEqualTo(view.fullName());
+        assertThat(catalogView.rowType()).isEqualTo(view.rowType());
+        assertThat(catalogView.query()).isEqualTo(view.query());
+        assertThat(catalogView.comment()).isEqualTo(view.comment());
+        assertThat(catalogView.options()).containsAllEntriesOf(view.options());
+
+        List<String> views = catalog.listViews(identifier.getDatabaseName());
+        assertThat(views).containsOnly(identifier.getObjectName());
+
+        catalog.createView(identifier, view, true);
+        assertThatThrownBy(() -> catalog.createView(identifier, view, false))
+                .isInstanceOf(Catalog.ViewAlreadyExistException.class);
+
+        catalog.dropView(identifier, false);
+        assertThat(catalog.viewExists(identifier)).isFalse();
+
+        catalog.dropView(identifier, true);
+        assertThatThrownBy(() -> catalog.dropView(identifier, false))
+                .isInstanceOf(Catalog.ViewNotExistException.class);
     }
 }

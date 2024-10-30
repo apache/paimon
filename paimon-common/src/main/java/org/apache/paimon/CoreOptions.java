@@ -28,6 +28,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -248,6 +249,14 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The default partition name in case the dynamic partition"
                                     + " column value is null/empty string.");
+
+    public static final ConfigOption<Boolean> PARTITION_GENERATE_LEGCY_NAME =
+            key("partition.legacy-name")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "The legacy partition name is using `toString` fpr all types. If false, using "
+                                    + "cast to string for all types.");
 
     public static final ConfigOption<Integer> SNAPSHOT_NUM_RETAINED_MIN =
             key("snapshot.num-retained.min")
@@ -601,6 +610,13 @@ public class CoreOptions implements Serializable {
                                     + " the sequence number determines which data is the most recent.");
 
     @Immutable
+    public static final ConfigOption<SortOrder> SEQUENCE_FIELD_SORT_ORDER =
+            key("sequence.field.sort-order")
+                    .enumType(SortOrder.class)
+                    .defaultValue(SortOrder.ASCENDING)
+                    .withDescription("Specify the order of sequence.field.");
+
+    @Immutable
     public static final ConfigOption<Boolean> PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE =
             key("partial-update.remove-record-on-delete")
                     .booleanType()
@@ -817,6 +833,13 @@ public class CoreOptions implements Serializable {
                                                     "If the timestamp is in fields dt and hour, you can use '$dt "
                                                             + "$hour:00:00'."))
                                     .build());
+
+    public static final ConfigOption<Boolean> PARTITION_MARK_DONE_WHEN_END_INPUT =
+            ConfigOptions.key("partition.end-input-to-done")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether mark the done status to indicate that the data is ready when end input.");
 
     public static final ConfigOption<Boolean> SCAN_PLAN_SORT_PARTITION =
             key("scan.plan-sort-partition")
@@ -1531,6 +1554,10 @@ public class CoreOptions implements Serializable {
         return options.get(PARTITION_DEFAULT_NAME);
     }
 
+    public boolean legacyPartitionName() {
+        return options.get(PARTITION_GENERATE_LEGCY_NAME);
+    }
+
     public boolean sortBySize() {
         return options.get(SORT_RANG_STRATEGY) == RangeStrategy.SIZE;
     }
@@ -2023,6 +2050,10 @@ public class CoreOptions implements Serializable {
                 .orElse(Collections.emptyList());
     }
 
+    public boolean sequenceFieldSortOrderIsAscending() {
+        return options.get(SEQUENCE_FIELD_SORT_ORDER) == SortOrder.ASCENDING;
+    }
+
     public boolean partialUpdateRemoveRecordOnDelete() {
         return options.get(PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE);
     }
@@ -2347,6 +2378,31 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         StartupMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Specifies the sort order for field sequence id. */
+    public enum SortOrder implements DescribedEnum {
+        ASCENDING("ascending", "specifies sequence.field sort order is ascending."),
+
+        DESCENDING("descending", "specifies sequence.field sort order is descending.");
+
+        private final String value;
+        private final String description;
+
+        SortOrder(String value, String description) {
             this.value = value;
             this.description = description;
         }

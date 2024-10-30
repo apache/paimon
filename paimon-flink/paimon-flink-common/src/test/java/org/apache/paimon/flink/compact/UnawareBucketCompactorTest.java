@@ -34,8 +34,10 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 
+import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Gauge;
 import org.apache.flink.metrics.MetricGroup;
+import org.apache.flink.metrics.SimpleCounter;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -48,6 +50,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import static org.apache.paimon.operation.metrics.CompactionMetrics.AVG_COMPACTION_TIME;
+import static org.apache.paimon.operation.metrics.CompactionMetrics.COMPACTION_COMPLETED_COUNT;
+import static org.apache.paimon.operation.metrics.CompactionMetrics.COMPACTION_QUEUED_COUNT;
 import static org.apache.paimon.operation.metrics.CompactionMetrics.COMPACTION_THREAD_BUSY;
 
 /** Test for {@link UnawareBucketCompactor}. */
@@ -65,7 +69,8 @@ public class UnawareBucketCompactorTest {
                 Executors.newSingleThreadScheduledExecutor(
                         new ExecutorThreadFactory(
                                 Thread.currentThread().getName() + "-append-only-compact-worker"));
-        Map<String, Gauge> map = new HashMap<>();
+        Map<String, Gauge> gaugeMap = new HashMap<>();
+        Map<String, Counter> counterMap = new HashMap<>();
         UnawareBucketCompactor unawareBucketCompactor =
                 new UnawareBucketCompactor(
                         (FileStoreTable) catalog.getTable(identifier()),
@@ -74,7 +79,7 @@ public class UnawareBucketCompactorTest {
                         new FileStoreSourceReaderTest.DummyMetricGroup() {
                             @Override
                             public <T, G extends Gauge<T>> G gauge(String name, G gauge) {
-                                map.put(name, gauge);
+                                gaugeMap.put(name, gauge);
                                 return null;
                             }
 
@@ -87,6 +92,13 @@ public class UnawareBucketCompactorTest {
                             public MetricGroup addGroup(String key, String value) {
                                 return this;
                             }
+
+                            @Override
+                            public Counter counter(String name) {
+                                SimpleCounter counter = new SimpleCounter();
+                                counterMap.put(name, counter);
+                                return counter;
+                            }
                         });
 
         for (int i = 0; i < 320; i++) {
@@ -94,11 +106,15 @@ public class UnawareBucketCompactorTest {
             Thread.sleep(250);
         }
 
-        double compactionThreadBusy = (double) map.get(COMPACTION_THREAD_BUSY).getValue();
-        double compactionAvrgTime = (double) map.get(AVG_COMPACTION_TIME).getValue();
+        double compactionThreadBusy = (double) gaugeMap.get(COMPACTION_THREAD_BUSY).getValue();
+        double compactionAvgTime = (double) gaugeMap.get(AVG_COMPACTION_TIME).getValue();
+        long compactionsCompletedCount = counterMap.get(COMPACTION_COMPLETED_COUNT).getCount();
+        long compactionsQueuedCount = counterMap.get(COMPACTION_QUEUED_COUNT).getCount();
 
         Assertions.assertThat(compactionThreadBusy).isGreaterThan(45).isLessThan(55);
-        Assertions.assertThat(compactionAvrgTime).isGreaterThan(120).isLessThan(140);
+        Assertions.assertThat(compactionAvgTime).isGreaterThan(120).isLessThan(140);
+        Assertions.assertThat(compactionsCompletedCount).isEqualTo(320L);
+        Assertions.assertThat(compactionsQueuedCount).isEqualTo(0L);
     }
 
     protected Catalog getCatalog() {

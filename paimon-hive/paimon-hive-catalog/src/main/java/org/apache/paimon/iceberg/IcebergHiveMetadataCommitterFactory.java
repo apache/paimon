@@ -16,6 +16,20 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.sql
+package org.apache.paimon.iceberg;
 
-class ShowTagsTest extends PaimonShowTagsTestBase {}
+import org.apache.paimon.table.FileStoreTable;
+
+/** Factory to create {@link IcebergHiveMetadataCommitter}. */
+public class IcebergHiveMetadataCommitterFactory implements IcebergMetadataCommitterFactory {
+
+    @Override
+    public String identifier() {
+        return IcebergOptions.StorageType.HIVE_CATALOG.toString();
+    }
+
+    @Override
+    public IcebergMetadataCommitter create(FileStoreTable table) {
+        return new IcebergHiveMetadataCommitter(table);
+    }
+}

@@ -106,7 +106,8 @@ public class ManifestListTest {
                         "default",
                         CoreOptions.FILE_FORMAT.defaultValue().toString(),
                         CoreOptions.DATA_FILE_PREFIX.defaultValue(),
-                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue());
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue());
         return new ManifestList.Factory(FileIOFinder.find(path), avro, "zstd", pathFactory, null)
                 .create();
     }

@@ -102,6 +102,9 @@ under the License.
         <flink.reuseForks>true</flink.reuseForks>
         <testcontainers.version>1.19.1</testcontainers.version>
         <iceberg.version>1.6.1</iceberg.version>
+        <parquet.version>1.13.1</parquet.version>
+        <orc.version>1.9.2</orc.version>
+        <protobuf-java.version>3.19.6</protobuf-java.version>
 
         <!-- Can be set to any value to reproduce a specific build. -->
         <test.randomization.seed/>

@@ -268,4 +268,9 @@ public class HiveCatalogTest extends CatalogTestBase {
             fail("Test failed due to exception: " + e.getMessage());
         }
     }
+
+    @Override
+    protected boolean supportsView() {
+        return true;
+    }
 }

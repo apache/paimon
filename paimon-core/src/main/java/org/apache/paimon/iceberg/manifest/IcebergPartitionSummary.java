@@ -69,7 +69,7 @@ public class IcebergPartitionSummary {
         fields.add(new DataField(518, "contains_nan", DataTypes.BOOLEAN()));
         fields.add(new DataField(510, "lower_bound", DataTypes.BYTES()));
         fields.add(new DataField(511, "upper_bound", DataTypes.BYTES()));
-        return (RowType) new RowType(fields).notNull();
+        return new RowType(false, fields);
     }
 
     @Override

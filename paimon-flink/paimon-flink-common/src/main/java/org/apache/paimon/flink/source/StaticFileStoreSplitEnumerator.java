@@ -21,12 +21,14 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.source.assigners.DynamicPartitionPruningAssigner;
+import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
 
 import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.connector.source.SplitsAssignment;
+import org.apache.flink.table.connector.source.DynamicFilteringEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -128,13 +130,23 @@ public class StaticFileStoreSplitEnumerator
             checkNotNull(
                     dynamicPartitionFilteringInfo,
                     "Cannot apply dynamic filtering because dynamicPartitionFilteringInfo hasn't been set.");
-            this.splitAssigner =
-                    DynamicPartitionPruningAssigner.createDynamicPartitionPruningAssignerIfNeeded(
-                            subtaskId,
-                            splitAssigner,
-                            dynamicPartitionFilteringInfo.getPartitionRowProjection(),
-                            sourceEvent,
-                            LOG);
+
+            if (splitAssigner instanceof PreAssignSplitAssigner) {
+                this.splitAssigner =
+                        ((PreAssignSplitAssigner) splitAssigner)
+                                .ofDynamicPartitionPruning(
+                                        dynamicPartitionFilteringInfo.getPartitionRowProjection(),
+                                        ((DynamicFilteringEvent) sourceEvent).getData());
+            } else {
+                this.splitAssigner =
+                        DynamicPartitionPruningAssigner
+                                .createDynamicPartitionPruningAssignerIfNeeded(
+                                        subtaskId,
+                                        splitAssigner,
+                                        dynamicPartitionFilteringInfo.getPartitionRowProjection(),
+                                        sourceEvent,
+                                        LOG);
+            }
         } else {
             LOG.error("Received unrecognized event: {}", sourceEvent);
         }

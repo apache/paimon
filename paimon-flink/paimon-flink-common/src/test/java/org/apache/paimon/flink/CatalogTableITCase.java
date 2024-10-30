@@ -42,10 +42,10 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC;
-import static org.apache.paimon.flink.FlinkCatalog.LAST_UPDATE_TIME_KEY;
-import static org.apache.paimon.flink.FlinkCatalog.NUM_FILES_KEY;
-import static org.apache.paimon.flink.FlinkCatalog.NUM_ROWS_KEY;
-import static org.apache.paimon.flink.FlinkCatalog.TOTAL_SIZE_KEY;
+import static org.apache.paimon.catalog.Catalog.LAST_UPDATE_TIME_PROP;
+import static org.apache.paimon.catalog.Catalog.NUM_FILES_PROP;
+import static org.apache.paimon.catalog.Catalog.NUM_ROWS_PROP;
+import static org.apache.paimon.catalog.Catalog.TOTAL_SIZE_PROP;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -554,10 +554,10 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertThat(partitionPropertiesMap1)
                 .allSatisfy(
                         (par, properties) -> {
-                            assertThat(properties.get(NUM_ROWS_KEY)).isEqualTo("2");
-                            assertThat(properties.get(LAST_UPDATE_TIME_KEY)).isNotBlank();
-                            assertThat(properties.get(NUM_FILES_KEY)).isEqualTo("1");
-                            assertThat(properties.get(TOTAL_SIZE_KEY)).isNotBlank();
+                            assertThat(properties.get(NUM_ROWS_PROP)).isEqualTo("2");
+                            assertThat(properties.get(LAST_UPDATE_TIME_PROP)).isNotBlank();
+                            assertThat(properties.get(NUM_FILES_PROP)).isEqualTo("1");
+                            assertThat(properties.get(TOTAL_SIZE_PROP)).isNotBlank();
                         });
         // update p1 data
         sql("UPDATE PK_T SET word = 'c' WHERE id = 2");
@@ -589,8 +589,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertThat(partitionPropertiesMap1)
                 .allSatisfy(
                         (par, properties) -> {
-                            assertThat(properties.get(NUM_ROWS_KEY)).isEqualTo("1");
-                            assertThat(properties.get(LAST_UPDATE_TIME_KEY)).isNotBlank();
+                            assertThat(properties.get(NUM_ROWS_PROP)).isEqualTo("1");
+                            assertThat(properties.get(LAST_UPDATE_TIME_PROP)).isNotBlank();
                         });
 
         // append data to p1
@@ -1063,13 +1063,13 @@ public class CatalogTableITCase extends CatalogITCaseBase {
             Long expectedNumFiles) {
         Map<String, String> newPartitionProperties = newProperties.get(partition);
         Map<String, String> oldPartitionProperties = oldProperties.get(partition);
-        assertThat(newPartitionProperties.get(NUM_ROWS_KEY))
+        assertThat(newPartitionProperties.get(NUM_ROWS_PROP))
                 .isEqualTo(String.valueOf(expectedNumRows));
-        assertThat(Long.valueOf(newPartitionProperties.get(LAST_UPDATE_TIME_KEY)))
-                .isGreaterThan(Long.valueOf(oldPartitionProperties.get(LAST_UPDATE_TIME_KEY)));
-        assertThat(newPartitionProperties.get(NUM_FILES_KEY))
+        assertThat(Long.valueOf(newPartitionProperties.get(LAST_UPDATE_TIME_PROP)))
+                .isGreaterThan(Long.valueOf(oldPartitionProperties.get(LAST_UPDATE_TIME_PROP)));
+        assertThat(newPartitionProperties.get(NUM_FILES_PROP))
                 .isEqualTo(String.valueOf(expectedNumFiles));
-        assertThat(Long.valueOf(newPartitionProperties.get(TOTAL_SIZE_KEY)))
-                .isGreaterThan(Long.valueOf(oldPartitionProperties.get(TOTAL_SIZE_KEY)));
+        assertThat(Long.valueOf(newPartitionProperties.get(TOTAL_SIZE_PROP)))
+                .isGreaterThan(Long.valueOf(oldPartitionProperties.get(TOTAL_SIZE_PROP)));
     }
 }

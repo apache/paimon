@@ -18,9 +18,11 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.operation.ManifestFileMerger;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
@@ -40,6 +42,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -448,7 +452,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         containSameIdentifyEntryFile(fullCompacted, entryIdentifierExpected);
     }
 
-    @RepeatedTest(100)
+    @RepeatedTest(1000)
     public void testRandomFullCompaction() throws Exception {
         List<ManifestFileMeta> input = new ArrayList<>();
         Set<FileEntry.Identifier> manifestEntrySet = new HashSet<>();
@@ -485,6 +489,32 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         .collect(Collectors.toList());
         long mustMergeSize =
                 mustMergedFiles.stream().map(ManifestFileMeta::fileSize).reduce(0L, Long::sum);
+        // manifest files which might be merged
+        List<ManifestFileMeta> toBeMerged = new LinkedList<>(input);
+        if (getPartitionType().getFieldCount() > 0) {
+            Set<BinaryRow> deletePartitions =
+                    deleteManifestEntrySet.stream()
+                            .map(entry -> entry.partition)
+                            .collect(Collectors.toSet());
+            PartitionPredicate predicate =
+                    PartitionPredicate.fromMultiple(getPartitionType(), deletePartitions);
+            if (predicate != null) {
+                Iterator<ManifestFileMeta> iterator = toBeMerged.iterator();
+                while (iterator.hasNext()) {
+                    ManifestFileMeta file = iterator.next();
+                    if (file.fileSize() < suggerstSize || file.numDeletedFiles() > 0) {
+                        continue;
+                    }
+                    if (!predicate.test(
+                            file.numAddedFiles() + file.numDeletedFiles(),
+                            file.partitionStats().minValues(),
+                            file.partitionStats().maxValues(),
+                            file.partitionStats().nullCounts())) {
+                        iterator.remove();
+                    }
+                }
+            }
+        }
         // manifest files which were not written after full compaction
         List<ManifestFileMeta> notMergedFiles =
                 input.stream()
@@ -503,7 +533,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         if (mustMergeSize < sizeTrigger) {
             assertThat(fullCompacted).isEmpty();
             assertThat(newMetas).isEmpty();
-        } else if (mustMergedFiles.size() <= 1) {
+        } else if (toBeMerged.size() <= 1) {
             assertThat(fullCompacted).isEmpty();
             assertThat(newMetas).isEmpty();
         } else {

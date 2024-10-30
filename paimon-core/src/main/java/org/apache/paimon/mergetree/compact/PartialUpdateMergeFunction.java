@@ -120,7 +120,6 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     currentDeleteRow = true;
                     row = new GenericRow(getters.length);
                 }
-                // ignore -U records
                 return;
             }
 
@@ -254,10 +253,9 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         if (reused == null) {
             reused = new KeyValue();
         }
-        if (currentDeleteRow) {
-            return null;
-        }
-        return reused.replace(currentKey, latestSequenceNumber, RowKind.INSERT, row);
+
+        RowKind rowKind = currentDeleteRow ? RowKind.DELETE : RowKind.INSERT;
+        return reused.replace(currentKey, latestSequenceNumber, rowKind, row);
     }
 
     public static MergeFunctionFactory<KeyValue> factory(
@@ -303,7 +301,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                     .collect(Collectors.toList());
 
                     Supplier<FieldsComparator> userDefinedSeqComparator =
-                            () -> UserDefinedSeqComparator.create(rowType, sequenceFields);
+                            () -> UserDefinedSeqComparator.create(rowType, sequenceFields, true);
                     Arrays.stream(v.split(FIELDS_SEPARATOR))
                             .map(
                                     fieldName ->
@@ -392,7 +390,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                 projectedSeqComparators.put(
                                         newField,
                                         UserDefinedSeqComparator.create(
-                                                newRowType, newSequenceFields));
+                                                newRowType, newSequenceFields, true));
                             }
                         });
                 for (int i = 0; i < projects.length; i++) {

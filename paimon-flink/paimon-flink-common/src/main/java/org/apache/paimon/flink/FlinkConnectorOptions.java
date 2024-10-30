@@ -355,12 +355,13 @@ public class FlinkConnectorOptions {
                             "You can specify time interval for partition, for example, "
                                     + "daily partition is '1 d', hourly partition is '1 h'.");
 
-    public static final ConfigOption<Boolean> PARTITION_MARK_DONE_WHEN_END_INPUT =
-            ConfigOptions.key("partition.end-input-to-done")
-                    .booleanType()
-                    .defaultValue(false)
+    public static final ConfigOption<Duration> PARTITION_IDLE_TIME_TO_REPORT_STATISTIC =
+            key("partition.idle-time-to-report-statistic")
+                    .durationType()
+                    .defaultValue(Duration.ofHours(1))
                     .withDescription(
-                            "Whether mark the done status to indicate that the data is ready when end input.");
+                            "Set a time duration when a partition has no new data after this time duration, "
+                                    + "start to report the partition statistics to hms.");
 
     public static final ConfigOption<String> CLUSTERING_COLUMNS =
             key("sink.clustering.by-columns")

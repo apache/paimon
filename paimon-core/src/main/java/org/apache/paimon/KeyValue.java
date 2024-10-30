@@ -31,9 +31,9 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static org.apache.paimon.table.SystemFields.LEVEL;
-import static org.apache.paimon.table.SystemFields.SEQUENCE_NUMBER;
-import static org.apache.paimon.table.SystemFields.VALUE_KIND;
+import static org.apache.paimon.table.SpecialFields.LEVEL;
+import static org.apache.paimon.table.SpecialFields.SEQUENCE_NUMBER;
+import static org.apache.paimon.table.SpecialFields.VALUE_KIND;
 
 /**
  * A key value, including user key, sequence number, value kind and value. This object can be

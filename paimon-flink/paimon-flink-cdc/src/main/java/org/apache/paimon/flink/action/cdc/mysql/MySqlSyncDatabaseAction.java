@@ -188,6 +188,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
 
     @Override
     protected MySqlSource<CdcSourceRecord> buildSource() {
+        validateRuntimeExecutionMode();
         return MySqlActionUtils.buildMySqlSource(
                 cdcSourceConfig,
                 tableList(

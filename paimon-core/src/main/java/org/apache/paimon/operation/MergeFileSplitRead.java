@@ -77,6 +77,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final MergeSorter mergeSorter;
     private final List<String> sequenceFields;
+    private final boolean sequenceOrder;
 
     @Nullable private RowType readKeyType;
 
@@ -106,6 +107,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                 new MergeSorter(
                         CoreOptions.fromMap(tableSchema.options()), keyType, valueType, null);
         this.sequenceFields = options.sequenceField();
+        this.sequenceOrder = options.sequenceFieldSortOrderIsAscending();
     }
 
     public Comparator<InternalRow> keyComparator() {
@@ -338,6 +340,6 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     @Nullable
     public UserDefinedSeqComparator createUdsComparator() {
         return UserDefinedSeqComparator.create(
-                readerFactoryBuilder.readValueType(), sequenceFields);
+                readerFactoryBuilder.readValueType(), sequenceFields, sequenceOrder);
     }
 }

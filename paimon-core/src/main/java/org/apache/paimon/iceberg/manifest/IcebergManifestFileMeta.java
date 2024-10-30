@@ -183,7 +183,7 @@ public class IcebergManifestFileMeta {
         fields.add(
                 new DataField(
                         508, "partitions", DataTypes.ARRAY(IcebergPartitionSummary.schema())));
-        return new RowType(fields);
+        return new RowType(false, fields);
     }
 
     @Override

@@ -25,18 +25,21 @@ import org.apache.paimon.io.cache.CacheKey;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySegment;
 
+import java.io.Closeable;
+import java.io.IOException;
+
 import static org.apache.paimon.io.cache.CacheManager.REFRESH_COUNT;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Util to apply a built bloom filter . */
-public class FileBasedBloomFilter {
+public class FileBasedBloomFilter implements Closeable {
 
     private final PageFileInput input;
     private final CacheManager cacheManager;
     private final BloomFilter filter;
     private final long readOffset;
     private final int readLength;
-
+    private final CacheKey cacheKey;
     private int accessCount;
 
     public FileBasedBloomFilter(
@@ -52,6 +55,7 @@ public class FileBasedBloomFilter {
         this.readOffset = readOffset;
         this.readLength = readLength;
         this.accessCount = 0;
+        this.cacheKey = CacheKey.forPosition(input.file(), readOffset, readLength);
     }
 
     public boolean testHash(int hash) {
@@ -61,7 +65,7 @@ public class FileBasedBloomFilter {
         if (accessCount == REFRESH_COUNT || filter.getMemorySegment() == null) {
             MemorySegment segment =
                     cacheManager.getPage(
-                            CacheKey.forPosition(input.file(), readOffset, readLength),
+                            cacheKey,
                             key -> input.readPosition(readOffset, readLength),
                             new BloomFilterCallBack(filter));
             filter.setMemorySegment(segment, 0);
@@ -73,6 +77,11 @@ public class FileBasedBloomFilter {
     @VisibleForTesting
     BloomFilter bloomFilter() {
         return filter;
+    }
+
+    @Override
+    public void close() throws IOException {
+        cacheManager.invalidPage(cacheKey);
     }
 
     /** Call back for cache manager. */

@@ -18,26 +18,4 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.PaimonSparkTestBase
-
-import org.apache.spark.sql.Row
-
-abstract class PaimonShowTagsTestBase extends PaimonSparkTestBase {
-
-  test("Paimon DDL: show tags for table") {
-    spark.sql("""CREATE TABLE T (id INT, name STRING)
-                |USING PAIMON
-                |TBLPROPERTIES ('primary-key'='id')""".stripMargin)
-
-    spark.sql("insert into T values(1, 'a')")
-    spark.sql("insert into T values(2, 'b')")
-
-    spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => '2024-10-12')")
-    spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => '2024-10-11')")
-    spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => '2024-10-13')")
-
-    checkAnswer(
-      spark.sql("show tags T"),
-      Row("2024-10-11") :: Row("2024-10-12") :: Row("2024-10-13") :: Nil)
-  }
-}
+class TagDdlTest extends PaimonTagDdlTestBase

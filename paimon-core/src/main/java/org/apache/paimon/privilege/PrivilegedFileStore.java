@@ -72,7 +72,7 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
 
     @Override
     public SnapshotManager snapshotManager() {
-        privilegeChecker.assertCanSelect(identifier);
+        privilegeChecker.assertCanSelectOrInsert(identifier);
         return wrapped.snapshotManager();
     }
 

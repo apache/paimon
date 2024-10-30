@@ -52,6 +52,24 @@ public class IcebergOptions {
                             "If number of small Iceberg metadata files exceeds this limit, "
                                     + "always trigger metadata compaction regardless of their total size.");
 
+    public static final ConfigOption<String> URI =
+            key("metadata.iceberg.uri")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Hive metastore uri for Iceberg Hive catalog.");
+
+    public static final ConfigOption<String> HIVE_CONF_DIR =
+            key("metadata.iceberg.hive-conf-dir")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("hive-conf-dir for Iceberg Hive catalog.");
+
+    public static final ConfigOption<String> HADOOP_CONF_DIR =
+            key("metadata.iceberg.hadoop-conf-dir")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("hadoop-conf-dir for Iceberg Hive catalog.");
+
     /** Where to store Iceberg metadata. */
     public enum StorageType implements DescribedEnum {
         DISABLED("disabled", "Disable Iceberg compatibility support."),
@@ -59,7 +77,11 @@ public class IcebergOptions {
         HADOOP_CATALOG(
                 "hadoop-catalog",
                 "Store Iceberg metadata in a separate directory. "
-                        + "This directory can be specified as the warehouse directory of an Iceberg Hadoop catalog.");
+                        + "This directory can be specified as the warehouse directory of an Iceberg Hadoop catalog."),
+        HIVE_CATALOG(
+                "hive-catalog",
+                "Not only store Iceberg metadata like hadoop-catalog, "
+                        + "but also create Iceberg external table in Hive.");
 
         private final String value;
         private final String description;

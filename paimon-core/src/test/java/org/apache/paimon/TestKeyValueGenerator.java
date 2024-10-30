@@ -30,7 +30,7 @@ import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.SchemaEvolutionTableTestBase;
-import org.apache.paimon.table.SystemFields;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
@@ -95,9 +95,9 @@ public class TestKeyValueGenerator {
     public static final RowType KEY_TYPE =
             RowType.of(
                     new DataField(
-                            2 + SystemFields.KEY_FIELD_ID_START, "key_shopId", new IntType(false)),
+                            2 + SpecialFields.KEY_FIELD_ID_START, "key_shopId", new IntType(false)),
                     new DataField(
-                            3 + SystemFields.KEY_FIELD_ID_START,
+                            3 + SpecialFields.KEY_FIELD_ID_START,
                             "key_orderId",
                             new BigIntType(false)));
 
@@ -393,7 +393,7 @@ public class TestKeyValueGenerator {
                     .map(
                             f ->
                                     new DataField(
-                                            f.id() + SystemFields.KEY_FIELD_ID_START,
+                                            f.id() + SpecialFields.KEY_FIELD_ID_START,
                                             "key_" + f.name(),
                                             f.type(),
                                             f.description()))
