@@ -27,6 +27,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.flink.table.api.TableException;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -39,6 +40,7 @@ import static org.apache.flink.table.planner.factories.TestValuesTableFactory.ch
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testStreamingRead;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** IT cases for consumer management actions. */
 public class ConsumerActionITCase extends ActionITCaseBase {
@@ -144,6 +146,48 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         }
         Optional<Consumer> consumer3 = consumerManager.consumer("myid");
         assertThat(consumer3).isNotPresent();
+
+        // reset consumer to a not exist snapshot id
+        List<String> args1 =
+                Arrays.asList(
+                        "reset_consumer",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--consumer_id",
+                        "myid",
+                        "--next_snapshot",
+                        "10");
+        switch (invoker) {
+            case "action":
+                assertThrows(
+                        RuntimeException.class,
+                        () -> createAction(ResetConsumerAction.class, args1).run());
+                break;
+            case "procedure_indexed":
+                assertThrows(
+                        TableException.class,
+                        () ->
+                                executeSQL(
+                                        String.format(
+                                                "CALL sys.reset_consumer('%s.%s', 'myid', 10)",
+                                                database, tableName)));
+                break;
+            case "procedure_named":
+                assertThrows(
+                        TableException.class,
+                        () ->
+                                executeSQL(
+                                        String.format(
+                                                "CALL sys.reset_consumer(`table` => '%s.%s', consumer_id => 'myid', next_snapshot_id => cast(10 as bigint))",
+                                                database, tableName)));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
+        }
     }
 
     @ParameterizedTest
@@ -206,7 +250,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                         "--consumer_id",
                         "myid",
                         "--next_snapshot",
-                        "1");
+                        "3");
         // reset consumer
         switch (invoker) {
             case "action":
@@ -215,13 +259,13 @@ public class ConsumerActionITCase extends ActionITCaseBase {
             case "procedure_indexed":
                 executeSQL(
                         String.format(
-                                "CALL sys.reset_consumer('%s.%s', 'myid', 1)",
+                                "CALL sys.reset_consumer('%s.%s', 'myid', 3)",
                                 database, branchTableName));
                 break;
             case "procedure_named":
                 executeSQL(
                         String.format(
-                                "CALL sys.reset_consumer(`table` => '%s.%s', consumer_id => 'myid', next_snapshot_id => cast(1 as bigint))",
+                                "CALL sys.reset_consumer(`table` => '%s.%s', consumer_id => 'myid', next_snapshot_id => cast(3 as bigint))",
                                 database, branchTableName));
                 break;
             default:
@@ -229,7 +273,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         }
         Optional<Consumer> consumer2 = consumerManager.consumer("myid");
         assertThat(consumer2).isPresent();
-        assertThat(consumer2.get().nextSnapshot()).isEqualTo(1);
+        assertThat(consumer2.get().nextSnapshot()).isEqualTo(3);
 
         // delete consumer
         switch (invoker) {
