@@ -47,21 +47,23 @@ public class CacheManagerTest {
         assertThat(file2.createNewFile()).isTrue();
         CacheKey key2 = CacheKey.forPageIndex(new RandomAccessFile(file2, "r"), 0, 0);
 
-        CacheManager cacheManager = new CacheManager(MemorySize.ofBytes(10));
-        byte[] value = new byte[6];
-        Arrays.fill(value, (byte) 1);
-        for (int i = 0; i < 10; i++) {
-            for (int j = 0; j < 10; j++) {
-                MemorySegment segment =
-                        cacheManager.getPage(
-                                j < 5 ? key1 : key2,
-                                key -> {
-                                    byte[] result = new byte[6];
-                                    Arrays.fill(result, (byte) 1);
-                                    return result;
-                                },
-                                key -> {});
-                assertThat(segment.getHeapMemory()).isEqualTo(value);
+        for (Cache.CacheType cacheType : Cache.CacheType.values()) {
+            CacheManager cacheManager = new CacheManager(cacheType, MemorySize.ofBytes(10));
+            byte[] value = new byte[6];
+            Arrays.fill(value, (byte) 1);
+            for (int i = 0; i < 10; i++) {
+                for (int j = 0; j < 10; j++) {
+                    MemorySegment segment =
+                            cacheManager.getPage(
+                                    j < 5 ? key1 : key2,
+                                    key -> {
+                                        byte[] result = new byte[6];
+                                        Arrays.fill(result, (byte) 1);
+                                        return result;
+                                    },
+                                    key -> {});
+                    assertThat(segment.getHeapMemory()).isEqualTo(value);
+                }
             }
         }
     }
