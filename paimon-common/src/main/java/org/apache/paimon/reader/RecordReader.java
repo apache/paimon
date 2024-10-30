@@ -19,8 +19,11 @@
 package org.apache.paimon.reader;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.fileindex.FileIndexResult;
+import org.apache.paimon.fileindex.bitmap.BitmapIndexResultLazy;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
 
@@ -208,5 +211,14 @@ public interface RecordReader<T> extends Closeable {
     /** Convert this reader to a {@link CloseableIterator}. */
     default CloseableIterator<T> toCloseableIterator() {
         return new RecordReaderIterator<>(this);
+    }
+
+    default boolean checkIndexResultExist(
+            FileIndexResult fileIndexResult, long startRowNum, long endRowNum) {
+        if (fileIndexResult instanceof BitmapIndexResultLazy) {
+            RoaringBitmap32 bitmap = ((BitmapIndexResultLazy) fileIndexResult).get();
+            return bitmap.rangeCardinality(startRowNum, endRowNum) > 0;
+        }
+        return true;
     }
 }

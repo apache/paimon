@@ -68,6 +68,10 @@ public class RoaringBitmap32 {
         return roaringBitmap.getLongCardinality();
     }
 
+    public long rangeCardinality(long start, long end) {
+        return roaringBitmap.rangeCardinality(start, end);
+    }
+
     public RoaringBitmap32 clone() {
         return new RoaringBitmap32(roaringBitmap.clone());
     }

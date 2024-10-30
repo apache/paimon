@@ -67,6 +67,16 @@ public class FileIndexPredicate implements Closeable {
         this.reader = FileIndexFormat.createReader(inputStream, fileRowType);
     }
 
+    public FileIndexResult evaluate(@Nullable Predicate predicate) {
+        if (predicate == null) {
+            return REMAIN;
+        }
+        Set<String> requiredFieldNames = getRequiredNames(predicate);
+        Map<String, Collection<FileIndexReader>> indexReaders = new HashMap<>();
+        requiredFieldNames.forEach(name -> indexReaders.put(name, reader.readColumnIndex(name)));
+        return new FileIndexPredicateTest(indexReaders).test(predicate);
+    }
+
     public boolean testPredicate(@Nullable Predicate filePredicate) {
         if (filePredicate == null) {
             return true;
