@@ -198,15 +198,7 @@ public interface ReadonlyTable extends InnerTable {
     }
 
     @Override
-    default void replaceTag(String tagName, Duration timeRetained) {
-        throw new UnsupportedOperationException(
-                String.format(
-                        "Readonly Table %s does not support replaceTag.",
-                        this.getClass().getSimpleName()));
-    }
-
-    @Override
-    default void replaceTag(String tagName, long fromSnapshotId, Duration timeRetained) {
+    default void replaceTag(String tagName, Long fromSnapshotId, Duration timeRetained) {
         throw new UnsupportedOperationException(
                 String.format(
                         "Readonly Table %s does not support replaceTag.",

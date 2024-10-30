@@ -120,13 +120,9 @@ public interface Table extends Serializable {
     @Experimental
     void renameTag(String tagName, String targetTagName);
 
-    /** Replace a tag with new time retained. */
-    @Experimental
-    void replaceTag(String tagName, Duration timeRetained);
-
     /** Replace a tag with new snapshot id and new time retained. */
     @Experimental
-    void replaceTag(String tagName, long fromSnapshotId, Duration timeRetained);
+    void replaceTag(String tagName, Long fromSnapshotId, Duration timeRetained);
 
     /** Delete a tag by name. */
     @Experimental

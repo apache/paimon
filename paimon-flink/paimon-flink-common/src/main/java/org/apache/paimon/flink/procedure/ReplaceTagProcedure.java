@@ -29,11 +29,7 @@ public class ReplaceTagProcedure extends CreateOrReplaceTagBaseProcedure {
 
     @Override
     void createOrReplaceTag(Table table, String tagName, Long snapshotId, Duration timeRetained) {
-        if (snapshotId == null) {
-            table.replaceTag(tagName, timeRetained);
-        } else {
-            table.replaceTag(tagName, snapshotId, timeRetained);
-        }
+        table.replaceTag(tagName, snapshotId, timeRetained);
     }
 
     @Override

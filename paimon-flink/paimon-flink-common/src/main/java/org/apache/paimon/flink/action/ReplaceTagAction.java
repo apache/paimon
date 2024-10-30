@@ -46,10 +46,6 @@ public class ReplaceTagAction extends TableActionBase {
 
     @Override
     public void run() throws Exception {
-        if (snapshotId == null) {
-            table.replaceTag(tagName, timeRetained);
-        } else {
-            table.replaceTag(tagName, snapshotId, timeRetained);
-        }
+        table.replaceTag(tagName, snapshotId, timeRetained);
     }
 }
