@@ -21,8 +21,6 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.SnapshotNotExistException;
 
 import java.util.Map;
 import java.util.Objects;
@@ -51,17 +49,6 @@ public class ResetConsumerAction extends TableActionBase {
     @Override
     public void run() throws Exception {
         FileStoreTable dataTable = (FileStoreTable) table;
-        SnapshotManager snapshotManager = dataTable.snapshotManager();
-        Long latestSnapshotId = snapshotManager.latestSnapshotId();
-        if (nextSnapshotId != null
-                && latestSnapshotId != null
-                && nextSnapshotId > latestSnapshotId) {
-            throw new SnapshotNotExistException(
-                    String.format(
-                            "The specified snapshot id %s should be smaller than the latest snapshot id %s.",
-                            nextSnapshotId, latestSnapshotId));
-        }
-
         ConsumerManager consumerManager =
                 new ConsumerManager(
                         dataTable.fileIO(),
@@ -70,6 +57,7 @@ public class ResetConsumerAction extends TableActionBase {
         if (Objects.isNull(nextSnapshotId)) {
             consumerManager.deleteConsumer(consumerId);
         } else {
+            dataTable.snapshotManager().snapshot(nextSnapshotId);
             consumerManager.resetConsumer(consumerId, new Consumer(nextSnapshotId));
         }
     }

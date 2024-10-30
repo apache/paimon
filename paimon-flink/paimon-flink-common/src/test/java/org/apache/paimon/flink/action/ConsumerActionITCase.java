@@ -32,6 +32,7 @@ import org.apache.flink.table.api.TableException;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.FileNotFoundException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -165,9 +166,8 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         switch (invoker) {
             case "action":
                 assertThrows(
-                        SnapshotNotExistException.class,
-                        () -> createAction(ResetConsumerAction.class, args1).run(),
-                        "the snapshot id is not exist, you can set it <= 3.");
+                        RuntimeException.class,
+                        () -> createAction(ResetConsumerAction.class, args1).run());
                 break;
             case "procedure_indexed":
                 assertThrows(
@@ -176,8 +176,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                                 executeSQL(
                                         String.format(
                                                 "CALL sys.reset_consumer('%s.%s', 'myid', 10)",
-                                                database, tableName)),
-                        "the snapshot id is not exist, you can set it <= 3.");
+                                                database, tableName)));
                 break;
             case "procedure_named":
                 assertThrows(
@@ -186,8 +185,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                                 executeSQL(
                                         String.format(
                                                 "CALL sys.reset_consumer(`table` => '%s.%s', consumer_id => 'myid', next_snapshot_id => cast(10 as bigint))",
-                                                database, tableName)),
-                        "the snapshot id is not exist, you can set it <= 3.");
+                                                database, tableName)));
                 break;
             default:
                 throw new UnsupportedOperationException(invoker);
@@ -254,7 +252,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                         "--consumer_id",
                         "myid",
                         "--next_snapshot",
-                        "1");
+                        "3");
         // reset consumer
         switch (invoker) {
             case "action":
@@ -263,13 +261,13 @@ public class ConsumerActionITCase extends ActionITCaseBase {
             case "procedure_indexed":
                 executeSQL(
                         String.format(
-                                "CALL sys.reset_consumer('%s.%s', 'myid', 1)",
+                                "CALL sys.reset_consumer('%s.%s', 'myid', 3)",
                                 database, branchTableName));
                 break;
             case "procedure_named":
                 executeSQL(
                         String.format(
-                                "CALL sys.reset_consumer(`table` => '%s.%s', consumer_id => 'myid', next_snapshot_id => cast(1 as bigint))",
+                                "CALL sys.reset_consumer(`table` => '%s.%s', consumer_id => 'myid', next_snapshot_id => cast(3 as bigint))",
                                 database, branchTableName));
                 break;
             default:
@@ -277,7 +275,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         }
         Optional<Consumer> consumer2 = consumerManager.consumer("myid");
         assertThat(consumer2).isPresent();
-        assertThat(consumer2.get().nextSnapshot()).isEqualTo(1);
+        assertThat(consumer2.get().nextSnapshot()).isEqualTo(3);
 
         // delete consumer
         switch (invoker) {

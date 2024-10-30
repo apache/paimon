@@ -21,8 +21,6 @@ package org.apache.paimon.spark.procedure;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.SnapshotNotExistException;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
@@ -84,17 +82,6 @@ public class ResetConsumerProcedure extends BaseProcedure {
                 tableIdent,
                 table -> {
                     FileStoreTable fileStoreTable = (FileStoreTable) table;
-                    SnapshotManager snapshotManager = fileStoreTable.snapshotManager();
-                    Long latestSnapshotId = snapshotManager.latestSnapshotId();
-                    if (nextSnapshotId != null
-                            && latestSnapshotId != null
-                            && nextSnapshotId > latestSnapshotId) {
-                        throw new SnapshotNotExistException(
-                                String.format(
-                                        "The specified snapshot id %s should be smaller than the latest snapshot id %s.",
-                                        nextSnapshotId, latestSnapshotId));
-                    }
-
                     ConsumerManager consumerManager =
                             new ConsumerManager(
                                     fileStoreTable.fileIO(),
@@ -103,6 +90,7 @@ public class ResetConsumerProcedure extends BaseProcedure {
                     if (nextSnapshotId == null) {
                         consumerManager.deleteConsumer(consumerId);
                     } else {
+                        fileStoreTable.snapshotManager().snapshot(nextSnapshotId);
                         consumerManager.resetConsumer(consumerId, new Consumer(nextSnapshotId));
                     }
 
