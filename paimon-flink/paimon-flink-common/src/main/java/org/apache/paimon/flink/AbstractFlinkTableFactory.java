@@ -22,7 +22,9 @@ import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.LogConsistency;
 import org.apache.paimon.CoreOptions.StreamingReadMode;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.flink.sink.FlinkTableSink;
@@ -88,6 +90,12 @@ public abstract class AbstractFlinkTableFactory
         implements DynamicTableSourceFactory, DynamicTableSinkFactory {
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractFlinkTableFactory.class);
+
+    @Nullable private final FlinkCatalog flinkCatalog;
+
+    public AbstractFlinkTableFactory(@Nullable FlinkCatalog flinkCatalog) {
+        this.flinkCatalog = flinkCatalog;
+    }
 
     @Override
     public DynamicTableSource createDynamicTableSource(Context context) {
@@ -227,7 +235,7 @@ public abstract class AbstractFlinkTableFactory
                 Options.fromMap(context.getCatalogTable().getOptions()), new FlinkFileIOLoader());
     }
 
-    static Table buildPaimonTable(DynamicTableFactory.Context context) {
+    Table buildPaimonTable(DynamicTableFactory.Context context) {
         CatalogTable origin = context.getCatalogTable().getOrigin();
         Table table;
 
@@ -243,16 +251,28 @@ public abstract class AbstractFlinkTableFactory
         newOptions.putAll(origin.getOptions());
         newOptions.putAll(dynamicOptions);
 
-        // notice that the Paimon table schema must be the same with the Flink's
+        FileStoreTable fileStoreTable;
         if (origin instanceof DataCatalogTable) {
-            FileStoreTable fileStoreTable = (FileStoreTable) ((DataCatalogTable) origin).table();
-            table = fileStoreTable.copyWithoutTimeTravel(newOptions);
+            fileStoreTable = (FileStoreTable) ((DataCatalogTable) origin).table();
+        } else if (flinkCatalog == null) {
+            // In case Paimon is directly used as a Flink connector, instead of through catalog.
+            fileStoreTable = FileStoreTableFactory.create(createCatalogContext(context));
         } else {
-            table =
-                    FileStoreTableFactory.create(createCatalogContext(context))
-                            .copyWithoutTimeTravel(newOptions);
+            // In cases like materialized table, the Paimon table might not be DataCatalogTable,
+            // but can still be acquired through the catalog.
+            Identifier identifier =
+                    Identifier.create(
+                            context.getObjectIdentifier().getDatabaseName(),
+                            context.getObjectIdentifier().getObjectName());
+            try {
+                fileStoreTable = (FileStoreTable) flinkCatalog.catalog().getTable(identifier);
+            } catch (Catalog.TableNotExistException e) {
+                throw new RuntimeException(e);
+            }
         }
+        table = fileStoreTable.copyWithoutTimeTravel(newOptions);
 
+        // notice that the Paimon table schema must be the same with the Flink's
         Schema schema = FlinkCatalog.fromCatalogTable(context.getCatalogTable());
 
         RowType rowType = toLogicalType(schema.rowType());
