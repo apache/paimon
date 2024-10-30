@@ -154,6 +154,17 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>rollback_to_timestamp</td>
+      <td>
+         To rollback to the snapshot which earlier or equal than timestamp. Argument:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>timestamp: roll back to the snapshot which earlier or equal than timestamp.</li>
+      </td>
+      <td>
+          CALL sys.rollback_to_timestamp(table => 'default.T', timestamp => 1730292023000)<br/><br/>
+      </td>
+    </tr>
+    <tr>
       <td>migrate_database</td>
       <td>
          Migrate hive table to a paimon table. Arguments:

@@ -40,6 +40,7 @@ import org.apache.paimon.spark.procedure.RenameTagProcedure;
 import org.apache.paimon.spark.procedure.RepairProcedure;
 import org.apache.paimon.spark.procedure.ResetConsumerProcedure;
 import org.apache.paimon.spark.procedure.RollbackProcedure;
+import org.apache.paimon.spark.procedure.RollbackToTimestampProcedure;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -63,6 +64,7 @@ public class SparkProcedures {
         ImmutableMap.Builder<String, Supplier<ProcedureBuilder>> procedureBuilders =
                 ImmutableMap.builder();
         procedureBuilders.put("rollback", RollbackProcedure::builder);
+        procedureBuilders.put("rollback_to_timestamp", RollbackToTimestampProcedure::builder);
         procedureBuilders.put("create_tag", CreateTagProcedure::builder);
         procedureBuilders.put("rename_tag", RenameTagProcedure::builder);
         procedureBuilders.put(

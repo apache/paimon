@@ -21,6 +21,7 @@ org.apache.paimon.flink.action.DropPartitionActionFactory
 org.apache.paimon.flink.action.DeleteActionFactory
 org.apache.paimon.flink.action.MergeIntoActionFactory
 org.apache.paimon.flink.action.RollbackToActionFactory
+org.apache.paimon.flink.action.RollbackToTimestampActionFactory
 org.apache.paimon.flink.action.CreateTagActionFactory
 org.apache.paimon.flink.action.CreateTagFromTimestampActionFactory
 org.apache.paimon.flink.action.CreateTagFromWatermarkActionFactory
@@ -57,6 +58,7 @@ org.apache.paimon.flink.procedure.DropPartitionProcedure
 org.apache.paimon.flink.procedure.MergeIntoProcedure
 org.apache.paimon.flink.procedure.ResetConsumerProcedure
 org.apache.paimon.flink.procedure.RollbackToProcedure
+org.apache.paimon.flink.procedure.RollbackToTimestampProcedure
 org.apache.paimon.flink.procedure.MigrateTableProcedure
 org.apache.paimon.flink.procedure.MigrateDatabaseProcedure
 org.apache.paimon.flink.procedure.MigrateFileProcedure
