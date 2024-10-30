@@ -139,6 +139,10 @@ import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_REFRESH_MODE;
 import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_REFRESH_STATUS;
 import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_SNAPSHOT;
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.catalog.Catalog.LAST_UPDATE_TIME_PROP;
+import static org.apache.paimon.catalog.Catalog.NUM_FILES_PROP;
+import static org.apache.paimon.catalog.Catalog.NUM_ROWS_PROP;
+import static org.apache.paimon.catalog.Catalog.TOTAL_SIZE_PROP;
 import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.apache.paimon.flink.FlinkCatalogOptions.REGISTER_TIMEOUT;
@@ -160,12 +164,8 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public class FlinkCatalog extends AbstractCatalog {
 
     private static final Logger LOG = LoggerFactory.getLogger(FlinkCatalog.class);
-    public static final String NUM_ROWS_KEY = "numRows";
-    public static final String LAST_UPDATE_TIME_KEY = "lastUpdateTime";
-    public static final String TOTAL_SIZE_KEY = "totalSize";
-    public static final String NUM_FILES_KEY = "numFiles";
-    private final ClassLoader classLoader;
 
+    private final ClassLoader classLoader;
     private final Catalog catalog;
     private final String name;
     private final boolean logStoreAutoRegister;
@@ -1198,11 +1198,11 @@ public class FlinkCatalog extends AbstractCatalog {
             // This was already filtered by the expected partition.
             PartitionEntry partitionEntry = partitionEntries.get(0);
             Map<String, String> properties = new HashMap<>();
-            properties.put(NUM_ROWS_KEY, String.valueOf(partitionEntry.recordCount()));
+            properties.put(NUM_ROWS_PROP, String.valueOf(partitionEntry.recordCount()));
             properties.put(
-                    LAST_UPDATE_TIME_KEY, String.valueOf(partitionEntry.lastFileCreationTime()));
-            properties.put(NUM_FILES_KEY, String.valueOf(partitionEntry.fileCount()));
-            properties.put(TOTAL_SIZE_KEY, String.valueOf(partitionEntry.fileSizeInBytes()));
+                    LAST_UPDATE_TIME_PROP, String.valueOf(partitionEntry.lastFileCreationTime()));
+            properties.put(NUM_FILES_PROP, String.valueOf(partitionEntry.fileCount()));
+            properties.put(TOTAL_SIZE_PROP, String.valueOf(partitionEntry.fileSizeInBytes()));
             return new CatalogPartitionImpl(properties, "");
         } catch (TableNotPartitionedException | TableNotExistException e) {
             throw new PartitionNotExistException(getName(), tablePath, partitionSpec);

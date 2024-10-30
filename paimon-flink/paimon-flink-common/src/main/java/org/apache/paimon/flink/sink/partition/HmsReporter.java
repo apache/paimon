@@ -41,6 +41,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.catalog.Catalog.HIVE_LAST_UPDATE_TIME_PROP;
+import static org.apache.paimon.catalog.Catalog.NUM_FILES_PROP;
+import static org.apache.paimon.catalog.Catalog.NUM_ROWS_PROP;
+import static org.apache.paimon.catalog.Catalog.TOTAL_SIZE_PROP;
 import static org.apache.paimon.utils.PartitionPathUtils.extractPartitionSpecFromPath;
 
 /** Action to report the table statistic from the latest snapshot to HMS. */
@@ -92,12 +96,10 @@ public class HmsReporter implements Closeable {
                 }
             }
             Map<String, String> statistic = new HashMap<>();
-            // refer to org.apache.hadoop.hive.common.StatsSetupConst
-            statistic.put("numFiles", String.valueOf(fileCount));
-            statistic.put("totalSize", String.valueOf(totalSize));
-            statistic.put("numRows", String.valueOf(rowCount));
-            // refer to org.apache.hadoop.hive.metastore.api.hive_metastoreConstants
-            statistic.put("transient_lastDdlTime", String.valueOf(modifyTime / 1000));
+            statistic.put(NUM_FILES_PROP, String.valueOf(fileCount));
+            statistic.put(TOTAL_SIZE_PROP, String.valueOf(totalSize));
+            statistic.put(NUM_ROWS_PROP, String.valueOf(rowCount));
+            statistic.put(HIVE_LAST_UPDATE_TIME_PROP, String.valueOf(modifyTime / 1000));
 
             LOG.info("alter partition {} with statistic {}.", partition, statistic);
             metastoreClient.alterPartition(partitionSpec, statistic, modifyTime);

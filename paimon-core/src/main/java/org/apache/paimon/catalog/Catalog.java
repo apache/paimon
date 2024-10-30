@@ -57,6 +57,11 @@ public interface Catalog extends AutoCloseable {
     String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
     String DB_LOCATION_PROP = "location";
     String DB_SUFFIX = ".db";
+    String NUM_ROWS_PROP = "numRows";
+    String NUM_FILES_PROP = "numFiles";
+    String TOTAL_SIZE_PROP = "totalSize";
+    String LAST_UPDATE_TIME_PROP = "lastUpdateTime";
+    String HIVE_LAST_UPDATE_TIME_PROP = "transient_lastDdlTime";
 
     /** Warehouse root path containing all database directories in this catalog. */
     String warehouse();

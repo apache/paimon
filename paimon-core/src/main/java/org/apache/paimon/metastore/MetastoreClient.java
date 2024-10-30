@@ -38,11 +38,13 @@ public interface MetastoreClient extends AutoCloseable {
 
     void markDone(LinkedHashMap<String, String> partitionSpec) throws Exception;
 
-    void alterPartition(
+    default void alterPartition(
             LinkedHashMap<String, String> partitionSpec,
             Map<String, String> parameters,
             long modifyTime)
-            throws Exception;
+            throws Exception {
+        throw new UnsupportedOperationException();
+    }
 
     /** Factory to create {@link MetastoreClient}. */
     interface Factory extends Serializable {
