@@ -61,21 +61,18 @@ public class CacheManager {
 
     public MemorySegment getPage(CacheKey key, CacheReader reader, CacheCallback callback) {
         CacheValue value =
-                checkNotNull(
-                        cache.get(
-                                key,
-                                k -> {
-                                    this.fileReadCount++;
-                                    try {
-                                        return new CacheValue(
-                                                MemorySegment.wrap(reader.read(k)), callback);
-                                    } catch (IOException e) {
-                                        throw new RuntimeException(e);
-                                    }
-                                }),
-                        String.format("Cache result for key(%s) is null", key));
+                cache.get(
+                        key,
+                        k -> {
+                            this.fileReadCount++;
+                            try {
+                                return new CacheValue(MemorySegment.wrap(reader.read(k)), callback);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
 
-        return value.segment;
+        return checkNotNull(value, String.format("Cache result for key(%s) is null", key)).segment;
     }
 
     public void invalidPage(CacheKey key) {
