@@ -93,7 +93,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private transient LookupTable lookupTable;
 
     // timestamp when cache expires
-    private transient long nextLoadTime;
+    protected transient long nextLoadTime;
 
     protected FunctionContext functionContext;
 
@@ -293,7 +293,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         }
     }
 
-    private void checkRefresh() throws Exception {
+    protected void checkRefresh() throws Exception {
         if (nextLoadTime > System.currentTimeMillis()) {
             return;
         }
