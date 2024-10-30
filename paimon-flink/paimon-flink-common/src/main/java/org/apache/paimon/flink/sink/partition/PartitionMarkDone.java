@@ -33,28 +33,25 @@ import org.apache.paimon.utils.PartitionPathUtils;
 
 import org.apache.flink.api.common.state.OperatorStateStore;
 
-import javax.annotation.Nullable;
-
-import java.io.Closeable;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_IDLE_TIME_TO_DONE;
 
 /** Mark partition done. */
-public class PartitionMarkDone implements Closeable {
+public class PartitionMarkDone implements PartitionListener {
 
     private final InternalRowPartitionComputer partitionComputer;
     private final PartitionMarkDoneTrigger trigger;
     private final List<PartitionMarkDoneAction> actions;
     private final boolean waitCompaction;
 
-    @Nullable
-    public static PartitionMarkDone create(
+    public static Optional<PartitionMarkDone> create(
             boolean isStreaming,
             boolean isRestored,
             OperatorStateStore stateStore,
@@ -64,7 +61,7 @@ public class PartitionMarkDone implements Closeable {
         Options options = coreOptions.toConfiguration();
 
         if (disablePartitionMarkDone(isStreaming, table, options)) {
-            return null;
+            return Optional.empty();
         }
 
         InternalRowPartitionComputer partitionComputer =
@@ -87,7 +84,8 @@ public class PartitionMarkDone implements Closeable {
                         && (coreOptions.deletionVectorsEnabled()
                                 || coreOptions.mergeEngine() == MergeEngine.FIRST_ROW);
 
-        return new PartitionMarkDone(partitionComputer, trigger, actions, waitCompaction);
+        return Optional.of(
+                new PartitionMarkDone(partitionComputer, trigger, actions, waitCompaction));
     }
 
     private static boolean disablePartitionMarkDone(
@@ -116,6 +114,7 @@ public class PartitionMarkDone implements Closeable {
         this.waitCompaction = waitCompaction;
     }
 
+    @Override
     public void notifyCommittable(List<ManifestCommittable> committables) {
         Set<BinaryRow> partitions = new HashSet<>();
         boolean endInput = false;
@@ -153,6 +152,7 @@ public class PartitionMarkDone implements Closeable {
         }
     }
 
+    @Override
     public void snapshotState() throws Exception {
         trigger.snapshotState();
     }

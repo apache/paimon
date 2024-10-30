@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -57,6 +58,15 @@ class AddDonePartitionActionTest {
 
                     @Override
                     public void markDone(LinkedHashMap<String, String> partitionSpec)
+                            throws Exception {
+                        throw new UnsupportedOperationException();
+                    }
+
+                    @Override
+                    public void alterPartition(
+                            LinkedHashMap<String, String> partitionSpec,
+                            Map<String, String> parameters,
+                            long modifyTime)
                             throws Exception {
                         throw new UnsupportedOperationException();
                     }
