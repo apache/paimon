@@ -35,43 +35,42 @@ public class CacheManager {
      */
     public static final int REFRESH_COUNT = 10;
 
-    private final InternalCache internalCache;
+    private final Cache cache;
 
     private int fileReadCount;
 
     public CacheManager(MemorySize maxMemorySize) {
-        this(InternalCache.CacheType.CAFFEINE, maxMemorySize);
+        this(Cache.CacheType.CAFFEINE, maxMemorySize);
     }
 
-    public CacheManager(InternalCache.CacheType cacheType, MemorySize maxMemorySize) {
-        this.internalCache =
-                InternalCacheBuilder.newBuilder(cacheType).maximumWeight(maxMemorySize).build();
+    public CacheManager(Cache.CacheType cacheType, MemorySize maxMemorySize) {
+        this.cache = CacheBuilder.newBuilder(cacheType).maximumWeight(maxMemorySize).build();
         this.fileReadCount = 0;
     }
 
     @VisibleForTesting
-    public InternalCache cache() {
-        return internalCache;
+    public Cache cache() {
+        return cache;
     }
 
     public MemorySegment getPage(CacheKey key, CacheReader reader, CacheCallback callback) {
-        InternalCache.CacheValue value = internalCache.get(key);
-        while (value == null || value.isClosed) {
-            try {
-                this.fileReadCount++;
-                value =
-                        new InternalCache.CacheValue(
-                                MemorySegment.wrap(reader.read(key)), callback);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            internalCache.put(key, value);
-        }
-        return value.segment;
+        Cache.CacheValue value =
+                cache.get(
+                        key,
+                        k -> {
+                            this.fileReadCount++;
+                            try {
+                                return new Cache.CacheValue(
+                                        MemorySegment.wrap(reader.read(key)), callback);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
+        return checkNotNull(value, String.format("Cache result for key(%s) is null", key)).segment;
     }
 
     public void invalidPage(CacheKey key) {
-        internalCache.invalidate(key);
+        cache.invalidate(key);
     }
 
     public int fileReadCount() {

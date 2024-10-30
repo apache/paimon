@@ -48,15 +48,15 @@ public class FileBasedRandomInputViewTest {
     @TempDir Path tempDir;
 
     private final ThreadLocalRandom rnd = ThreadLocalRandom.current();
-    private final InternalCache.CacheType cacheType;
+    private final Cache.CacheType cacheType;
 
-    public FileBasedRandomInputViewTest(InternalCache.CacheType cacheType) {
+    public FileBasedRandomInputViewTest(Cache.CacheType cacheType) {
         this.cacheType = cacheType;
     }
 
     @Parameters(name = "{0}")
-    public static List<InternalCache.CacheType> getVarSeg() {
-        return Arrays.asList(InternalCache.CacheType.CAFFEINE, InternalCache.CacheType.GUAVA);
+    public static List<Cache.CacheType> getVarSeg() {
+        return Arrays.asList(Cache.CacheType.CAFFEINE, Cache.CacheType.GUAVA);
     }
 
     @TestTemplate

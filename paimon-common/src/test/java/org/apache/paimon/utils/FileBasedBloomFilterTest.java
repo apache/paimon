@@ -19,8 +19,8 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.io.PageFileInput;
+import org.apache.paimon.io.cache.Cache;
 import org.apache.paimon.io.cache.CacheManager;
-import org.apache.paimon.io.cache.InternalCache;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
@@ -45,15 +45,15 @@ import java.util.UUID;
 public class FileBasedBloomFilterTest {
 
     @TempDir Path tempDir;
-    private final InternalCache.CacheType cacheType;
+    private final Cache.CacheType cacheType;
 
-    public FileBasedBloomFilterTest(InternalCache.CacheType cacheType) {
+    public FileBasedBloomFilterTest(Cache.CacheType cacheType) {
         this.cacheType = cacheType;
     }
 
     @Parameters(name = "{0}")
-    public static List<InternalCache.CacheType> getVarSeg() {
-        return Arrays.asList(InternalCache.CacheType.CAFFEINE, InternalCache.CacheType.GUAVA);
+    public static List<Cache.CacheType> getVarSeg() {
+        return Arrays.asList(Cache.CacheType.CAFFEINE, Cache.CacheType.GUAVA);
     }
 
     @TestTemplate

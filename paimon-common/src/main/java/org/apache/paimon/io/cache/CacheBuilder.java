@@ -22,21 +22,20 @@ import org.apache.paimon.options.MemorySize;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalCause;
-import org.apache.paimon.shade.guava30.com.google.common.cache.CacheBuilder;
 import org.apache.paimon.shade.guava30.com.google.common.cache.RemovalNotification;
 
 /** Cache builder builds cache from cache type. */
-public abstract class InternalCacheBuilder {
+public abstract class CacheBuilder {
     protected MemorySize memorySize;
 
-    InternalCacheBuilder maximumWeight(MemorySize memorySize) {
+    CacheBuilder maximumWeight(MemorySize memorySize) {
         this.memorySize = memorySize;
         return this;
     }
 
-    public abstract InternalCache build();
+    public abstract Cache build();
 
-    public static InternalCacheBuilder newBuilder(InternalCache.CacheType type) {
+    public static CacheBuilder newBuilder(Cache.CacheType type) {
         switch (type) {
             case CAFFEINE:
                 return new CaffeineCacheBuilder();
@@ -47,47 +46,45 @@ public abstract class InternalCacheBuilder {
         }
     }
 
-    static class CaffeineCacheBuilder extends InternalCacheBuilder {
+    static class CaffeineCacheBuilder extends CacheBuilder {
         @Override
-        public InternalCache build() {
+        public Cache build() {
             return new CaffeineCache(
                     Caffeine.newBuilder()
-                            .weigher(InternalCacheBuilder::weigh)
+                            .weigher(CacheBuilder::weigh)
                             .maximumWeight(memorySize.getBytes())
                             .removalListener(this::onRemoval)
                             .executor(Runnable::run)
                             .build());
         }
 
-        private void onRemoval(CacheKey key, InternalCache.CacheValue value, RemovalCause cause) {
+        private void onRemoval(CacheKey key, Cache.CacheValue value, RemovalCause cause) {
             if (value != null) {
-                value.isClosed = true;
                 value.callback.onRemoval(key);
             }
         }
     }
 
-    static class GuavaCacheBuilder extends InternalCacheBuilder {
+    static class GuavaCacheBuilder extends CacheBuilder {
         @Override
-        public InternalCache build() {
+        public Cache build() {
             return new GuavaCache(
-                    CacheBuilder.newBuilder()
-                            .weigher(InternalCacheBuilder::weigh)
+                    org.apache.paimon.shade.guava30.com.google.common.cache.CacheBuilder
+                            .newBuilder()
+                            .weigher(CacheBuilder::weigh)
                             .maximumWeight(memorySize.getBytes())
                             .removalListener(this::onRemoval)
                             .build());
         }
 
-        private void onRemoval(
-                RemovalNotification<CacheKey, InternalCache.CacheValue> notification) {
+        private void onRemoval(RemovalNotification<CacheKey, Cache.CacheValue> notification) {
             if (notification.getValue() != null) {
-                notification.getValue().isClosed = true;
                 notification.getValue().callback.onRemoval(notification.getKey());
             }
         }
     }
 
-    private static int weigh(CacheKey cacheKey, InternalCache.CacheValue cacheValue) {
+    private static int weigh(CacheKey cacheKey, Cache.CacheValue cacheValue) {
         return cacheValue.segment.size();
     }
 }

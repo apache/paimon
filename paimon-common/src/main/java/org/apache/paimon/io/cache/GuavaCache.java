@@ -18,15 +18,17 @@
 
 package org.apache.paimon.io.cache;
 
-import org.apache.paimon.shade.guava30.com.google.common.cache.Cache;
-
 import javax.annotation.Nullable;
 
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.function.Function;
 
 /** Guava cache implementation. */
-public class GuavaCache implements InternalCache {
-    private final Cache<CacheKey, CacheValue> cache;
+public class GuavaCache implements Cache {
+    private final org.apache.paimon.shade.guava30.com.google.common.cache.Cache<
+                    CacheKey, CacheValue>
+            cache;
 
     public GuavaCache(
             org.apache.paimon.shade.guava30.com.google.common.cache.Cache<CacheKey, CacheValue>
@@ -36,8 +38,12 @@ public class GuavaCache implements InternalCache {
 
     @Nullable
     @Override
-    public CacheValue get(CacheKey key) {
-        return cache.getIfPresent(key);
+    public CacheValue get(CacheKey key, Function<CacheKey, CacheValue> supplier) {
+        try {
+            return cache.get(key, () -> supplier.apply(key));
+        } catch (ExecutionException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override

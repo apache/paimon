@@ -23,11 +23,12 @@ import org.apache.paimon.memory.MemorySegment;
 import javax.annotation.Nullable;
 
 import java.util.Map;
+import java.util.function.Function;
 
 /** Cache interface in paimon which supports caffeine and guava caches. */
-public interface InternalCache {
+public interface Cache {
     @Nullable
-    CacheValue get(CacheKey key);
+    CacheValue get(CacheKey key, Function<CacheKey, CacheValue> supplier);
 
     void put(CacheKey key, CacheValue value);
 
@@ -42,8 +43,6 @@ public interface InternalCache {
 
         final MemorySegment segment;
         final CacheCallback callback;
-
-        boolean isClosed = false;
 
         CacheValue(MemorySegment segment, CacheCallback callback) {
             this.segment = segment;

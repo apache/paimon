@@ -18,15 +18,16 @@
 
 package org.apache.paimon.io.cache;
 
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
-
 import javax.annotation.Nullable;
 
 import java.util.Map;
+import java.util.function.Function;
 
 /** Caffeine cache implementation. */
-public class CaffeineCache implements InternalCache {
-    private final Cache<CacheKey, CacheValue> cache;
+public class CaffeineCache implements Cache {
+    private final org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache<
+                    CacheKey, CacheValue>
+            cache;
 
     public CaffeineCache(
             org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache<
@@ -37,8 +38,8 @@ public class CaffeineCache implements InternalCache {
 
     @Nullable
     @Override
-    public CacheValue get(CacheKey key) {
-        return this.cache.getIfPresent(key);
+    public CacheValue get(CacheKey key, Function<CacheKey, CacheValue> supplier) {
+        return this.cache.get(key, supplier);
     }
 
     @Override
