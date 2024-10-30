@@ -56,6 +56,8 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
         assertThatCode(() -> sql("CALL sys.compact('default.T')")).doesNotThrowAnyException();
         assertThatCode(() -> sql("CALL sys.compact('default.T', 'pt=1')"))
                 .doesNotThrowAnyException();
+        assertThatCode(() -> sql("CALL sys.compact('default.T', '', '')"))
+                .doesNotThrowAnyException();
         assertThatCode(() -> sql("CALL sys.compact('default.T', 'pt=1', '', '')"))
                 .doesNotThrowAnyException();
         assertThatCode(() -> sql("CALL sys.compact('default.T', '', '', '', 'sink.parallelism=1')"))
