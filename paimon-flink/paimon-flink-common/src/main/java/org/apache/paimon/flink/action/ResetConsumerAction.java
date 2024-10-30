@@ -57,6 +57,7 @@ public class ResetConsumerAction extends TableActionBase {
         if (Objects.isNull(nextSnapshotId)) {
             consumerManager.deleteConsumer(consumerId);
         } else {
+            dataTable.snapshotManager().snapshot(nextSnapshotId);
             consumerManager.resetConsumer(consumerId, new Consumer(nextSnapshotId));
         }
     }
