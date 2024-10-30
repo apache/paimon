@@ -714,6 +714,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>The field that generates the sequence number for primary key table, the sequence number determines which data is the most recent.</td>
         </tr>
         <tr>
+            <td><h5>sequence.field.sort-order</h5></td>
+            <td style="word-wrap: break-word;">ascending</td>
+            <td><p>Enum</p></td>
+            <td>Specify the order of sequence.field.<br /><br />Possible values:<ul><li>"ascending": specifies sequence.field sort order is ascending.</li><li>"descending": specifies sequence.field sort order is descending.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>sink.watermark-time-zone</h5></td>
             <td style="word-wrap: break-word;">"UTC"</td>
             <td>String</td>

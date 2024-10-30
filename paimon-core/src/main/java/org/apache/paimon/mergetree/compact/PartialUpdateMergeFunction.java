@@ -301,7 +301,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                     .collect(Collectors.toList());
 
                     Supplier<FieldsComparator> userDefinedSeqComparator =
-                            () -> UserDefinedSeqComparator.create(rowType, sequenceFields);
+                            () -> UserDefinedSeqComparator.create(rowType, sequenceFields, true);
                     Arrays.stream(v.split(FIELDS_SEPARATOR))
                             .map(
                                     fieldName ->
@@ -390,7 +390,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                 projectedSeqComparators.put(
                                         newField,
                                         UserDefinedSeqComparator.create(
-                                                newRowType, newSequenceFields));
+                                                newRowType, newSequenceFields, true));
                             }
                         });
                 for (int i = 0; i < projects.length; i++) {

@@ -113,7 +113,8 @@ public abstract class RocksDBState<K, V, CacheV> {
                 options.pageSize(),
                 options.localSortMaxNumFileHandles(),
                 options.spillCompressOptions(),
-                options.writeBufferSpillDiskSize());
+                options.writeBufferSpillDiskSize(),
+                options.sequenceFieldSortOrderIsAscending());
     }
 
     /** A class wraps byte[] to implement equals and hashCode. */

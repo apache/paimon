@@ -1008,6 +1008,36 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testSequenceFieldSortOrder() {
+        // test default condition which get the largest record
+        sql(
+                "CREATE TABLE T1 (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c STRING) WITH ('sequence.field'='c')");
+        sql("INSERT INTO T1 VALUES ('a', 'b', 'l')");
+        sql("INSERT INTO T1 VALUES ('a', 'd', 'n')");
+        sql("INSERT INTO T1 VALUES ('a', 'e', 'm')");
+        List<Row> sql = sql("select * from T1");
+        assertThat(sql("select * from T1").toString()).isEqualTo("[+I[a, d, n]]");
+
+        // test for get small record
+        sql(
+                "CREATE TABLE T2 (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c BIGINT) WITH ('sequence.field'='c', 'sequence.field.sort-order'='descending')");
+        sql("INSERT INTO T2 VALUES ('a', 'b', 1)");
+        sql("INSERT INTO T2 VALUES ('a', 'd', 3)");
+        sql("INSERT INTO T2 VALUES ('a', 'e', 2)");
+        sql = sql("select * from T2");
+        assertThat(sql("select * from T2").toString()).isEqualTo("[+I[a, b, 1]]");
+
+        // test for get largest record
+        sql(
+                "CREATE TABLE T3 (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c DOUBLE) WITH ('sequence.field'='c', 'sequence.field.sort-order'='ascending')");
+        sql("INSERT INTO T3 VALUES ('a', 'b', 1.0)");
+        sql("INSERT INTO T3 VALUES ('a', 'd', 3.0)");
+        sql("INSERT INTO T3 VALUES ('a', 'e', 2.0)");
+        sql = sql("select * from T3");
+        assertThat(sql("select * from T3").toString()).isEqualTo("[+I[a, d, 3.0]]");
+    }
+
+    @Test
     public void testAlterTableMetadataComment() {
         sql("CREATE TABLE T (a INT, name VARCHAR METADATA COMMENT 'header1', b INT)");
         List<Row> result = sql("SHOW CREATE TABLE T");

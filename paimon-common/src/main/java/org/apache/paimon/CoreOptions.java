@@ -610,6 +610,13 @@ public class CoreOptions implements Serializable {
                                     + " the sequence number determines which data is the most recent.");
 
     @Immutable
+    public static final ConfigOption<SortOrder> SEQUENCE_FIELD_SORT_ORDER =
+            key("sequence.field.sort-order")
+                    .enumType(SortOrder.class)
+                    .defaultValue(SortOrder.ASCENDING)
+                    .withDescription("Specify the order of sequence.field.");
+
+    @Immutable
     public static final ConfigOption<Boolean> PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE =
             key("partial-update.remove-record-on-delete")
                     .booleanType()
@@ -2043,6 +2050,10 @@ public class CoreOptions implements Serializable {
                 .orElse(Collections.emptyList());
     }
 
+    public boolean sequenceFieldSortOrderIsAscending() {
+        return options.get(SEQUENCE_FIELD_SORT_ORDER) == SortOrder.ASCENDING;
+    }
+
     public boolean partialUpdateRemoveRecordOnDelete() {
         return options.get(PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE);
     }
@@ -2367,6 +2378,31 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         StartupMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Specifies the sort order for field sequence id. */
+    public enum SortOrder implements DescribedEnum {
+        ASCENDING("ascending", "specifies sequence.field sort order is ascending."),
+
+        DESCENDING("descending", "specifies sequence.field sort order is descending.");
+
+        private final String value;
+        private final String description;
+
+        SortOrder(String value, String description) {
             this.value = value;
             this.description = description;
         }

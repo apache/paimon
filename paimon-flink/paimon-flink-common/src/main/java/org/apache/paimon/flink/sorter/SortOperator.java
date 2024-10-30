@@ -48,6 +48,7 @@ public class SortOperator extends TableStreamOperator<InternalRow>
     private final CompressOptions spillCompression;
     private final int sinkParallelism;
     private final MemorySize maxDiskSize;
+    private final boolean sequenceOrder;
 
     private transient BinaryExternalSortBuffer buffer;
     private transient IOManager ioManager;
@@ -60,7 +61,8 @@ public class SortOperator extends TableStreamOperator<InternalRow>
             int spillSortMaxNumFiles,
             CompressOptions spillCompression,
             int sinkParallelism,
-            MemorySize maxDiskSize) {
+            MemorySize maxDiskSize,
+            boolean sequenceOrder) {
         this.keyType = keyType;
         this.rowType = rowType;
         this.maxMemory = maxMemory;
@@ -70,6 +72,7 @@ public class SortOperator extends TableStreamOperator<InternalRow>
         this.spillCompression = spillCompression;
         this.sinkParallelism = sinkParallelism;
         this.maxDiskSize = maxDiskSize;
+        this.sequenceOrder = sequenceOrder;
     }
 
     @Override
@@ -100,7 +103,8 @@ public class SortOperator extends TableStreamOperator<InternalRow>
                         pageSize,
                         spillSortMaxNumFiles,
                         spillCompression,
-                        maxDiskSize);
+                        maxDiskSize,
+                        sequenceOrder);
     }
 
     @Override
