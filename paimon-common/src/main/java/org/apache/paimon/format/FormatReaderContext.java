@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format;
 
+import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
@@ -28,11 +29,16 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
     private final FileIO fileIO;
     private final Path file;
     private final long fileSize;
+    private FileIndexResult fileIndexResult;
 
     public FormatReaderContext(FileIO fileIO, Path file, long fileSize) {
         this.fileIO = fileIO;
         this.file = file;
         this.fileSize = fileSize;
+    }
+
+    public void setFileIndexResult(FileIndexResult fileIndexResult) {
+        this.fileIndexResult = fileIndexResult;
     }
 
     @Override
@@ -48,5 +54,10 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
     @Override
     public long fileSize() {
         return fileSize;
+    }
+
+    @Override
+    public FileIndexResult fileIndex() {
+        return fileIndexResult;
     }
 }

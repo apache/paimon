@@ -68,6 +68,10 @@ public class RoaringBitmap32 {
         return roaringBitmap.getLongCardinality();
     }
 
+    public long rangeCardinality(long start, long end) {
+        return roaringBitmap.rangeCardinality(start, end);
+    }
+
     public void serialize(DataOutput out) throws IOException {
         roaringBitmap.runOptimize();
         roaringBitmap.serialize(out);

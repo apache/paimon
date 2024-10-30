@@ -103,9 +103,12 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                         + "'file-index.in-manifest-threshold'='1B');");
         spark.sql("INSERT INTO T VALUES (0),(1),(2),(3),(4),(5);");
 
+        List<Row> rows1 = spark.sql("SELECT a FROM T where a>3;").collectAsList();
+        assertThat(rows1.toString()).isEqualTo("[[4], [5]]");
+
         // check query result
-        List<Row> rows = spark.sql("SELECT a FROM T where a='3';").collectAsList();
-        assertThat(rows.toString()).isEqualTo("[[3]]");
+        List<Row> rows2 = spark.sql("SELECT a FROM T where a=3;").collectAsList();
+        assertThat(rows2.toString()).isEqualTo("[[3]]");
 
         // check index reader
         foreachIndexReader(

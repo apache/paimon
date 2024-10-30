@@ -19,6 +19,7 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
@@ -38,5 +39,7 @@ public interface FormatReaderFactory {
         Path filePath();
 
         long fileSize();
+
+        FileIndexResult fileIndex();
     }
 }
