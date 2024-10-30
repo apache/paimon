@@ -306,6 +306,19 @@ public abstract class CatalogTestBase {
                                                 ""),
                                         true))
                 .doesNotThrowAnyException();
+        // Create table throws IleaArgumentException when some table options are not set correctly
+        schema.options()
+                .put(
+                        CoreOptions.MERGE_ENGINE.key(),
+                        CoreOptions.MergeEngine.DEDUPLICATE.toString());
+        schema.options().put(CoreOptions.IGNORE_DELETE.key(), "max");
+        assertThatCode(
+                        () ->
+                                catalog.createTable(
+                                        Identifier.create("test_db", "wrong_table"), schema, false))
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage(
+                        "Unrecognized option for boolean: max. Expected either true or false(case insensitive)");
     }
 
     @Test

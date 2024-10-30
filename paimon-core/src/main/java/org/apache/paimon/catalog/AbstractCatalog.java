@@ -279,6 +279,18 @@ public abstract class AbstractCatalog implements Catalog {
         } else {
             createTableImpl(identifier, schema);
         }
+        Table table = null;
+        try {
+            table = getTable(identifier);
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+            fileStoreTable.store();
+        } catch (Exception e) {
+            throw new RuntimeException("create table failed", e);
+        } finally {
+            if (table == null) {
+                fileIO.deleteQuietly(getTableLocation(identifier));
+            }
+        }
     }
 
     protected abstract void createTableImpl(Identifier identifier, Schema schema);
