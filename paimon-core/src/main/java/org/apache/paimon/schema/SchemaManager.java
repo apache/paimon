@@ -46,6 +46,7 @@ import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.base.Joiner;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterables;
