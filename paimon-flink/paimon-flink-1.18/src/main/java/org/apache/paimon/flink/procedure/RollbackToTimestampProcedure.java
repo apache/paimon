@@ -28,7 +28,7 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 /**
- * Rollback procedure. Usage:
+ * Rollback to timestamp procedure. Usage:
  *
  * <pre><code>
  *  -- rollback to a snapshot
