@@ -21,8 +21,11 @@ package org.apache.paimon.io.cache;
 import org.apache.paimon.io.PageFileInput;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
+import org.apache.paimon.testutils.junit.parameterized.Parameters;
 
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
@@ -30,6 +33,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -37,23 +42,34 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Test for {@link FileBasedRandomInputView}. */
+@ExtendWith(ParameterizedTestExtension.class)
 public class FileBasedRandomInputViewTest {
 
     @TempDir Path tempDir;
 
     private final ThreadLocalRandom rnd = ThreadLocalRandom.current();
+    private final Cache.CacheType cacheType;
 
-    @Test
+    public FileBasedRandomInputViewTest(Cache.CacheType cacheType) {
+        this.cacheType = cacheType;
+    }
+
+    @Parameters(name = "{0}")
+    public static List<Cache.CacheType> getVarSeg() {
+        return Arrays.asList(Cache.CacheType.CAFFEINE, Cache.CacheType.GUAVA);
+    }
+
+    @TestTemplate
     public void testMatched() throws IOException {
         innerTest(1024 * 512, 5000);
     }
 
-    @Test
+    @TestTemplate
     public void testNotMatched() throws IOException {
         innerTest(131092, 1000);
     }
 
-    @Test
+    @TestTemplate
     public void testRandom() throws IOException {
         innerTest(rnd.nextInt(5000, 100000), 100);
     }
@@ -66,7 +82,7 @@ public class FileBasedRandomInputViewTest {
         }
 
         File file = writeFile(bytes);
-        CacheManager cacheManager = new CacheManager(MemorySize.ofKibiBytes(128));
+        CacheManager cacheManager = new CacheManager(cacheType, MemorySize.ofKibiBytes(128));
         FileBasedRandomInputView view =
                 new FileBasedRandomInputView(
                         PageFileInput.create(file, 1024, null, 0, null), cacheManager);
