@@ -101,7 +101,8 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             int pageSize,
             int maxNumFileHandles,
             CompressOptions compression,
-            MemorySize maxDiskSize) {
+            MemorySize maxDiskSize,
+            boolean sequenceOrder) {
         return create(
                 ioManager,
                 rowType,
@@ -109,7 +110,8 @@ public class BinaryExternalSortBuffer implements SortBuffer {
                 new HeapMemorySegmentPool(bufferSize, pageSize),
                 maxNumFileHandles,
                 compression,
-                maxDiskSize);
+                maxDiskSize,
+                sequenceOrder);
     }
 
     public static BinaryExternalSortBuffer create(
@@ -119,8 +121,10 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             MemorySegmentPool pool,
             int maxNumFileHandles,
             CompressOptions compression,
-            MemorySize maxDiskSize) {
-        RecordComparator comparator = newRecordComparator(rowType.getFieldTypes(), keyFields, true);
+            MemorySize maxDiskSize,
+            boolean sequenceOrder) {
+        RecordComparator comparator =
+                newRecordComparator(rowType.getFieldTypes(), keyFields, sequenceOrder);
         BinaryInMemorySortBuffer sortBuffer =
                 BinaryInMemorySortBuffer.createBuffer(
                         newNormalizedKeyComputer(rowType.getFieldTypes(), keyFields),

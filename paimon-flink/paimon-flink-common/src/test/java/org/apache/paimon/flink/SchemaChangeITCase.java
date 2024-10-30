@@ -1020,7 +1020,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
 
         // test for get small record
         sql(
-                "CREATE TABLE T2 (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c BIGINT) WITH ('sequence.field'='c', 'sequence.field.sort.is.ascending'='false')");
+                "CREATE TABLE T2 (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c BIGINT) WITH ('sequence.field'='c', 'sequence.field.sort-order'='descending')");
         sql("INSERT INTO T2 VALUES ('a', 'b', 1)");
         sql("INSERT INTO T2 VALUES ('a', 'd', 3)");
         sql("INSERT INTO T2 VALUES ('a', 'e', 2)");
@@ -1029,7 +1029,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
 
         // test for get largest record
         sql(
-                "CREATE TABLE T3 (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c DOUBLE) WITH ('sequence.field'='c', 'sequence.field.sort.is.ascending'='true')");
+                "CREATE TABLE T3 (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c DOUBLE) WITH ('sequence.field'='c', 'sequence.field.sort-order'='ascending')");
         sql("INSERT INTO T3 VALUES ('a', 'b', 1.0)");
         sql("INSERT INTO T3 VALUES ('a', 'd', 3.0)");
         sql("INSERT INTO T3 VALUES ('a', 'e', 2.0)");

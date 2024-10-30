@@ -51,7 +51,8 @@ public class UserDefinedSeqComparator implements FieldsComparator {
 
     @Nullable
     public static UserDefinedSeqComparator create(RowType rowType, CoreOptions options) {
-        return create(rowType, options.sequenceField(), options.sequenceFieldSortOrder());
+        return create(
+                rowType, options.sequenceField(), options.sequenceFieldSortOrderIsAscending());
     }
 
     @Nullable
