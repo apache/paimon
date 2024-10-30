@@ -112,7 +112,10 @@ public abstract class FullCacheLookupTable implements LookupTable {
             projectedType = builder.build();
             context = context.copy(table.rowType().getFieldIndices(projectedType.getFieldNames()));
             this.userDefinedSeqComparator =
-                    UserDefinedSeqComparator.create(projectedType, sequenceFields, coreOptions.sequenceFieldSortOrderIsAscending());
+                    UserDefinedSeqComparator.create(
+                            projectedType,
+                            sequenceFields,
+                            coreOptions.sequenceFieldSortOrderIsAscending());
             this.appendUdsFieldNumber = appendUdsFieldNumber.get();
         } else {
             this.userDefinedSeqComparator = null;
