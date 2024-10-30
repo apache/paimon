@@ -34,6 +34,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
@@ -63,6 +64,7 @@ import java.util.Optional;
 
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 import static org.apache.paimon.CoreOptions.StreamingReadMode.FILE;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SOURCE_OPERATOR_UID_SUFFIX;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -73,6 +75,7 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  * @since 0.8
  */
 public class FlinkSourceBuilder {
+    private static final String SOURCE_NAME = "Source";
 
     private final Table table;
     private final Options conf;
@@ -210,6 +213,16 @@ public class FlinkSourceBuilder {
                                 : watermarkStrategy,
                         sourceName,
                         produceTypeInfo());
+
+        String uidSuffix = table.options().get(SOURCE_OPERATOR_UID_SUFFIX.key());
+        if (!StringUtils.isNullOrWhitespaceOnly(uidSuffix)) {
+            dataStream =
+                    (DataStreamSource<RowData>)
+                            dataStream.uid(
+                                    String.format(
+                                            "%s_%s_%s", SOURCE_NAME, table.name(), uidSuffix));
+        }
+
         if (parallelism != null) {
             dataStream.setParallelism(parallelism);
         }

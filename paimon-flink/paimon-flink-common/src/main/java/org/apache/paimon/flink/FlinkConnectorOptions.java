@@ -414,6 +414,24 @@ public class FlinkConnectorOptions {
                                     + "in order to compact several changelog files from the same partition into large ones, "
                                     + "which can decrease the number of small files. ");
 
+    public static final ConfigOption<String> SOURCE_OPERATOR_UID_SUFFIX =
+            key("source.operator-uid.suffix")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Set the uid suffix for the source operators. After setting, the uid format is "
+                                    + "${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. If the uid suffix is not set, flink will "
+                                    + "automatically generate the operator uid, which may be incompatible when the topology changes.");
+
+    public static final ConfigOption<String> SINK_OPERATOR_UID_SUFFIX =
+            key("sink.operator-uid.suffix")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Set the uid suffix for the writer, dynamic bucket assigner and committer operators. The uid format is "
+                                    + "${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. If the uid suffix is not set, flink will "
+                                    + "automatically generate the operator uid, which may be incompatible when the topology changes.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);
