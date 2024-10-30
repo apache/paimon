@@ -46,6 +46,11 @@ import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.StringUtils;
+
+import org.apache.paimon.shade.guava30.com.google.common.base.Joiner;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Iterables;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
@@ -68,6 +73,8 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
+import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Catalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
@@ -305,7 +312,7 @@ public class SchemaManager implements Serializable {
 
                 } else if (change instanceof RenameColumn) {
                     RenameColumn rename = (RenameColumn) change;
-                    validateNotPrimaryAndPartitionKey(oldTableSchema, rename.fieldName());
+                    columnChangeValidation(oldTableSchema, change);
                     if (newFields.stream().anyMatch(f -> f.name().equals(rename.newName()))) {
                         throw new Catalog.ColumnAlreadyExistException(
                                 identifierFromPath(tableRoot.toString(), true, branch),
@@ -324,7 +331,7 @@ public class SchemaManager implements Serializable {
                                             field.description()));
                 } else if (change instanceof DropColumn) {
                     DropColumn drop = (DropColumn) change;
-                    validateNotPrimaryAndPartitionKey(oldTableSchema, drop.fieldName());
+                    columnChangeValidation(oldTableSchema, change);
                     if (!newFields.removeIf(
                             f -> f.name().equals(((DropColumn) change).fieldName()))) {
                         throw new Catalog.ColumnNotExistException(
@@ -413,8 +420,10 @@ public class SchemaManager implements Serializable {
                     new Schema(
                             newFields,
                             oldTableSchema.partitionKeys(),
-                            oldTableSchema.primaryKeys(),
-                            newOptions,
+                            applyColumnRename(
+                                    oldTableSchema.primaryKeys(),
+                                    Iterables.filter(changes, RenameColumn.class)),
+                            applySchemaChanges(newOptions, changes),
                             newComment);
             TableSchema newTableSchema =
                     new TableSchema(
@@ -519,15 +528,61 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    private void validateNotPrimaryAndPartitionKey(TableSchema schema, String fieldName) {
-        /// TODO support partition and primary keys schema evolution
-        if (schema.partitionKeys().contains(fieldName)) {
-            throw new UnsupportedOperationException(
-                    String.format("Cannot drop/rename partition key[%s]", fieldName));
+    private static Map<String, String> applySchemaChanges(
+            Map<String, String> options, Iterable<SchemaChange> changes) {
+        Map<String, String> newOptions = Maps.newHashMap(options);
+        String bucketKeysStr = options.get(BUCKET_KEY.key());
+        if (!StringUtils.isNullOrWhitespaceOnly(bucketKeysStr)) {
+            List<String> bucketColumns = Arrays.asList(bucketKeysStr.split(","));
+            List<String> newBucketColumns =
+                    applyColumnRename(bucketColumns, Iterables.filter(changes, RenameColumn.class));
+            newOptions.put(BUCKET_KEY.key(), Joiner.on(',').join(newBucketColumns));
         }
-        if (schema.primaryKeys().contains(fieldName)) {
-            throw new UnsupportedOperationException(
-                    String.format("Cannot drop/rename primary key[%s]", fieldName));
+
+        // TODO: Apply changes to other options that contain column names, such as `sequence.field`
+        return newOptions;
+    }
+
+    // Apply column rename changes to the list of column names, this will not change the order of
+    // the column names
+    private static List<String> applyColumnRename(
+            List<String> columns, Iterable<RenameColumn> renames) {
+        if (Iterables.isEmpty(renames)) {
+            return columns;
+        }
+
+        Map<String, String> columnNames = Maps.newHashMap();
+        for (RenameColumn renameColumn : renames) {
+            columnNames.put(renameColumn.fieldName(), renameColumn.newName());
+        }
+
+        // The order of the column names will be preserved, as a non-parallel stream is used here.
+        return columns.stream()
+                .map(column -> columnNames.getOrDefault(column, column))
+                .collect(Collectors.toList());
+    }
+
+    private static void columnChangeValidation(TableSchema schema, SchemaChange change) {
+        /// TODO support partition and primary keys schema evolution
+        if (change instanceof DropColumn) {
+            String columnToDrop = ((DropColumn) change).fieldName();
+            if (schema.partitionKeys().contains(columnToDrop)
+                    || schema.primaryKeys().contains(columnToDrop)) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Cannot drop partition key or primary key: [%s]", columnToDrop));
+            }
+        } else if (change instanceof RenameColumn) {
+            String columnToRename = ((RenameColumn) change).fieldName();
+            if (schema.partitionKeys().contains(columnToRename)) {
+                throw new UnsupportedOperationException(
+                        String.format("Cannot rename partition column: [%s]", columnToRename));
+            }
+        } else {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Validation for %s is not supported",
+                            change.getClass().getSimpleName()));
         }
     }
 
