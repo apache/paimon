@@ -199,7 +199,7 @@ public class FlinkCatalog extends AbstractCatalog {
 
     @Override
     public Optional<Factory> getFactory() {
-        return Optional.of(new FlinkTableFactory());
+        return Optional.of(new FlinkTableFactory(this));
     }
 
     @Override
