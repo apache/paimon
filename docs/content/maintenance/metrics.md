@@ -181,6 +181,16 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
             <td>Gauge</td>
             <td>Number of buckets written in the last commit.</td>
         </tr>
+        <tr>
+            <td>lastCompactionInputFileSize</td>
+            <td>Gauge</td>
+            <td>Total size of the input files for the last compaction.</td>
+        </tr>
+        <tr>
+            <td>lastCompactionOutputFileSize</td>
+            <td>Gauge</td>
+            <td>Total size of the output files for the last compaction.</td>
+        </tr>
     </tbody>
 </table>
 
@@ -232,17 +242,17 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
         <tr>
             <td>maxLevel0FileCount</td>
             <td>Gauge</td>
-            <td>The maximum number of level 0 files currently handled by this writer. This value will become larger if asynchronous compaction cannot be done in time.</td>
+            <td>The maximum number of level 0 files currently handled by this task. This value will become larger if asynchronous compaction cannot be done in time.</td>
         </tr>
         <tr>
             <td>avgLevel0FileCount</td>
             <td>Gauge</td>
-            <td>The average number of level 0 files currently handled by this writer. This value will become larger if asynchronous compaction cannot be done in time.</td>
+            <td>The average number of level 0 files currently handled by this task. This value will become larger if asynchronous compaction cannot be done in time.</td>
         </tr>
         <tr>
             <td>compactionThreadBusy</td>
             <td>Gauge</td>
-            <td>The maximum business of compaction threads in this parallelism. Currently, there is only one compaction thread in each parallelism, so value of business ranges from 0 (idle) to 100 (compaction running all the time).</td>
+            <td>The maximum business of compaction threads in this task. Currently, there is only one compaction thread in each parallelism, so value of business ranges from 0 (idle) to 100 (compaction running all the time).</td>
         </tr>
         <tr>
             <td>avgCompactionTime</td>
@@ -258,6 +268,26 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
             <td>compactionQueuedCount</td>
             <td>Counter</td>
             <td>The total number of compactions that are queued/running.</td>
+        </tr>
+        <tr>
+            <td>maxCompactionInputSize</td>
+            <td>Gauge</td>
+            <td>The maximum input file size for this task's compaction.</td>
+        </tr>
+        <tr>
+            <td>avgCompactionInputSize/td>
+            <td>Gauge</td>
+            <td>The average input file size for this task's compaction.</td>
+        </tr>
+        <tr>
+            <td>maxCompactionOutputSize</td>
+            <td>Gauge</td>
+            <td>The maximum output file size for this task's compaction.</td>
+        </tr>
+        <tr>
+            <td>avgCompactionOutputSize</td>
+            <td>Gauge</td>
+            <td>The average output file size for this task's compaction.</td>
         </tr>
     </tbody>
 </table>
