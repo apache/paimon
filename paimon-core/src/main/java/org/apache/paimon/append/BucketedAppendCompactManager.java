@@ -115,8 +115,15 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
                                 targetFileSize,
                                 rewriter,
                                 metricsReporter));
+        recordCompactionsQueuedRequest();
         compacting = new ArrayList<>(toCompact);
         toCompact.clear();
+    }
+
+    private void recordCompactionsQueuedRequest() {
+        if (metricsReporter != null) {
+            metricsReporter.increaseCompactionsQueuedCount();
+        }
     }
 
     private void triggerCompactionWithBestEffort() {
@@ -130,6 +137,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
                     executor.submit(
                             new AutoCompactTask(
                                     dvMaintainer, compacting, rewriter, metricsReporter));
+            recordCompactionsQueuedRequest();
         }
     }
 

@@ -249,6 +249,16 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
             <td>Gauge</td>
             <td>The average runtime of compaction threads, calculated based on recorded compaction time data in milliseconds. The value represents the average duration of compaction operations. Higher values indicate longer average compaction times, which may suggest the need for performance optimization.</td>
         </tr>
+       <tr>
+            <td>compactionCompletedCount</td>
+            <td>Counter</td>
+            <td>The total number of compactions that have completed.</td>
+        </tr>
+        <tr>
+            <td>compactionQueuedCount</td>
+            <td>Counter</td>
+            <td>The total number of compactions that are queued/running.</td>
+        </tr>
     </tbody>
 </table>
 

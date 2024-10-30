@@ -100,14 +100,31 @@ public class UnawareBucketCompactor {
                                                         metricsReporter.reportCompactionTime(
                                                                 System.currentTimeMillis()
                                                                         - startMillis);
+                                                        metricsReporter
+                                                                .increaseCompactionsCompletedCount();
                                                     }
                                                 },
                                                 LOG);
                                         return commitMessage;
                                     } finally {
                                         MetricUtils.safeCall(this::stopTimer, LOG);
+                                        MetricUtils.safeCall(
+                                                this::decreaseCompactionsQueuedCount, LOG);
                                     }
                                 }));
+        recordCompactionsQueuedRequest();
+    }
+
+    private void recordCompactionsQueuedRequest() {
+        if (metricsReporter != null) {
+            metricsReporter.increaseCompactionsQueuedCount();
+        }
+    }
+
+    private void decreaseCompactionsQueuedCount() {
+        if (metricsReporter != null) {
+            metricsReporter.decreaseCompactionsQueuedCount();
+        }
     }
 
     private void startTimer() {

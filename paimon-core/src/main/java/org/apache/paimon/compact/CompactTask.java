@@ -53,6 +53,7 @@ public abstract class CompactTask implements Callable<CompactResult> {
                         if (metricsReporter != null) {
                             metricsReporter.reportCompactionTime(
                                     System.currentTimeMillis() - startMillis);
+                            metricsReporter.increaseCompactionsCompletedCount();
                         }
                     },
                     LOG);
@@ -63,6 +64,13 @@ public abstract class CompactTask implements Callable<CompactResult> {
             return result;
         } finally {
             MetricUtils.safeCall(this::stopTimer, LOG);
+            MetricUtils.safeCall(this::decreaseCompactionsQueuedCount, LOG);
+        }
+    }
+
+    private void decreaseCompactionsQueuedCount() {
+        if (metricsReporter != null) {
+            metricsReporter.decreaseCompactionsQueuedCount();
         }
     }
 
