@@ -18,4 +18,4 @@
 
 package org.apache.paimon.spark.sql
 
-class ShowTagsTest extends PaimonShowTagsTestBase {}
+class TagDdlTest extends PaimonTagDdlTestBase {}
