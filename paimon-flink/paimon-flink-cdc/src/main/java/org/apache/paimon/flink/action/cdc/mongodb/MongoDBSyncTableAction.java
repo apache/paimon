@@ -77,6 +77,7 @@ public class MongoDBSyncTableAction extends SyncTableActionBase {
 
     @Override
     protected MongoDBSource<CdcSourceRecord> buildSource() {
+        validateRuntimeExecutionMode();
         String tableList =
                 cdcSourceConfig.get(MongoDBSourceOptions.DATABASE)
                         + "\\."
