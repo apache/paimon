@@ -54,9 +54,6 @@ public class ChangelogCompactTask implements Serializable {
     private final Map<Integer, List<DataFileMeta>> newFileChangelogFiles;
     private final Map<Integer, List<DataFileMeta>> compactChangelogFiles;
 
-    private transient OutputStream outputStream;
-    private final transient List<Result> results = new ArrayList<>();
-
     public ChangelogCompactTask(
             long checkpointId,
             BinaryRow partition,
@@ -86,14 +83,23 @@ public class ChangelogCompactTask implements Serializable {
 
     public List<Committable> doCompact(FileStoreTable table) throws Exception {
         FileStorePathFactory pathFactory = table.store().pathFactory();
+        OutputStream outputStream = new OutputStream();
+        List<Result> results = new ArrayList<>();
 
         // copy all changelog files to a new big file
         for (Map.Entry<Integer, List<DataFileMeta>> entry : newFileChangelogFiles.entrySet()) {
-            Integer bucket = entry.getKey();
+            int bucket = entry.getKey();
             DataFilePathFactory dataFilePathFactory =
                     pathFactory.createDataFilePathFactory(partition, bucket);
             for (DataFileMeta meta : entry.getValue()) {
-                copyFile(table, dataFilePathFactory.toPath(meta.fileName()), bucket, false, meta);
+                copyFile(
+                        outputStream,
+                        results,
+                        table,
+                        dataFilePathFactory.toPath(meta.fileName()),
+                        bucket,
+                        false,
+                        meta);
             }
         }
         for (Map.Entry<Integer, List<DataFileMeta>> entry : compactChangelogFiles.entrySet()) {
@@ -101,22 +107,34 @@ public class ChangelogCompactTask implements Serializable {
             DataFilePathFactory dataFilePathFactory =
                     pathFactory.createDataFilePathFactory(partition, bucket);
             for (DataFileMeta meta : entry.getValue()) {
-                copyFile(table, dataFilePathFactory.toPath(meta.fileName()), bucket, true, meta);
+                copyFile(
+                        outputStream,
+                        results,
+                        table,
+                        dataFilePathFactory.toPath(meta.fileName()),
+                        bucket,
+                        true,
+                        meta);
             }
         }
         outputStream.out.close();
 
-        return produceNewCommittables(table, pathFactory);
+        return produceNewCommittables(results, table, pathFactory, outputStream.path);
     }
 
     private void copyFile(
-            FileStoreTable table, Path path, int bucket, boolean isCompactResult, DataFileMeta meta)
+            OutputStream outputStream,
+            List<Result> results,
+            FileStoreTable table,
+            Path path,
+            int bucket,
+            boolean isCompactResult,
+            DataFileMeta meta)
             throws Exception {
-        if (outputStream == null) {
+        if (!outputStream.isInitialized) {
             Path outputPath =
                     new Path(path.getParent(), "tmp-compacted-changelog-" + UUID.randomUUID());
-            outputStream =
-                    new OutputStream(outputPath, table.fileIO().newOutputStream(outputPath, false));
+            outputStream.init(outputPath, table.fileIO().newOutputStream(outputPath, false));
         }
         long offset = outputStream.out.getPos();
         try (SeekableInputStream in = table.fileIO().newInputStream(path)) {
@@ -129,7 +147,11 @@ public class ChangelogCompactTask implements Serializable {
     }
 
     private List<Committable> produceNewCommittables(
-            FileStoreTable table, FileStorePathFactory pathFactory) throws IOException {
+            List<Result> results,
+            FileStoreTable table,
+            FileStorePathFactory pathFactory,
+            Path changelogTempPath)
+            throws IOException {
         Result baseResult = results.get(0);
         Preconditions.checkArgument(baseResult.offset == 0);
         DataFilePathFactory dataFilePathFactory =
@@ -144,7 +166,7 @@ public class ChangelogCompactTask implements Serializable {
                         + baseResult.length;
         table.fileIO()
                 .rename(
-                        outputStream.path,
+                        changelogTempPath,
                         dataFilePathFactory.toPath(
                                 realName
                                         + "."
@@ -226,12 +248,18 @@ public class ChangelogCompactTask implements Serializable {
 
     private static class OutputStream {
 
-        private final Path path;
-        private final PositionOutputStream out;
+        private Path path;
+        private PositionOutputStream out;
+        private boolean isInitialized;
 
-        private OutputStream(Path path, PositionOutputStream out) {
+        private OutputStream() {
+            this.isInitialized = false;
+        }
+
+        private void init(Path path, PositionOutputStream out) {
             this.path = path;
             this.out = out;
+            this.isInitialized = true;
         }
     }
 

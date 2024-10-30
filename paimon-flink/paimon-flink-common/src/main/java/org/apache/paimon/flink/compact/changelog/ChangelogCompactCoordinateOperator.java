@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.compact.changelog;
 
-import org.apache.paimon.append.UnawareAppendTableCompactionCoordinator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.io.CompactIncrement;
@@ -42,7 +41,7 @@ import java.util.Map;
 /**
  * Coordinator operator for compacting changelog files.
  *
- * <p>{@link UnawareAppendTableCompactionCoordinator} calculates the file size of changelog files
+ * <p>{@link ChangelogCompactCoordinateOperator} calculates the file size of changelog files
  * contained in all buckets within each partition from {@link Committable} message emitted from
  * writer operator. And emit {@link ChangelogCompactTask} to {@link ChangelogCompactWorkerOperator}.
  */
@@ -84,12 +83,13 @@ public class ChangelogCompactCoordinateOperator
 
         BinaryRow partition = message.partition();
         Integer bucket = message.bucket();
+        long targetFileSize = table.coreOptions().targetFileSize(false);
         for (DataFileMeta meta : message.newFilesIncrement().changelogFiles()) {
             partitionChangelogs
                     .computeIfAbsent(partition, k -> new PartitionChangelog())
                     .addNewChangelogFile(bucket, meta);
             PartitionChangelog partitionChangelog = partitionChangelogs.get(partition);
-            if (partitionChangelog.totalFileSize >= table.coreOptions().targetFileSize(false)) {
+            if (partitionChangelog.totalFileSize >= targetFileSize) {
                 emitPartitionChanglogCompactTask(partition);
             }
         }
@@ -98,7 +98,7 @@ public class ChangelogCompactCoordinateOperator
                     .computeIfAbsent(partition, k -> new PartitionChangelog())
                     .addCompactChangelogFile(bucket, meta);
             PartitionChangelog partitionChangelog = partitionChangelogs.get(partition);
-            if (partitionChangelog.totalFileSize >= table.coreOptions().targetFileSize(false)) {
+            if (partitionChangelog.totalFileSize >= targetFileSize) {
                 emitPartitionChanglogCompactTask(partition);
             }
         }
@@ -153,10 +153,6 @@ public class ChangelogCompactCoordinateOperator
         private long totalFileSize;
         private final Map<Integer, List<DataFileMeta>> newFileChangelogFiles;
         private final Map<Integer, List<DataFileMeta>> compactChangelogFiles;
-
-        public long totalFileSize() {
-            return totalFileSize;
-        }
 
         public PartitionChangelog() {
             totalFileSize = 0;

@@ -479,7 +479,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         assertThat(compactedChangelogs2).hasSize(2);
         assertThat(listAllFilesWithPrefix("changelog-")).isEmpty();
 
-        //         write update data
+        // write update data
         values.clear();
         for (int i = 0; i < 100; i++) {
             values.add(String.format("(0, %d, %d)", i, i + 1));
@@ -681,18 +681,17 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                 tEnv,
                 numProducers,
                 enableFailure,
-                "'bucket' = '4',"
-                        + String.format(
-                                "'bucket' = '4', "
-                                        + "'writer-buffer-size' = '%s', "
-                                        + "'changelog-producer' = 'lookup', "
-                                        + "'lookup-wait' = '%s', "
-                                        + "'deletion-vectors.enabled' = '%s', "
-                                        + "'changelog.compact.parallelism' = '%s'",
-                                random.nextBoolean() ? "512kb" : "1mb",
-                                random.nextBoolean(),
-                                enableDeletionVectors,
-                                random.nextInt(1, 3)));
+                String.format(
+                        "'bucket' = '4', "
+                                + "'writer-buffer-size' = '%s', "
+                                + "'changelog-producer' = 'lookup', "
+                                + "'lookup-wait' = '%s', "
+                                + "'deletion-vectors.enabled' = '%s', "
+                                + "'changelog.precommit-compact' = '%s'",
+                        random.nextBoolean() ? "512kb" : "1mb",
+                        random.nextBoolean(),
+                        enableDeletionVectors,
+                        random.nextBoolean()));
 
         // sleep for a random amount of time to check
         // if we can first read complete records then read incremental records correctly
