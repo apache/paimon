@@ -101,8 +101,6 @@ public class CacheManager {
         private final MemorySegment segment;
         private final CacheCallback callback;
 
-        private boolean cached = false;
-
         private CacheValue(MemorySegment segment, CacheCallback callback) {
             this.segment = segment;
             this.callback = callback;
