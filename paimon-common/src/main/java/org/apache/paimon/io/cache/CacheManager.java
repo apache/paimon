@@ -40,7 +40,7 @@ public class CacheManager {
     private int fileReadCount;
 
     public CacheManager(MemorySize maxMemorySize) {
-        this(Cache.CacheType.CAFFEINE, maxMemorySize);
+        this(Cache.CacheType.GUAVA, maxMemorySize);
     }
 
     public CacheManager(Cache.CacheType cacheType, MemorySize maxMemorySize) {
