@@ -2922,7 +2922,9 @@ public class CoreOptions implements Serializable {
 
         SECONDS_LONG("seconds-long", "Timestamps in seconds with BIGINT field type."),
 
-        MILLIS_LONG("millis-long", "Timestamps in milliseconds with BIGINT field type.");
+        MILLIS_LONG("millis-long", "Timestamps in milliseconds with BIGINT field type."),
+
+        TIMESTAMP("timestamp", "Timestamp field type.");
 
         private final String value;
         private final String description;
