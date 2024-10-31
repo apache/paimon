@@ -1,9 +1,9 @@
 ---
 title: "Clone Tables"
-weight: 3
+weight: 94
 type: docs
 aliases:
-- /migration/clone-tables.html
+- /flink/clone-tables.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
