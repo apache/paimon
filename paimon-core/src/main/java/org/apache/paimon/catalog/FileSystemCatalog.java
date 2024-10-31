@@ -127,13 +127,12 @@ public class FileSystemCatalog extends AbstractCatalog {
         uncheck(() -> schemaManager(identifier).createTable(schema));
     }
 
-    private SchemaManager schemaManager(Identifier identifier) throws TableNotExistException {
+    private SchemaManager schemaManager(Identifier identifier) {
         Path path = getTableLocation(identifier);
         CatalogLock catalogLock =
                 lockFactory().map(fac -> fac.createLock(assertGetLockContext())).orElse(null);
         return new SchemaManager(fileIO, path, identifier.getBranchNameOrDefault())
-                .withLock(catalogLock == null ? null : Lock.fromCatalog(catalogLock, identifier))
-                .withCatalogEnvironment(catalogEnvironment(identifier));
+                .withLock(catalogLock == null ? null : Lock.fromCatalog(catalogLock, identifier));
     }
 
     private CatalogLockContext assertGetLockContext() {
