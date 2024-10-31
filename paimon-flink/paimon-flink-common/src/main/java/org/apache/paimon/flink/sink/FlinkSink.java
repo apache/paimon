@@ -21,6 +21,9 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.TagCreationMode;
+import org.apache.paimon.flink.compact.changelog.ChangelogCompactCoordinateOperator;
+import org.apache.paimon.flink.compact.changelog.ChangelogCompactWorkerOperator;
+import org.apache.paimon.flink.compact.changelog.ChangelogTaskTypeInfo;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -31,6 +34,7 @@ import org.apache.paimon.utils.SerializableRunnable;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.operators.SlotSharingGroup;
 import org.apache.flink.api.dag.Transformation;
+import org.apache.flink.api.java.typeutils.EitherTypeInfo;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.CheckpointingMode;
@@ -54,6 +58,7 @@ import java.util.Set;
 
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.createCommitUser;
+import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRECOMMIT_COMPACT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.END_INPUT_WATERMARK;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_AUTO_TAG_FOR_SAVEPOINT;
@@ -226,6 +231,22 @@ public abstract class FlinkSink<T> implements Serializable {
         if (options.get(SINK_USE_MANAGED_MEMORY)) {
             declareManagedMemory(written, options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY));
         }
+
+        if (options.contains(CHANGELOG_PRECOMMIT_COMPACT)) {
+            written =
+                    written.transform(
+                                    "Changelog Compact Coordinator",
+                                    new EitherTypeInfo<>(
+                                            new CommittableTypeInfo(), new ChangelogTaskTypeInfo()),
+                                    new ChangelogCompactCoordinateOperator(table))
+                            .forceNonParallel()
+                            .transform(
+                                    "Changelog Compact Worker",
+                                    new CommittableTypeInfo(),
+                                    new ChangelogCompactWorkerOperator(table))
+                            .setParallelism(written.getParallelism());
+        }
+
         return written;
     }
 

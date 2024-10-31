@@ -405,6 +405,15 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Optional endInput watermark used in case of batch mode or bounded stream.");
 
+    public static final ConfigOption<Boolean> CHANGELOG_PRECOMMIT_COMPACT =
+            key("changelog.precommit-compact")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, it will add a changelog compact coordinator and worker operator after the writer operator,"
+                                    + "in order to compact several changelog files from the same partition into large ones, "
+                                    + "which can decrease the number of small files. ");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);
