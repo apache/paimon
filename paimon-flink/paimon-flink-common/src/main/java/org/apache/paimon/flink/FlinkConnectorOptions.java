@@ -311,6 +311,15 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "If the pending snapshot count exceeds the threshold, lookup operator will refresh the table in sync.");
 
+    public static final ConfigOption<String> LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST =
+            ConfigOptions.key("lookup.refresh.time-periods-blacklist")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The blacklist contains several time periods. During these time periods, the lookup table's "
+                                    + "cache refreshing is forbidden. Blacklist format is start1->end1,start2->end2,... , "
+                                    + "and the time format is yyyy-MM-dd HH:mm. Only used when lookup table is FULL cache mode.");
+
     public static final ConfigOption<Boolean> SINK_AUTO_TAG_FOR_SAVEPOINT =
             ConfigOptions.key("sink.savepoint.auto-tag")
                     .booleanType()

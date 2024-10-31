@@ -87,6 +87,12 @@ under the License.
             <td>If the pending snapshot count exceeds the threshold, lookup operator will refresh the table in sync.</td>
         </tr>
         <tr>
+            <td><h5>lookup.refresh.time-periods-blacklist</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The blacklist contains several time periods. During these time periods, the lookup table's cache refreshing is forbidden. Blacklist format is start1-&gt;end1,start2-&gt;end2,... , and the time format is yyyy-MM-dd HH:mm. Only used when lookup table is FULL cache mode.</td>
+        </tr>
+        <tr>
             <td><h5>partition.idle-time-to-done</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
