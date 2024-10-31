@@ -390,7 +390,8 @@ public abstract class AbstractCatalog implements Catalog {
                 catalogEnvironment(identifier));
     }
 
-    protected CatalogEnvironment catalogEnvironment(Identifier identifier) throws TableNotExistException {
+    protected CatalogEnvironment catalogEnvironment(Identifier identifier)
+            throws TableNotExistException {
         return new CatalogEnvironment(
                 identifier,
                 Lock.factory(lockFactory().orElse(null), lockContext().orElse(null), identifier),
