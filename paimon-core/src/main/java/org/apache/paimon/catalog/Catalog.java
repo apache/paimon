@@ -83,7 +83,8 @@ public interface Catalog extends AutoCloseable {
     }
 
     /** Get metastore client factory for the table specified by {@code identifier}. */
-    default Optional<MetastoreClient.Factory> metastoreClientFactory(Identifier identifier) {
+    default Optional<MetastoreClient.Factory> metastoreClientFactory(Identifier identifier)
+            throws TableNotExistException {
         return Optional.empty();
     }
 
