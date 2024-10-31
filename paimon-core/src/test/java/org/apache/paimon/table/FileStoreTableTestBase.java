@@ -1136,8 +1136,9 @@ public abstract class FileStoreTableTestBase {
             table.createTag("test-tag", 1);
             // verify that tag file exist
             assertThat(tagManager.tagExists("test-tag")).isTrue();
-            // Create again
-            table.createTag("test-tag", 1);
+            // Create again failed if tag existed
+            Assertions.assertThatThrownBy(() -> table.createTag("test-tag", 1))
+                    .hasMessageContaining("Tag name 'test-tag' already exists.");
             Assertions.assertThatThrownBy(() -> table.createTag("test-tag", 2))
                     .hasMessageContaining("Tag name 'test-tag' already exists.");
         }

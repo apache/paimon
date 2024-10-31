@@ -188,6 +188,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void replaceTag(String tagName, Long fromSnapshotId, Duration timeRetained) {
+        wrapped.replaceTag(tagName, fromSnapshotId, timeRetained);
+    }
+
+    @Override
     public void deleteTag(String tagName) {
         wrapped.deleteTag(tagName);
     }

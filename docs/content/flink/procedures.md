@@ -223,6 +223,32 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
+      <td>replace_tag</td>
+      <td>
+         -- Use named argument<br/>
+         -- replace tag with new time retained <br/>
+         CALL [catalog.]sys.replace_tag(`table` => 'identifier', tag => 'tagName', time_retained => 'timeRetained') <br/>
+         -- replace tag with new snapshot id and time retained <br/>
+         CALL [catalog.]sys.replace_tag(`table` => 'identifier', snapshot_id => 'snapshotId') <br/><br/>
+         -- Use indexed argument<br/>
+         -- replace tag with new snapshot id and time retained <br/>
+         CALL [catalog.]sys.replace_tag('identifier', 'tagName', 'snapshotId', 'timeRetained') <br/>
+      </td>
+      <td>
+         To replace an existing tag with new tag info. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>tag: name of the existed tag. Cannot be empty.</li>
+            <li>snapshot(Long):  id of the snapshot which the tag is based on, it is optional.</li>
+            <li>time_retained: The maximum time retained for the existing tag, it is optional.</li>
+      </td>
+      <td>
+         -- for Flink 1.18<br/>
+         CALL sys.replace_tag('default.T', 'my_tag', 5, '1 d')<br/><br/>
+         -- for Flink 1.19 and later<br/>
+         CALL sys.replace_tag(`table` => 'default.T', tag => 'my_tag', snapshot_id => 5, time_retained => '1 d')<br/><br/>
+      </td>
+   </tr>
+   <tr>
       <td>expire_tags</td>
       <td>
          CALL [catalog.]sys.expire_tags('identifier', 'older_than')
