@@ -333,6 +333,12 @@ under the License.
             <td>Define different file format for different level, you can add the conf like this: 'file.format.per.level' = '0:avro,3:parquet', if the file format for level is not provided, the default format which set by `file.format` will be used.</td>
         </tr>
         <tr>
+            <td><h5>file.suffix.include.compression</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to add file compression type in the file name of data file and changelog file.</td>
+        </tr>
+        <tr>
             <td><h5>force-lookup</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>

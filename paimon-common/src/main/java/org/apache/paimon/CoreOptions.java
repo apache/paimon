@@ -190,6 +190,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue("changelog-")
                     .withDescription("Specify the file name prefix of changelog files.");
 
+    public static final ConfigOption<Boolean> FILE_SUFFIX_INCLUDE_COMPRESSION =
+            key("file.suffix.include.compression")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to add file compression type in the file name of data file and changelog file.");
+
     public static final ConfigOption<MemorySize> FILE_BLOCK_SIZE =
             key("file.block-size")
                     .memoryType()
@@ -1596,6 +1603,10 @@ public class CoreOptions implements Serializable {
 
     public String changelogFilePrefix() {
         return options.get(CHANGELOG_FILE_PREFIX);
+    }
+
+    public boolean fileSuffixIncludeCompression() {
+        return options.get(FILE_SUFFIX_INCLUDE_COMPRESSION);
     }
 
     public String fieldsDefaultFunc() {

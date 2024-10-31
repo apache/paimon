@@ -39,6 +39,7 @@ public class DataFilePathFactoryTest {
                         CoreOptions.FILE_FORMAT.defaultValue().toString(),
                         CoreOptions.DATA_FILE_PREFIX.defaultValue(),
                         CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue());
         String uuid = pathFactory.uuid();
 
@@ -51,8 +52,6 @@ public class DataFilePathFactoryTest {
                                             + uuid
                                             + "-"
                                             + i
-                                            + "."
-                                            + CoreOptions.FILE_COMPRESSION.defaultValue()
                                             + "."
                                             + CoreOptions.FILE_FORMAT.defaultValue()));
         }
@@ -68,6 +67,7 @@ public class DataFilePathFactoryTest {
                         CoreOptions.FILE_FORMAT.defaultValue().toString(),
                         CoreOptions.DATA_FILE_PREFIX.defaultValue(),
                         CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue());
         String uuid = pathFactory.uuid();
 
@@ -80,8 +80,6 @@ public class DataFilePathFactoryTest {
                                             + uuid
                                             + "-"
                                             + i
-                                            + "."
-                                            + CoreOptions.FILE_COMPRESSION.defaultValue()
                                             + "."
                                             + CoreOptions.FILE_FORMAT.defaultValue()));
         }

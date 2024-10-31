@@ -37,7 +37,6 @@ import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
@@ -353,33 +352,38 @@ public class SparkWriteITCase {
 
         spark.sql("INSERT INTO T VALUES (1, 1, 'aa')");
         spark.sql("INSERT INTO T VALUES (2, 2, 'bb')");
-        spark.sql("INSERT INTO T VALUES (1, 3, 'cc')");
 
-        List<Row> data = spark.sql("SELECT * FROM T order by a").collectAsList();
-        assertThat(data.toString()).isEqualTo("[[1,3,cc], [2,2,bb]]");
+        // enable file suffix
+        spark.conf().set("spark.paimon.file.suffix.include.compression", true);
+        spark.sql("INSERT INTO T VALUES (3, 3, 'cc')");
+        spark.sql("INSERT INTO T VALUES (4, 4, 'dd')");
 
-        List<String> beforeCompactFiles =
-                spark.sql("select file_path from `T$files`").collectAsList().stream()
-                        .map(x -> x.getString(0))
-                        .collect(Collectors.toList());
-        Assertions.assertEquals(3, beforeCompactFiles.size());
-
-        // compact
-        assertThat(spark.sql("CALL sys.compact(table => 'T')").collectAsList().toString())
-                .isEqualTo("[[true]]");
-        List<String> afterCompactFiles =
-                spark.sql("select file_path from `T$files`").collectAsList().stream()
-                        .map(x -> x.getString(0))
-                        .collect(Collectors.toList());
-        Assertions.assertEquals(1, afterCompactFiles.size());
+        List<Row> data2 = spark.sql("SELECT * FROM T order by a").collectAsList();
+        assertThat(data2.toString()).isEqualTo("[[1,1,aa], [2,2,bb], [3,3,cc], [4,4,dd]]");
 
         // check files suffix name
-        List<String> files = new ArrayList<>(beforeCompactFiles);
-        String extension = "." + "zstd" + "." + "parquet";
-        files.addAll(afterCompactFiles);
-        for (String fileName : files) {
-            Assertions.assertTrue(fileName.endsWith(extension));
-        }
+        List<String> files =
+                spark.sql("select file_path from `T$files`").collectAsList().stream()
+                        .map(x -> x.getString(0))
+                        .collect(Collectors.toList());
+        Assertions.assertEquals(4, files.size());
+
+        String defaultExtension = "." + "parquet";
+        String newExtension = "." + "zstd" + "." + "parquet";
+        // two data files end with ".parquet", two data file end with ".zstd.parquet"
+        Assertions.assertEquals(
+                2,
+                files.stream()
+                        .filter(
+                                name ->
+                                        name.endsWith(defaultExtension)
+                                                && !name.endsWith(newExtension))
+                        .count());
+        Assertions.assertEquals(
+                2, files.stream().filter(name -> name.endsWith(newExtension)).count());
+
+        // reset config
+        spark.conf().unset("spark.paimon.file.suffix.include.compression");
     }
 
     @Test
@@ -398,14 +402,32 @@ public class SparkWriteITCase {
         FileIO fileIO = table.fileIO();
 
         spark.sql("INSERT INTO T VALUES (1, 1, 'aa')");
-        FileStatus[] files = fileIO.listStatus(new Path(tabLocation, "bucket-0"));
-        Assertions.assertEquals(1, dataFileCount(files, "changelog-"));
 
-        // check files suffix name
-        String extension = "." + "zstd" + "." + "parquet";
-        for (FileStatus file : files) {
-            Assertions.assertTrue(file.getPath().getName().endsWith(extension));
-        }
+        spark.conf().set("spark.paimon.file.suffix.include.compression", true);
+        spark.sql("INSERT INTO T VALUES (2, 2, 'bb')");
+
+        // collect changelog files
+        List<String> files =
+                Arrays.stream(fileIO.listStatus(new Path(tabLocation, "bucket-0")))
+                        .map(name -> name.getPath().getName())
+                        .filter(name -> name.startsWith("changelog-"))
+                        .collect(Collectors.toList());
+        String defaultExtension = "." + "parquet";
+        String newExtension = "." + "zstd" + "." + "parquet";
+        // one changelog file end with ".parquet", one changelog file end with ".zstd.parquet"
+        Assertions.assertEquals(
+                1,
+                files.stream()
+                        .filter(
+                                name ->
+                                        name.endsWith(defaultExtension)
+                                                && !name.endsWith(newExtension))
+                        .count());
+        Assertions.assertEquals(
+                1, files.stream().filter(name -> name.endsWith(newExtension)).count());
+
+        // reset config
+        spark.conf().unset("spark.paimon.file.suffix.include.compression");
     }
 
     protected static FileStoreTable getTable(String tableName) {

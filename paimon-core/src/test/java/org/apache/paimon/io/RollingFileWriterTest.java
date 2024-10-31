@@ -82,6 +82,8 @@ public class RollingFileWriterTest {
                                                         CoreOptions.DATA_FILE_PREFIX.defaultValue(),
                                                         CoreOptions.CHANGELOG_FILE_PREFIX
                                                                 .defaultValue(),
+                                                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION
+                                                                .defaultValue(),
                                                         CoreOptions.FILE_COMPRESSION.defaultValue())
                                                 .newPath(),
                                         SCHEMA,

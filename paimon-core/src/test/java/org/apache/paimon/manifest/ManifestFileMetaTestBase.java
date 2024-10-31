@@ -148,6 +148,7 @@ public abstract class ManifestFileMetaTestBase {
                                 CoreOptions.DATA_FILE_PREFIX.defaultValue(),
                                 CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
                                 CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
+                                CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                                 CoreOptions.FILE_COMPRESSION.defaultValue()),
                         Long.MAX_VALUE,
                         null)

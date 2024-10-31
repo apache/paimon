@@ -43,6 +43,7 @@ public class FileStorePathFactory {
     private final String formatIdentifier;
     private final String dataFilePrefix;
     private final String changelogFilePrefix;
+    private final boolean fileSuffixIncludeCompression;
     private final String fileCompression;
 
     private final AtomicInteger manifestFileCount;
@@ -59,6 +60,7 @@ public class FileStorePathFactory {
             String dataFilePrefix,
             String changelogFilePrefix,
             boolean legacyPartitionName,
+            boolean fileSuffixIncludeCompression,
             String fileCompression) {
         this.root = root;
         this.uuid = UUID.randomUUID().toString();
@@ -68,6 +70,7 @@ public class FileStorePathFactory {
         this.formatIdentifier = formatIdentifier;
         this.dataFilePrefix = dataFilePrefix;
         this.changelogFilePrefix = changelogFilePrefix;
+        this.fileSuffixIncludeCompression = fileSuffixIncludeCompression;
         this.fileCompression = fileCompression;
 
         this.manifestFileCount = new AtomicInteger(0);
@@ -117,6 +120,7 @@ public class FileStorePathFactory {
                 formatIdentifier,
                 dataFilePrefix,
                 changelogFilePrefix,
+                fileSuffixIncludeCompression,
                 fileCompression);
     }
 
