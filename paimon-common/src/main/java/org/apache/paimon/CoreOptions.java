@@ -1405,13 +1405,6 @@ public class CoreOptions implements Serializable {
                             "Whether to enable asynchronous IO writing when writing files.");
 
     @ExcludeFromDocumentation("Only used internally to support materialized table")
-    public static final ConfigOption<Long> MATERIALIZED_TABLE_SNAPSHOT =
-            key("materialized-table.snapshot")
-                    .longType()
-                    .noDefaultValue()
-                    .withDescription("The snapshot specified for the materialized table");
-
-    @ExcludeFromDocumentation("Only used internally to support materialized table")
     public static final ConfigOption<String> MATERIALIZED_TABLE_DEFINITION_QUERY =
             key("materialized-table.definition-query")
                     .stringType()
