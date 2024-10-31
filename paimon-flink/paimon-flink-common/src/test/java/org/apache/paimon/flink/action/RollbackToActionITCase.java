@@ -160,4 +160,59 @@ public class RollbackToActionITCase extends ActionITCaseBase {
                 "SELECT * FROM `" + tableName + "`",
                 Arrays.asList(Row.of(1L, "Hi"), Row.of(2L, "Apache")));
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"action", "procedure_named", "procedure_indexed"})
+    public void rollbackToTimestampTest(String invoker) throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        ROW_TYPE,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = writeBuilder.newWrite();
+        commit = writeBuilder.newCommit();
+
+        writeData(rowData(1L, BinaryString.fromString("Hi")));
+        writeData(rowData(2L, BinaryString.fromString("Apache")));
+        long timestamp = System.currentTimeMillis();
+        writeData(rowData(2L, BinaryString.fromString("Paimon")));
+
+        switch (invoker) {
+            case "action":
+                createAction(
+                                RollbackToTimestampAction.class,
+                                "rollback_to_timestamp",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--timestamp",
+                                timestamp + "")
+                        .run();
+                break;
+            case "procedure_indexed":
+                executeSQL(
+                        String.format(
+                                "CALL sys.rollback_to_timestamp('%s.%s', %s)",
+                                database, tableName, timestamp));
+                break;
+            case "procedure_named":
+                executeSQL(
+                        String.format(
+                                "CALL sys.rollback_to_timestamp(`table` => '%s.%s', `timestamp` => %s)",
+                                database, tableName, timestamp));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
+        }
+
+        testBatchRead(
+                "SELECT * FROM `" + tableName + "`",
+                Arrays.asList(Row.of(1L, "Hi"), Row.of(2L, "Apache")));
+    }
 }
