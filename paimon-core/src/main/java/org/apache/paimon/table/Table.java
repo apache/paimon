@@ -121,6 +121,10 @@ public interface Table extends Serializable {
     @Experimental
     void renameTag(String tagName, String targetTagName);
 
+    /** Replace a tag with new snapshot id and new time retained. */
+    @Experimental
+    void replaceTag(String tagName, Long fromSnapshotId, Duration timeRetained);
+
     /** Delete a tag by name. */
     @Experimental
     void deleteTag(String tagName);
