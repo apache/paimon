@@ -31,7 +31,7 @@ import org.junit.jupiter.api.BeforeEach;
 
 import java.util.UUID;
 
-class RecordLevelExpireWithTimestampTest extends RecordLevelExpireWithTimestampBaseTest {
+class RecordLevelExpireWithTimestampLTZTest extends RecordLevelExpireWithTimestampBaseTest {
 
     @Override
     @BeforeEach
@@ -46,7 +46,7 @@ class RecordLevelExpireWithTimestampTest extends RecordLevelExpireWithTimestampB
                 Schema.newBuilder()
                         .column("pt", DataTypes.INT())
                         .column("pk", DataTypes.INT())
-                        .column("col1", DataTypes.TIMESTAMP())
+                        .column("col1", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE())
                         .partitionKeys("pt")
                         .primaryKey("pk", "pt")
                         .options(tableOptions().toMap())

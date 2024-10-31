@@ -24,6 +24,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
@@ -69,7 +70,7 @@ public class RecordLevelExpire {
         if (!isValidateFieldType(timeFieldType, field)) {
             throw new IllegalArgumentException(
                     String.format(
-                            "The record level time field type should be one of SECONDS_INT,SECONDS_LONG or MILLIS_LONG, "
+                            "The record level time field type should be one of SECONDS_INT, SECONDS_LONG, MILLIS_LONG or TIMESTAMP, "
                                     + "but time field type is %s, field type is %s.",
                             timeFieldType, field.type()));
         }
@@ -80,14 +81,17 @@ public class RecordLevelExpire {
 
     private static boolean isValidateFieldType(
             CoreOptions.TimeFieldType timeFieldType, DataField field) {
+        DataType dataType = field.type();
         return ((timeFieldType == CoreOptions.TimeFieldType.SECONDS_INT
-                        && field.type() instanceof IntType)
+                        && dataType instanceof IntType)
                 || (timeFieldType == CoreOptions.TimeFieldType.SECONDS_LONG
-                        && field.type() instanceof BigIntType)
+                        && dataType instanceof BigIntType)
                 || (timeFieldType == CoreOptions.TimeFieldType.MILLIS_LONG
-                        && field.type() instanceof BigIntType)
+                        && dataType instanceof BigIntType)
                 || (timeFieldType == CoreOptions.TimeFieldType.TIMESTAMP
-                        && field.type() instanceof TimestampType));
+                        && dataType instanceof TimestampType)
+                || (timeFieldType == CoreOptions.TimeFieldType.TIMESTAMP
+                        && dataType instanceof LocalZonedTimestampType));
     }
 
     private RecordLevelExpire(
