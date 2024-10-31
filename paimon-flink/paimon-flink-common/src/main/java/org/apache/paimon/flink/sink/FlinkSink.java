@@ -232,7 +232,7 @@ public abstract class FlinkSink<T> implements Serializable {
             declareManagedMemory(written, options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY));
         }
 
-        if (options.contains(CHANGELOG_PRECOMMIT_COMPACT)) {
+        if (options.get(CHANGELOG_PRECOMMIT_COMPACT)) {
             written =
                     written.transform(
                                     "Changelog Compact Coordinator",

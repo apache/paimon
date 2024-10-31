@@ -688,7 +688,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                                 + "'lookup-wait' = '%s', "
                                 + "'deletion-vectors.enabled' = '%s', "
                                 + "'changelog.precommit-compact' = '%s'",
-                        random.nextBoolean() ? "512kb" : "1mb",
+                        random.nextBoolean() ? "4mb" : "8mb",
                         random.nextBoolean(),
                         enableDeletionVectors,
                         random.nextBoolean()));
