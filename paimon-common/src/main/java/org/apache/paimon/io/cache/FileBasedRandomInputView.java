@@ -22,9 +22,9 @@ import org.apache.paimon.data.AbstractPagedInputView;
 import org.apache.paimon.io.PageFileInput;
 import org.apache.paimon.io.SeekableDataInputView;
 import org.apache.paimon.io.cache.CacheKey.PageIndexCacheKey;
+import org.apache.paimon.io.cache.CacheManager.SegmentContainer;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.utils.MathUtils;
-import org.apache.paimon.io.cache.CacheManager.SegmentContainer;
 
 import java.io.Closeable;
 import java.io.EOFException;
