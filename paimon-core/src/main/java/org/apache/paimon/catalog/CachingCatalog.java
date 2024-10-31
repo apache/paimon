@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaChange;
@@ -61,6 +62,7 @@ public class CachingCatalog extends DelegateCatalog {
 
     protected final Cache<String, Map<String, String>> databaseCache;
     protected final Cache<Identifier, Table> tableCache;
+    protected final Cache<Identifier, List<PartitionEntry>> partitionCache;
     @Nullable protected final SegmentsCache<Path> manifestCache;
 
     public CachingCatalog(Catalog wrapped) {
@@ -107,6 +109,13 @@ public class CachingCatalog extends DelegateCatalog {
                 Caffeine.newBuilder()
                         .softValues()
                         .removalListener(new TableInvalidatingRemovalListener())
+                        .executor(Runnable::run)
+                        .expireAfterAccess(expirationInterval)
+                        .ticker(ticker)
+                        .build();
+        this.partitionCache =
+                Caffeine.newBuilder()
+                        .softValues()
                         .executor(Runnable::run)
                         .expireAfterAccess(expirationInterval)
                         .ticker(ticker)
@@ -225,6 +234,44 @@ public class CachingCatalog extends DelegateCatalog {
             ((FileStoreTable) table).setManifestCache(manifestCache);
         }
         tableCache.put(identifier, table);
+    }
+
+    public List<PartitionEntry> getPartitions(Identifier identifier) throws TableNotExistException {
+        Table table = this.getTable(identifier);
+        if (enablePartitionCache(table)) {
+            List<PartitionEntry> partitions;
+            partitions = partitionCache.getIfPresent(identifier);
+            if (partitions == null || partitions.isEmpty()) {
+                this.refreshPartitions(identifier);
+                partitions = partitionCache.getIfPresent(identifier);
+            }
+            return partitions;
+        }
+        return ((FileStoreTable) table).newSnapshotReader().partitionEntries();
+    }
+
+    public void refreshPartitions(Identifier identifier) throws TableNotExistException {
+        Table table = this.getTable(identifier);
+        if (enablePartitionCache(table)) {
+            List<PartitionEntry> partitions =
+                    ((FileStoreTable) table).newSnapshotReader().partitionEntries();
+            partitionCache.put(identifier, partitions);
+        }
+    }
+
+    private boolean enablePartitionCache(Table table) {
+        return partitionCache != null
+                && table instanceof FileStoreTable
+                && !table.partitionKeys().isEmpty();
+    }
+
+    @Override
+    public void dropPartition(Identifier identifier, Map<String, String> partitions)
+            throws TableNotExistException, PartitionNotExistException {
+        wrapped.dropPartition(identifier, partitions);
+        if (partitionCache != null) {
+            partitionCache.invalidate(identifier);
+        }
     }
 
     private class TableInvalidatingRemovalListener implements RemovalListener<Identifier, Table> {

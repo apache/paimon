@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.table.Table;
 
@@ -25,6 +26,7 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cach
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Ticker;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -40,12 +42,16 @@ public class TestableCachingCatalog extends CachingCatalog {
         this.cacheExpirationInterval = expirationInterval;
     }
 
-    public Cache<Identifier, Table> cache() {
+    public Cache<Identifier, Table> tableCache() {
         // cleanUp must be called as tests apply assertions directly on the underlying map, but
-        // metadata
-        // table map entries are cleaned up asynchronously.
+        // metadata table map entries are cleaned up asynchronously.
         tableCache.cleanUp();
         return tableCache;
+    }
+
+    public Cache<Identifier, List<PartitionEntry>> partitionCache() {
+        partitionCache.cleanUp();
+        return partitionCache;
     }
 
     public Optional<Duration> ageOf(Identifier identifier) {
