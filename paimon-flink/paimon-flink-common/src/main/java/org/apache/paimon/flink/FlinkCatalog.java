@@ -137,7 +137,6 @@ import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_REFRESH_HANDLER_B
 import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_REFRESH_HANDLER_DESCRIPTION;
 import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_REFRESH_MODE;
 import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_REFRESH_STATUS;
-import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_SNAPSHOT;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.catalog.Catalog.LAST_UPDATE_TIME_PROP;
 import static org.apache.paimon.catalog.Catalog.NUM_FILES_PROP;
@@ -448,7 +447,6 @@ public class FlinkCatalog extends AbstractCatalog {
             CatalogMaterializedTable mt, Map<String, String> options) {
         Options mtOptions = new Options();
         mtOptions.set(CoreOptions.TYPE, TableType.MATERIALIZED_TABLE);
-        mt.getSnapshot().ifPresent(x -> mtOptions.set(MATERIALIZED_TABLE_SNAPSHOT, x));
         mtOptions.set(MATERIALIZED_TABLE_DEFINITION_QUERY, mt.getDefinitionQuery());
         mtOptions.set(
                 MATERIALIZED_TABLE_INTERVAL_FRESHNESS, mt.getDefinitionFreshness().getInterval());
@@ -972,7 +970,6 @@ public class FlinkCatalog extends AbstractCatalog {
 
     private CatalogMaterializedTable buildMaterializedTable(
             Table table, Map<String, String> newOptions, TableSchema schema, Options options) {
-        Long snapshot = options.get(MATERIALIZED_TABLE_SNAPSHOT);
         String definitionQuery = options.get(MATERIALIZED_TABLE_DEFINITION_QUERY);
         IntervalFreshness freshness =
                 IntervalFreshness.of(
@@ -1000,7 +997,6 @@ public class FlinkCatalog extends AbstractCatalog {
                 .comment(table.comment().orElse(""))
                 .partitionKeys(table.partitionKeys())
                 .options(newOptions)
-                .snapshot(snapshot)
                 .definitionQuery(definitionQuery)
                 .freshness(freshness)
                 .logicalRefreshMode(logicalRefreshMode)
@@ -1434,7 +1430,6 @@ public class FlinkCatalog extends AbstractCatalog {
 
     private List<String> allMaterializedTableAttributes() {
         return Arrays.asList(
-                MATERIALIZED_TABLE_SNAPSHOT.key(),
                 MATERIALIZED_TABLE_DEFINITION_QUERY.key(),
                 MATERIALIZED_TABLE_INTERVAL_FRESHNESS.key(),
                 MATERIALIZED_TABLE_INTERVAL_FRESHNESS_TIME_UNIT.key(),
