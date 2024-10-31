@@ -141,7 +141,7 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
             checkAnswer(
               spark.sql(
                 s"CALL paimon.sys.rollback_to_timestamp(table => 'test.T', timestamp => $timestamp)"),
-              Row(true) :: Nil)
+              Row("Success roll back to snapshot: 2 .") :: Nil)
             checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
 
           } finally {

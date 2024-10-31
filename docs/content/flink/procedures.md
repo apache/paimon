@@ -375,7 +375,7 @@ All available procedures are listed below.
          -- for Flink 1.18<br/>
          CALL sys.rollback_to_timestamp('default.T', 10)
          -- for Flink 1.19 and later<br/>
-         CALL sys.rollback_to(`table` => 'default.T', snapshot_id => 1730292023000)
+         CALL sys.rollback_to_timestamp(`table` => 'default.T', timestamp => 1730292023000)
       </td>
    </tr>
    <tr>

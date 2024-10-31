@@ -25,10 +25,10 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
-import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+import org.apache.spark.unsafe.types.UTF8String;
 
 import static org.apache.spark.sql.types.DataTypes.LongType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
@@ -46,7 +46,7 @@ public class RollbackToTimestampProcedure extends BaseProcedure {
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                        new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
+                        new StructField("result", StringType, true, Metadata.empty())
                     });
 
     private RollbackToTimestampProcedure(TableCatalog tableCatalog) {
@@ -77,8 +77,14 @@ public class RollbackToTimestampProcedure extends BaseProcedure {
                     Preconditions.checkNotNull(
                             snapshot,
                             String.format("count not find snapshot earlier than %s", timestamp));
-                    fileStoreTable.rollbackTo(snapshot.id());
-                    InternalRow outputRow = newInternalRow(true);
+                    long snapshotId = snapshot.id();
+                    fileStoreTable.rollbackTo(snapshotId);
+                    InternalRow outputRow =
+                            newInternalRow(
+                                    UTF8String.fromString(
+                                            String.format(
+                                                    "Success roll back to snapshot: %s .",
+                                                    snapshotId)));
                     return new InternalRow[] {outputRow};
                 });
     }

@@ -34,7 +34,7 @@ import org.apache.flink.table.procedure.ProcedureContext;
  * Rollback to timestamp procedure. Usage:
  *
  * <pre><code>
- *  -- rollback to a timestamp
+ *  -- rollback to the snapshot which earlier or equal than timestamp.
  *  CALL sys.rollback_to_timestamp(`table` => 'tableId', timestamp => timestamp)
  * </code></pre>
  */
@@ -54,8 +54,9 @@ public class RollbackToTimestampProcedure extends ProcedureBase {
         Snapshot snapshot = fileStoreTable.snapshotManager().earlierOrEqualTimeMills(timestamp);
         Preconditions.checkNotNull(
                 snapshot, String.format("count not find snapshot earlier than %s", timestamp));
-        fileStoreTable.rollbackTo(snapshot.id());
-        return new String[] {"Success"};
+        long snapshotId = snapshot.id();
+        fileStoreTable.rollbackTo(snapshotId);
+        return new String[] {String.format("Success roll back to snapshot: %s .", snapshotId)};
     }
 
     @Override
