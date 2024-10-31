@@ -46,6 +46,7 @@ import java.util.Set;
 
 /** Lookup table for primary key which supports to read the LSM tree directly. */
 public class PrimaryKeyPartialLookupTable implements LookupTable {
+
     private final QueryExecutorFactory executorFactory;
     private final FixedBucketFromPkExtractor extractor;
     @Nullable private final ProjectedRow keyRearrange;

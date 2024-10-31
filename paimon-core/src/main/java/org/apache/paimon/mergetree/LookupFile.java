@@ -58,6 +58,7 @@ public class LookupFile {
     private long hitCount;
     private boolean isClosed = false;
     private Lock lock;
+    private boolean isReady;
 
     @Nullable
     public byte[] get(byte[] key) throws IOException {
@@ -154,7 +155,16 @@ public class LookupFile {
         return this;
     }
 
+    public LookupFile withReady(boolean isReady) {
+        this.isReady = isReady;
+        return this;
+    }
+
     public Lock getLock() {
         return lock;
+    }
+
+    public boolean isReady() {
+        return isReady;
     }
 }

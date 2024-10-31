@@ -131,21 +131,15 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
 
     @Nullable
     private T lookup(InternalRow key, DataFileMeta file) throws IOException {
-        LookupFile lookupFile = lookupFileCache.getIfPresent(file.fileName());
+        LookupFile lookupFile = lookupFileCache.get(file.fileName(), k -> createLookupFile(file));
         boolean newCreatedLookupFile = false;
-        if (lookupFile == null) {
-            synchronized (lock) {
-                // double check
-                lookupFile = lookupFileCache.getIfPresent(file.fileName());
-                if (lookupFile == null) {
-                    lookupFile = createLookupFile(file);
-                    newCreatedLookupFile = true;
-                }
-            }
-        }
         Lock lock = lookupFile.getLock();
         try {
-            loadDataForLookupFile(file, lookupFile);
+            if (!lookupFile.isReady()) {
+                loadDataForLookupFile(file, lookupFile);
+                newCreatedLookupFile = true;
+            }
+
             byte[] valueBytes;
             try {
                 byte[] keyBytes = keySerializer.serializeToBytes(key);
@@ -217,7 +211,8 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
                 .withLocalFile(localFile)
                 .withRemoteFile(file)
                 .withReader(lookupStoreFactory.createReader(localFile, context))
-                .withCallback(() -> ownCachedFiles.remove(file.fileName()));
+                .withCallback(() -> ownCachedFiles.remove(file.fileName()))
+                .withReady(true);
     }
 
     @Override
