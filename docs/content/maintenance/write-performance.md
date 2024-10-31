@@ -1,6 +1,6 @@
 ---
 title: "Write Performance"
-weight: 2
+weight: 3
 type: docs
 aliases:
 - /maintenance/write-performance.html

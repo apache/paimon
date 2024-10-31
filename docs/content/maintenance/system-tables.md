@@ -1,6 +1,6 @@
 ---
 title: "System Tables"
-weight: 1
+weight: 2
 type: docs
 aliases:
 - /maintenance/system-tables.html
