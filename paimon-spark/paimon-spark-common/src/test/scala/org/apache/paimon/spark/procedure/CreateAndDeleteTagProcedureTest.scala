@@ -120,7 +120,7 @@ class CreateAndDeleteTagProcedureTest extends PaimonSparkTestBase with StreamTes
               spark.sql("SELECT tag_name FROM paimon.test.`T$tags`"),
               Row("test_tag_2") :: Row("test_tag_3") :: Nil)
 
-            // delete test_tag_1 and test_tag_2
+            // delete test_tag_2 and test_tag_3
             checkAnswer(
               spark.sql(
                 "CALL paimon.sys.delete_tag(table => 'test.T', tag => 'test_tag_2,test_tag_3')"),
@@ -198,5 +198,31 @@ class CreateAndDeleteTagProcedureTest extends PaimonSparkTestBase with StreamTes
     checkAnswer(
       spark.sql("CALL paimon.sys.delete_tag(table => 'test.T', tag => 'test_tag')"),
       Row(true) :: Nil)
+  }
+
+  test("Paimon Procedure: delete multiple tags") {
+    spark.sql("CREATE TABLE T (id INT, name STRING) USING PAIMON")
+    spark.sql("insert into T values (1, 'a')")
+
+    // create four tags
+    spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-1')")
+    spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-2')")
+    spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-3')")
+    spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-4')")
+    checkAnswer(spark.sql("SELECT count(*) FROM paimon.test.`T$tags`"), Row(4) :: Nil)
+
+    // multiple tags with no space
+    checkAnswer(
+      spark.sql("CALL paimon.sys.delete_tag(table => 'test.T', tag => 'tag-1,tag-2')"),
+      Row(true) :: Nil)
+    checkAnswer(
+      spark.sql("SELECT tag_name FROM paimon.test.`T$tags`"),
+      Row("tag-3") :: Row("tag-4") :: Nil)
+
+    // multiple tags with space
+    checkAnswer(
+      spark.sql("CALL paimon.sys.delete_tag(table => 'test.T', tag => 'tag-3, tag-4')"),
+      Row(true) :: Nil)
+    checkAnswer(spark.sql("SELECT tag_name FROM paimon.test.`T$tags`"), Nil)
   }
 }
