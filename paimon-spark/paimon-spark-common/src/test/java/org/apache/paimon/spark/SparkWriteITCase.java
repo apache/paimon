@@ -344,12 +344,12 @@ public class SparkWriteITCase {
     public void testDataFileSuffixName() {
         spark.sql(
                 "CREATE TABLE T (a INT, b INT, c STRING)"
-                        + " TBLPROPERTIES (" +
-                        "'bucket' = '1', " +
-                        "'primary-key'='a', " +
-                        "'write-only' = 'true', " +
-                        "'file.format' = 'parquet', " +
-                        "'file.compression' = 'zstd')");
+                        + " TBLPROPERTIES ("
+                        + "'bucket' = '1', "
+                        + "'primary-key'='a', "
+                        + "'write-only' = 'true', "
+                        + "'file.format' = 'parquet', "
+                        + "'file.compression' = 'zstd')");
 
         spark.sql("INSERT INTO T VALUES (1, 1, 'aa')");
         spark.sql("INSERT INTO T VALUES (2, 2, 'bb')");
@@ -385,13 +385,13 @@ public class SparkWriteITCase {
     @Test
     public void testChangelogFileSuffixName() throws Exception {
         spark.sql(
-                "CREATE TABLE T (a INT, b INT, c STRING) " +
-                        "TBLPROPERTIES (" +
-                        "'primary-key'='a', " +
-                        "'bucket' = '1', " +
-                        "'changelog-producer' = 'lookup', " +
-                        "'file.format' = 'parquet', " +
-                        "'file.compression' = 'zstd')");
+                "CREATE TABLE T (a INT, b INT, c STRING) "
+                        + "TBLPROPERTIES ("
+                        + "'primary-key'='a', "
+                        + "'bucket' = '1', "
+                        + "'changelog-producer' = 'lookup', "
+                        + "'file.format' = 'parquet', "
+                        + "'file.compression' = 'zstd')");
 
         FileStoreTable table = getTable("T");
         Path tabLocation = table.location();
