@@ -107,11 +107,14 @@ public class LookupFile {
     }
 
     private static int fileWeigh(String file, LookupFile lookupFile) {
+        if (!lookupFile.isReady()) {
+            return 0;
+        }
         return fileKibiBytes(lookupFile.localFile);
     }
 
     private static void removalCallback(String file, LookupFile lookupFile, RemovalCause cause) {
-        if (lookupFile != null) {
+        if (lookupFile != null && lookupFile.isReady()) {
             try {
                 lookupFile.close(cause);
             } catch (IOException e) {

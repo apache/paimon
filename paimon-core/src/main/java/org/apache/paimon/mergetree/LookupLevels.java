@@ -133,6 +133,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         LookupFile lookupFile = lookupFileCache.get(file.fileName(), k -> createLookupFile(file));
         boolean newCreatedLookupFile = false;
         Lock lock = lookupFile.getLock();
+        lock.lock();
         try {
             if (!lookupFile.isReady()) {
                 loadDataForLookupFile(file, lookupFile);
