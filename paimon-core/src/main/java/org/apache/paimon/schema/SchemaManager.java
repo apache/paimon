@@ -36,6 +36,8 @@ import org.apache.paimon.schema.SchemaChange.UpdateColumnNullability;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnPosition;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnType;
 import org.apache.paimon.schema.SchemaChange.UpdateComment;
+import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
@@ -91,6 +93,7 @@ public class SchemaManager implements Serializable {
     private final Path tableRoot;
 
     @Nullable private transient Lock lock;
+    private transient CatalogEnvironment catalogEnvironment = CatalogEnvironment.empty();
 
     private final String branch;
 
@@ -111,6 +114,12 @@ public class SchemaManager implements Serializable {
 
     public SchemaManager withLock(@Nullable Lock lock) {
         this.lock = lock;
+        return this;
+    }
+
+    public SchemaManager withCatalogEnvironment(@Nullable CatalogEnvironment catalogEnvironment) {
+        this.catalogEnvironment =
+                catalogEnvironment == null ? CatalogEnvironment.empty() : catalogEnvironment;
         return this;
     }
 
@@ -220,6 +229,14 @@ public class SchemaManager implements Serializable {
                             primaryKeys,
                             options,
                             schema.comment());
+
+            try {
+                FileStoreTableFactory.create(fileIO, tableRoot, newSchema, catalogEnvironment)
+                        .store();
+            } catch (Exception e) {
+                fileIO.deleteQuietly(tableRoot);
+                throw new RuntimeException("create table failed", e);
+            }
 
             boolean success = commit(newSchema);
             if (success) {

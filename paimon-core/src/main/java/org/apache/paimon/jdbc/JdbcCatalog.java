@@ -352,7 +352,9 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     private SchemaManager getSchemaManager(Identifier identifier) {
-        return new SchemaManager(fileIO, getTableLocation(identifier)).withLock(lock(identifier));
+        return new SchemaManager(fileIO, getTableLocation(identifier))
+                .withLock(lock(identifier))
+                .withCatalogEnvironment(catalogEnvironment(identifier));
     }
 
     private Map<String, String> fetchProperties(String databaseName) {
