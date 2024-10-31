@@ -1,6 +1,6 @@
 ---
 title: "Dedicated Compaction"
-weight: 3
+weight: 4
 type: docs
 aliases:
 - /maintenance/dedicated-compaction.html
