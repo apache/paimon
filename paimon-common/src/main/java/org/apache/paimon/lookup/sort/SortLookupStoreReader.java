@@ -32,10 +32,7 @@ import org.apache.paimon.utils.MurmurHashUtils;
 import javax.annotation.Nullable;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 import java.util.Comparator;
 
 import static org.apache.paimon.lookup.sort.SortLookupStoreUtils.crc32c;
@@ -44,21 +41,18 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /**
  * A {@link LookupStoreReader} for sort store.
  *
- * <p>TODO add block cache support.
- *
  * <p>TODO separate index cache and block cache.
  */
 public class SortLookupStoreReader implements LookupStoreReader {
 
     private final Comparator<MemorySlice> comparator;
-    private final FileChannel fileChannel;
     private final String filePath;
     private final long fileSize;
-    private final CacheManager cacheManager;
 
     private final BlockIterator indexBlockIterator;
     @Nullable private FileBasedBloomFilter bloomFilter;
-    @Nullable private PageFileInput fileInput;
+    private final BlockCache blockCache;
+    private final PageFileInput fileInput;
 
     public SortLookupStoreReader(
             Comparator<MemorySlice> comparator,
@@ -68,17 +62,15 @@ public class SortLookupStoreReader implements LookupStoreReader {
             CacheManager cacheManager)
             throws IOException {
         this.comparator = comparator;
-        //noinspection resource
-        this.fileChannel = new FileInputStream(file).getChannel();
         this.filePath = file.getAbsolutePath();
         this.fileSize = context.fileSize();
-        this.cacheManager = cacheManager;
 
+        this.fileInput = PageFileInput.create(file, blockSize, null, fileSize, null);
+        this.blockCache = new BlockCache(fileInput.file(), cacheManager);
         Footer footer = readFooter();
         this.indexBlockIterator = readBlock(footer.getIndexBlockHandle()).iterator();
         BloomFilterHandle handle = footer.getBloomFilterHandle();
         if (handle != null) {
-            this.fileInput = PageFileInput.create(file, blockSize, null, fileSize, null);
             this.bloomFilter =
                     new FileBasedBloomFilter(
                             fileInput,
@@ -90,7 +82,9 @@ public class SortLookupStoreReader implements LookupStoreReader {
     }
 
     private Footer readFooter() throws IOException {
-        MemorySegment footerData = read(fileSize - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH);
+        MemorySegment footerData =
+                blockCache.getBlock(
+                        fileSize - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH, b -> b);
         return Footer.readFooter(MemorySlice.wrap(footerData).toInput());
     }
 
@@ -127,64 +121,61 @@ public class SortLookupStoreReader implements LookupStoreReader {
         return readBlock(blockHandle);
     }
 
-    private MemorySegment read(long offset, int length) throws IOException {
-        // TODO use cache
-        // TODO cache uncompressed block
-        // TODO separate index and data cache
-        byte[] buffer = new byte[length];
-        int read = fileChannel.read(ByteBuffer.wrap(buffer), offset);
-        if (read != length) {
-            throw new IOException("Could not read all the data");
-        }
-        return MemorySegment.wrap(buffer);
-    }
-
-    private BlockReader readBlock(BlockHandle blockHandle) throws IOException {
+    private BlockReader readBlock(BlockHandle blockHandle) {
         // read block trailer
         MemorySegment trailerData =
-                read(blockHandle.offset() + blockHandle.size(), BlockTrailer.ENCODED_LENGTH);
+                blockCache.getBlock(
+                        blockHandle.offset() + blockHandle.size(),
+                        BlockTrailer.ENCODED_LENGTH,
+                        b -> b);
         BlockTrailer blockTrailer =
                 BlockTrailer.readBlockTrailer(MemorySlice.wrap(trailerData).toInput());
 
-        MemorySegment block = read(blockHandle.offset(), blockHandle.size());
-        int crc32cCode = crc32c(block, blockTrailer.getCompressionType());
-        checkArgument(
-                blockTrailer.getCrc32c() == crc32cCode,
-                String.format(
-                        "Expected CRC32C(%d) but found CRC32C(%d) for file(%s)",
-                        blockTrailer.getCrc32c(), crc32cCode, filePath));
+        MemorySegment unCompressedBlock =
+                blockCache.getBlock(
+                        blockHandle.offset(),
+                        blockHandle.size(),
+                        bytes -> {
+                            MemorySegment block = MemorySegment.wrap(bytes);
+                            int crc32cCode = crc32c(block, blockTrailer.getCompressionType());
+                            checkArgument(
+                                    blockTrailer.getCrc32c() == crc32cCode,
+                                    String.format(
+                                            "Expected CRC32C(%d) but found CRC32C(%d) for file(%s)",
+                                            blockTrailer.getCrc32c(), crc32cCode, filePath));
 
-        // decompress data
-        MemorySlice uncompressedData;
-        BlockCompressionFactory compressionFactory =
-                BlockCompressionFactory.create(blockTrailer.getCompressionType());
-        if (compressionFactory == null) {
-            uncompressedData = MemorySlice.wrap(block);
-        } else {
-            MemorySliceInput compressedInput = MemorySlice.wrap(block).toInput();
-            byte[] uncompressed = new byte[compressedInput.readVarLenInt()];
-            BlockDecompressor decompressor = compressionFactory.getDecompressor();
-            int uncompressedLength =
-                    decompressor.decompress(
-                            block.getHeapMemory(),
-                            compressedInput.position(),
-                            compressedInput.available(),
-                            uncompressed,
-                            0);
-            checkArgument(uncompressedLength == uncompressed.length);
-            uncompressedData = MemorySlice.wrap(uncompressed);
-        }
-
-        return new BlockReader(uncompressedData, comparator);
+                            // decompress data
+                            BlockCompressionFactory compressionFactory =
+                                    BlockCompressionFactory.create(
+                                            blockTrailer.getCompressionType());
+                            if (compressionFactory == null) {
+                                return bytes;
+                            } else {
+                                MemorySliceInput compressedInput =
+                                        MemorySlice.wrap(block).toInput();
+                                byte[] uncompressed = new byte[compressedInput.readVarLenInt()];
+                                BlockDecompressor decompressor =
+                                        compressionFactory.getDecompressor();
+                                int uncompressedLength =
+                                        decompressor.decompress(
+                                                block.getHeapMemory(),
+                                                compressedInput.position(),
+                                                compressedInput.available(),
+                                                uncompressed,
+                                                0);
+                                checkArgument(uncompressedLength == uncompressed.length);
+                                return uncompressed;
+                            }
+                        });
+        return new BlockReader(MemorySlice.wrap(unCompressedBlock), comparator);
     }
 
     @Override
     public void close() throws IOException {
-        this.fileChannel.close();
         if (bloomFilter != null) {
             bloomFilter.close();
-            fileInput.close();
         }
-        // TODO clear cache too
+        blockCache.close();
+        fileInput.close();
     }
 }
