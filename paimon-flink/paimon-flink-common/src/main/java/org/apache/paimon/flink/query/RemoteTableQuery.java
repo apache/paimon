@@ -43,6 +43,7 @@ import static org.apache.paimon.service.ServiceManager.PRIMARY_KEY_LOOKUP;
 /** Implementation for {@link TableQuery} to lookup data from remote service. */
 public class RemoteTableQuery implements TableQuery {
 
+    private final Object lock = new Object();
     private final FileStoreTable table;
     private final KvQueryClient client;
     private final InternalRowSerializer keySerializer;
@@ -65,13 +66,12 @@ public class RemoteTableQuery implements TableQuery {
     @Override
     public InternalRow lookup(BinaryRow partition, int bucket, InternalRow key) throws IOException {
         BinaryRow row;
+        BinaryRow binaryRowKey;
         try {
-            row =
-                    client.getValues(
-                                    partition,
-                                    bucket,
-                                    new BinaryRow[] {keySerializer.toBinaryRow(key)})
-                            .get()[0];
+            synchronized (lock) {
+                binaryRowKey = keySerializer.toBinaryRow(key);
+            }
+            row = client.getValues(partition, bucket, new BinaryRow[] {binaryRowKey}).get()[0];
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException(e);

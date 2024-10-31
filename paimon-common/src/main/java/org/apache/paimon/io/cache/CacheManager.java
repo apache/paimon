@@ -23,6 +23,7 @@ import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
 
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -37,7 +38,7 @@ public class CacheManager {
 
     private final Cache cache;
 
-    private int fileReadCount;
+    private final AtomicInteger fileReadCount;
 
     public CacheManager(MemorySize maxMemorySize) {
         this(Cache.CacheType.GUAVA, maxMemorySize);
@@ -45,7 +46,7 @@ public class CacheManager {
 
     public CacheManager(Cache.CacheType cacheType, MemorySize maxMemorySize) {
         this.cache = CacheBuilder.newBuilder(cacheType).maximumWeight(maxMemorySize).build();
-        this.fileReadCount = 0;
+        this.fileReadCount = new AtomicInteger(0);
     }
 
     @VisibleForTesting
@@ -58,7 +59,7 @@ public class CacheManager {
                 cache.get(
                         key,
                         k -> {
-                            this.fileReadCount++;
+                            this.fileReadCount.incrementAndGet();
                             try {
                                 return new Cache.CacheValue(
                                         MemorySegment.wrap(reader.read(key)), callback);
@@ -74,6 +75,6 @@ public class CacheManager {
     }
 
     public int fileReadCount() {
-        return fileReadCount;
+        return fileReadCount.get();
     }
 }

@@ -38,6 +38,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Duration;
+import java.util.concurrent.locks.Lock;
 
 import static org.apache.paimon.mergetree.LookupUtils.fileKibiBytes;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.partToSimpleString;
@@ -48,22 +49,15 @@ public class LookupFile {
 
     private static final Logger LOG = LoggerFactory.getLogger(LookupFile.class);
 
-    private final File localFile;
-    private final DataFileMeta remoteFile;
-    private final LookupStoreReader reader;
-    private final Runnable callback;
+    private File localFile;
+    private DataFileMeta remoteFile;
+    private LookupStoreReader reader;
+    private Runnable callback;
 
     private long requestCount;
     private long hitCount;
     private boolean isClosed = false;
-
-    public LookupFile(
-            File localFile, DataFileMeta remoteFile, LookupStoreReader reader, Runnable callback) {
-        this.localFile = localFile;
-        this.remoteFile = remoteFile;
-        this.reader = reader;
-        this.callback = callback;
-    }
+    private Lock lock;
 
     @Nullable
     public byte[] get(byte[] key) throws IOException {
@@ -133,5 +127,34 @@ public class LookupFile {
             String partitionString = partToSimpleString(partitionType, partition, "-", 20);
             return String.format("%s-%s-%s", partitionString, bucket, remoteFileName);
         }
+    }
+
+    public LookupFile withLocalFile(File localFile) {
+        this.localFile = localFile;
+        return this;
+    }
+
+    public LookupFile withRemoteFile(DataFileMeta remoteFile) {
+        this.remoteFile = remoteFile;
+        return this;
+    }
+
+    public LookupFile withReader(LookupStoreReader reader) {
+        this.reader = reader;
+        return this;
+    }
+
+    public LookupFile withCallback(Runnable callback) {
+        this.callback = callback;
+        return this;
+    }
+
+    public LookupFile withLock(Lock lock) {
+        this.lock = lock;
+        return this;
+    }
+
+    public Lock getLock() {
+        return lock;
     }
 }

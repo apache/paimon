@@ -33,6 +33,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ProjectedRow;
+import org.apache.paimon.utils.Triple;
 
 import javax.annotation.Nullable;
 
@@ -45,7 +46,6 @@ import java.util.Set;
 
 /** Lookup table for primary key which supports to read the LSM tree directly. */
 public class PrimaryKeyPartialLookupTable implements LookupTable {
-
     private final QueryExecutorFactory executorFactory;
     private final FixedBucketFromPkExtractor extractor;
     @Nullable private final ProjectedRow keyRearrange;
@@ -108,6 +108,19 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     @Override
     public List<InternalRow> get(InternalRow key) throws IOException {
+        Triple<BinaryRow, Integer, InternalRow> partitionAndBucket = extractPartitionAndBucket(key);
+        InternalRow kv =
+                queryExecutor.lookup(
+                        partitionAndBucket.f0, partitionAndBucket.f1, partitionAndBucket.f2);
+        if (kv == null) {
+            return Collections.emptyList();
+        } else {
+            return Collections.singletonList(kv);
+        }
+    }
+
+    private synchronized Triple<BinaryRow, Integer, InternalRow> extractPartitionAndBucket(
+            InternalRow key) {
         InternalRow adjustedKey = key;
         if (keyRearrange != null) {
             adjustedKey = keyRearrange.replaceRow(adjustedKey);
@@ -115,18 +128,11 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         extractor.setRecord(adjustedKey);
         int bucket = extractor.bucket();
         BinaryRow partition = extractor.partition();
-
         InternalRow trimmedKey = key;
         if (trimmedKeyRearrange != null) {
             trimmedKey = trimmedKeyRearrange.replaceRow(trimmedKey);
         }
-
-        InternalRow kv = queryExecutor.lookup(partition, bucket, trimmedKey);
-        if (kv == null) {
-            return Collections.emptyList();
-        } else {
-            return Collections.singletonList(kv);
-        }
+        return Triple.of(partition, bucket, trimmedKey);
     }
 
     @Override

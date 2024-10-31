@@ -44,8 +44,12 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 
 import static org.apache.paimon.utils.VarLengthIntUtils.MAX_VAR_LONG_SIZE;
@@ -54,7 +58,8 @@ import static org.apache.paimon.utils.VarLengthIntUtils.encodeLong;
 
 /** Provide lookup by key. */
 public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
-
+    private final Object lock = new Object();
+    private final Map<Object, Lock> lockMap = new ConcurrentHashMap<>();
     private final Levels levels;
     private final Comparator<InternalRow> keyComparator;
     private final RowCompactedSerializer keySerializer;
@@ -127,31 +132,48 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     @Nullable
     private T lookup(InternalRow key, DataFileMeta file) throws IOException {
         LookupFile lookupFile = lookupFileCache.getIfPresent(file.fileName());
-
         boolean newCreatedLookupFile = false;
         if (lookupFile == null) {
-            lookupFile = createLookupFile(file);
-            newCreatedLookupFile = true;
-        }
-
-        byte[] valueBytes;
-        try {
-            byte[] keyBytes = keySerializer.serializeToBytes(key);
-            valueBytes = lookupFile.get(keyBytes);
-        } finally {
-            if (newCreatedLookupFile) {
-                lookupFileCache.put(file.fileName(), lookupFile);
+            synchronized (lock) {
+                // double check
+                lookupFile = lookupFileCache.getIfPresent(file.fileName());
+                if (lookupFile == null) {
+                    lookupFile = createLookupFile(file);
+                    newCreatedLookupFile = true;
+                }
             }
         }
-        if (valueBytes == null) {
-            return null;
-        }
+        Lock lock = lookupFile.getLock();
+        try {
+            loadDataForLookupFile(file, lookupFile);
+            byte[] valueBytes;
+            try {
+                byte[] keyBytes = keySerializer.serializeToBytes(key);
+                valueBytes = lookupFile.get(keyBytes);
+            } finally {
+                if (newCreatedLookupFile) {
+                    lookupFileCache.put(file.fileName(), lookupFile);
+                }
+            }
+            if (valueBytes == null) {
+                return null;
+            }
 
-        return valueProcessor.readFromDisk(
-                key, lookupFile.remoteFile().level(), valueBytes, file.fileName());
+            return valueProcessor.readFromDisk(
+                    key, lookupFile.remoteFile().level(), valueBytes, file.fileName());
+        } finally {
+            lock.unlock();
+        }
     }
 
-    private LookupFile createLookupFile(DataFileMeta file) throws IOException {
+    private LookupFile createLookupFile(DataFileMeta file) {
+        Lock lock = lockMap.computeIfAbsent(file, k -> new ReentrantLock(true));
+        LookupFile lookupFile = new LookupFile();
+        return lookupFile.withLock(lock);
+    }
+
+    private void loadDataForLookupFile(DataFileMeta file, LookupFile lookupFile)
+            throws IOException {
         File localFile = localFileFactory.apply(file.fileName());
         if (!localFile.createNewFile()) {
             throw new IOException("Can not create new file: " + localFile);
@@ -191,11 +213,11 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         }
 
         ownCachedFiles.add(file.fileName());
-        return new LookupFile(
-                localFile,
-                file,
-                lookupStoreFactory.createReader(localFile, context),
-                () -> ownCachedFiles.remove(file.fileName()));
+        lookupFile
+                .withLocalFile(localFile)
+                .withRemoteFile(file)
+                .withReader(lookupStoreFactory.createReader(localFile, context))
+                .withCallback(() -> ownCachedFiles.remove(file.fileName()));
     }
 
     @Override

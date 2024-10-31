@@ -248,7 +248,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     }
 
     @Nullable
-    private BinaryRow refreshDynamicPartition(boolean reopen) throws Exception {
+    private synchronized BinaryRow refreshDynamicPartition(boolean reopen) throws Exception {
         if (partitionLoader == null) {
             return null;
         }
@@ -284,7 +284,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         return createPartitionPredicate(rowType, partitionMap);
     }
 
-    private void reopen() {
+    private synchronized void reopen() {
         try {
             close();
             open();
@@ -293,7 +293,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         }
     }
 
-    private void checkRefresh() throws Exception {
+    private synchronized void checkRefresh() throws Exception {
         if (nextLoadTime > System.currentTimeMillis()) {
             return;
         }
@@ -319,7 +319,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     }
 
     @Override
-    public void close() throws IOException {
+    public synchronized void close() throws IOException {
         if (lookupTable != null) {
             lookupTable.close();
             lookupTable = null;
