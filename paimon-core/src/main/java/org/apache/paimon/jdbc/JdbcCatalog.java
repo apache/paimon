@@ -351,8 +351,10 @@ public class JdbcCatalog extends AbstractCatalog {
         connections.close();
     }
 
-    private SchemaManager getSchemaManager(Identifier identifier) {
-        return new SchemaManager(fileIO, getTableLocation(identifier)).withLock(lock(identifier));
+    private SchemaManager getSchemaManager(Identifier identifier) throws TableNotExistException {
+        return new SchemaManager(fileIO, getTableLocation(identifier))
+                .withLock(lock(identifier))
+                .withCatalogEnvironment(catalogEnvironment(identifier));
     }
 
     private Map<String, String> fetchProperties(String databaseName) {

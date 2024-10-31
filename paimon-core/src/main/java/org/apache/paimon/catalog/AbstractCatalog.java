@@ -387,12 +387,16 @@ public abstract class AbstractCatalog implements Catalog {
                 fileIO,
                 getTableLocation(identifier),
                 getDataTableSchema(identifier),
-                new CatalogEnvironment(
-                        identifier,
-                        Lock.factory(
-                                lockFactory().orElse(null), lockContext().orElse(null), identifier),
-                        metastoreClientFactory(identifier).orElse(null),
-                        lineageMetaFactory));
+                catalogEnvironment(identifier));
+    }
+
+    protected CatalogEnvironment catalogEnvironment(Identifier identifier)
+            throws TableNotExistException {
+        return new CatalogEnvironment(
+                identifier,
+                Lock.factory(lockFactory().orElse(null), lockContext().orElse(null), identifier),
+                metastoreClientFactory(identifier).orElse(null),
+                lineageMetaFactory);
     }
 
     /**
