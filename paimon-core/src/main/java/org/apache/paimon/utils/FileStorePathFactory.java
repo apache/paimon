@@ -43,6 +43,7 @@ public class FileStorePathFactory {
     private final String formatIdentifier;
     private final String dataFilePrefix;
     private final String changelogFilePrefix;
+    private final String fileCompression;
 
     private final AtomicInteger manifestFileCount;
     private final AtomicInteger manifestListCount;
@@ -57,7 +58,8 @@ public class FileStorePathFactory {
             String formatIdentifier,
             String dataFilePrefix,
             String changelogFilePrefix,
-            boolean legacyPartitionName) {
+            boolean legacyPartitionName,
+            String fileCompression) {
         this.root = root;
         this.uuid = UUID.randomUUID().toString();
 
@@ -66,6 +68,7 @@ public class FileStorePathFactory {
         this.formatIdentifier = formatIdentifier;
         this.dataFilePrefix = dataFilePrefix;
         this.changelogFilePrefix = changelogFilePrefix;
+        this.fileCompression = fileCompression;
 
         this.manifestFileCount = new AtomicInteger(0);
         this.manifestListCount = new AtomicInteger(0);
@@ -113,7 +116,8 @@ public class FileStorePathFactory {
                 bucketPath(partition, bucket),
                 formatIdentifier,
                 dataFilePrefix,
-                changelogFilePrefix);
+                changelogFilePrefix,
+                fileCompression);
     }
 
     public Path bucketPath(BinaryRow partition, int bucket) {

@@ -106,7 +106,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.fileFormat().getFormatIdentifier(),
                 options.dataFilePrefix(),
                 options.changelogFilePrefix(),
-                options.legacyPartitionName());
+                options.legacyPartitionName(),
+                options.fileCompression());
     }
 
     @Override

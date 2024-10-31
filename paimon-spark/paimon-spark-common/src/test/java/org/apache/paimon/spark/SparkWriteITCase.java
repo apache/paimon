@@ -37,6 +37,7 @@ import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
@@ -296,6 +297,9 @@ public class SparkWriteITCase {
         for (String fileName : fileNames) {
             Assertions.assertTrue(fileName.startsWith("test-"));
         }
+
+        // reset config, it will affect other tests
+        spark.conf().unset("spark.paimon.data-file.prefix");
     }
 
     @Test
@@ -317,6 +321,9 @@ public class SparkWriteITCase {
         spark.sql("INSERT INTO T VALUES (2, 2, 'bb')");
         FileStatus[] files2 = fileIO.listStatus(new Path(tabLocation, "bucket-0"));
         Assertions.assertEquals(1, dataFileCount(files2, "test-changelog-"));
+
+        // reset config, it will affect other tests
+        spark.conf().unset("spark.paimon.changelog-file.prefix");
     }
 
     @Test
@@ -331,6 +338,63 @@ public class SparkWriteITCase {
         Path tabLocation = table.location();
 
         Assertions.assertTrue(fileIO.exists(new Path(tabLocation, "c=aa/_SUCCESS")));
+    }
+
+    @Test
+    public void testDataFileSuffixName() {
+        spark.sql(
+                "CREATE TABLE T (a INT, b INT, c STRING)"
+                        + " TBLPROPERTIES ('bucket' = '1', 'primary-key'='a', 'write-only' = 'true', 'file.format' = 'parquet', 'file.compression' = 'zstd')");
+
+        spark.sql("INSERT INTO T VALUES (1, 1, 'aa')");
+        spark.sql("INSERT INTO T VALUES (2, 2, 'bb')");
+        spark.sql("INSERT INTO T VALUES (1, 3, 'cc')");
+
+        List<Row> data = spark.sql("SELECT * FROM T order by a").collectAsList();
+        assertThat(data.toString()).isEqualTo("[[1,3,cc], [2,2,bb]]");
+
+        List<String> beforeCompactFiles =
+                spark.sql("select file_path from `T$files`").collectAsList().stream()
+                        .map(x -> x.getString(0))
+                        .collect(Collectors.toList());
+        Assertions.assertEquals(3, beforeCompactFiles.size());
+
+        // compact
+        assertThat(spark.sql("CALL sys.compact(table => 'T')").collectAsList().toString())
+                .isEqualTo("[[true]]");
+        List<String> afterCompactFiles =
+                spark.sql("select file_path from `T$files`").collectAsList().stream()
+                        .map(x -> x.getString(0))
+                        .collect(Collectors.toList());
+        Assertions.assertEquals(1, afterCompactFiles.size());
+
+        // check files suffix name
+        List<String> files = new ArrayList<>(beforeCompactFiles);
+        String extension = "." + "zstd" + "." + "parquet";
+        files.addAll(afterCompactFiles);
+        for (String fileName : files) {
+            Assertions.assertTrue(fileName.endsWith(extension));
+        }
+    }
+
+    @Test
+    public void testChangelogFileSuffixName() throws Exception {
+        spark.sql(
+                "CREATE TABLE T (a INT, b INT, c STRING) TBLPROPERTIES ('primary-key'='a', 'bucket' = '1', 'changelog-producer' = 'lookup', 'file.format' = 'parquet', 'file.compression' = 'zstd')");
+
+        FileStoreTable table = getTable("T");
+        Path tabLocation = table.location();
+        FileIO fileIO = table.fileIO();
+
+        spark.sql("INSERT INTO T VALUES (1, 1, 'aa')");
+        FileStatus[] files = fileIO.listStatus(new Path(tabLocation, "bucket-0"));
+        Assertions.assertEquals(1, dataFileCount(files, "changelog-"));
+
+        // check files suffix name
+        String extension = "." + "zstd" + "." + "parquet";
+        for (FileStatus file : files) {
+            Assertions.assertTrue(file.getPath().getName().endsWith(extension));
+        }
     }
 
     protected static FileStoreTable getTable(String tableName) {
