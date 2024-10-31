@@ -43,12 +43,12 @@ import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.TagCreationMode.WATERMARK;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_GROUP;
@@ -193,8 +193,15 @@ public abstract class SynchronizationActionBase extends ActionBase {
             EventParser.Factory<RichCdcMultiplexRecord> parserFactory);
 
     protected FileStoreTable alterTableOptions(Identifier identifier, FileStoreTable table) {
-        // doesn't support altering bucket here
         Map<String, String> dynamicOptions = new HashMap<>(tableConfig);
+        List<SchemaChange> tableOptionChanges = new ArrayList<>();
+
+        // Remove options that are no longer used
+        table.options().keySet().stream()
+                .filter(key -> !dynamicOptions.containsKey(key))
+                .forEach(key -> tableOptionChanges.add(SchemaChange.removeOption(key)));
+
+        // doesn't support altering bucket here
         dynamicOptions.remove(CoreOptions.BUCKET.key());
 
         // remove immutable options and options with equal values
@@ -213,13 +220,11 @@ public abstract class SynchronizationActionBase extends ActionBase {
         }
 
         // alter the table dynamic options
-        List<SchemaChange> optionChanges =
-                dynamicOptions.entrySet().stream()
-                        .map(entry -> SchemaChange.setOption(entry.getKey(), entry.getValue()))
-                        .collect(Collectors.toList());
+        dynamicOptions.forEach(
+                (key, value) -> tableOptionChanges.add(SchemaChange.setOption(key, value)));
 
         try {
-            catalog.alterTable(identifier, optionChanges, false);
+            catalog.alterTable(identifier, tableOptionChanges, false);
         } catch (Catalog.TableNotExistException
                 | Catalog.ColumnAlreadyExistException
                 | Catalog.ColumnNotExistException e) {

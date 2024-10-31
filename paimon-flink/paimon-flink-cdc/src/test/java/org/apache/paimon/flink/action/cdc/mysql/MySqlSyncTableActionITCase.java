@@ -1174,6 +1174,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         options.put("bucket", "1");
         options.put("sink.parallelism", "1");
         options.put("sequence.field", "_timestamp");
+        options.put("write-only", "true");
 
         createFileStoreTable(
                 RowType.of(
@@ -1189,18 +1190,19 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "test_exist_options_change");
-        Map<String, String> tableConfig = new HashMap<>();
         // update immutable options
-        tableConfig.put("sequence.field", "_date");
+        options.put("sequence.field", "_date");
         // update existing options
-        tableConfig.put("sink.parallelism", "2");
+        options.put("sink.parallelism", "2");
         // add new options
-        tableConfig.put("snapshot.expire.limit", "1000");
+        options.put("snapshot.expire.limit", "1000");
+        // remove existing options
+        options.remove("write-only", "true");
 
         MySqlSyncTableAction action =
                 syncTableActionBuilder(mySqlConfig)
                         .withPrimaryKeys("pk")
-                        .withTableConfig(tableConfig)
+                        .withTableConfig(options)
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -1210,6 +1212,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         assertThat(table.options().get("sequence.field")).isEqualTo("_timestamp");
         assertThat(table.options().get("sink.parallelism")).isEqualTo("2");
         assertThat(table.options().get("snapshot.expire.limit")).isEqualTo("1000");
+        assertThat(table.options().get("write-only")).isNull();
     }
 
     @Test
