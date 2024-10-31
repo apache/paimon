@@ -58,7 +58,6 @@ import static org.apache.paimon.utils.VarLengthIntUtils.encodeLong;
 
 /** Provide lookup by key. */
 public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
-    private final Object lock = new Object();
     private final Map<Object, Lock> lockMap = new ConcurrentHashMap<>();
     private final Levels levels;
     private final Comparator<InternalRow> keyComparator;
