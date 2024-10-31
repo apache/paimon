@@ -66,6 +66,7 @@ public class MongoDBSyncDatabaseAction extends SyncDatabaseActionBase {
 
     @Override
     protected MongoDBSource<CdcSourceRecord> buildSource() {
+        validateRuntimeExecutionMode();
         return MongoDBActionUtils.buildMongodbSource(
                 cdcSourceConfig,
                 CdcActionCommonUtils.combinedModeTableList(

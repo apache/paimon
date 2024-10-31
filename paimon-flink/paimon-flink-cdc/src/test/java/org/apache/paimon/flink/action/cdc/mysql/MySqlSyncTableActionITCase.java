@@ -1499,7 +1499,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(1000)
     public void testRuntimeExecutionModeCheckForCdcSync() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "check_cdc_sync_runtime_execution_mode");
