@@ -52,6 +52,8 @@ public class DataFilePathFactoryTest {
                                             + "-"
                                             + i
                                             + "."
+                                            + CoreOptions.FILE_COMPRESSION.defaultValue()
+                                            + "."
                                             + CoreOptions.FILE_FORMAT.defaultValue()));
         }
         assertThat(pathFactory.toPath("my-data-file-name"))
@@ -78,6 +80,8 @@ public class DataFilePathFactoryTest {
                                             + uuid
                                             + "-"
                                             + i
+                                            + "."
+                                            + CoreOptions.FILE_COMPRESSION.defaultValue()
                                             + "."
                                             + CoreOptions.FILE_FORMAT.defaultValue()));
         }
