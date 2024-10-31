@@ -92,6 +92,7 @@ import java.util.stream.Collectors;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTOREWAREHOUSE;
 import static org.apache.hadoop.hive.serde.serdeConstants.FIELD_DELIM;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
+import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
@@ -721,6 +722,13 @@ public class HiveCatalog extends AbstractCatalog {
             tblProperties.putAll(convertToPropertiesTableKey(tableSchema));
         } else {
             tblProperties = convertToPropertiesPrefixKey(tableSchema.options(), HIVE_PREFIX);
+            if (tableSchema.options().containsKey(PARTITION_EXPIRATION_TIME.key())) {
+                // This property will be stored in the 'table_params' table of the HMS database for
+                // querying by other engines or products.
+                tblProperties.put(
+                        PARTITION_EXPIRATION_TIME.key(),
+                        tableSchema.options().get(PARTITION_EXPIRATION_TIME.key()));
+            }
         }
 
         Table table = newHmsTable(identifier, tblProperties, provider);
