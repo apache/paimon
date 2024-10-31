@@ -45,6 +45,7 @@ import org.apache.spark.sql.connector.expressions.Transform;
 import org.apache.spark.sql.execution.datasources.csv.CSVFileFormat;
 import org.apache.spark.sql.execution.datasources.orc.OrcFileFormat;
 import org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormat;
+import org.apache.spark.sql.execution.datasources.v2.FileTable;
 import org.apache.spark.sql.execution.datasources.v2.csv.CSVTable;
 import org.apache.spark.sql.execution.datasources.v2.orc.OrcTable;
 import org.apache.spark.sql.execution.datasources.v2.parquet.ParquetTable;
@@ -500,48 +501,50 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
         try {
             org.apache.paimon.table.Table paimonTable = catalog.getTable(toIdentifier(ident));
             if (paimonTable instanceof FormatTable) {
-                FormatTable formatTable = (FormatTable) paimonTable;
-                StructType schema = SparkTypeUtils.fromPaimonRowType(formatTable.rowType());
-                List<String> pathList = new ArrayList<>();
-                pathList.add(formatTable.location());
-                CaseInsensitiveStringMap dsOptions =
-                        new CaseInsensitiveStringMap(formatTable.options());
-                if (formatTable.format() == FormatTable.Format.CSV) {
-                    return new CSVTable(
-                            ident.name(),
-                            SparkSession.active(),
-                            dsOptions,
-                            scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
-                            scala.Option.apply(schema),
-                            CSVFileFormat.class);
-                } else if (formatTable.format() == FormatTable.Format.ORC) {
-                    return new OrcTable(
-                            ident.name(),
-                            SparkSession.active(),
-                            dsOptions,
-                            scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
-                            scala.Option.apply(schema),
-                            OrcFileFormat.class);
-                } else if (formatTable.format() == FormatTable.Format.PARQUET) {
-                    return new ParquetTable(
-                            ident.name(),
-                            SparkSession.active(),
-                            dsOptions,
-                            scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
-                            scala.Option.apply(schema),
-                            ParquetFileFormat.class);
-                } else {
-                    throw new UnsupportedOperationException(
-                            "Unsupported format table "
-                                    + ident.name()
-                                    + " format "
-                                    + formatTable.format().name());
-                }
+                return convertToFileTable(ident, (FormatTable) paimonTable);
             } else {
                 return new SparkTable(copyWithSQLConf(paimonTable, extraOptions));
             }
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
+        }
+    }
+
+    private static FileTable convertToFileTable(Identifier ident, FormatTable formatTable) {
+        StructType schema = SparkTypeUtils.fromPaimonRowType(formatTable.rowType());
+        List<String> pathList = new ArrayList<>();
+        pathList.add(formatTable.location());
+        CaseInsensitiveStringMap dsOptions = new CaseInsensitiveStringMap(formatTable.options());
+        if (formatTable.format() == FormatTable.Format.CSV) {
+            return new CSVTable(
+                    ident.name(),
+                    SparkSession.active(),
+                    dsOptions,
+                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
+                    scala.Option.apply(schema),
+                    CSVFileFormat.class);
+        } else if (formatTable.format() == FormatTable.Format.ORC) {
+            return new OrcTable(
+                    ident.name(),
+                    SparkSession.active(),
+                    dsOptions,
+                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
+                    scala.Option.apply(schema),
+                    OrcFileFormat.class);
+        } else if (formatTable.format() == FormatTable.Format.PARQUET) {
+            return new ParquetTable(
+                    ident.name(),
+                    SparkSession.active(),
+                    dsOptions,
+                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
+                    scala.Option.apply(schema),
+                    ParquetFileFormat.class);
+        } else {
+            throw new UnsupportedOperationException(
+                    "Unsupported format table "
+                            + ident.name()
+                            + " format "
+                            + formatTable.format().name());
         }
     }
 
