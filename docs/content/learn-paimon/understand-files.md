@@ -328,9 +328,9 @@ The new file layout as of snapshot-4 looks like
 
 Note that `manifest-4-0` contains 20 manifest entries (18 `DELETE` operations and 2 `ADD` operations)
 1. For partition `20230503` to `20230510`, two `DELETE` operations for two data files
-2. For partition `20230501` to `20230502`, one `DELETE` operation and one `ADD` operation
-   for the same data file.
-
+2. For partition `20230501` to `20230502`, one `DELETE` operation and one `ADD` operation for the same data file.
+   This is because there has been an upgrade of the file from level 0 to the highest level. Please rest assured that
+   this is only a change in metadata, and the file is still the same.
 
 ### Alter Table
 Execute the following statement to configure full-compaction:
