@@ -1946,8 +1946,7 @@ public abstract class HiveCatalogITCaseBase {
 
         tEnv.executeSql("CREATE VIEW flink_v AS SELECT a + 1, b FROM t").await();
         tEnv.executeSql("ALTER VIEW flink_v rename to flink_v_rename").await();
-        assertThat(collect("SHOW VIEWS"))
-                .containsExactlyInAnyOrder(Row.of("flink_v_rename"));
+        assertThat(collect("SHOW VIEWS")).containsExactlyInAnyOrder(Row.of("flink_v_rename"));
 
         hiveShell.executeQuery("CREATE VIEW hive_v AS SELECT a + 1, b FROM t");
         tEnv.executeSql("ALTER VIEW hive_v rename to hive_v_rename").await();
