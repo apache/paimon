@@ -78,6 +78,8 @@ public class SchemaUtils {
                             options,
                             updateSchema.comment());
 
+            SchemaValidation.validateTableSchema(manager, newSchema);
+
             boolean success = manager.commit(newSchema);
             if (success) {
                 return newSchema;

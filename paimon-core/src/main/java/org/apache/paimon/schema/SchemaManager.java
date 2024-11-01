@@ -221,6 +221,8 @@ public class SchemaManager implements Serializable {
                             options,
                             schema.comment());
 
+            SchemaValidation.validateTableSchema(this, newSchema);
+
             // validate table from creating table
             FileStoreTableFactory.create(fileIO, tableRoot, newSchema).store();
 
@@ -438,6 +440,7 @@ public class SchemaManager implements Serializable {
                             newSchema.options(),
                             newSchema.comment());
 
+            SchemaValidation.validateTableSchema(this, newTableSchema);
             try {
                 boolean success = commit(newTableSchema);
                 if (success) {
@@ -523,6 +526,7 @@ public class SchemaManager implements Serializable {
         if (current.equals(update)) {
             return false;
         } else {
+            SchemaValidation.validateTableSchema(this, update);
             try {
                 return commit(update);
             } catch (Exception e) {
@@ -637,8 +641,6 @@ public class SchemaManager implements Serializable {
 
     @VisibleForTesting
     boolean commit(TableSchema newSchema) throws Exception {
-        SchemaValidation.validateTableSchema(newSchema);
-        SchemaValidation.validateFallbackBranch(this, newSchema);
         Path schemaPath = toSchemaPath(newSchema.id());
         Callable<Boolean> callable =
                 () -> fileIO.tryToWriteAtomic(schemaPath, newSchema.toString());

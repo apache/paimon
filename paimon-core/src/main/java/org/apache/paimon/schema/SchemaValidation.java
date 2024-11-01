@@ -83,6 +83,11 @@ public class SchemaValidation {
     public static final List<Class<? extends DataType>> PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES =
             Arrays.asList(MapType.class, ArrayType.class, RowType.class, MultisetType.class);
 
+    public static void validateTableSchema(SchemaManager schemaManager, TableSchema schema) {
+        validateTableSchema(schema);
+        validateFallbackBranch(schemaManager, schema);
+    }
+
     /**
      * Validate the {@link TableSchema} and {@link CoreOptions}.
      *
