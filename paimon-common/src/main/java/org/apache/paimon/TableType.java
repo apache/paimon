@@ -29,7 +29,12 @@ public enum TableType implements DescribedEnum {
     FORMAT_TABLE(
             "format-table",
             "A file format table refers to a directory that contains multiple files of the same format."),
-    MATERIALIZED_TABLE("materialized-table", "A materialized table.");
+    MATERIALIZED_TABLE(
+            "materialized-table",
+            "A materialized table combines normal Paimon table and materialized SQL."),
+    OBJECT_TABLE(
+            "object-table", "A object table combines normal Paimon table and object location.");
+
     private final String value;
     private final String description;
 

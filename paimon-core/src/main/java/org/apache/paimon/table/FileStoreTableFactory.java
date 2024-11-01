@@ -19,12 +19,14 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.utils.StringUtils;
 
 import java.io.IOException;
@@ -124,6 +126,15 @@ public class FileStoreTableFactory {
                                 fileIO, tablePath, tableSchema, catalogEnvironment)
                         : new PrimaryKeyFileStoreTable(
                                 fileIO, tablePath, tableSchema, catalogEnvironment);
-        return table.copy(dynamicOptions.toMap());
+        table = table.copy(dynamicOptions.toMap());
+        CoreOptions options = table.coreOptions();
+        if (options.type() == TableType.OBJECT_TABLE) {
+            table =
+                    ObjectTable.builder()
+                            .underlyingTable(table)
+                            .objectLocation(options.objectLocation())
+                            .build();
+        }
+        return table;
     }
 }
