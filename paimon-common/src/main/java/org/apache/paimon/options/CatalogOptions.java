@@ -98,6 +98,13 @@ public class CatalogOptions {
                     .withDescription(
                             "Controls the duration for which databases and tables in the catalog are cached.");
 
+    public static final ConfigOption<Long> CACHE_PARTITION_MAX_NUM =
+            key("cache.partition.max-num")
+                    .longType()
+                    .defaultValue(0L)
+                    .withDescription(
+                            "Controls the duration for which databases and tables in the catalog are cached.");
+
     public static final ConfigOption<MemorySize> CACHE_MANIFEST_SMALL_FILE_MEMORY =
             key("cache.manifest.small-file-memory")
                     .memoryType()
