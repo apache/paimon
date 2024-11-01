@@ -86,6 +86,8 @@ The data file meta is:
 13. creationTime: creation time of this file.
 14. deleteRowCount: rowCount = addRowCount + deleteRowCount.
 15. embeddedIndex: if data file index is too small, store the index in manifest.
+16. fileSource: indicate whether this file is generated as an APPEND or COMPACT file
+17. valueStatsCols: statistical column in metadata 
 
 ### Index Manifest
 
