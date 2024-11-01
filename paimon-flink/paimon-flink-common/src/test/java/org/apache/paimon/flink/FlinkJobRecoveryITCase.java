@@ -20,6 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.JobStatus;
@@ -48,7 +49,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test case for flink source / sink restore from savepoint. */
+@SuppressWarnings("BusyWait")
 public class FlinkJobRecoveryITCase extends CatalogITCaseBase {
+
+    private static final String MINI_CLUSTER_FIELD = "miniCluster";
 
     @BeforeEach
     @Override
@@ -113,6 +117,7 @@ public class FlinkJobRecoveryITCase extends CatalogITCaseBase {
                 afterRecoverCheckSql,
                 afterRecoverExpectedRows,
                 Collections.emptyList(),
+                Pair.of("target_table", "target_table"),
                 Collections.emptyMap());
     }
 
@@ -146,6 +151,7 @@ public class FlinkJobRecoveryITCase extends CatalogITCaseBase {
                 afterRecoverCheckSql,
                 afterRecoverExpectedRows,
                 Collections.emptyList(),
+                Pair.of("target_table", "target_table"),
                 Collections.singletonMap(
                         StateRecoveryOptions.SAVEPOINT_IGNORE_UNCLAIMED_STATE.key(), "true"));
     }
@@ -181,6 +187,7 @@ public class FlinkJobRecoveryITCase extends CatalogITCaseBase {
                 afterRecoverCheckSql,
                 afterRecoverExpectedRows,
                 Collections.singletonList(updateSql),
+                Pair.of("target_table", "target_table2"),
                 Collections.singletonMap(
                         StateRecoveryOptions.SAVEPOINT_IGNORE_UNCLAIMED_STATE.key(), "true"));
     }
@@ -193,12 +200,15 @@ public class FlinkJobRecoveryITCase extends CatalogITCaseBase {
             String afterRecoverCheckSql,
             List<Row> afterRecoverExpectedRows,
             List<String> updateSql,
+            Pair<String, String> targetTables,
             Map<String, String> recoverOptions)
             throws Exception {
 
+        //noinspection OptionalGetWithoutIsPresent
         JobClient jobClient = sEnv.executeSql(beforeRecoverSql).getJobClient().get();
         String checkpointPath =
-                triggerCheckpointAndWaitForWrites(jobClient, beforeRecoverExpectedRows.size());
+                triggerCheckpointAndWaitForWrites(
+                        jobClient, targetTables.getLeft(), beforeRecoverExpectedRows.size());
         jobClient.cancel().get();
 
         List<Row> rows = batchSql(beforeRecoverCheckSql);
@@ -217,8 +227,10 @@ public class FlinkJobRecoveryITCase extends CatalogITCaseBase {
             config.setString(entry.getKey(), entry.getValue());
         }
 
+        //noinspection OptionalGetWithoutIsPresent
         jobClient = sEnv.executeSql(afterRecoverSql).getJobClient().get();
-        triggerCheckpointAndWaitForWrites(jobClient, afterRecoverExpectedRows.size());
+        triggerCheckpointAndWaitForWrites(
+                jobClient, targetTables.getRight(), afterRecoverExpectedRows.size());
         jobClient.cancel().get();
 
         rows = batchSql(afterRecoverCheckSql);
@@ -268,16 +280,17 @@ public class FlinkJobRecoveryITCase extends CatalogITCaseBase {
     }
 
     @SuppressWarnings("unchecked")
-    private <T> T reflectGetField(Object instance, String fieldName)
+    private <T> T reflectGetMiniCluster(Object instance)
             throws NoSuchFieldException, IllegalAccessException {
-        Field field = instance.getClass().getDeclaredField(fieldName);
+        Field field = instance.getClass().getDeclaredField(MINI_CLUSTER_FIELD);
         field.setAccessible(true);
         return (T) field.get(instance);
     }
 
-    private String triggerCheckpointAndWaitForWrites(JobClient jobClient, long totalReocrds)
-            throws Exception {
-        MiniCluster miniCluster = reflectGetField(jobClient, "miniCluster");
+    private String triggerCheckpointAndWaitForWrites(
+            JobClient jobClient, String targetTable, long totalRecords) throws Exception {
+        //noinspection resource
+        MiniCluster miniCluster = reflectGetMiniCluster(jobClient);
         JobID jobID = jobClient.getJobID();
         JobStatus jobStatus = jobClient.getJobStatus().get();
         while (jobStatus == JobStatus.INITIALIZING || jobStatus == JobStatus.CREATED) {
@@ -309,10 +322,11 @@ public class FlinkJobRecoveryITCase extends CatalogITCaseBase {
         }
 
         String checkpointPath = miniCluster.triggerCheckpoint(jobID).get();
-        Snapshot snapshot = waitForNewSnapshot("target_table", -1L);
-        while (snapshot.totalRecordCount() < totalReocrds) {
+        Snapshot snapshot = waitForNewSnapshot(targetTable, -1L);
+        //noinspection DataFlowIssue
+        while (snapshot.totalRecordCount() < totalRecords) {
             checkpointPath = miniCluster.triggerCheckpoint(jobID).get();
-            snapshot = waitForNewSnapshot("target_table", snapshot.id());
+            snapshot = waitForNewSnapshot(targetTable, snapshot.id());
         }
 
         return checkpointPath;

@@ -65,6 +65,7 @@ import java.util.Optional;
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 import static org.apache.paimon.CoreOptions.StreamingReadMode.FILE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SOURCE_OPERATOR_UID_SUFFIX;
+import static org.apache.paimon.flink.FlinkConnectorOptions.generateCustomUid;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -218,9 +219,7 @@ public class FlinkSourceBuilder {
         if (!StringUtils.isNullOrWhitespaceOnly(uidSuffix)) {
             dataStream =
                     (DataStreamSource<RowData>)
-                            dataStream.uid(
-                                    String.format(
-                                            "%s_%s_%s", SOURCE_NAME, table.name(), uidSuffix));
+                            dataStream.uid(generateCustomUid(SOURCE_NAME, table.name(), uidSuffix));
         }
 
         if (parallelism != null) {

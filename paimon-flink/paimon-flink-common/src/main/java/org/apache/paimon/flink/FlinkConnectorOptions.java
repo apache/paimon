@@ -447,6 +447,11 @@ public class FlinkConnectorOptions {
         return list;
     }
 
+    public static String generateCustomUid(
+            String uidPrefix, String tableName, String userDefinedSuffix) {
+        return String.format("%s_%s_%s", uidPrefix, tableName, userDefinedSuffix);
+    }
+
     /** The mode of lookup cache. */
     public enum LookupCacheMode {
         /** Auto mode, try to use partial mode. */

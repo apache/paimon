@@ -39,6 +39,7 @@ import java.util.Map;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_SUFFIX;
+import static org.apache.paimon.flink.FlinkConnectorOptions.generateCustomUid;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 
 /** Sink for dynamic bucket table. */
@@ -103,8 +104,7 @@ public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Inte
         if (!StringUtils.isNullOrWhitespaceOnly(uidSuffix)) {
             bucketAssigned =
                     bucketAssigned.uid(
-                            String.format(
-                                    "%s_%s_%s",
+                            generateCustomUid(
                                     DYNAMIC_BUCKET_ASSIGNER_NAME, table.name(), uidSuffix));
         }
 

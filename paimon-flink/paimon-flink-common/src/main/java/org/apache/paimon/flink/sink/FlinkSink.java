@@ -68,6 +68,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_OPERA
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_SUFFIX;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.generateCustomUid;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -232,7 +233,7 @@ public abstract class FlinkSink<T> implements Serializable {
 
         String uidSuffix = options.get(SINK_OPERATOR_UID_SUFFIX);
         if (options.get(SINK_OPERATOR_UID_SUFFIX) != null) {
-            written = written.uid(String.format("%s_%s_%s", WRITER_NAME, table.name(), uidSuffix));
+            written = written.uid(generateCustomUid(WRITER_NAME, table.name(), uidSuffix));
         }
 
         if (options.get(SINK_USE_MANAGED_MEMORY)) {
@@ -303,12 +304,12 @@ public abstract class FlinkSink<T> implements Serializable {
                         .setParallelism(1)
                         .setMaxParallelism(1);
         if (options.get(SINK_OPERATOR_UID_SUFFIX) != null) {
-            committed.uid(
-                    String.format(
-                            "%s_%s_%s",
-                            GLOBAL_COMMITTER_NAME,
-                            table.name(),
-                            options.get(SINK_OPERATOR_UID_SUFFIX)));
+            committed =
+                    committed.uid(
+                            generateCustomUid(
+                                    GLOBAL_COMMITTER_NAME,
+                                    table.name(),
+                                    options.get(SINK_OPERATOR_UID_SUFFIX)));
         }
         configureGlobalCommitter(
                 committed, options.get(SINK_COMMITTER_CPU), options.get(SINK_COMMITTER_MEMORY));
