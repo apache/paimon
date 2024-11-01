@@ -356,11 +356,12 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 lookupTable.specificPartitionFilter(createSpecificPartFilter(partition));
                 lookupTable.close();
                 lookupTable.open();
-                // no need to refresh the lookupTable because it is reopened
+                // no need to refresh the lookup table because it is reopened
                 return;
             }
         }
 
+        // 3. refresh lookup table
         if (shouldRefreshLookupTable()) {
             lookupTable.refresh();
             nextRefreshTime = System.currentTimeMillis() + refreshInterval.toMillis();
