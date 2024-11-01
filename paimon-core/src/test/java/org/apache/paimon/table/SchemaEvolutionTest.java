@@ -184,7 +184,7 @@ public class SchemaEvolutionTest {
                                                                     CoreOptions
                                                                             .DEFAULT_VALUE_SUFFIX),
                                                             "abc"))))
-                    .hasCauseInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("Primary key a should not be assign default column.");
 
             assertThatThrownBy(
@@ -199,7 +199,7 @@ public class SchemaEvolutionTest {
                                                                     CoreOptions
                                                                             .DEFAULT_VALUE_SUFFIX),
                                                             "abc"))))
-                    .hasCauseInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("Partition key c should not be assign default column.");
         }
     }
