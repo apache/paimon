@@ -280,9 +280,9 @@ public class FileStoreLookupFunctionTest {
 
         FileStoreLookupFunction lookupFunction = createLookupFunction(table, true);
 
-        lookupFunction.checkRefresh();
+        lookupFunction.tryRefresh();
 
-        assertThat(lookupFunction.nextLoadTime()).isEqualTo(end.toEpochMilli() + 1);
+        assertThat(lookupFunction.nextBlacklistCheckTime()).isEqualTo(end.toEpochMilli() + 1);
     }
 
     private void commit(List<CommitMessage> messages) throws Exception {

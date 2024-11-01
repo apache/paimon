@@ -93,14 +93,17 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private final List<String> projectFields;
     private final List<String> joinKeys;
     @Nullable private final Predicate predicate;
-    private final List<Pair<Long, Long>> timePeriodsBlacklist;
 
-    private transient Duration refreshInterval;
+    private final List<Pair<Long, Long>> timePeriodsBlacklist;
+    private long nextBlacklistCheckTime;
+
     private transient File path;
     private transient LookupTable lookupTable;
 
-    // timestamp when cache expires
-    private transient long nextLoadTime;
+    // interval of refreshing lookup table
+    private transient Duration refreshInterval;
+    // timestamp when refreshing lookup table
+    private transient long nextRefreshTime;
 
     protected FunctionContext functionContext;
 
@@ -142,6 +145,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         this.timePeriodsBlacklist =
                 parseTimePeriodsBlacklist(
                         table.options().get(LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST.key()));
+        this.nextBlacklistCheckTime = -1;
     }
 
     private List<Pair<Long, Long>> parseTimePeriodsBlacklist(String blacklist) {
@@ -194,11 +198,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     }
 
     private void open() throws Exception {
-        if (partitionLoader != null) {
-            partitionLoader.open();
-        }
-
-        this.nextLoadTime = -1;
+        this.nextRefreshTime = -1;
 
         Options options = Options.fromMap(table.options());
         this.refreshInterval =
@@ -242,7 +242,15 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             this.lookupTable = FullCacheLookupTable.create(context, options.get(LOOKUP_CACHE_ROWS));
         }
 
-        refreshDynamicPartition(false);
+        if (partitionLoader != null) {
+            partitionLoader.open();
+            partitionLoader.checkRefresh();
+            BinaryRow partition = partitionLoader.partition();
+            if (partition != null) {
+                lookupTable.specificPartitionFilter(createSpecificPartFilter(partition));
+            }
+        }
+
         if (cacheRowFilter != null) {
             lookupTable.specifyCacheRowFilter(cacheRowFilter);
         }
@@ -267,15 +275,14 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     public Collection<RowData> lookup(RowData keyRow) {
         try {
-            checkRefresh();
+            tryRefresh();
 
             InternalRow key = new FlinkRowWrapper(keyRow);
             if (partitionLoader != null) {
-                InternalRow partition = refreshDynamicPartition(true);
-                if (partition == null) {
+                if (partitionLoader.partition() == null) {
                     return Collections.emptyList();
                 }
-                key = JoinedRow.join(key, partition);
+                key = JoinedRow.join(key, partitionLoader.partition());
             }
 
             List<InternalRow> results = lookupTable.get(key);
@@ -290,28 +297,6 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-    }
-
-    @Nullable
-    private BinaryRow refreshDynamicPartition(boolean reopen) throws Exception {
-        if (partitionLoader == null) {
-            return null;
-        }
-
-        boolean partitionChanged = partitionLoader.checkRefresh();
-        BinaryRow partition = partitionLoader.partition();
-        if (partition == null) {
-            return null;
-        }
-
-        lookupTable.specificPartitionFilter(createSpecificPartFilter(partition));
-
-        if (partitionChanged && reopen) {
-            lookupTable.close();
-            lookupTable.open();
-        }
-
-        return partition;
     }
 
     private Predicate createSpecificPartFilter(BinaryRow partition) {
@@ -339,9 +324,10 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     }
 
     @VisibleForTesting
-    void checkRefresh() throws Exception {
+    void tryRefresh() throws Exception {
+        // 1. check if this time is in black list
         long currentTimeMillis = System.currentTimeMillis();
-        if (nextLoadTime > currentTimeMillis) {
+        if (nextBlacklistCheckTime > currentTimeMillis) {
             return;
         }
 
@@ -352,20 +338,33 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                     currentTimeMillis,
                     period.getLeft(),
                     period.getRight());
-            this.nextLoadTime = period.getRight() + 1;
+            nextBlacklistCheckTime = period.getRight() + 1;
             return;
         }
 
-        if (nextLoadTime > 0) {
-            LOG.info(
-                    "Lookup table {} has refreshed after {} second(s), refreshing",
-                    table.name(),
-                    refreshInterval.toMillis() / 1000);
+        // 2. refresh dynamic partition
+        if (partitionLoader != null) {
+            boolean partitionChanged = partitionLoader.checkRefresh();
+            BinaryRow partition = partitionLoader.partition();
+            if (partition == null) {
+                // no data to be load, fast exit
+                return;
+            }
+
+            if (partitionChanged) {
+                // reopen with latest partition
+                lookupTable.specificPartitionFilter(createSpecificPartFilter(partition));
+                lookupTable.close();
+                lookupTable.open();
+                // no need to refresh the lookupTable because it is reopened
+                return;
+            }
         }
 
-        refresh();
-
-        nextLoadTime = System.currentTimeMillis() + refreshInterval.toMillis();
+        if (shouldRefreshLookupTable()) {
+            lookupTable.refresh();
+            nextRefreshTime = System.currentTimeMillis() + refreshInterval.toMillis();
+        }
     }
 
     @Nullable
@@ -378,18 +377,28 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         return null;
     }
 
+    private boolean shouldRefreshLookupTable() {
+        if (nextRefreshTime > System.currentTimeMillis()) {
+            return false;
+        }
+
+        if (nextRefreshTime > 0) {
+            LOG.info(
+                    "Lookup table {} has refreshed after {} second(s), refreshing",
+                    table.name(),
+                    refreshInterval.toMillis() / 1000);
+        }
+        return true;
+    }
+
     @VisibleForTesting
     LookupTable lookupTable() {
         return lookupTable;
     }
 
     @VisibleForTesting
-    long nextLoadTime() {
-        return nextLoadTime;
-    }
-
-    private void refresh() throws Exception {
-        lookupTable.refresh();
+    long nextBlacklistCheckTime() {
+        return nextBlacklistCheckTime;
     }
 
     @Override
