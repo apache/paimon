@@ -569,6 +569,34 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
+    public void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
+            throws ViewNotExistException, ViewAlreadyExistException {
+        if (!viewExists(fromView)) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new ViewNotExistException(fromView);
+        }
+        if (viewExists(toView)) {
+            throw new ViewAlreadyExistException(toView);
+        }
+        try {
+            String fromDB = fromView.getDatabaseName();
+            String fromViewName = fromView.getTableName();
+            Table table = clients.run(client -> client.getTable(fromDB, fromViewName));
+            table.setDbName(toView.getDatabaseName());
+            table.setTableName(toView.getTableName());
+            clients.execute(client -> client.alter_table(fromDB, fromViewName, table));
+        } catch (TException e) {
+            throw new RuntimeException("Failed to rename view " + fromView.getFullName(), e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(
+                    "Interrupted in call to rename view " + fromView.getFullName(), e);
+        }
+    }
+
+    @Override
     public org.apache.paimon.table.Table getDataOrFormatTable(Identifier identifier)
             throws TableNotExistException {
         Preconditions.checkArgument(identifier.getSystemTableName() == null);

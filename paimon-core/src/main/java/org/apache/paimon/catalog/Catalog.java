@@ -369,6 +369,19 @@ public interface Catalog extends AutoCloseable {
         return Collections.emptyList();
     }
 
+    /**
+     * Rename a view.
+     *
+     * @param fromView identifier of the view to rename
+     * @param toView new view identifier
+     * @throws ViewNotExistException if the fromView does not exist
+     * @throws ViewAlreadyExistException if the toView already exists
+     */
+    default void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
+            throws ViewNotExistException, ViewAlreadyExistException {
+        throw new UnsupportedOperationException();
+    }
+
     /** Return a boolean that indicates whether this catalog allow upper case. */
     boolean allowUpperCase();
 

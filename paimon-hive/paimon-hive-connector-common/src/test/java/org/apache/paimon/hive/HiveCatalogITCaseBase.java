@@ -1938,6 +1938,22 @@ public abstract class HiveCatalogITCaseBase {
         collect("DROP VIEW hive_v");
     }
 
+    @Test
+    public void renameView() throws Exception {
+        tEnv.executeSql("CREATE TABLE t ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
+                .await();
+        tEnv.executeSql("INSERT INTO t VALUES (1, 'Hi'), (2, 'Hello')").await();
+
+        tEnv.executeSql("CREATE VIEW flink_v AS SELECT a + 1, b FROM t").await();
+        tEnv.executeSql("ALTER VIEW flink_v rename to flink_v_rename").await();
+        assertThat(collect("SHOW VIEWS")).containsExactlyInAnyOrder(Row.of("flink_v_rename"));
+
+        hiveShell.executeQuery("CREATE VIEW hive_v AS SELECT a + 1, b FROM t");
+        tEnv.executeSql("ALTER VIEW hive_v rename to hive_v_rename").await();
+        assertThat(collect("SHOW VIEWS"))
+                .containsExactlyInAnyOrder(Row.of("flink_v_rename"), Row.of("hive_v_rename"));
+    }
+
     /** Prepare to update a paimon table with a custom path in the paimon file system. */
     private void alterTableInFileSystem(TableEnvironment tEnv) throws Exception {
         tEnv.executeSql(

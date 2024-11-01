@@ -170,6 +170,12 @@ public class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
+            throws ViewNotExistException, ViewAlreadyExistException {
+        wrapped.renameView(fromView, toView, ignoreIfNotExists);
+    }
+
+    @Override
     public Path getTableLocation(Identifier identifier) {
         return wrapped.getTableLocation(identifier);
     }
