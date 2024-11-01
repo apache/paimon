@@ -1083,19 +1083,17 @@ public class FlinkCatalog extends AbstractCatalog {
             ObjectPath tablePath, String newTableName, boolean ignoreIfNotExists)
             throws CatalogException, TableNotExistException, TableAlreadyExistException {
         ObjectPath toTable = new ObjectPath(tablePath.getDatabaseName(), newTableName);
-        if (catalog.viewExists(toIdentifier(tablePath))) {
-            try {
-                catalog.renameView(
-                        toIdentifier(tablePath), toIdentifier(toTable), ignoreIfNotExists);
-                return;
-            } catch (Catalog.ViewNotExistException | Catalog.ViewAlreadyExistException e) {
-                throw new RuntimeException("Unexpected exception.", e);
-            }
-        }
         try {
             catalog.renameTable(toIdentifier(tablePath), toIdentifier(toTable), ignoreIfNotExists);
         } catch (Catalog.TableNotExistException e) {
-            throw new TableNotExistException(getName(), tablePath);
+            try {
+                catalog.renameView(
+                        toIdentifier(tablePath), toIdentifier(toTable), ignoreIfNotExists);
+            } catch (Catalog.ViewNotExistException ex) {
+                throw new TableNotExistException(getName(), tablePath);
+            } catch (Catalog.ViewAlreadyExistException ex) {
+                throw new TableAlreadyExistException(getName(), toTable);
+            }
         } catch (Catalog.TableAlreadyExistException e) {
             throw new TableAlreadyExistException(getName(), toTable);
         }

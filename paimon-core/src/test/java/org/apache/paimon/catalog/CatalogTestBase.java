@@ -901,11 +901,20 @@ public abstract class CatalogTestBase {
         assertThatThrownBy(() -> catalog.createView(identifier, view, false))
                 .isInstanceOf(Catalog.ViewAlreadyExistException.class);
 
-        catalog.dropView(identifier, false);
-        assertThat(catalog.viewExists(identifier)).isFalse();
+        Identifier newIdentifier = new Identifier("view_db", "new_view");
+        catalog.renameView(new Identifier("view_db", "unknown"), newIdentifier, true);
+        assertThatThrownBy(
+                        () ->
+                                catalog.renameView(
+                                        new Identifier("view_db", "unknown"), newIdentifier, false))
+                .isInstanceOf(Catalog.ViewNotExistException.class);
+        catalog.renameView(identifier, newIdentifier, false);
 
-        catalog.dropView(identifier, true);
-        assertThatThrownBy(() -> catalog.dropView(identifier, false))
+        catalog.dropView(newIdentifier, false);
+        assertThat(catalog.viewExists(newIdentifier)).isFalse();
+
+        catalog.dropView(newIdentifier, true);
+        assertThatThrownBy(() -> catalog.dropView(newIdentifier, false))
                 .isInstanceOf(Catalog.ViewNotExistException.class);
     }
 }
