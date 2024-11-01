@@ -107,7 +107,7 @@ public class LookupFile {
     }
 
     private static int fileWeigh(String file, LookupFile lookupFile) {
-        if (!lookupFile.isReady()) {
+        if (lookupFile == null || !lookupFile.isReady()) {
             return 0;
         }
         return fileKibiBytes(lookupFile.localFile);
