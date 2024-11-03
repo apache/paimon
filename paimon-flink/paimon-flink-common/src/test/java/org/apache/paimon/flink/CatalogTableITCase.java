@@ -862,17 +862,14 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         paimonTable("T").createTag("tag1", 1);
         paimonTable("T").createTag("tag2", 2);
 
-        //        List<Row> result =
-        //                sql(
-        //                        "SELECT tag_name, snapshot_id, schema_id, record_count FROM T$tags
-        // ORDER BY tag_name");
-        //
-        //        assertThat(result).containsExactly(Row.of("tag1", 1L, 0L, 1L), Row.of("tag2", 2L,
-        // 0L, 2L));
-
         List<Row> result =
                 sql(
-                        "SELECT tag_name, snapshot_id, schema_id, record_count FROM T$tags where tag_name in ('tag1','tag2')");
+                        "SELECT tag_name, snapshot_id, schema_id, record_count FROM T$tags ORDER BY tag_name");
+        assertThat(result).containsExactly(Row.of("tag1", 1L, 0L, 1L), Row.of("tag2", 2L, 0L, 2L));
+
+        result =
+                sql(
+                        "SELECT tag_name, snapshot_id, schema_id, record_count FROM T$tags where tag_name = 'tag1' ");
         assertThat(result).containsExactly(Row.of("tag1", 1L, 0L, 1L));
     }
 
