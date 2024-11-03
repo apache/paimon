@@ -1,0 +1,1 @@
+{"data":{"_id":101,"_date":"2023-03-23"},"metadata":{"timestamp":"2024-10-27T12:39:03.210671Z","record-type":"data","operation":"insert","partition-key-type":"schema-table","schema-name":"test","table-name":"product","transaction-id":670014899490}}
