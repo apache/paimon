@@ -128,6 +128,10 @@ public class SchemaManager implements Serializable {
         return listAllIds().stream().map(this::schema).collect(Collectors.toList());
     }
 
+    public List<TableSchema> schemasWithIds(List<Long> schemaIds) {
+        return schemaIds.stream().map(this::schema).collect(Collectors.toList());
+    }
+
     public List<TableSchema> listWithRange(
             Optional<Long> optionalMaxSchemaId, Optional<Long> optionalMinSchemaId) {
         Long lowerBoundSchemaId = 0L;

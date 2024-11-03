@@ -36,6 +36,7 @@ import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.LessOrEqual;
 import org.apache.paimon.predicate.LessThan;
+import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
@@ -62,13 +63,7 @@ import java.io.IOException;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -206,6 +201,7 @@ public class SnapshotsTable implements ReadonlyTable {
         private RowType readType;
         private Optional<Long> optionalFilterSnapshotIdMax = Optional.empty();
         private Optional<Long> optionalFilterSnapshotIdMin = Optional.empty();
+        private List<Long> snapshotIds = new ArrayList<>();
 
         public SnapshotsRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -224,6 +220,20 @@ public class SnapshotsTable implements ReadonlyTable {
                     List<Predicate> children = compoundPredicate.children();
                     for (Predicate leaf : children) {
                         handleLeafPredicate(leaf, leafName);
+                    }
+                }
+
+                // optimize for IN filter
+                if ((compoundPredicate.function()) instanceof Or) {
+                    List<Predicate> children = compoundPredicate.children();
+                    for (Predicate leaf : children) {
+                        if (leaf instanceof LeafPredicate
+                                && (((LeafPredicate) leaf).function() instanceof Equal)) {
+                            snapshotIds.add((Long) ((LeafPredicate) leaf).literals().get(0));
+                        } else {
+                            snapshotIds.clear();
+                            break;
+                        }
                     }
                 }
             } else {
@@ -284,9 +294,15 @@ public class SnapshotsTable implements ReadonlyTable {
             }
             SnapshotManager snapshotManager =
                     new SnapshotManager(fileIO, ((SnapshotsSplit) split).location, branch);
-            Iterator<Snapshot> snapshots =
-                    snapshotManager.snapshotsWithinRange(
-                            optionalFilterSnapshotIdMax, optionalFilterSnapshotIdMin);
+
+            Iterator<Snapshot> snapshots;
+            if (!snapshotIds.isEmpty()) {
+                snapshots = snapshotManager.snapshotsWithIds(snapshotIds);
+            } else {
+                snapshots =
+                        snapshotManager.snapshotsWithinRange(
+                                optionalFilterSnapshotIdMax, optionalFilterSnapshotIdMin);
+            }
 
             Iterator<InternalRow> rows = Iterators.transform(snapshots, this::toRow);
             if (readType != null) {
