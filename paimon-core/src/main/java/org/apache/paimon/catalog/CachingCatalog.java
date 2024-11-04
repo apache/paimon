@@ -63,7 +63,7 @@ public class CachingCatalog extends DelegateCatalog {
 
     protected final Cache<String, Map<String, String>> databaseCache;
     protected final Cache<Identifier, Table> tableCache;
-    protected final Cache<Identifier, List<PartitionEntry>> partitionCache;
+    @Nullable protected final Cache<Identifier, List<PartitionEntry>> partitionCache;
     @Nullable protected final SegmentsCache<Path> manifestCache;
     private final long cachedPartitionMaxNum;
 
@@ -120,12 +120,15 @@ public class CachingCatalog extends DelegateCatalog {
                         .ticker(ticker)
                         .build();
         this.partitionCache =
-                Caffeine.newBuilder()
-                        .softValues()
-                        .executor(Runnable::run)
-                        .expireAfterAccess(expirationInterval)
-                        .ticker(ticker)
-                        .build();
+                cachedPartitionMaxNum == 0
+                        ? null
+                        : Caffeine.newBuilder()
+                                .softValues()
+                                .executor(Runnable::run)
+                                .expireAfterAccess(expirationInterval)
+                                .maximumWeight(cachedPartitionMaxNum)
+                                .ticker(ticker)
+                                .build();
         this.manifestCache = SegmentsCache.create(manifestMaxMemory, manifestCacheThreshold);
         this.cachedPartitionMaxNum = cachedPartitionMaxNum;
     }
