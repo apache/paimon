@@ -23,7 +23,6 @@ import org.apache.paimon.flink.action.CompactAction;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.utils.FailingFileIO;
 
 import org.apache.flink.api.common.JobStatus;
@@ -393,15 +392,9 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                         + "    'bucket' = '2'\n"
                         + ")");
 
-        String exceptionMsg =
-                "The earliest snapshot is null now, but the next expected snapshot id is 3. "
-                        + "Most possible cause might be the table had been recreated.";
         // if reload data, it will generate a new snapshot for recreated table
         if (isReloadData) {
             bEnv.executeSql("INSERT INTO t VALUES " + String.join(", ", values)).await();
-            exceptionMsg =
-                    "The next expected snapshot with id 3 is greater than latest snapshot with id 1 plus one. "
-                            + "Most possible cause might be the table had been recreated.";
         }
         assertThatCode(
                         () -> {
@@ -411,8 +404,9 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                                 }
                             }
                         })
-                .hasRootCauseInstanceOf(OutOfRangeException.class)
-                .hasRootCauseMessage(exceptionMsg);
+                .rootCause()
+                .hasMessageContaining(
+                        "The next expected snapshot is too big! Most possible cause might be the table had been recreated.");
     }
 
     @Test

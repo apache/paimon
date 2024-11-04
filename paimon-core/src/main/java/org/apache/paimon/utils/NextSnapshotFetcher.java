@@ -48,20 +48,16 @@ public class NextSnapshotFetcher {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         // No snapshot now
         if (earliestSnapshotId == null || earliestSnapshotId <= nextSnapshotId) {
-            if (earliestSnapshotId == null && nextSnapshotId > 1) {
+            if ((earliestSnapshotId == null && nextSnapshotId > 1)
+                    || (latestSnapshotId != null && nextSnapshotId > latestSnapshotId + 1)) {
                 throw new OutOfRangeException(
                         String.format(
-                                "The earliest snapshot is null now, but the next expected snapshot id is %d. "
-                                        + "Most possible cause might be the table had been recreated.",
-                                nextSnapshotId));
+                                "The next expected snapshot is too big! Most possible cause might be the table had been recreated."
+                                        + "The next snapshot id is %d, while the latest snapshot id is %s",
+                                nextSnapshotId,
+                                latestSnapshotId == null ? "null" : latestSnapshotId));
             }
-            if (latestSnapshotId != null && nextSnapshotId > latestSnapshotId + 1) {
-                throw new OutOfRangeException(
-                        String.format(
-                                "The next expected snapshot with id %d is greater than latest snapshot with id %d plus one. "
-                                        + "Most possible cause might be the table had been recreated.",
-                                nextSnapshotId, latestSnapshotId));
-            }
+
             LOG.debug(
                     "Next snapshot id {} does not exist, wait for the snapshot generation.",
                     nextSnapshotId);
