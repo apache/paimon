@@ -36,6 +36,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -108,6 +109,18 @@ public abstract class CatalogTestBase {
 
         List<String> databases = catalog.listDatabases();
         assertThat(databases).contains("db1", "db2", "db3");
+    }
+
+    @Test
+    public void testDuplicatedDatabaseAfterCreatingTable() throws Exception {
+        catalog.createDatabase("test_db", false);
+        Identifier identifier = Identifier.create("test_db", "new_table");
+        Schema schema = Schema.newBuilder().column("pk1", DataTypes.INT()).build();
+        catalog.createTable(identifier, schema, false);
+
+        List<String> databases = catalog.listDatabases();
+        Assertions.assertEquals(1, databases.size());
+        Assertions.assertEquals("test_db", databases.get(0));
     }
 
     @Test
