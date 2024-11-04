@@ -22,15 +22,18 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.types.DataType;
 
-/** FieldAggregatorFactory for test. */
-public class TestCostomAggFactory implements FieldAggregatorFactory {
+/** FieldAggregatorFactory for #{@link TestCustomAgg} test. */
+public class TestCustomAggFactory implements FieldAggregatorFactory {
+
+    public static final String NAME = "custom";
+
     @Override
     public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
-        return new TestCostomAgg(fieldType);
+        return new TestCustomAgg(identifier(), fieldType);
     }
 
     @Override
     public String identifier() {
-        return "custom";
+        return NAME;
     }
 }

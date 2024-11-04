@@ -19,7 +19,6 @@
 package org.apache.paimon.mergetree.compact.aggregate.factory;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldThetaSketchAgg;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.VarBinaryType;
@@ -28,17 +27,20 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Factory for #{@link FieldThetaSketchAgg}. */
 public class FieldThetaSketchAggFactory implements FieldAggregatorFactory {
+
+    public static final String NAME = "theta_sketch";
+
     @Override
-    public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
+    public FieldThetaSketchAgg create(DataType fieldType, CoreOptions options, String field) {
         checkArgument(
                 fieldType instanceof VarBinaryType,
                 "Data type for theta sketch column must be 'VarBinaryType' but was '%s'.",
                 fieldType);
-        return new FieldThetaSketchAgg((VarBinaryType) fieldType);
+        return new FieldThetaSketchAgg(identifier(), (VarBinaryType) fieldType);
     }
 
     @Override
     public String identifier() {
-        return FieldThetaSketchAgg.NAME;
+        return NAME;
     }
 }

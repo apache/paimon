@@ -19,19 +19,21 @@
 package org.apache.paimon.mergetree.compact.aggregate.factory;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldLastNonNullValueAgg;
 import org.apache.paimon.types.DataType;
 
 /** Factory for #{@link FieldLastNonNullValueAgg}. */
 public class FieldLastNonNullValueAggFactory implements FieldAggregatorFactory {
+
+    public static final String NAME = "last_non_null_value";
+
     @Override
-    public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
-        return new FieldLastNonNullValueAgg(fieldType);
+    public FieldLastNonNullValueAgg create(DataType fieldType, CoreOptions options, String field) {
+        return new FieldLastNonNullValueAgg(identifier(), fieldType);
     }
 
     @Override
     public String identifier() {
-        return FieldLastNonNullValueAgg.NAME;
+        return NAME;
     }
 }

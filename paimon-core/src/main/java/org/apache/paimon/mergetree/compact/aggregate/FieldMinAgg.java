@@ -25,33 +25,21 @@ import org.apache.paimon.utils.InternalRowUtils;
 /** min aggregate a field of a row. */
 public class FieldMinAgg extends FieldAggregator {
 
-    public static final String NAME = "min";
-
     private static final long serialVersionUID = 1L;
 
-    public FieldMinAgg(DataType dataType) {
-        super(dataType);
-    }
-
-    @Override
-    public String name() {
-        return NAME;
+    public FieldMinAgg(String name, DataType dataType) {
+        super(name, dataType);
     }
 
     @Override
     public Object agg(Object accumulator, Object inputField) {
-        Object min;
-
         if (accumulator == null || inputField == null) {
-            min = (accumulator == null ? inputField : accumulator);
-        } else {
-            DataTypeRoot type = fieldType.getTypeRoot();
-            if (InternalRowUtils.compare(accumulator, inputField, type) < 0) {
-                min = accumulator;
-            } else {
-                min = inputField;
-            }
+            return accumulator == null ? inputField : accumulator;
         }
-        return min;
+
+        DataTypeRoot type = fieldType.getTypeRoot();
+        return InternalRowUtils.compare(accumulator, inputField, type) < 0
+                ? accumulator
+                : inputField;
     }
 }

@@ -25,13 +25,16 @@ import org.apache.paimon.types.DataType;
 
 /** Factory for legacy name of #{@link FieldFirstNonNullValueAgg}. */
 public class FieldFirstNonNullValueAggLegacyFactory implements FieldAggregatorFactory {
+
+    public static final String LEGACY_NAME = "first_not_null_value";
+
     @Override
     public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
-        return new FieldFirstNonNullValueAgg(fieldType);
+        return new FieldFirstNonNullValueAgg(identifier(), fieldType);
     }
 
     @Override
     public String identifier() {
-        return FieldFirstNonNullValueAgg.LEGACY_NAME;
+        return LEGACY_NAME;
     }
 }

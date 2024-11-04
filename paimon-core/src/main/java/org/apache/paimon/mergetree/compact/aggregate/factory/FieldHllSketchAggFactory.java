@@ -19,7 +19,6 @@
 package org.apache.paimon.mergetree.compact.aggregate.factory;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldHllSketchAgg;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.VarBinaryType;
@@ -28,17 +27,20 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Factory for #{@link FieldHllSketchAgg}. */
 public class FieldHllSketchAggFactory implements FieldAggregatorFactory {
+
+    public static final String NAME = "hll_sketch";
+
     @Override
-    public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
+    public FieldHllSketchAgg create(DataType fieldType, CoreOptions options, String field) {
         checkArgument(
                 fieldType instanceof VarBinaryType,
                 "Data type for hll sketch column must be 'VarBinaryType' but was '%s'.",
                 fieldType);
-        return new FieldHllSketchAgg((VarBinaryType) fieldType);
+        return new FieldHllSketchAgg(identifier(), (VarBinaryType) fieldType);
     }
 
     @Override
     public String identifier() {
-        return FieldHllSketchAgg.NAME;
+        return NAME;
     }
 }

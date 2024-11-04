@@ -43,16 +43,14 @@ import static org.apache.paimon.codegen.CodeGenUtils.newRecordEqualiser;
 /** Collect elements into an ARRAY. */
 public class FieldCollectAgg extends FieldAggregator {
 
-    public static final String NAME = "collect";
-
     private static final long serialVersionUID = 1L;
 
     private final boolean distinct;
     private final InternalArray.ElementGetter elementGetter;
     @Nullable private final BiFunction<Object, Object, Boolean> equaliser;
 
-    public FieldCollectAgg(ArrayType dataType, boolean distinct) {
-        super(dataType);
+    public FieldCollectAgg(String name, ArrayType dataType, boolean distinct) {
+        super(name, dataType);
         this.distinct = distinct;
         this.elementGetter = InternalArray.createElementGetter(dataType.getElementType());
 
@@ -82,11 +80,6 @@ public class FieldCollectAgg extends FieldAggregator {
         } else {
             equaliser = null;
         }
-    }
-
-    @Override
-    public String name() {
-        return NAME;
     }
 
     @Override
