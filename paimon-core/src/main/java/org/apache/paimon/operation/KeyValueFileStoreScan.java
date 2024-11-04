@@ -62,8 +62,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     private final ChangelogProducer changelogProducer;
 
     private final boolean fileIndexReadEnabled;
-    // just cache.
-    private final Map<Long, Predicate> dataFilterMapping = new HashMap<>();
+    private final Map<Long, Predicate> schemaId2DataFilter = new HashMap<>();
 
     public KeyValueFileStoreScan(
             ManifestsReader manifestsReader,
@@ -137,19 +136,17 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         }
 
         RowType dataRowType = scanTableSchema(entry.file().schemaId()).logicalRowType();
-
-        Predicate dataPredicate =
-                dataFilterMapping.computeIfAbsent(
-                        entry.file().schemaId(),
-                        id ->
-                                fieldValueStatsConverters.convertFilter(
-                                        entry.file().schemaId(), valueFilter));
-
         try (FileIndexPredicate predicate =
                 new FileIndexPredicate(embeddedIndexBytes, dataRowType)) {
+            Predicate dataPredicate =
+                    schemaId2DataFilter.computeIfAbsent(
+                            entry.file().schemaId(),
+                            id ->
+                                    fieldValueStatsConverters.convertFilter(
+                                            entry.file().schemaId(), valueFilter));
             return predicate.testPredicate(dataPredicate);
         } catch (IOException e) {
-            throw new RuntimeException("Exception happens while checking predicate.", e);
+            throw new RuntimeException("Exception happens while checking fileIndex predicate.", e);
         }
     }
 
