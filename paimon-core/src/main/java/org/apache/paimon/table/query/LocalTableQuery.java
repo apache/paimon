@@ -101,7 +101,9 @@ public class LocalTableQuery implements TableQuery {
         this.lookupStoreFactory =
                 LookupStoreFactory.create(
                         options,
-                        new CacheManager(options.lookupCacheMaxMemory()),
+                        new CacheManager(
+                                options.lookupDataCacheMaxMemory(),
+                                options.lookupIndexCacheMaxMemory()),
                         new RowCompactedSerializer(keyType).createSliceComparator());
 
         if (options.needLookup()) {
