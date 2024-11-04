@@ -76,4 +76,130 @@ class PaimonOptionTest extends PaimonSparkTestBase {
       }
     }
   }
+
+  test("Paimon Table Options: query one table with sql conf and table options") {
+    sql("CREATE TABLE T (id INT)")
+    sql("INSERT INTO T VALUES 1")
+    sql("INSERT INTO T VALUES 2")
+    checkAnswer(sql("SELECT * FROM T ORDER BY id"), Row(1) :: Row(2) :: Nil)
+    val table = loadTable("T")
+
+    // query with global options
+    withSQLConf("spark.paimon.scan.snapshot-id" -> "1") {
+      checkAnswer(sql("SELECT * FROM T ORDER BY id"), Row(1))
+      checkAnswer(spark.read.format("paimon").load(table.location().toString), Row(1))
+    }
+
+    // query with table options
+    withSQLConf("spark.paimon.*.*.T.scan.snapshot-id" -> "1") {
+      checkAnswer(sql("SELECT * FROM T ORDER BY id"), Row(1))
+      checkAnswer(spark.read.format("paimon").load(table.location().toString), Row(1))
+    }
+
+    // query with both global and table options
+    withSQLConf(
+      "spark.paimon.scan.snapshot-id" -> "1",
+      "spark.paimon.*.*.T.scan.snapshot-id" -> "2") {
+      checkAnswer(sql("SELECT * FROM T ORDER BY id"), Row(1) :: Row(2) :: Nil)
+      checkAnswer(
+        spark.read.format("paimon").load(table.location().toString),
+        Row(1) :: Row(2) :: Nil)
+    }
+  }
+
+  test("Paimon Table Options: query multiple tables with sql conf and table options") {
+    sql("CREATE TABLE T1 (id INT)")
+    sql("INSERT INTO T1 VALUES 1")
+    sql("INSERT INTO T1 VALUES 2")
+
+    sql("CREATE TABLE T2 (id INT)")
+    sql("INSERT INTO T2 VALUES 1")
+    sql("INSERT INTO T2 VALUES 2")
+    checkAnswer(
+      sql("SELECT * FROM T1 join T2 on T1.id = T2.id ORDER BY T1.id"),
+      Row(1, 1) :: Row(2, 2) :: Nil)
+    val table1 = loadTable("T1")
+    val table2 = loadTable("T1")
+
+    // query with global options
+    withSQLConf("spark.paimon.scan.snapshot-id" -> "1") {
+      checkAnswer(sql("SELECT * FROM T1 join T2 on T1.id = T2.id ORDER BY T1.id"), Row(1, 1))
+      checkAnswer(
+        spark.read
+          .format("paimon")
+          .load(table1.location().toString)
+          .join(spark.read.format("paimon").load(table2.location().toString), "id"),
+        Row(1)
+      )
+    }
+
+    // query with table options
+    withSQLConf("spark.paimon.*.*.*.scan.snapshot-id" -> "1") {
+      checkAnswer(sql("SELECT * FROM T1 join T2 on T1.id = T2.id ORDER BY T1.id"), Row(1, 1))
+      checkAnswer(
+        spark.read
+          .format("paimon")
+          .load(table1.location().toString)
+          .join(spark.read.format("paimon").load(table2.location().toString), "id"),
+        Row(1)
+      )
+    }
+
+    // query with both global and table options
+    withSQLConf(
+      "spark.paimon.scan.snapshot-id" -> "1",
+      "spark.paimon.*.*.*.scan.snapshot-id" -> "2") {
+      checkAnswer(
+        sql("SELECT * FROM T1 join T2 on T1.id = T2.id ORDER BY T1.id"),
+        Row(1, 1) :: Row(2, 2) :: Nil)
+      checkAnswer(
+        spark.read
+          .format("paimon")
+          .load(table1.location().toString)
+          .join(spark.read.format("paimon").load(table2.location().toString), "id"),
+        Row(1) :: Row(2) :: Nil
+      )
+    }
+
+    withSQLConf(
+      "spark.paimon.*.*.T1.scan.snapshot-id" -> "1",
+      "spark.paimon.*.*.T2.scan.snapshot-id" -> "1") {
+      checkAnswer(sql("SELECT * FROM T1 join T2 on T1.id = T2.id ORDER BY T1.id"), Row(1, 1))
+      checkAnswer(
+        spark.read
+          .format("paimon")
+          .load(table1.location().toString)
+          .join(spark.read.format("paimon").load(table2.location().toString), "id"),
+        Row(1)
+      )
+    }
+
+    withSQLConf(
+      "spark.paimon.*.*.T1.scan.snapshot-id" -> "1",
+      "spark.paimon.*.*.T2.scan.snapshot-id" -> "2") {
+      checkAnswer(sql("SELECT * FROM T1 join T2 on T1.id = T2.id ORDER BY T1.id"), Row(1, 1))
+      checkAnswer(
+        spark.read
+          .format("paimon")
+          .load(table1.location().toString)
+          .join(spark.read.format("paimon").load(table2.location().toString), "id"),
+        Row(1)
+      )
+    }
+
+    withSQLConf(
+      "spark.paimon.*.*.T1.scan.snapshot-id" -> "2",
+      "spark.paimon.*.*.T2.scan.snapshot-id" -> "2") {
+      checkAnswer(
+        sql("SELECT * FROM T1 join T2 on T1.id = T2.id ORDER BY T1.id"),
+        Row(1, 1) :: Row(2, 2) :: Nil)
+      checkAnswer(
+        spark.read
+          .format("paimon")
+          .load(table1.location().toString)
+          .join(spark.read.format("paimon").load(table2.location().toString), "id"),
+        Row(1) :: Row(2) :: Nil
+      )
+    }
+  }
 }
