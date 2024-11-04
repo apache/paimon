@@ -103,7 +103,7 @@ public class LocalTableQuery implements TableQuery {
                         options,
                         new CacheManager(
                                 options.lookupCacheMaxMemory(),
-                                options.lookupIndexCacheMaxMemory()),
+                                options.lookupCacheHighPrioPoolRatio()),
                         new RowCompactedSerializer(keyType).createSliceComparator());
 
         if (options.needLookup()) {
