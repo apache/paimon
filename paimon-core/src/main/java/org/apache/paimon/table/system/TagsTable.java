@@ -26,11 +26,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.Equal;
-import org.apache.paimon.predicate.LeafPredicate;
-import org.apache.paimon.predicate.Or;
-import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.*;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -218,13 +214,15 @@ public class TagsTable implements ReadonlyTable {
             Path location = ((TagsSplit) split).location;
             Predicate predicate = ((TagsSplit) split).tagPredicate;
             TagManager tagManager = new TagManager(fileIO, location, branch);
+            String leafName = "tag_name";
 
             Map<String, Tag> nameToSnapshot = new TreeMap<>();
             Map<String, Tag> predicateMap = new TreeMap<>();
             if (predicate != null) {
                 if (predicate instanceof LeafPredicate
                         && ((LeafPredicate) predicate).function() instanceof Equal
-                        && ((LeafPredicate) predicate).literals().get(0) instanceof BinaryString) {
+                        && ((LeafPredicate) predicate).literals().get(0) instanceof BinaryString
+                        && predicate.visit(LeafPredicateExtractor.INSTANCE).get(leafName) != null) {
                     String equalValue = ((LeafPredicate) predicate).literals().get(0).toString();
                     if (tagManager.tagExists(equalValue)) {
                         predicateMap.put(equalValue, tagManager.tag(equalValue));
@@ -238,7 +236,11 @@ public class TagsTable implements ReadonlyTable {
                         List<Predicate> children = compoundPredicate.children();
                         for (Predicate leaf : children) {
                             if (leaf instanceof LeafPredicate
-                                    && (((LeafPredicate) leaf).function() instanceof Equal)) {
+                                    && (((LeafPredicate) leaf).function() instanceof Equal)
+                                    && predicate
+                                                    .visit(LeafPredicateExtractor.INSTANCE)
+                                                    .get(leafName)
+                                            != null) {
                                 String equalValue =
                                         ((LeafPredicate) leaf).literals().get(0).toString();
                                 predicateMap.put(equalValue, tagManager.tag(equalValue));

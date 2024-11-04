@@ -217,7 +217,7 @@ public class SchemasTable implements ReadonlyTable {
                 return this;
             }
 
-            String leafName = "schema_id";
+            String leafName = "tag_name";
             if (predicate instanceof CompoundPredicate) {
                 CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
                 if ((compoundPredicate.function()) instanceof And) {
@@ -232,7 +232,9 @@ public class SchemasTable implements ReadonlyTable {
                     List<Predicate> children = compoundPredicate.children();
                     for (Predicate leaf : children) {
                         if (leaf instanceof LeafPredicate
-                                && (((LeafPredicate) leaf).function() instanceof Equal)) {
+                                && (((LeafPredicate) leaf).function() instanceof Equal)
+                                && leaf.visit(LeafPredicateExtractor.INSTANCE).get(leafName)
+                                        != null) {
                             schemaIds.add((Long) ((LeafPredicate) leaf).literals().get(0));
                         } else {
                             schemaIds.clear();

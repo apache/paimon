@@ -235,7 +235,9 @@ public class SnapshotsTable implements ReadonlyTable {
                     List<Predicate> children = compoundPredicate.children();
                     for (Predicate leaf : children) {
                         if (leaf instanceof LeafPredicate
-                                && (((LeafPredicate) leaf).function() instanceof Equal)) {
+                                && (((LeafPredicate) leaf).function() instanceof Equal)
+                                && leaf.visit(LeafPredicateExtractor.INSTANCE).get(leafName)
+                                        != null) {
                             snapshotIds.add((Long) ((LeafPredicate) leaf).literals().get(0));
                         } else {
                             snapshotIds.clear();
