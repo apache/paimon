@@ -64,7 +64,8 @@ public class FileBasedBloomFilterTest {
         Arrays.stream(inputs).forEach(i -> builder.addHash(Integer.hashCode(i)));
         File file = writeFile(segment.getArray());
 
-        CacheManager cacheManager = new CacheManager(cacheType, MemorySize.ofMebiBytes(1));
+        CacheManager cacheManager =
+                new CacheManager(cacheType, MemorySize.ofMebiBytes(1), MemorySize.ofMebiBytes(1));
         FileBasedBloomFilter filter =
                 new FileBasedBloomFilter(
                         PageFileInput.create(file, 1024, null, 0, null),
@@ -76,7 +77,8 @@ public class FileBasedBloomFilterTest {
         Arrays.stream(inputs)
                 .forEach(i -> Assertions.assertThat(filter.testHash(Integer.hashCode(i))).isTrue());
         filter.close();
-        Assertions.assertThat(cacheManager.cache().asMap()).isEmpty();
+        Assertions.assertThat(cacheManager.dataCache().asMap()).isEmpty();
+        Assertions.assertThat(cacheManager.indexCache().asMap()).isEmpty();
         Assertions.assertThat(filter.bloomFilter().getMemorySegment()).isNull();
     }
 

@@ -35,25 +35,40 @@ public class CacheManager {
      */
     public static final int REFRESH_COUNT = 10;
 
-    private final Cache cache;
+    private final Cache dataCache;
+    private final Cache indexCache;
 
     private int fileReadCount;
 
+    @VisibleForTesting
     public CacheManager(MemorySize maxMemorySize) {
-        this(Cache.CacheType.GUAVA, maxMemorySize);
+        this(Cache.CacheType.GUAVA, maxMemorySize, maxMemorySize);
     }
 
-    public CacheManager(Cache.CacheType cacheType, MemorySize maxMemorySize) {
-        this.cache = CacheBuilder.newBuilder(cacheType).maximumWeight(maxMemorySize).build();
+    public CacheManager(MemorySize dataMaxMemorySize, MemorySize indexMaxMemorySize) {
+        this(Cache.CacheType.GUAVA, dataMaxMemorySize, indexMaxMemorySize);
+    }
+
+    public CacheManager(
+            Cache.CacheType cacheType, MemorySize maxMemorySize, MemorySize indexMaxMemorySize) {
+        this.dataCache = CacheBuilder.newBuilder(cacheType).maximumWeight(maxMemorySize).build();
+        this.indexCache =
+                CacheBuilder.newBuilder(cacheType).maximumWeight(indexMaxMemorySize).build();
         this.fileReadCount = 0;
     }
 
     @VisibleForTesting
-    public Cache cache() {
-        return cache;
+    public Cache dataCache() {
+        return dataCache;
+    }
+
+    @VisibleForTesting
+    public Cache indexCache() {
+        return indexCache;
     }
 
     public MemorySegment getPage(CacheKey key, CacheReader reader, CacheCallback callback) {
+        Cache cache = key.isIndex() ? indexCache : dataCache;
         Cache.CacheValue value =
                 cache.get(
                         key,
@@ -70,7 +85,11 @@ public class CacheManager {
     }
 
     public void invalidPage(CacheKey key) {
-        cache.invalidate(key);
+        if (key.isIndex()) {
+            indexCache.invalidate(key);
+        } else {
+            dataCache.invalidate(key);
+        }
     }
 
     public int fileReadCount() {

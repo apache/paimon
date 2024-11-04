@@ -38,11 +38,7 @@ import java.util.Comparator;
 import static org.apache.paimon.lookup.sort.SortLookupStoreUtils.crc32c;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/**
- * A {@link LookupStoreReader} for sort store.
- *
- * <p>TODO separate index cache and block cache.
- */
+/** A {@link LookupStoreReader} for sort store. */
 public class SortLookupStoreReader implements LookupStoreReader {
 
     private final Comparator<MemorySlice> comparator;
@@ -68,7 +64,7 @@ public class SortLookupStoreReader implements LookupStoreReader {
         this.fileInput = PageFileInput.create(file, blockSize, null, fileSize, null);
         this.blockCache = new BlockCache(fileInput.file(), cacheManager);
         Footer footer = readFooter();
-        this.indexBlockIterator = readBlock(footer.getIndexBlockHandle()).iterator();
+        this.indexBlockIterator = readBlock(footer.getIndexBlockHandle(), true).iterator();
         BloomFilterHandle handle = footer.getBloomFilterHandle();
         if (handle != null) {
             this.bloomFilter =
@@ -84,7 +80,7 @@ public class SortLookupStoreReader implements LookupStoreReader {
     private Footer readFooter() throws IOException {
         MemorySegment footerData =
                 blockCache.getBlock(
-                        fileSize - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH, b -> b);
+                        fileSize - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH, b -> b, true);
         return Footer.readFooter(MemorySlice.wrap(footerData).toInput());
     }
 
@@ -111,23 +107,26 @@ public class SortLookupStoreReader implements LookupStoreReader {
     }
 
     private BlockIterator getNextBlock() throws IOException {
+        // index block handle, point to the key, value position.
         MemorySlice blockHandle = indexBlockIterator.next().getValue();
-        BlockReader dataBlock = openBlock(blockHandle);
+        BlockReader dataBlock =
+                readBlock(BlockHandle.readBlockHandle(blockHandle.toInput()), false);
         return dataBlock.iterator();
     }
 
-    private BlockReader openBlock(MemorySlice blockEntry) throws IOException {
-        BlockHandle blockHandle = BlockHandle.readBlockHandle(blockEntry.toInput());
-        return readBlock(blockHandle);
-    }
-
-    private BlockReader readBlock(BlockHandle blockHandle) {
+    /**
+     * @param blockHandle The block handle.
+     * @param index Whether read the block as an index.
+     * @return The reader of the target block.
+     */
+    private BlockReader readBlock(BlockHandle blockHandle, boolean index) {
         // read block trailer
         MemorySegment trailerData =
                 blockCache.getBlock(
                         blockHandle.offset() + blockHandle.size(),
                         BlockTrailer.ENCODED_LENGTH,
-                        b -> b);
+                        b -> b,
+                        true);
         BlockTrailer blockTrailer =
                 BlockTrailer.readBlockTrailer(MemorySlice.wrap(trailerData).toInput());
 
@@ -166,7 +165,8 @@ public class SortLookupStoreReader implements LookupStoreReader {
                                 checkArgument(uncompressedLength == uncompressed.length);
                                 return uncompressed;
                             }
-                        });
+                        },
+                        index);
         return new BlockReader(MemorySlice.wrap(unCompressedBlock), comparator);
     }
 

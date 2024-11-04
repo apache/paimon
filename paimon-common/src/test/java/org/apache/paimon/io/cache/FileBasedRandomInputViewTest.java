@@ -82,7 +82,9 @@ public class FileBasedRandomInputViewTest {
         }
 
         File file = writeFile(bytes);
-        CacheManager cacheManager = new CacheManager(cacheType, MemorySize.ofKibiBytes(128));
+        CacheManager cacheManager =
+                new CacheManager(
+                        cacheType, MemorySize.ofKibiBytes(128), MemorySize.ofKibiBytes(128));
         FileBasedRandomInputView view =
                 new FileBasedRandomInputView(
                         PageFileInput.create(file, 1024, null, 0, null), cacheManager);
@@ -117,7 +119,8 @@ public class FileBasedRandomInputViewTest {
 
         // hot key in LRU, should have good cache hit rate
         assertThat(cacheManager.fileReadCount()).isLessThan(maxFileReadCount);
-        assertThat(cacheManager.cache().asMap().size()).isEqualTo(0);
+        assertThat(cacheManager.dataCache().asMap().size()).isEqualTo(0);
+        assertThat(cacheManager.indexCache().asMap().size()).isEqualTo(0);
     }
 
     private File writeFile(byte[] bytes) throws IOException {

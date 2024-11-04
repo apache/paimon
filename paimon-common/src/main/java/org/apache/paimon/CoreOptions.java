@@ -909,11 +909,18 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Spill compression for lookup cache, currently zstd, none, lz4 and lzo are supported.");
 
-    public static final ConfigOption<MemorySize> LOOKUP_CACHE_MAX_MEMORY_SIZE =
-            key("lookup.cache-max-memory-size")
+    public static final ConfigOption<MemorySize> LOOKUP_DATA_CACHE_MAX_MEMORY_SIZE =
+            key("lookup.data-cache-max-memory-size")
                     .memoryType()
                     .defaultValue(MemorySize.parse("256 mb"))
-                    .withDescription("Max memory size for lookup cache.");
+                    .withFallbackKeys("lookup.cache-max-memory-size")
+                    .withDescription("Max memory size for lookup data cache.");
+
+    public static final ConfigOption<MemorySize> LOOKUP_INDEX_CACHE_MAX_MEMORY_SIZE =
+            key("lookup.index-cache-max-memory-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("64 mb"))
+                    .withDescription("Max memory size for lookup index cache.");
 
     public static final ConfigOption<Boolean> LOOKUP_CACHE_BLOOM_FILTER_ENABLED =
             key("lookup.cache.bloom.filter.enabled")
@@ -1828,8 +1835,12 @@ public class CoreOptions implements Serializable {
         return options.get(LOOKUP_LOCAL_FILE_TYPE);
     }
 
-    public MemorySize lookupCacheMaxMemory() {
-        return options.get(LOOKUP_CACHE_MAX_MEMORY_SIZE);
+    public MemorySize lookupDataCacheMaxMemory() {
+        return options.get(LOOKUP_DATA_CACHE_MAX_MEMORY_SIZE);
+    }
+
+    public MemorySize lookupIndexCacheMaxMemory() {
+        return options.get(LOOKUP_INDEX_CACHE_MAX_MEMORY_SIZE);
     }
 
     public long targetFileSize(boolean hasPrimaryKey) {

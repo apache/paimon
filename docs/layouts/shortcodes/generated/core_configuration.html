@@ -400,12 +400,6 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Max disk size for lookup cache, you can use this option to limit the use of local disks.</td>
         </tr>
         <tr>
-            <td><h5>lookup.cache-max-memory-size</h5></td>
-            <td style="word-wrap: break-word;">256 mb</td>
-            <td>MemorySize</td>
-            <td>Max memory size for lookup cache.</td>
-        </tr>
-        <tr>
             <td><h5>lookup.cache-spill-compression</h5></td>
             <td style="word-wrap: break-word;">"zstd"</td>
             <td>String</td>
@@ -424,10 +418,22 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Define the default false positive probability for lookup cache bloom filters.</td>
         </tr>
         <tr>
+            <td><h5>lookup.data-cache-max-memory-size</h5></td>
+            <td style="word-wrap: break-word;">256 mb</td>
+            <td>MemorySize</td>
+            <td>Max memory size for lookup data cache.</td>
+        </tr>
+        <tr>
             <td><h5>lookup.hash-load-factor</h5></td>
             <td style="word-wrap: break-word;">0.75</td>
             <td>Float</td>
             <td>The index load factor for lookup.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.index-cache-max-memory-size</h5></td>
+            <td style="word-wrap: break-word;">64 mb</td>
+            <td>MemorySize</td>
+            <td>Max memory size for lookup index cache.</td>
         </tr>
         <tr>
             <td><h5>lookup.local-file-type</h5></td>

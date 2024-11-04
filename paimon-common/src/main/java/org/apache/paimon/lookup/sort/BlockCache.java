@@ -49,7 +49,6 @@ public class BlockCache implements Closeable {
         this.blocks = new HashMap<>();
     }
 
-    // TODO separate index and data cache
     private byte[] readFrom(long offset, int length) throws IOException {
         byte[] buffer = new byte[length];
         int read = channel.read(ByteBuffer.wrap(buffer), offset);
@@ -61,9 +60,9 @@ public class BlockCache implements Closeable {
     }
 
     public MemorySegment getBlock(
-            long position, int length, Function<byte[], byte[]> decompressFunc) {
+            long position, int length, Function<byte[], byte[]> decompressFunc, boolean index) {
 
-        CacheKey cacheKey = CacheKey.forPosition(file, position, length);
+        CacheKey cacheKey = CacheKey.forPosition(file, position, length, index);
 
         SegmentContainer container = blocks.get(cacheKey);
         if (container == null || container.getAccessCount() == CacheManager.REFRESH_COUNT) {

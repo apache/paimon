@@ -55,7 +55,7 @@ public class FileBasedBloomFilter implements Closeable {
         this.readOffset = readOffset;
         this.readLength = readLength;
         this.accessCount = 0;
-        this.cacheKey = CacheKey.forPosition(input.file(), readOffset, readLength);
+        this.cacheKey = CacheKey.forPosition(input.file(), readOffset, readLength, true);
     }
 
     public boolean testHash(int hash) {

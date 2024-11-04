@@ -48,7 +48,8 @@ public class CacheManagerTest {
         CacheKey key2 = CacheKey.forPageIndex(new RandomAccessFile(file2, "r"), 0, 0);
 
         for (Cache.CacheType cacheType : Cache.CacheType.values()) {
-            CacheManager cacheManager = new CacheManager(cacheType, MemorySize.ofBytes(10));
+            CacheManager cacheManager =
+                    new CacheManager(cacheType, MemorySize.ofBytes(10), MemorySize.ofBytes(10));
             byte[] value = new byte[6];
             Arrays.fill(value, (byte) 1);
             for (int i = 0; i < 10; i++) {
