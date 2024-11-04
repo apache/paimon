@@ -18,14 +18,11 @@
 
 package org.apache.paimon.jdbc;
 
-import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.utils.BranchManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
@@ -33,7 +30,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
-import java.io.File;
 import java.io.ObjectOutputStream;
 import java.sql.SQLException;
 import java.util.Map;
@@ -125,26 +121,5 @@ public class JdbcCatalogTest extends CatalogTestBase {
                         oos.flush();
                     }
                 });
-    }
-
-    @Test
-    public void testGetDataTableLocation() {
-        Path path =
-                ((AbstractCatalog) catalog)
-                        .getDataTableLocation(Identifier.create("test_db", "test_table$branch_a1"));
-        assertThat(path.toString())
-                .isEqualTo(
-                        new File(
-                                        "file:/" + tempFile,
-                                        "test_db"
-                                                + ".db"
-                                                + File.separator
-                                                + "test_table"
-                                                + File.separator
-                                                + "branch"
-                                                + File.separator
-                                                + BranchManager.BRANCH_PREFIX
-                                                + "a1")
-                                .toString());
     }
 }

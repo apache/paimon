@@ -36,7 +36,6 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -514,26 +513,16 @@ public interface Catalog extends AutoCloseable {
     /** Exception for trying to operate on a table that doesn't exist. */
     class TableNotExistException extends Exception {
 
-        private static final String MSG_TABLE = "Table %s does not exist.";
-        private static final String MSG_BRANCH = "Branch %s does not exist.";
+        private static final String MSG = "Table %s does not exist.";
+
         private final Identifier identifier;
 
         public TableNotExistException(Identifier identifier) {
-            this(identifier, null, DEFAULT_MAIN_BRANCH);
+            this(identifier, null);
         }
 
-        public TableNotExistException(Identifier identifier, String branchName) {
-            this(identifier, null, branchName);
-        }
-
-        public TableNotExistException(Identifier identifier, Throwable cause, String branchName) {
-            super(
-                    branchName.equals(DEFAULT_MAIN_BRANCH)
-                            ? String.format(MSG_TABLE, identifier.getFullName())
-                            : String.format(
-                                    MSG_BRANCH,
-                                    identifier.getFullName() + BRANCH_PREFIX + branchName),
-                    cause);
+        public TableNotExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
             this.identifier = identifier;
         }
 

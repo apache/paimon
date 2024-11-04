@@ -319,7 +319,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         // call the FileSystemCatalog.getDataTableSchema() function
         assertThatThrownBy(() -> paimonTable("T$branch_branch2"))
                 .isInstanceOf(Catalog.TableNotExistException.class)
-                .hasMessage("Branch %s does not exist.", "default.T$branch_branch2");
+                .hasMessage("Table %s does not exist.", "default.T$branch_branch2");
     }
 
     @Override

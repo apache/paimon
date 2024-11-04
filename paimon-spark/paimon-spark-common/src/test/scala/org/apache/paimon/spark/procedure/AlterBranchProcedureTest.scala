@@ -69,10 +69,13 @@ class AlterBranchProcedureTest extends PaimonSparkTestBase with StreamTest {
           val table = loadTable("T")
           val branchManager = table.branchManager()
 
-          // create branch with snapshot
+          // create branch with tag
+          checkAnswer(
+            spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 's_2', snapshot => 2)"),
+            Row(true) :: Nil)
           checkAnswer(
             spark.sql(
-              "CALL paimon.sys.create_branch(table => 'test.T', branch => 'snapshot_branch', snapshot => 2)"),
+              "CALL paimon.sys.create_branch(table => 'test.T', branch => 'snapshot_branch', tag => 's_2')"),
             Row(true) :: Nil)
           assert(branchManager.branchExists("snapshot_branch"))
 
