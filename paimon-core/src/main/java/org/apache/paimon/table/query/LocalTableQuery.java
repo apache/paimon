@@ -102,7 +102,7 @@ public class LocalTableQuery implements TableQuery {
                 LookupStoreFactory.create(
                         options,
                         new CacheManager(
-                                options.lookupDataCacheMaxMemory(),
+                                options.lookupCacheMaxMemory(),
                                 options.lookupIndexCacheMaxMemory()),
                         new RowCompactedSerializer(keyType).createSliceComparator());
 

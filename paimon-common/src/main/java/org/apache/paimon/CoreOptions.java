@@ -909,18 +909,18 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Spill compression for lookup cache, currently zstd, none, lz4 and lzo are supported.");
 
-    public static final ConfigOption<MemorySize> LOOKUP_DATA_CACHE_MAX_MEMORY_SIZE =
-            key("lookup.data-cache-max-memory-size")
+    public static final ConfigOption<MemorySize> LOOKUP_CACHE_MAX_MEMORY_SIZE =
+            key("lookup.cache-max-memory-size")
                     .memoryType()
                     .defaultValue(MemorySize.parse("256 mb"))
-                    .withFallbackKeys("lookup.cache-max-memory-size")
-                    .withDescription("Max memory size for lookup data cache.");
+                    .withDescription("Max memory size for lookup cache.");
 
-    public static final ConfigOption<MemorySize> LOOKUP_INDEX_CACHE_MAX_MEMORY_SIZE =
-            key("lookup.index-cache-max-memory-size")
-                    .memoryType()
-                    .defaultValue(MemorySize.parse("64 mb"))
-                    .withDescription("Max memory size for lookup index cache.");
+    public static final ConfigOption<Double> LOOKUP_CACHE_HIGH_PRIO_POOL_RATIO =
+            key("lookup.cache.high-prio-pool-ratio")
+                    .doubleType()
+                    .defaultValue(0.25)
+                    .withDescription(
+                            "The fraction of cache memory that is reserved for high-priority data like index, filter.");
 
     public static final ConfigOption<Boolean> LOOKUP_CACHE_BLOOM_FILTER_ENABLED =
             key("lookup.cache.bloom.filter.enabled")
@@ -1835,12 +1835,12 @@ public class CoreOptions implements Serializable {
         return options.get(LOOKUP_LOCAL_FILE_TYPE);
     }
 
-    public MemorySize lookupDataCacheMaxMemory() {
-        return options.get(LOOKUP_DATA_CACHE_MAX_MEMORY_SIZE);
+    public MemorySize lookupCacheMaxMemory() {
+        return options.get(LOOKUP_CACHE_MAX_MEMORY_SIZE);
     }
 
-    public MemorySize lookupIndexCacheMaxMemory() {
-        return options.get(LOOKUP_INDEX_CACHE_MAX_MEMORY_SIZE);
+    public double lookupCacheHighPrioPoolRatio() {
+        return options.get(LOOKUP_CACHE_HIGH_PRIO_POOL_RATIO);
     }
 
     public long targetFileSize(boolean hasPrimaryKey) {

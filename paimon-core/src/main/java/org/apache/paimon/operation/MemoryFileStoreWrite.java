@@ -80,7 +80,7 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
         this.options = options;
         this.cacheManager =
                 new CacheManager(
-                        options.lookupDataCacheMaxMemory(), options.lookupIndexCacheMaxMemory());
+                        options.lookupCacheMaxMemory(), options.lookupCacheHighPrioPoolRatio());
     }
 
     @Override

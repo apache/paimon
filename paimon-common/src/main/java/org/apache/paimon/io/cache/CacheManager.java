@@ -21,6 +21,10 @@ package org.apache.paimon.io.cache;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.utils.Preconditions;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 
@@ -28,6 +32,8 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Cache manager to cache bytes to paged {@link MemorySegment}s. */
 public class CacheManager {
+
+    private static final Logger LOG = LoggerFactory.getLogger(CacheManager.class);
 
     /**
      * Refreshing the cache comes with some costs, so not every time we visit the CacheManager, but
@@ -42,19 +48,34 @@ public class CacheManager {
 
     @VisibleForTesting
     public CacheManager(MemorySize maxMemorySize) {
-        this(Cache.CacheType.GUAVA, maxMemorySize, maxMemorySize);
+        this(Cache.CacheType.GUAVA, maxMemorySize, 0);
     }
 
-    public CacheManager(MemorySize dataMaxMemorySize, MemorySize indexMaxMemorySize) {
-        this(Cache.CacheType.GUAVA, dataMaxMemorySize, indexMaxMemorySize);
+    public CacheManager(MemorySize dataMaxMemorySize, double highPrioPoolRatio) {
+        this(Cache.CacheType.GUAVA, dataMaxMemorySize, highPrioPoolRatio);
     }
 
     public CacheManager(
-            Cache.CacheType cacheType, MemorySize maxMemorySize, MemorySize indexMaxMemorySize) {
-        this.dataCache = CacheBuilder.newBuilder(cacheType).maximumWeight(maxMemorySize).build();
-        this.indexCache =
-                CacheBuilder.newBuilder(cacheType).maximumWeight(indexMaxMemorySize).build();
+            Cache.CacheType cacheType, MemorySize maxMemorySize, double highPrioPoolRatio) {
+        Preconditions.checkArgument(
+                highPrioPoolRatio >= 0 && highPrioPoolRatio < 1,
+                "The high priority pool ratio should in the range [0, 1).");
+        MemorySize indexCacheSize =
+                MemorySize.ofBytes((long) (maxMemorySize.getBytes() * highPrioPoolRatio));
+        MemorySize dataCacheSize =
+                MemorySize.ofBytes((long) (maxMemorySize.getBytes() * (1 - highPrioPoolRatio)));
+        this.dataCache = CacheBuilder.newBuilder(cacheType).maximumWeight(dataCacheSize).build();
+        if (highPrioPoolRatio == 0) {
+            this.indexCache = dataCache;
+        } else {
+            this.indexCache =
+                    CacheBuilder.newBuilder(cacheType).maximumWeight(indexCacheSize).build();
+        }
         this.fileReadCount = 0;
+        LOG.info(
+                "Initialize cache manager with data cache of {} and index cache of {}.",
+                dataCacheSize,
+                indexCacheSize);
     }
 
     @VisibleForTesting

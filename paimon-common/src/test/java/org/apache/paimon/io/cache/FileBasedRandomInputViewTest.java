@@ -82,9 +82,7 @@ public class FileBasedRandomInputViewTest {
         }
 
         File file = writeFile(bytes);
-        CacheManager cacheManager =
-                new CacheManager(
-                        cacheType, MemorySize.ofKibiBytes(128), MemorySize.ofKibiBytes(128));
+        CacheManager cacheManager = new CacheManager(cacheType, MemorySize.ofKibiBytes(128), 0.25);
         FileBasedRandomInputView view =
                 new FileBasedRandomInputView(
                         PageFileInput.create(file, 1024, null, 0, null), cacheManager);
