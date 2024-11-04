@@ -1,9 +1,9 @@
 ---
-title: "Query"
+title: "Query Performance"
 weight: 3
 type: docs
 aliases:
-- /append-table/query.html
+- /append-table/query-performance.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,7 +24,7 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Query
+# Query Performance
 
 ## Data Skipping By Order
 
@@ -56,8 +56,6 @@ multiple columns.
 
 Different file index may be efficient in different scenario. For example bloom filter may speed up query in point lookup
 scenario. Using a bitmap may consume more space but can result in greater accuracy.
-
-Currently, file index is only supported in append-only table.
 
 `Bloom Filter`:
 * `file-index.bloom-filter.columns`: specify the columns that need bloom filter index.
