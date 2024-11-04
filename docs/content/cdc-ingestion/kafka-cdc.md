@@ -63,6 +63,10 @@ If a message in a Kafka topic is a change event captured from another database u
          <td><a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/json/">JSON</a></td>
         <td>True</td>
         </tr>
+        <tr>
+         <td><a href="https://docs.aws.amazon.com/dms/latest/userguide/Welcome.html">aws-dms-json</a></td>
+        <td>True</td>
+        </tr>
     </tbody>
 </table>
 
