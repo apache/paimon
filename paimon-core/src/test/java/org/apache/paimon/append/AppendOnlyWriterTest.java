@@ -522,7 +522,9 @@ public class AppendOnlyWriterTest {
                 new Path(tempDir + "/dt=" + PART + "/bucket-0"),
                 CoreOptions.FILE_FORMAT.defaultValue().toString(),
                 CoreOptions.DATA_FILE_PREFIX.defaultValue(),
-                CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue());
+                CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                CoreOptions.FILE_COMPRESSION.defaultValue());
     }
 
     private AppendOnlyWriter createEmptyWriter(long targetFileSize) {
