@@ -217,7 +217,7 @@ public class SchemasTable implements ReadonlyTable {
                 return this;
             }
 
-            String leafName = "tag_name";
+            String leafName = "schema_id";
             if (predicate instanceof CompoundPredicate) {
                 CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
                 if ((compoundPredicate.function()) instanceof And) {
