@@ -71,8 +71,10 @@ public class RecordLevelExpire {
             throw new IllegalArgumentException(
                     String.format(
                             "The record level time field type should be one of SECONDS_INT, SECONDS_LONG, MILLIS_LONG or TIMESTAMP, "
-                                    + "but time field type is %s, field type is %s.",
-                            timeFieldType, field.type()));
+                                    + "but time field type is %s, field type is %s. You can specify the type through the config '%s'.",
+                            timeFieldType,
+                            field.type(),
+                            CoreOptions.RECORD_LEVEL_TIME_FIELD_TYPE.key()));
         }
 
         return new RecordLevelExpire(
