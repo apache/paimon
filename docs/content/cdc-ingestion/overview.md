@@ -3,7 +3,7 @@ title: "Overview"
 weight: 1
 type: docs
 aliases:
-- /flink/cdc-ingestion/overview.html
+- /cdc-ingestion/overview.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
