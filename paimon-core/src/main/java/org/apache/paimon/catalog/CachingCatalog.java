@@ -126,6 +126,7 @@ public class CachingCatalog extends DelegateCatalog {
                                 .softValues()
                                 .executor(Runnable::run)
                                 .expireAfterAccess(expirationInterval)
+                                .weigher(this::weigh)
                                 .maximumWeight(cachedPartitionMaxNum)
                                 .ticker(ticker)
                                 .build();
@@ -277,6 +278,10 @@ public class CachingCatalog extends DelegateCatalog {
         return partitionCache != null
                 && table instanceof FileStoreTable
                 && !table.partitionKeys().isEmpty();
+    }
+
+    private int weigh(Identifier identifier, List<PartitionEntry> partitions) {
+        return partitions.size();
     }
 
     @Override
