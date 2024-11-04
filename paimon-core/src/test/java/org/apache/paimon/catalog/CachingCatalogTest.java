@@ -242,10 +242,11 @@ class CachingCatalogTest extends CatalogTestBase {
                         "");
         catalog.createTable(tableIdent, schema, false);
         List<PartitionEntry> partitionEntryList = catalog.getPartitions(tableIdent);
-        assertThat(catalog.partitionCache().asMap().containsKey(tableIdent));
+        assertThat(catalog.partitionCache().asMap()).containsKey(tableIdent);
         List<PartitionEntry> partitionEntryListFromCache =
                 catalog.partitionCache().getIfPresent(tableIdent);
-        assertThat(partitionEntryListFromCache.containsAll(partitionEntryList));
+        assertThat(partitionEntryListFromCache).isNotNull();
+        assertThat(partitionEntryListFromCache).containsAll(partitionEntryList);
     }
 
     @Test

@@ -65,7 +65,7 @@ public class CachingCatalog extends DelegateCatalog {
     protected final Cache<Identifier, Table> tableCache;
     protected final Cache<Identifier, List<PartitionEntry>> partitionCache;
     @Nullable protected final SegmentsCache<Path> manifestCache;
-    private final long partitionMaxNum;
+    private final long cachedPartitionMaxNum;
 
     public CachingCatalog(Catalog wrapped) {
         this(
@@ -81,13 +81,13 @@ public class CachingCatalog extends DelegateCatalog {
             Duration expirationInterval,
             MemorySize manifestMaxMemory,
             long manifestCacheThreshold,
-            long partitionMaxNum) {
+            long cachedPartitionMaxNum) {
         this(
                 wrapped,
                 expirationInterval,
                 manifestMaxMemory,
                 manifestCacheThreshold,
-                partitionMaxNum,
+                cachedPartitionMaxNum,
                 Ticker.systemTicker());
     }
 
@@ -96,7 +96,7 @@ public class CachingCatalog extends DelegateCatalog {
             Duration expirationInterval,
             MemorySize manifestMaxMemory,
             long manifestCacheThreshold,
-            long partitionMaxNum,
+            long cachedPartitionMaxNum,
             Ticker ticker) {
         super(wrapped);
         if (expirationInterval.isZero() || expirationInterval.isNegative()) {
@@ -127,7 +127,7 @@ public class CachingCatalog extends DelegateCatalog {
                         .ticker(ticker)
                         .build();
         this.manifestCache = SegmentsCache.create(manifestMaxMemory, manifestCacheThreshold);
-        this.partitionMaxNum = partitionMaxNum;
+        this.cachedPartitionMaxNum = cachedPartitionMaxNum;
     }
 
     public static Catalog tryToCreate(Catalog catalog, Options options) {
@@ -246,7 +246,7 @@ public class CachingCatalog extends DelegateCatalog {
 
     public List<PartitionEntry> getPartitions(Identifier identifier) throws TableNotExistException {
         Table table = this.getTable(identifier);
-        if (enablePartitionCache(table)) {
+        if (partitionCacheEnabled(table)) {
             List<PartitionEntry> partitions;
             partitions = partitionCache.getIfPresent(identifier);
             if (partitions == null || partitions.isEmpty()) {
@@ -262,15 +262,15 @@ public class CachingCatalog extends DelegateCatalog {
         Table table = this.getTable(identifier);
         List<PartitionEntry> partitions =
                 ((FileStoreTable) table).newSnapshotReader().partitionEntries();
-        if (enablePartitionCache(table)
+        if (partitionCacheEnabled(table)
                 && partitionCache.asMap().values().stream().mapToInt(List::size).sum()
-                        < this.partitionMaxNum) {
+                        < this.cachedPartitionMaxNum) {
             partitionCache.put(identifier, partitions);
         }
         return partitions;
     }
 
-    private boolean enablePartitionCache(Table table) {
+    private boolean partitionCacheEnabled(Table table) {
         return partitionCache != null
                 && table instanceof FileStoreTable
                 && !table.partitionKeys().isEmpty();
