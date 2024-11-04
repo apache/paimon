@@ -211,7 +211,8 @@ public class FilesTableTest extends TableTestBase {
                                             maxCol1, maxKey, partition1, partition2)),
                             file.minSequenceNumber(),
                             file.maxSequenceNumber(),
-                            file.creationTime()));
+                            file.creationTime(),
+                            BinaryString.fromString(file.fileSource().get().toString())));
         }
         return expectedRow;
     }
