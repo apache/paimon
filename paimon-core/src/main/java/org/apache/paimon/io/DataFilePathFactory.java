@@ -39,18 +39,24 @@ public class DataFilePathFactory {
     private final String formatIdentifier;
     private final String dataFilePrefix;
     private final String changelogFilePrefix;
+    private final boolean fileSuffixIncludeCompression;
+    private final String fileCompression;
 
     public DataFilePathFactory(
             Path parent,
             String formatIdentifier,
             String dataFilePrefix,
-            String changelogFilePrefix) {
+            String changelogFilePrefix,
+            boolean fileSuffixIncludeCompression,
+            String fileCompression) {
         this.parent = parent;
         this.uuid = UUID.randomUUID().toString();
         this.pathCount = new AtomicInteger(0);
         this.formatIdentifier = formatIdentifier;
         this.dataFilePrefix = dataFilePrefix;
         this.changelogFilePrefix = changelogFilePrefix;
+        this.fileSuffixIncludeCompression = fileSuffixIncludeCompression;
+        this.fileCompression = fileCompression;
     }
 
     public Path newPath() {
@@ -62,7 +68,13 @@ public class DataFilePathFactory {
     }
 
     private Path newPath(String prefix) {
-        String name = prefix + uuid + "-" + pathCount.getAndIncrement() + "." + formatIdentifier;
+        String extension;
+        if (fileSuffixIncludeCompression) {
+            extension = "." + fileCompression + "." + formatIdentifier;
+        } else {
+            extension = "." + formatIdentifier;
+        }
+        String name = prefix + uuid + "-" + pathCount.getAndIncrement() + extension;
         return new Path(parent, name);
     }
 
