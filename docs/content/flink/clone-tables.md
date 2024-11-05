@@ -58,14 +58,14 @@ Example: Clone `test_db.test_table` from source warehouse to target warehouse.
 
 ```sql
 CALL sys.clone(
-    warehouse => 's3:///path/to/warehouse_source`,
-    `database` => 'test_db',
-    `table` => 'test_table', 
-    catalog_conf => 's3.endpoint=https://****.com;s3.access-key=*****;s3.secret-key=*****',
-    target_warehouse => 's3:///path/to/warehouse_target',
-    target_database => 'test_db',
-    target_table => 'test_table',
-    target_catalog_conf => 's3.endpoint=https://****.com;s3.access-key=*****;s3.secret-key=*****'
+    'warehouse' => 's3:///path/to/warehouse_source',
+    'database' => 'test_db',
+    'table' => 'test_table',
+    'catalog_conf' => 's3.endpoint=https://****.com;s3.access-key=*****;s3.secret-key=*****',
+    'target_warehouse' => 's3:///path/to/warehouse_target',
+    'target_database' => 'test_db',
+    'target_table' => 'test_table',
+    'target_catalog_conf' => 's3.endpoint=https://****.com;s3.access-key=*****;s3.secret-key=*****'
 );
 ```
 
