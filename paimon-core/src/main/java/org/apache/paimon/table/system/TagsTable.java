@@ -243,7 +243,7 @@ public class TagsTable implements ReadonlyTable {
                         for (Predicate leaf : children) {
                             if (leaf instanceof LeafPredicate
                                     && (((LeafPredicate) leaf).function() instanceof Equal
-                                            && ((LeafPredicate) predicate).literals().get(0)
+                                            && ((LeafPredicate) leaf).literals().get(0)
                                                     instanceof BinaryString)
                                     && predicate
                                                     .visit(LeafPredicateExtractor.INSTANCE)
