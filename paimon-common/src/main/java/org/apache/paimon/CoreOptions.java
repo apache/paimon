@@ -916,7 +916,7 @@ public class CoreOptions implements Serializable {
                     .withDescription("Max memory size for lookup cache.");
 
     public static final ConfigOption<Double> LOOKUP_CACHE_HIGH_PRIO_POOL_RATIO =
-            key("lookup.cache.high-prio-pool-ratio")
+            key("lookup.cache.high-priority-pool-ratio")
                     .doubleType()
                     .defaultValue(0.25)
                     .withDescription(

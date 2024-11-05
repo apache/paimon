@@ -51,21 +51,21 @@ public class CacheManager {
         this(Cache.CacheType.GUAVA, maxMemorySize, 0);
     }
 
-    public CacheManager(MemorySize dataMaxMemorySize, double highPrioPoolRatio) {
-        this(Cache.CacheType.GUAVA, dataMaxMemorySize, highPrioPoolRatio);
+    public CacheManager(MemorySize dataMaxMemorySize, double highPriorityPoolRatio) {
+        this(Cache.CacheType.GUAVA, dataMaxMemorySize, highPriorityPoolRatio);
     }
 
     public CacheManager(
-            Cache.CacheType cacheType, MemorySize maxMemorySize, double highPrioPoolRatio) {
+            Cache.CacheType cacheType, MemorySize maxMemorySize, double highPriorityPoolRatio) {
         Preconditions.checkArgument(
-                highPrioPoolRatio >= 0 && highPrioPoolRatio < 1,
+                highPriorityPoolRatio >= 0 && highPriorityPoolRatio < 1,
                 "The high priority pool ratio should in the range [0, 1).");
         MemorySize indexCacheSize =
-                MemorySize.ofBytes((long) (maxMemorySize.getBytes() * highPrioPoolRatio));
+                MemorySize.ofBytes((long) (maxMemorySize.getBytes() * highPriorityPoolRatio));
         MemorySize dataCacheSize =
-                MemorySize.ofBytes((long) (maxMemorySize.getBytes() * (1 - highPrioPoolRatio)));
+                MemorySize.ofBytes((long) (maxMemorySize.getBytes() * (1 - highPriorityPoolRatio)));
         this.dataCache = CacheBuilder.newBuilder(cacheType).maximumWeight(dataCacheSize).build();
-        if (highPrioPoolRatio == 0) {
+        if (highPriorityPoolRatio == 0) {
             this.indexCache = dataCache;
         } else {
             this.indexCache =

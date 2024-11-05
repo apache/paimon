@@ -60,9 +60,9 @@ public class BlockCache implements Closeable {
     }
 
     public MemorySegment getBlock(
-            long position, int length, Function<byte[], byte[]> decompressFunc, boolean index) {
+            long position, int length, Function<byte[], byte[]> decompressFunc, boolean isIndex) {
 
-        CacheKey cacheKey = CacheKey.forPosition(file, position, length, index);
+        CacheKey cacheKey = CacheKey.forPosition(file, position, length, isIndex);
 
         SegmentContainer container = blocks.get(cacheKey);
         if (container == null || container.getAccessCount() == CacheManager.REFRESH_COUNT) {
