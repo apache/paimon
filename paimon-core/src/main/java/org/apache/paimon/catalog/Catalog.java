@@ -300,14 +300,6 @@ public interface Catalog extends AutoCloseable {
     List<PartitionEntry> listPartitions(Identifier identifier) throws TableNotExistException;
 
     /**
-     * Refresh cached partitions of the table.
-     *
-     * @param identifier path of the table to refresh partitions
-     * @throws TableNotExistException if the table does not exist
-     */
-    default void refreshPartitions(Identifier identifier) throws TableNotExistException {}
-
-    /**
      * Modify an existing table from a {@link SchemaChange}.
      *
      * <p>NOTE: System tables can not be altered.
