@@ -32,12 +32,9 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
 
@@ -56,7 +53,6 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.time.Duration;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -66,7 +62,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
@@ -93,9 +88,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private final List<String> projectFields;
     private final List<String> joinKeys;
     @Nullable private final Predicate predicate;
-
-    private final List<Pair<Long, Long>> timePeriodsBlacklist;
-    private long nextBlacklistCheckTime;
+    private final RefreshBlacklist refreshBlacklist;
 
     private transient File path;
     private transient LookupTable lookupTable;
@@ -142,44 +135,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
         this.predicate = predicate;
 
-        this.timePeriodsBlacklist =
-                parseTimePeriodsBlacklist(
+        this.refreshBlacklist =
+                new RefreshBlacklist(
                         table.options().get(LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST.key()));
-        this.nextBlacklistCheckTime = -1;
-    }
-
-    private List<Pair<Long, Long>> parseTimePeriodsBlacklist(String blacklist) {
-        if (StringUtils.isNullOrWhitespaceOnly(blacklist)) {
-            return Collections.emptyList();
-        }
-        String[] timePeriods = blacklist.split(",");
-        List<Pair<Long, Long>> result = new ArrayList<>();
-        for (String period : timePeriods) {
-            String[] times = period.split("->");
-            if (times.length != 2) {
-                throw new IllegalArgumentException(
-                        String.format("Incorrect time periods format: [%s].", blacklist));
-            }
-
-            long left = parseToMillis(times[0]);
-            long right = parseToMillis(times[1]);
-            if (left > right) {
-                throw new IllegalArgumentException(
-                        String.format("Incorrect time period: [%s->%s].", times[0], times[1]));
-            }
-            result.add(Pair.of(left, right));
-        }
-        return result;
-    }
-
-    private long parseToMillis(String dateTime) {
-        try {
-            return DateTimeUtils.parseTimestampData(dateTime + ":00", 3, TimeZone.getDefault())
-                    .getMillisecond();
-        } catch (DateTimeParseException e) {
-            throw new IllegalArgumentException(
-                    String.format("Date time format error: [%s].", dateTime), e);
-        }
     }
 
     public void open(FunctionContext context) throws Exception {
@@ -326,19 +284,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     @VisibleForTesting
     void tryRefresh() throws Exception {
         // 1. check if this time is in black list
-        long currentTimeMillis = System.currentTimeMillis();
-        if (nextBlacklistCheckTime > currentTimeMillis) {
-            return;
-        }
-
-        Pair<Long, Long> period = getFirstTimePeriods(timePeriodsBlacklist, currentTimeMillis);
-        if (period != null) {
-            LOG.info(
-                    "Current time {} is in black list {}-{}, so try to refresh cache next time.",
-                    currentTimeMillis,
-                    period.getLeft(),
-                    period.getRight());
-            nextBlacklistCheckTime = period.getRight() + 1;
+        if (!refreshBlacklist.canRefresh()) {
             return;
         }
 
@@ -368,16 +314,6 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         }
     }
 
-    @Nullable
-    private Pair<Long, Long> getFirstTimePeriods(List<Pair<Long, Long>> timePeriods, long time) {
-        for (Pair<Long, Long> period : timePeriods) {
-            if (period.getLeft() <= time && time <= period.getRight()) {
-                return period;
-            }
-        }
-        return null;
-    }
-
     private boolean shouldRefreshLookupTable() {
         if (nextRefreshTime > System.currentTimeMillis()) {
             return false;
@@ -399,7 +335,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     @VisibleForTesting
     long nextBlacklistCheckTime() {
-        return nextBlacklistCheckTime;
+        return refreshBlacklist.nextBlacklistCheckTime();
     }
 
     @Override
