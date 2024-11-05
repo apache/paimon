@@ -106,31 +106,31 @@ public class CdcRecordStoreWriteOperatorTest {
 
         // check that records with compatible schema can be processed immediately
 
-        Map<String, String> fields = new HashMap<>();
-        fields.put("pt", "0");
-        fields.put("k", "1");
-        fields.put("v", "10");
-        CdcRecord expected = new CdcRecord(RowKind.INSERT, fields);
+        Map<String, String> data = new HashMap<>();
+        data.put("pt", "0");
+        data.put("k", "1");
+        data.put("v", "10");
+        CdcRecord expected = new CdcRecord(RowKind.INSERT, data);
         runner.offer(expected);
         CdcRecord actual = runner.take();
         assertThat(actual).isEqualTo(expected);
 
-        fields = new HashMap<>();
-        fields.put("pt", "0");
-        fields.put("k", "2");
-        expected = new CdcRecord(RowKind.INSERT, fields);
+        data = new HashMap<>();
+        data.put("pt", "0");
+        data.put("k", "2");
+        expected = new CdcRecord(RowKind.INSERT, data);
         runner.offer(expected);
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
 
-        // check that records with new fields should be processed after schema is updated
+        // check that records with new data should be processed after schema is updated
 
-        fields = new HashMap<>();
-        fields.put("pt", "0");
-        fields.put("k", "3");
-        fields.put("v", "30");
-        fields.put("v2", "300");
-        expected = new CdcRecord(RowKind.INSERT, fields);
+        data = new HashMap<>();
+        data.put("pt", "0");
+        data.put("k", "3");
+        data.put("v", "30");
+        data.put("v2", "300");
+        expected = new CdcRecord(RowKind.INSERT, data);
         runner.offer(expected);
         actual = runner.poll(1);
         assertThat(actual).isNull();
@@ -172,26 +172,26 @@ public class CdcRecordStoreWriteOperatorTest {
 
         // check that records with compatible schema can be processed immediately
 
-        Map<String, String> fields = new HashMap<>();
-        fields.put("k", "1");
-        fields.put("v1", "10");
-        fields.put("v2", "0.625");
-        fields.put("v3", "one");
-        fields.put("v4", "b_one");
-        CdcRecord expected = new CdcRecord(RowKind.INSERT, fields);
+        Map<String, String> data = new HashMap<>();
+        data.put("k", "1");
+        data.put("v1", "10");
+        data.put("v2", "0.625");
+        data.put("v3", "one");
+        data.put("v4", "b_one");
+        CdcRecord expected = new CdcRecord(RowKind.INSERT, data);
         runner.offer(expected);
         CdcRecord actual = runner.take();
         assertThat(actual).isEqualTo(expected);
 
-        // check that records with new fields should be processed after schema is updated
+        // check that records with new data should be processed after schema is updated
 
         // int -> bigint
 
-        fields = new HashMap<>();
-        fields.put("k", "2");
-        fields.put("v1", "12345678987654321");
-        fields.put("v2", "0.25");
-        expected = new CdcRecord(RowKind.INSERT, fields);
+        data = new HashMap<>();
+        data.put("k", "2");
+        data.put("v1", "12345678987654321");
+        data.put("v2", "0.25");
+        expected = new CdcRecord(RowKind.INSERT, data);
         runner.offer(expected);
         actual = runner.poll(1);
         assertThat(actual).isNull();
@@ -203,11 +203,11 @@ public class CdcRecordStoreWriteOperatorTest {
 
         // float -> double
 
-        fields = new HashMap<>();
-        fields.put("k", "3");
-        fields.put("v1", "100");
-        fields.put("v2", "1.0000000000009095");
-        expected = new CdcRecord(RowKind.INSERT, fields);
+        data = new HashMap<>();
+        data.put("k", "3");
+        data.put("v1", "100");
+        data.put("v2", "1.0000000000009095");
+        expected = new CdcRecord(RowKind.INSERT, data);
         runner.offer(expected);
         actual = runner.poll(1);
         assertThat(actual).isNull();
@@ -218,11 +218,11 @@ public class CdcRecordStoreWriteOperatorTest {
 
         // varchar(5) -> varchar(10)
 
-        fields = new HashMap<>();
-        fields.put("k", "4");
-        fields.put("v1", "40");
-        fields.put("v3", "long four");
-        expected = new CdcRecord(RowKind.INSERT, fields);
+        data = new HashMap<>();
+        data.put("k", "4");
+        data.put("v1", "40");
+        data.put("v3", "long four");
+        expected = new CdcRecord(RowKind.INSERT, data);
         runner.offer(expected);
         actual = runner.poll(1);
         assertThat(actual).isNull();
@@ -233,11 +233,11 @@ public class CdcRecordStoreWriteOperatorTest {
 
         // varbinary(5) -> varbinary(10)
 
-        fields = new HashMap<>();
-        fields.put("k", "5");
-        fields.put("v1", "50");
-        fields.put("v4", "long five~");
-        expected = new CdcRecord(RowKind.INSERT, fields);
+        data = new HashMap<>();
+        data.put("k", "5");
+        data.put("v1", "50");
+        data.put("v4", "long five~");
+        expected = new CdcRecord(RowKind.INSERT, data);
         runner.offer(expected);
         actual = runner.poll(1);
         assertThat(actual).isNull();
