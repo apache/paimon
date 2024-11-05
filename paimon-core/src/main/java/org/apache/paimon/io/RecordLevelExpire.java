@@ -20,11 +20,11 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
-import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.BigIntType;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
@@ -33,16 +33,15 @@ import org.apache.paimon.types.TimestampType;
 import javax.annotation.Nullable;
 
 import java.time.Duration;
+import java.util.function.Function;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A factory to create {@link RecordReader} expires records by time. */
 public class RecordLevelExpire {
 
-    private final int timeFieldIndex;
     private final int expireTime;
-    private final CoreOptions.TimeFieldType timeFieldType;
-    private final DataField rawDataField;
+    private final Function<InternalRow, Integer> fieldGetter;
 
     @Nullable
     public static RecordLevelExpire create(CoreOptions options, RowType rowType) {
@@ -65,46 +64,14 @@ public class RecordLevelExpire {
                             "Can not find time field %s for record level expire.", timeFieldName));
         }
 
-        CoreOptions.TimeFieldType timeFieldType = options.recordLevelTimeFieldType();
-        DataField field = rowType.getField(timeFieldName);
-        if (!isValidateFieldType(timeFieldType, field)) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "The record level time field type should be one of SECONDS_INT, SECONDS_LONG, MILLIS_LONG or TIMESTAMP, "
-                                    + "but time field type is %s, field type is %s. You can specify the type through the config '%s'.",
-                            timeFieldType,
-                            field.type(),
-                            CoreOptions.RECORD_LEVEL_TIME_FIELD_TYPE.key()));
-        }
-
-        return new RecordLevelExpire(
-                fieldIndex, (int) expireTime.getSeconds(), timeFieldType, field);
+        DataType dataType = rowType.getField(timeFieldName).type();
+        Function<InternalRow, Integer> fieldGetter = createFieldGetter(dataType, fieldIndex);
+        return new RecordLevelExpire((int) expireTime.getSeconds(), fieldGetter);
     }
 
-    private static boolean isValidateFieldType(
-            CoreOptions.TimeFieldType timeFieldType, DataField field) {
-        DataType dataType = field.type();
-        return ((timeFieldType == CoreOptions.TimeFieldType.SECONDS_INT
-                        && dataType instanceof IntType)
-                || (timeFieldType == CoreOptions.TimeFieldType.SECONDS_LONG
-                        && dataType instanceof BigIntType)
-                || (timeFieldType == CoreOptions.TimeFieldType.MILLIS_LONG
-                        && dataType instanceof BigIntType)
-                || (timeFieldType == CoreOptions.TimeFieldType.TIMESTAMP
-                        && dataType instanceof TimestampType)
-                || (timeFieldType == CoreOptions.TimeFieldType.TIMESTAMP
-                        && dataType instanceof LocalZonedTimestampType));
-    }
-
-    private RecordLevelExpire(
-            int timeFieldIndex,
-            int expireTime,
-            CoreOptions.TimeFieldType timeFieldType,
-            DataField rawDataField) {
-        this.timeFieldIndex = timeFieldIndex;
+    private RecordLevelExpire(int expireTime, Function<InternalRow, Integer> fieldGetter) {
         this.expireTime = expireTime;
-        this.timeFieldType = timeFieldType;
-        this.rawDataField = rawDataField;
+        this.fieldGetter = fieldGetter;
     }
 
     public FileReaderFactory<KeyValue> wrap(FileReaderFactory<KeyValue> readerFactory) {
@@ -113,54 +80,38 @@ public class RecordLevelExpire {
 
     private RecordReader<KeyValue> wrap(RecordReader<KeyValue> reader) {
         int currentTime = (int) (System.currentTimeMillis() / 1000);
-        return reader.filter(
-                kv -> {
-                    checkArgument(
-                            !kv.value().isNullAt(timeFieldIndex),
-                            "Time field for record-level expire should not be null.");
-                    final int recordTime;
-                    switch (timeFieldType) {
-                        case SECONDS_INT:
-                            recordTime = kv.value().getInt(timeFieldIndex);
-                            break;
-                        case SECONDS_LONG:
-                            recordTime = (int) kv.value().getLong(timeFieldIndex);
-                            break;
-                        case MILLIS_LONG:
-                            recordTime = (int) (kv.value().getLong(timeFieldIndex) / 1000);
-                            break;
-                        case TIMESTAMP:
-                            Timestamp timestamp;
-                            if (rawDataField.type() instanceof TimestampType) {
-                                TimestampType timestampType = (TimestampType) rawDataField.type();
-                                timestamp =
-                                        kv.value()
-                                                .getTimestamp(
-                                                        timeFieldIndex,
-                                                        timestampType.getPrecision());
-                            } else if (rawDataField.type() instanceof LocalZonedTimestampType) {
-                                LocalZonedTimestampType timestampType =
-                                        (LocalZonedTimestampType) rawDataField.type();
-                                timestamp =
-                                        kv.value()
-                                                .getTimestamp(
-                                                        timeFieldIndex,
-                                                        timestampType.getPrecision());
-                            } else {
-                                throw new UnsupportedOperationException(
-                                        "Unsupported timestamp type: " + rawDataField.type());
-                            }
-                            recordTime = (int) (timestamp.getMillisecond() / 1000);
-                            break;
-                        default:
-                            String msg =
-                                    String.format(
-                                            "type %s not support in %s",
-                                            timeFieldType,
-                                            CoreOptions.TimeFieldType.class.getName());
-                            throw new IllegalArgumentException(msg);
-                    }
-                    return currentTime <= recordTime + expireTime;
-                });
+        return reader.filter(kv -> currentTime <= fieldGetter.apply(kv.value()) + expireTime);
+    }
+
+    private static Function<InternalRow, Integer> createFieldGetter(
+            DataType dataType, int fieldIndex) {
+        final Function<InternalRow, Integer> fieldGetter;
+        if (dataType instanceof IntType) {
+            fieldGetter = row -> row.getInt(fieldIndex);
+        } else if (dataType instanceof BigIntType) {
+            fieldGetter =
+                    row -> {
+                        long value = row.getLong(fieldIndex);
+                        // If it is milliseconds, convert it to seconds.
+                        return (int) (value >= 1_000_000_000_000L ? value / 1000 : value);
+                    };
+        } else if (dataType instanceof TimestampType
+                || dataType instanceof LocalZonedTimestampType) {
+            int precision = DataTypeChecks.getPrecision(dataType);
+            fieldGetter =
+                    row -> (int) (row.getTimestamp(fieldIndex, precision).getMillisecond() / 1000);
+        } else {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "The record level time field type should be one of INT, BIGINT, or TIMESTAMP, but field type is %s.",
+                            dataType));
+        }
+
+        return row -> {
+            checkArgument(
+                    !row.isNullAt(fieldIndex),
+                    "Time field for record-level expire should not be null.");
+            return fieldGetter.apply(row);
+        };
     }
 }
