@@ -94,10 +94,7 @@ public class BranchManager {
 
         try {
             TableSchema latestSchema = schemaManager.latest().get();
-            fileIO.copyFile(
-                    schemaManager.toSchemaPath(latestSchema.id()),
-                    schemaManager.copyWithBranch(branchName).toSchemaPath(latestSchema.id()),
-                    true);
+            copySchemasToBranch(branchName, latestSchema.id());
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
@@ -123,10 +120,7 @@ public class BranchManager {
                     snapshotManager.snapshotPath(snapshot.id()),
                     snapshotManager.copyWithBranch(branchName).snapshotPath(snapshot.id()),
                     true);
-            fileIO.copyFile(
-                    schemaManager.toSchemaPath(snapshot.schemaId()),
-                    schemaManager.copyWithBranch(branchName).toSchemaPath(snapshot.schemaId()),
-                    true);
+            copySchemasToBranch(branchName, snapshot.schemaId());
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
@@ -248,5 +242,16 @@ public class BranchManager {
                 !branchName.chars().allMatch(Character::isDigit),
                 "Branch name cannot be pure numeric string but is '%s'.",
                 branchName);
+    }
+
+    private void copySchemasToBranch(String branchName, long schemaId) throws IOException {
+        for (int i = 0; i <= schemaId; i++) {
+            if (schemaManager.schemaExists(i)) {
+                fileIO.copyFile(
+                        schemaManager.toSchemaPath(i),
+                        schemaManager.copyWithBranch(branchName).toSchemaPath(i),
+                        true);
+            }
+        }
     }
 }
