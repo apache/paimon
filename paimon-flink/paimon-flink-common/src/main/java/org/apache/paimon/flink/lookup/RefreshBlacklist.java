@@ -25,6 +25,8 @@ import org.apache.paimon.utils.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -40,12 +42,22 @@ public class RefreshBlacklist {
 
     private long nextBlacklistCheckTime;
 
-    public RefreshBlacklist(String blacklist) {
-        this.timePeriodsBlacklist = parseTimePeriodsBlacklist(blacklist);
+    public RefreshBlacklist(List<Pair<Long, Long>> timePeriodsBlacklist) {
+        this.timePeriodsBlacklist = timePeriodsBlacklist;
         this.nextBlacklistCheckTime = -1;
     }
 
-    private List<Pair<Long, Long>> parseTimePeriodsBlacklist(String blacklist) {
+    @Nullable
+    public static RefreshBlacklist create(String blacklist) {
+        List<Pair<Long, Long>> timePeriodsBlacklist = parseTimePeriodsBlacklist(blacklist);
+        if (timePeriodsBlacklist.isEmpty()) {
+            return null;
+        }
+
+        return new RefreshBlacklist(timePeriodsBlacklist);
+    }
+
+    private static List<Pair<Long, Long>> parseTimePeriodsBlacklist(String blacklist) {
         if (StringUtils.isNullOrWhitespaceOnly(blacklist)) {
             return Collections.emptyList();
         }
@@ -69,7 +81,7 @@ public class RefreshBlacklist {
         return result;
     }
 
-    private long parseToMillis(String dateTime) {
+    private static long parseToMillis(String dateTime) {
         try {
             return DateTimeUtils.parseTimestampData(dateTime + ":00", 3, TimeZone.getDefault())
                     .getMillisecond();
