@@ -19,7 +19,7 @@
 package org.apache.spark.sql.catalyst.parser.extensions
 
 import org.apache.paimon.spark.catalyst.plans.logical
-import org.apache.paimon.spark.catalyst.plans.logical.{CreateTagCommand, DeleteTagCommand, PaimonCallArgument, PaimonCallStatement, PaimonNamedArgument, PaimonPositionalArgument, RenameTagCommand, ShowTagsCommand, TagOptions}
+import org.apache.paimon.spark.catalyst.plans.logical.{CreateOrReplaceTagCommand, DeleteTagCommand, PaimonCallArgument, PaimonCallStatement, PaimonNamedArgument, PaimonPositionalArgument, RenameTagCommand, ShowTagsCommand, TagOptions}
 import org.apache.paimon.utils.TimeUtils
 
 import org.antlr.v4.runtime._
@@ -98,31 +98,44 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
     ShowTagsCommand(typedVisit[Seq[String]](ctx.multipartIdentifier))
   }
 
-  /** Create a CREATE TAG logical command. */
-  override def visitCreateTag(ctx: CreateTagContext): CreateTagCommand = withOrigin(ctx) {
-    val tagName = ctx.identifier().getText
-    val tagOptionsContext = Option(ctx.tagOptions())
-    val snapshotId =
-      tagOptionsContext.flatMap(tagOptions => Option(tagOptions.snapshotId())).map(_.getText.toLong)
-    val timeRetainCtx = tagOptionsContext.flatMap(tagOptions => Option(tagOptions.timeRetain()))
-    val timeRetained = if (timeRetainCtx.nonEmpty) {
-      val (number, timeUnit) =
-        timeRetainCtx.map(retain => (retain.number().getText.toLong, retain.timeUnit().getText)).get
-      Option(TimeUtils.parseDuration(number, timeUnit))
-    } else {
-      None
+  /** Create a CREATE OR REPLACE TAG logical command. */
+  override def visitCreateOrReplaceTag(ctx: CreateOrReplaceTagContext): CreateOrReplaceTagCommand =
+    withOrigin(ctx) {
+      val createTagClause = ctx.createReplaceTagClause()
+
+      val tagName = createTagClause.identifier().getText
+      val tagOptionsContext = Option(createTagClause.tagOptions())
+      val snapshotId =
+        tagOptionsContext
+          .flatMap(tagOptions => Option(tagOptions.snapshotId()))
+          .map(_.getText.toLong)
+      val timeRetainCtx = tagOptionsContext.flatMap(tagOptions => Option(tagOptions.timeRetain()))
+      val timeRetained = if (timeRetainCtx.nonEmpty) {
+        val (number, timeUnit) =
+          timeRetainCtx
+            .map(retain => (retain.number().getText.toLong, retain.timeUnit().getText))
+            .get
+        Option(TimeUtils.parseDuration(number, timeUnit))
+      } else {
+        None
+      }
+      val tagOptions = TagOptions(
+        snapshotId,
+        timeRetained
+      )
+
+      val create = createTagClause.CREATE() != null
+      val replace = createTagClause.REPLACE() != null
+      val ifNotExists = createTagClause.EXISTS() != null
+
+      CreateOrReplaceTagCommand(
+        typedVisit[Seq[String]](ctx.multipartIdentifier),
+        tagName,
+        tagOptions,
+        create,
+        replace,
+        ifNotExists)
     }
-    val tagOptions = TagOptions(
-      snapshotId,
-      timeRetained
-    )
-    val ifNotExists = ctx.EXISTS() != null
-    CreateTagCommand(
-      typedVisit[Seq[String]](ctx.multipartIdentifier),
-      tagName,
-      tagOptions,
-      ifNotExists)
-  }
 
   /** Create a DELETE TAG logical command. */
   override def visitDeleteTag(ctx: DeleteTagContext): DeleteTagCommand = withOrigin(ctx) {

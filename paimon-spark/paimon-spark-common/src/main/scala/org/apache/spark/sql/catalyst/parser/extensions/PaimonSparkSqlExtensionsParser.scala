@@ -105,10 +105,12 @@ class PaimonSparkSqlExtensionsParser(delegate: ParserInterface)
   }
 
   private def isTagRefDdl(normalized: String): Boolean = {
-    normalized.startsWith("show tags") || (normalized
-      .startsWith("alter table") && (normalized.contains("create tag") ||
-      normalized.contains("rename tag") ||
-      normalized.contains("delete tag")))
+    normalized.startsWith("show tags") ||
+    (normalized.startsWith("alter table") &&
+      (normalized.contains("create tag") ||
+        normalized.contains("replace tag") ||
+        normalized.contains("rename tag") ||
+        normalized.contains("delete tag")))
   }
 
   protected def parse[T](command: String)(toResult: PaimonSqlExtensionsParser => T): T = {

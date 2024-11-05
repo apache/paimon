@@ -211,8 +211,12 @@ CREATE TABLE my_table_all_as PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 
 ```
 
 ## Tag DDL
-### Create Tag
-Create a tag based on snapshot or retention.
+### Create or replace Tag
+Create or replace a tag syntax with the following options.
+- Create a tag with or without the snapshot id and time retention.
+- Create an existed tag is not failed if using `IF NOT EXISTS` syntax.
+- Update a tag using `REPLACE TAG` or `CREATE OR REPLACE TAG` syntax.
+
 ```sql
 -- create a tag based on the latest snapshot and no retention.
 ALTER TABLE T CREATE TAG `TAG-1`;
@@ -228,6 +232,12 @@ ALTER TABLE T CREATE TAG `TAG-3` AS OF VERSION 1;
 
 -- create a tag based on snapshot-2 and retain it for 12 hour.
 ALTER TABLE T CREATE TAG `TAG-4` AS OF VERSION 2 RETAIN 12 HOURS;
+
+-- replace a existed tag with new snapshot id and new retention
+ALTER TABLE T REPLACE TAG `TAG-4` AS OF VERSION 2 RETAIN 24 HOURS;
+
+-- create or replace a tag, create tag if it not exist, replace tag if it exists.
+ALTER TABLE T CREATE OR REPLACE TAG `TAG-5` AS OF VERSION 2 RETAIN 24 HOURS;
 ```
 
 ### Delete Tag

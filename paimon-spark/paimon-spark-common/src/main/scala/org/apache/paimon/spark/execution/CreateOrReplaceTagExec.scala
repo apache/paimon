@@ -27,11 +27,13 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.connector.catalog.{Identifier, TableCatalog}
 
-case class CreateTagExec(
+case class CreateOrReplaceTagExec(
     catalog: TableCatalog,
     ident: Identifier,
     tagName: String,
     tagOptions: TagOptions,
+    create: Boolean,
+    replace: Boolean,
     ifNotExists: Boolean)
   extends PaimonLeafV2CommandExec {
 
@@ -42,14 +44,27 @@ case class CreateTagExec(
     table.asInstanceOf[SparkTable].getTable match {
       case paimonTable: FileStoreTable =>
         val tagIsExists = paimonTable.tagManager().tagExists(tagName)
-        if (tagIsExists && ifNotExists) {
-          return Nil
-        }
         val timeRetained = tagOptions.timeRetained.orNull
-        if (tagOptions.snapshotId.isEmpty) {
-          paimonTable.createTag(tagName, timeRetained)
+        val snapshotId = tagOptions.snapshotId
+
+        if (create && replace && !tagIsExists) {
+          if (snapshotId.isEmpty) {
+            paimonTable.createTag(tagName, timeRetained)
+          } else {
+            paimonTable.createTag(tagName, snapshotId.get, timeRetained)
+          }
+        } else if (replace) {
+          paimonTable.replaceTag(tagName, snapshotId.get, timeRetained)
         } else {
-          paimonTable.createTag(tagName, tagOptions.snapshotId.get, timeRetained)
+          if (tagIsExists && ifNotExists) {
+            return Nil
+          }
+
+          if (snapshotId.isEmpty) {
+            paimonTable.createTag(tagName, timeRetained)
+          } else {
+            paimonTable.createTag(tagName, snapshotId.get, timeRetained)
+          }
         }
       case t =>
         throw new UnsupportedOperationException(
