@@ -212,7 +212,8 @@ public class FilesTableTest extends TableTestBase {
                             file.minSequenceNumber(),
                             file.maxSequenceNumber(),
                             file.creationTime(),
-                            BinaryString.fromString(file.fileSource().get().toString())));
+                            BinaryString.fromString(
+                                    file.fileSource().map(Object::toString).orElse(null))));
         }
         return expectedRow;
     }
