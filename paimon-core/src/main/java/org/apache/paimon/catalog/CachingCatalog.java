@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaChange;
@@ -52,6 +53,7 @@ import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRATION_INTERVAL
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_MAX_MEMORY;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_MEMORY;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_THRESHOLD;
+import static org.apache.paimon.options.CatalogOptions.CACHE_PARTITION_MAX_NUM;
 import static org.apache.paimon.table.system.SystemTableLoader.SYSTEM_TABLES;
 
 /** A {@link Catalog} to cache databases and tables and manifests. */
@@ -61,26 +63,31 @@ public class CachingCatalog extends DelegateCatalog {
 
     protected final Cache<String, Map<String, String>> databaseCache;
     protected final Cache<Identifier, Table> tableCache;
+    @Nullable protected final Cache<Identifier, List<PartitionEntry>> partitionCache;
     @Nullable protected final SegmentsCache<Path> manifestCache;
+    private final long cachedPartitionMaxNum;
 
     public CachingCatalog(Catalog wrapped) {
         this(
                 wrapped,
                 CACHE_EXPIRATION_INTERVAL_MS.defaultValue(),
                 CACHE_MANIFEST_SMALL_FILE_MEMORY.defaultValue(),
-                CACHE_MANIFEST_SMALL_FILE_THRESHOLD.defaultValue().getBytes());
+                CACHE_MANIFEST_SMALL_FILE_THRESHOLD.defaultValue().getBytes(),
+                CACHE_PARTITION_MAX_NUM.defaultValue());
     }
 
     public CachingCatalog(
             Catalog wrapped,
             Duration expirationInterval,
             MemorySize manifestMaxMemory,
-            long manifestCacheThreshold) {
+            long manifestCacheThreshold,
+            long cachedPartitionMaxNum) {
         this(
                 wrapped,
                 expirationInterval,
                 manifestMaxMemory,
                 manifestCacheThreshold,
+                cachedPartitionMaxNum,
                 Ticker.systemTicker());
     }
 
@@ -89,6 +96,7 @@ public class CachingCatalog extends DelegateCatalog {
             Duration expirationInterval,
             MemorySize manifestMaxMemory,
             long manifestCacheThreshold,
+            long cachedPartitionMaxNum,
             Ticker ticker) {
         super(wrapped);
         if (expirationInterval.isZero() || expirationInterval.isNegative()) {
@@ -111,7 +119,19 @@ public class CachingCatalog extends DelegateCatalog {
                         .expireAfterAccess(expirationInterval)
                         .ticker(ticker)
                         .build();
+        this.partitionCache =
+                cachedPartitionMaxNum == 0
+                        ? null
+                        : Caffeine.newBuilder()
+                                .softValues()
+                                .executor(Runnable::run)
+                                .expireAfterAccess(expirationInterval)
+                                .weigher(this::weigh)
+                                .maximumWeight(cachedPartitionMaxNum)
+                                .ticker(ticker)
+                                .build();
         this.manifestCache = SegmentsCache.create(manifestMaxMemory, manifestCacheThreshold);
+        this.cachedPartitionMaxNum = cachedPartitionMaxNum;
     }
 
     public static Catalog tryToCreate(Catalog catalog, Options options) {
@@ -131,7 +151,8 @@ public class CachingCatalog extends DelegateCatalog {
                 catalog,
                 options.get(CACHE_EXPIRATION_INTERVAL_MS),
                 manifestMaxMemory,
-                manifestThreshold);
+                manifestThreshold,
+                options.get(CACHE_PARTITION_MAX_NUM));
     }
 
     @Override
@@ -225,6 +246,51 @@ public class CachingCatalog extends DelegateCatalog {
             ((FileStoreTable) table).setManifestCache(manifestCache);
         }
         tableCache.put(identifier, table);
+    }
+
+    public List<PartitionEntry> getPartitions(Identifier identifier) throws TableNotExistException {
+        Table table = this.getTable(identifier);
+        if (partitionCacheEnabled(table)) {
+            List<PartitionEntry> partitions;
+            partitions = partitionCache.getIfPresent(identifier);
+            if (partitions == null || partitions.isEmpty()) {
+                partitions = this.refreshPartitions(identifier);
+            }
+            return partitions;
+        }
+        return ((FileStoreTable) table).newSnapshotReader().partitionEntries();
+    }
+
+    public List<PartitionEntry> refreshPartitions(Identifier identifier)
+            throws TableNotExistException {
+        Table table = this.getTable(identifier);
+        List<PartitionEntry> partitions =
+                ((FileStoreTable) table).newSnapshotReader().partitionEntries();
+        if (partitionCacheEnabled(table)
+                && partitionCache.asMap().values().stream().mapToInt(List::size).sum()
+                        < this.cachedPartitionMaxNum) {
+            partitionCache.put(identifier, partitions);
+        }
+        return partitions;
+    }
+
+    private boolean partitionCacheEnabled(Table table) {
+        return partitionCache != null
+                && table instanceof FileStoreTable
+                && !table.partitionKeys().isEmpty();
+    }
+
+    private int weigh(Identifier identifier, List<PartitionEntry> partitions) {
+        return partitions.size();
+    }
+
+    @Override
+    public void dropPartition(Identifier identifier, Map<String, String> partitions)
+            throws TableNotExistException, PartitionNotExistException {
+        wrapped.dropPartition(identifier, partitions);
+        if (partitionCache != null) {
+            partitionCache.invalidate(identifier);
+        }
     }
 
     private class TableInvalidatingRemovalListener implements RemovalListener<Identifier, Table> {
