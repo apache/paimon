@@ -26,29 +26,18 @@ import java.io.IOException;
 /** roaring bitmap aggregate a field of a row. */
 public class FieldRoaringBitmap64Agg extends FieldAggregator {
 
-    public static final String NAME = "rbm64";
-
     private static final long serialVersionUID = 1L;
     private final RoaringBitmap64 roaringBitmapAcc;
     private final RoaringBitmap64 roaringBitmapInput;
 
-    public FieldRoaringBitmap64Agg(VarBinaryType dataType) {
-        super(dataType);
+    public FieldRoaringBitmap64Agg(String name, VarBinaryType dataType) {
+        super(name, dataType);
         this.roaringBitmapAcc = new RoaringBitmap64();
         this.roaringBitmapInput = new RoaringBitmap64();
     }
 
     @Override
-    public String name() {
-        return NAME;
-    }
-
-    @Override
     public Object agg(Object accumulator, Object inputField) {
-        if (accumulator == null && inputField == null) {
-            return null;
-        }
-
         if (accumulator == null || inputField == null) {
             return accumulator == null ? inputField : accumulator;
         }

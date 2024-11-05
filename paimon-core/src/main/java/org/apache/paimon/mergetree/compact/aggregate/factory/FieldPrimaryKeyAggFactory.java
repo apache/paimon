@@ -25,13 +25,16 @@ import org.apache.paimon.types.DataType;
 
 /** Factory for #{@link FieldPrimaryKeyAgg}. */
 public class FieldPrimaryKeyAggFactory implements FieldAggregatorFactory {
+
+    public static final String NAME = "primary-key";
+
     @Override
     public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
-        return new FieldPrimaryKeyAgg(fieldType);
+        return new FieldPrimaryKeyAgg(identifier(), fieldType);
     }
 
     @Override
     public String identifier() {
-        return FieldPrimaryKeyAgg.NAME;
+        return NAME;
     }
 }

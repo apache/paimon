@@ -23,19 +23,12 @@ import org.apache.paimon.types.DataType;
 /** first value aggregate a field of a row. */
 public class FieldFirstValueAgg extends FieldAggregator {
 
-    public static final String NAME = "first_value";
-
     private static final long serialVersionUID = 1L;
 
     private boolean initialized;
 
-    public FieldFirstValueAgg(DataType dataType) {
-        super(dataType);
-    }
-
-    @Override
-    public String name() {
-        return NAME;
+    public FieldFirstValueAgg(String name, DataType dataType) {
+        super(name, dataType);
     }
 
     @Override

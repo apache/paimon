@@ -18,61 +18,22 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.factories.FactoryUtil;
-import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.types.DataType;
-
-import javax.annotation.Nullable;
 
 import java.io.Serializable;
 
 /** abstract class of aggregating a field of a row. */
 public abstract class FieldAggregator implements Serializable {
-    protected DataType fieldType;
 
     private static final long serialVersionUID = 1L;
 
-    public FieldAggregator(DataType dataType) {
+    protected final DataType fieldType;
+    protected final String name;
+
+    public FieldAggregator(String name, DataType dataType) {
+        this.name = name;
         this.fieldType = dataType;
     }
-
-    public static FieldAggregator createFieldAggregator(
-            DataType fieldType,
-            @Nullable String strAgg,
-            boolean ignoreRetract,
-            boolean isPrimaryKey,
-            CoreOptions options,
-            String field) {
-        FieldAggregator fieldAggregator;
-        if (isPrimaryKey) {
-            strAgg = FieldPrimaryKeyAgg.NAME;
-        } else if (strAgg == null) {
-            strAgg = FieldLastNonNullValueAgg.NAME;
-        }
-
-        FieldAggregatorFactory fieldAggregatorFactory =
-                FactoryUtil.discoverFactory(
-                        FieldAggregator.class.getClassLoader(),
-                        FieldAggregatorFactory.class,
-                        strAgg);
-        if (fieldAggregatorFactory == null) {
-            throw new RuntimeException(
-                    String.format(
-                            "Use unsupported aggregation: %s or spell aggregate function incorrectly!",
-                            strAgg));
-        }
-
-        fieldAggregator = fieldAggregatorFactory.create(fieldType, options, field);
-
-        if (ignoreRetract) {
-            fieldAggregator = new FieldIgnoreRetractAgg(fieldAggregator);
-        }
-
-        return fieldAggregator;
-    }
-
-    public abstract String name();
 
     public abstract Object agg(Object accumulator, Object inputField);
 
@@ -89,6 +50,6 @@ public abstract class FieldAggregator implements Serializable {
                         "Aggregate function '%s' does not support retraction,"
                                 + " If you allow this function to ignore retraction messages,"
                                 + " you can configure 'fields.${field_name}.ignore-retract'='true'.",
-                        name()));
+                        name));
     }
 }

@@ -26,8 +26,8 @@ import org.apache.paimon.data.InternalRow.FieldGetter;
 import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
-import org.apache.paimon.mergetree.compact.aggregate.FieldLastValueAgg;
-import org.apache.paimon.mergetree.compact.aggregate.FieldSumAgg;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastValueAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldSumAggFactory;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -293,7 +293,8 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                                     row -> row.isNullAt(0) ? null : row.getInt(0)
                                                 },
                                                 new FieldAggregator[] {
-                                                    new FieldSumAgg(DataTypes.INT())
+                                                    new FieldSumAggFactory()
+                                                            .create(DataTypes.INT(), null, null)
                                                 }),
                                 RowType.of(DataTypes.INT()),
                                 RowType.of(DataTypes.INT())),
@@ -381,7 +382,8 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                                     row -> row.isNullAt(0) ? null : row.getInt(0)
                                                 },
                                                 new FieldAggregator[] {
-                                                    new FieldLastValueAgg(DataTypes.INT())
+                                                    new FieldLastValueAggFactory()
+                                                            .create(DataTypes.INT(), null, null)
                                                 }),
                                 RowType.of(DataTypes.INT()),
                                 RowType.of(DataTypes.INT())),

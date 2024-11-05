@@ -19,19 +19,21 @@
 package org.apache.paimon.mergetree.compact.aggregate.factory;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldFirstNonNullValueAgg;
 import org.apache.paimon.types.DataType;
 
 /** Factory for #{@link FieldFirstNonNullValueAgg}. */
 public class FieldFirstNonNullValueAggFactory implements FieldAggregatorFactory {
+
+    public static final String NAME = "first_non_null_value";
+
     @Override
-    public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
-        return new FieldFirstNonNullValueAgg(fieldType);
+    public FieldFirstNonNullValueAgg create(DataType fieldType, CoreOptions options, String field) {
+        return new FieldFirstNonNullValueAgg(identifier(), fieldType);
     }
 
     @Override
     public String identifier() {
-        return FieldFirstNonNullValueAgg.NAME;
+        return NAME;
     }
 }

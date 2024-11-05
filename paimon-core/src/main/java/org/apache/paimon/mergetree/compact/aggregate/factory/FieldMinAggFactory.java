@@ -19,19 +19,21 @@
 package org.apache.paimon.mergetree.compact.aggregate.factory;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldMinAgg;
 import org.apache.paimon.types.DataType;
 
 /** Factory for #{@link FieldMinAgg}. */
 public class FieldMinAggFactory implements FieldAggregatorFactory {
+
+    public static final String NAME = "min";
+
     @Override
-    public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
-        return new FieldMinAgg(fieldType);
+    public FieldMinAgg create(DataType fieldType, CoreOptions options, String field) {
+        return new FieldMinAgg(identifier(), fieldType);
     }
 
     @Override
     public String identifier() {
-        return FieldMinAgg.NAME;
+        return NAME;
     }
 }
