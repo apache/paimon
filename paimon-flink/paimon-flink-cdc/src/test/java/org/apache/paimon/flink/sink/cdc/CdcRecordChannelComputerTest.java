@@ -128,9 +128,9 @@ public class CdcRecordChannelComputerTest {
 
         // assert that channel(record) and channel(partition, bucket) gives the same result
 
-        for (Map<String, String> fields : input) {
-            CdcRecord insertRecord = new CdcRecord(RowKind.INSERT, fields);
-            CdcRecord deleteRecord = new CdcRecord(RowKind.DELETE, fields);
+        for (Map<String, String> data : input) {
+            CdcRecord insertRecord = new CdcRecord(RowKind.INSERT, data);
+            CdcRecord deleteRecord = new CdcRecord(RowKind.DELETE, data);
 
             extractor.setRecord(random.nextBoolean() ? insertRecord : deleteRecord);
             BinaryRow partition = extractor.partition();
@@ -151,8 +151,8 @@ public class CdcRecordChannelComputerTest {
                 bucketsPerChannel.put(i, 0);
             }
 
-            Map<String, String> fields = input.get(random.nextInt(input.size()));
-            extractor.setRecord(new CdcRecord(RowKind.INSERT, fields));
+            Map<String, String> data = input.get(random.nextInt(input.size()));
+            extractor.setRecord(new CdcRecord(RowKind.INSERT, data));
             BinaryRow partition = extractor.partition();
 
             int numBuckets = random.nextInt(numChannels * 4) + 1;

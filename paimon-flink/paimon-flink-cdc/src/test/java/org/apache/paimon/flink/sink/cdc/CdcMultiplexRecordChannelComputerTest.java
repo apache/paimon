@@ -163,9 +163,9 @@ public class CdcMultiplexRecordChannelComputerTest {
 
         // assert that insert and delete records are routed into same channel
 
-        for (Map<String, String> fields : input) {
-            CdcRecord insertRecord = new CdcRecord(RowKind.INSERT, fields);
-            CdcRecord deleteRecord = new CdcRecord(RowKind.DELETE, fields);
+        for (Map<String, String> data : input) {
+            CdcRecord insertRecord = new CdcRecord(RowKind.INSERT, data);
+            CdcRecord deleteRecord = new CdcRecord(RowKind.DELETE, data);
 
             assertThat(
                             channelComputer.channel(
@@ -184,8 +184,8 @@ public class CdcMultiplexRecordChannelComputerTest {
         // assert that channel >= 0
         int numTests = random.nextInt(10) + 1;
         for (int test = 0; test < numTests; test++) {
-            Map<String, String> fields = input.get(random.nextInt(input.size()));
-            CdcRecord record = new CdcRecord(RowKind.INSERT, fields);
+            Map<String, String> data = input.get(random.nextInt(input.size()));
+            CdcRecord record = new CdcRecord(RowKind.INSERT, data);
 
             int numBuckets = random.nextInt(numChannels * 4) + 1;
             for (int i = 0; i < numBuckets; i++) {
