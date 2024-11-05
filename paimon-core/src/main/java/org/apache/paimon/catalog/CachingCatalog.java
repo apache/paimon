@@ -268,7 +268,6 @@ public class CachingCatalog extends DelegateCatalog {
 
     public void refreshPartitions(Identifier identifier) throws TableNotExistException {
         if (partitionCache != null) {
-            partitionCache.invalidate(identifier);
             List<PartitionEntry> result = wrapped.listPartitions(identifier);
             partitionCache.put(identifier, result);
         }
