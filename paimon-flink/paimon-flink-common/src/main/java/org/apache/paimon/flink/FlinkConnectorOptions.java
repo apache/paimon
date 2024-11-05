@@ -44,7 +44,7 @@ public class FlinkConnectorOptions {
 
     public static final String NONE = "none";
 
-    public static final String TABLE_DYNAMIC_OPTION_PREFIX = "paimon";
+    public static final String TABLE_DYNAMIC_OPTION_PREFIX = "paimon.";
 
     public static final int MIN_CLUSTERING_SAMPLE_FACTOR = 20;
 
