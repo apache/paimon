@@ -39,8 +39,8 @@ argument can be omitted. For the above example, the call statement is \
 ``CALL sys.compact(`table` => 'default.t', options => 'sink.parallelism=4')``.
 
 Specify partitions: we use string to represent partition filter. "," means "AND" and ";" means "OR". For example, if you want
-to specify two partitions date=01 and date=02, you need to write 'date=01;date=02'; If you want to specify one partition
-with date=01 and day=01, you need to write 'date=01,day=01'.
+to specify two partitions date=01 and date=02, you need to write 'date=01,date=02'; If you want to specify one partition
+with date=01 and day=01, you need to write 'date=01;day=01'.
 
 Table options syntax: we use string to represent table options. The format is 'key1=value1,key2=value2...'.
 
