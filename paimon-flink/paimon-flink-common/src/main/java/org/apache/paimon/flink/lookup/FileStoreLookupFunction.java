@@ -88,7 +88,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private final List<String> projectFields;
     private final List<String> joinKeys;
     @Nullable private final Predicate predicate;
-    private final RefreshBlacklist refreshBlacklist;
+    @Nullable private final RefreshBlacklist refreshBlacklist;
 
     private transient File path;
     private transient LookupTable lookupTable;
@@ -136,7 +136,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         this.predicate = predicate;
 
         this.refreshBlacklist =
-                new RefreshBlacklist(
+                RefreshBlacklist.create(
                         table.options().get(LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST.key()));
     }
 
@@ -284,7 +284,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     @VisibleForTesting
     void tryRefresh() throws Exception {
         // 1. check if this time is in black list
-        if (!refreshBlacklist.canRefresh()) {
+        if (refreshBlacklist != null && !refreshBlacklist.canRefresh()) {
             return;
         }
 
@@ -335,7 +335,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     @VisibleForTesting
     long nextBlacklistCheckTime() {
-        return refreshBlacklist.nextBlacklistCheckTime();
+        return refreshBlacklist == null ? -1 : refreshBlacklist.nextBlacklistCheckTime();
     }
 
     @Override
