@@ -73,5 +73,11 @@ public class ObjectTableITCase extends CatalogITCaseBase {
         // time travel
         assertThat(sql("SELECT name, length FROM T /*+ OPTIONS('scan.snapshot-id' = '1') */"))
                 .containsExactlyInAnyOrder(Row.of("f0", 5L));
+
+        // insert into
+        assertThatThrownBy(() -> sql("INSERT INTO T SELECT * FROM T"))
+                .rootCause()
+                .hasMessageContaining("Object table does not support Write.");
+        assertThat(sql("SELECT name, length FROM T")).containsExactlyInAnyOrder(Row.of("f1", 5L));
     }
 }

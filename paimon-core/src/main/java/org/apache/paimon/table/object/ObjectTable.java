@@ -18,11 +18,14 @@
 
 package org.apache.paimon.table.object;
 
+import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.DelegatedFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -117,6 +120,21 @@ public interface ObjectTable extends FileStoreTable {
 
         @Override
         public StreamWriteBuilder newStreamWriteBuilder() {
+            throw new UnsupportedOperationException("Object table does not support Write.");
+        }
+
+        @Override
+        public TableWriteImpl<?> newWrite(String commitUser) {
+            throw new UnsupportedOperationException("Object table does not support Write.");
+        }
+
+        @Override
+        public TableWriteImpl<?> newWrite(String commitUser, ManifestCacheFilter manifestFilter) {
+            throw new UnsupportedOperationException("Object table does not support Write.");
+        }
+
+        @Override
+        public TableCommitImpl newCommit(String commitUser) {
             throw new UnsupportedOperationException("Object table does not support Write.");
         }
 
