@@ -20,6 +20,7 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -190,6 +191,12 @@ public class DelegateCatalog implements Catalog {
     public void dropPartition(Identifier identifier, Map<String, String> partitions)
             throws TableNotExistException, PartitionNotExistException {
         wrapped.dropPartition(identifier, partitions);
+    }
+
+    @Override
+    public List<PartitionEntry> listPartitions(Identifier identifier)
+            throws TableNotExistException {
+        return wrapped.listPartitions(identifier);
     }
 
     @Override

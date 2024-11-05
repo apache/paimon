@@ -21,6 +21,7 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -289,6 +290,14 @@ public interface Catalog extends AutoCloseable {
      */
     void dropPartition(Identifier identifier, Map<String, String> partitions)
             throws TableNotExistException, PartitionNotExistException;
+
+    /**
+     * Get PartitionEntry of all partitions of the table.
+     *
+     * @param identifier path of the table to list partitions
+     * @throws TableNotExistException if the table does not exist
+     */
+    List<PartitionEntry> listPartitions(Identifier identifier) throws TableNotExistException;
 
     /**
      * Modify an existing table from a {@link SchemaChange}.

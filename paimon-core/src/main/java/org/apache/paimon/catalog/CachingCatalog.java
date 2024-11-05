@@ -34,6 +34,7 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caff
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalCause;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalListener;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Ticker;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Weigher;
 
 import org.checkerframework.checker.nullness.qual.NonNull;
 import org.slf4j.Logger;
@@ -63,9 +64,10 @@ public class CachingCatalog extends DelegateCatalog {
 
     protected final Cache<String, Map<String, String>> databaseCache;
     protected final Cache<Identifier, Table> tableCache;
-    @Nullable protected final Cache<Identifier, List<PartitionEntry>> partitionCache;
     @Nullable protected final SegmentsCache<Path> manifestCache;
-    private final long cachedPartitionMaxNum;
+
+    // partition cache will affect data latency
+    @Nullable protected final Cache<Identifier, List<PartitionEntry>> partitionCache;
 
     public CachingCatalog(Catalog wrapped) {
         this(
@@ -126,12 +128,13 @@ public class CachingCatalog extends DelegateCatalog {
                                 .softValues()
                                 .executor(Runnable::run)
                                 .expireAfterAccess(expirationInterval)
-                                .weigher(this::weigh)
+                                .weigher(
+                                        (Weigher<Identifier, List<PartitionEntry>>)
+                                                (identifier, v) -> v.size())
                                 .maximumWeight(cachedPartitionMaxNum)
                                 .ticker(ticker)
                                 .build();
         this.manifestCache = SegmentsCache.create(manifestMaxMemory, manifestCacheThreshold);
-        this.cachedPartitionMaxNum = cachedPartitionMaxNum;
     }
 
     public static Catalog tryToCreate(Catalog catalog, Options options) {
@@ -248,40 +251,19 @@ public class CachingCatalog extends DelegateCatalog {
         tableCache.put(identifier, table);
     }
 
-    public List<PartitionEntry> getPartitions(Identifier identifier) throws TableNotExistException {
-        Table table = this.getTable(identifier);
-        if (partitionCacheEnabled(table)) {
-            List<PartitionEntry> partitions;
-            partitions = partitionCache.getIfPresent(identifier);
-            if (partitions == null || partitions.isEmpty()) {
-                partitions = this.refreshPartitions(identifier);
-            }
-            return partitions;
-        }
-        return ((FileStoreTable) table).newSnapshotReader().partitionEntries();
-    }
-
-    public List<PartitionEntry> refreshPartitions(Identifier identifier)
+    @Override
+    public List<PartitionEntry> listPartitions(Identifier identifier)
             throws TableNotExistException {
-        Table table = this.getTable(identifier);
-        List<PartitionEntry> partitions =
-                ((FileStoreTable) table).newSnapshotReader().partitionEntries();
-        if (partitionCacheEnabled(table)
-                && partitionCache.asMap().values().stream().mapToInt(List::size).sum()
-                        < this.cachedPartitionMaxNum) {
-            partitionCache.put(identifier, partitions);
+        if (partitionCache == null) {
+            return wrapped.listPartitions(identifier);
         }
-        return partitions;
-    }
 
-    private boolean partitionCacheEnabled(Table table) {
-        return partitionCache != null
-                && table instanceof FileStoreTable
-                && !table.partitionKeys().isEmpty();
-    }
-
-    private int weigh(Identifier identifier, List<PartitionEntry> partitions) {
-        return partitions.size();
+        List<PartitionEntry> result = partitionCache.getIfPresent(identifier);
+        if (result == null) {
+            result = wrapped.listPartitions(identifier);
+            partitionCache.put(identifier, result);
+        }
+        return result;
     }
 
     @Override
