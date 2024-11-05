@@ -54,8 +54,7 @@ public class NextSnapshotFetcher {
                         String.format(
                                 "The next expected snapshot is too big! Most possible cause might be the table had been recreated."
                                         + "The next snapshot id is %d, while the latest snapshot id is %s",
-                                nextSnapshotId,
-                                latestSnapshotId == null ? "null" : latestSnapshotId));
+                                nextSnapshotId, latestSnapshotId));
             }
 
             LOG.debug(

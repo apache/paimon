@@ -350,6 +350,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                         + "PARTITIONED BY (pt) "
                         + "WITH ("
                         + "    'bucket' = '2'\n"
+                        + "    ,'continuous.discovery-interval' = '1s'\n"
                         + ")");
 
         TableEnvironment sEnv =
@@ -360,6 +361,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                         .build();
         sEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
         sEnv.executeSql("USE CATALOG testCatalog");
+        CloseableIterator<Row> it = sEnv.executeSql("SELECT * FROM t").collect();
 
         // first write
         List<String> values = new ArrayList<>();
@@ -368,6 +370,12 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
             values.add(String.format("(1, %d, %d)", i, i));
         }
         bEnv.executeSql("INSERT INTO t VALUES " + String.join(", ", values)).await();
+        List<Row> expected = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            expected.add(Row.ofKind(RowKind.INSERT, 0, i, i));
+            expected.add(Row.ofKind(RowKind.INSERT, 1, i, i));
+        }
+        assertStreamingResult(it, expected);
 
         // second write
         values.clear();
@@ -378,10 +386,13 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         bEnv.executeSql("INSERT INTO t VALUES " + String.join(", ", values)).await();
 
         // start a read job
-        CloseableIterator<Row> it = sEnv.executeSql("SELECT * FROM t").collect();
-
-        // wait the read job to read the current table
-        Thread.sleep(10000);
+        for (int i = 0; i < 10; i++) {
+            expected.add(Row.ofKind(RowKind.UPDATE_BEFORE, 0, i, i));
+            expected.add(Row.ofKind(RowKind.UPDATE_BEFORE, 1, i, i));
+            expected.add(Row.ofKind(RowKind.UPDATE_AFTER, 0, i, i + 1));
+            expected.add(Row.ofKind(RowKind.UPDATE_AFTER, 1, i, i + 1));
+        }
+        assertStreamingResult(it, expected.subList(20, 60));
 
         // delete table and recreate a same table
         bEnv.executeSql("DROP TABLE t");
