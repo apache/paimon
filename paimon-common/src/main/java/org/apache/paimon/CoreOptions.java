@@ -1358,7 +1358,7 @@ public class CoreOptions implements Serializable {
                     .enumType(TimeFieldType.class)
                     .defaultValue(TimeFieldType.SECONDS_INT)
                     .withDescription(
-                            "Time field type for record level expire, it can be seconds-int,seconds-long or millis-long.");
+                            "Time field type for record level expire, it can be seconds-int,seconds-long, millis-long or timestamp.");
 
     public static final ConfigOption<String> FIELDS_DEFAULT_AGG_FUNC =
             key(FIELDS_PREFIX + "." + DEFAULT_AGG_FUNCTION)
@@ -2926,7 +2926,9 @@ public class CoreOptions implements Serializable {
 
         SECONDS_LONG("seconds-long", "Timestamps in seconds with BIGINT field type."),
 
-        MILLIS_LONG("millis-long", "Timestamps in milliseconds with BIGINT field type.");
+        MILLIS_LONG("millis-long", "Timestamps in milliseconds with BIGINT field type."),
+
+        TIMESTAMP("timestamp", "Timestamp field type.");
 
         private final String value;
         private final String description;
