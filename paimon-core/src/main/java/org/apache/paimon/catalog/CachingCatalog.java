@@ -266,6 +266,13 @@ public class CachingCatalog extends DelegateCatalog {
         return result;
     }
 
+    public void refreshPartitions(Identifier identifier) throws TableNotExistException {
+        if (partitionCache != null) {
+            List<PartitionEntry> result = wrapped.listPartitions(identifier);
+            partitionCache.put(identifier, result);
+        }
+    }
+
     @Override
     public void dropPartition(Identifier identifier, Map<String, String> partitions)
             throws TableNotExistException, PartitionNotExistException {
@@ -289,6 +296,9 @@ public class CachingCatalog extends DelegateCatalog {
     public void invalidateTable(Identifier identifier) {
         tableCache.invalidate(identifier);
         tryInvalidateSysTables(identifier);
+        if (partitionCache != null) {
+            partitionCache.invalidate(identifier);
+        }
     }
 
     private void tryInvalidateSysTables(Identifier identifier) {
