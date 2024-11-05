@@ -69,5 +69,9 @@ public class ObjectTableITCase extends CatalogITCaseBase {
         fileIO.deleteQuietly(new Path(objectLocation, "f0"));
         sql("CALL sys.refresh_object_table('default.T')");
         assertThat(sql("SELECT name, length FROM T")).containsExactlyInAnyOrder(Row.of("f1", 5L));
+
+        // time travel
+        assertThat(sql("SELECT name, length FROM T /*+ OPTIONS('scan.snapshot-id' = '1') */"))
+                .containsExactlyInAnyOrder(Row.of("f0", 5L));
     }
 }
