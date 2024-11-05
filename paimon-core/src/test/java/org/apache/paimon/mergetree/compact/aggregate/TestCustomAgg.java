@@ -21,14 +21,10 @@ package org.apache.paimon.mergetree.compact.aggregate;
 import org.apache.paimon.types.DataType;
 
 /** Custom FieldAggregator for Test. */
-public class TestCostomAgg extends FieldAggregator {
-    public TestCostomAgg(DataType dataType) {
-        super(dataType);
-    }
+public class TestCustomAgg extends FieldAggregator {
 
-    @Override
-    public String name() {
-        return "custom";
+    public TestCustomAgg(String name, DataType dataType) {
+        super(name, dataType);
     }
 
     @Override

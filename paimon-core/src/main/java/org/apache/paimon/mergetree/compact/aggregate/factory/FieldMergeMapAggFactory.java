@@ -19,7 +19,6 @@
 package org.apache.paimon.mergetree.compact.aggregate.factory;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldMergeMapAgg;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
@@ -28,17 +27,20 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Factory for #{@link FieldMergeMapAgg}. */
 public class FieldMergeMapAggFactory implements FieldAggregatorFactory {
+
+    public static final String NAME = "merge_map";
+
     @Override
-    public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
+    public FieldMergeMapAgg create(DataType fieldType, CoreOptions options, String field) {
         checkArgument(
                 fieldType instanceof MapType,
-                "Data type of merge map column must be 'MAP' but was '%s'",
+                "Data type for merge map column must be 'MAP' but was '%s'",
                 fieldType);
-        return new FieldMergeMapAgg((MapType) fieldType);
+        return new FieldMergeMapAgg(identifier(), (MapType) fieldType);
     }
 
     @Override
     public String identifier() {
-        return FieldMergeMapAgg.NAME;
+        return NAME;
     }
 }

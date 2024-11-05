@@ -19,19 +19,28 @@
 package org.apache.paimon.mergetree.compact.aggregate.factory;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldSumAgg;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeFamily;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Factory for #{@link FieldSumAgg}. */
 public class FieldSumAggFactory implements FieldAggregatorFactory {
+
+    public static final String NAME = "sum";
+
     @Override
-    public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
-        return new FieldSumAgg(fieldType);
+    public FieldSumAgg create(DataType fieldType, CoreOptions options, String field) {
+        checkArgument(
+                fieldType.getTypeRoot().getFamilies().contains(DataTypeFamily.NUMERIC),
+                "Data type for sum column must be 'NumericType' but was '%s'.",
+                fieldType);
+        return new FieldSumAgg(identifier(), fieldType);
     }
 
     @Override
     public String identifier() {
-        return FieldSumAgg.NAME;
+        return NAME;
     }
 }

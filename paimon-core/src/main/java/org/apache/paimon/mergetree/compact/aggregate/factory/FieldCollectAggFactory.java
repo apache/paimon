@@ -19,7 +19,6 @@
 package org.apache.paimon.mergetree.compact.aggregate.factory;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldCollectAgg;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
@@ -28,17 +27,21 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Factory for #{@link FieldCollectAgg}. */
 public class FieldCollectAggFactory implements FieldAggregatorFactory {
+
+    public static final String NAME = "collect";
+
     @Override
-    public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
+    public FieldCollectAgg create(DataType fieldType, CoreOptions options, String field) {
         checkArgument(
                 fieldType instanceof ArrayType,
                 "Data type for collect column must be 'Array' but was '%s'.",
                 fieldType);
-        return new FieldCollectAgg((ArrayType) fieldType, options.fieldCollectAggDistinct(field));
+        return new FieldCollectAgg(
+                identifier(), (ArrayType) fieldType, options.fieldCollectAggDistinct(field));
     }
 
     @Override
     public String identifier() {
-        return FieldCollectAgg.NAME;
+        return NAME;
     }
 }

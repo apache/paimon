@@ -19,7 +19,6 @@
 package org.apache.paimon.mergetree.compact.aggregate.factory;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldRoaringBitmap32Agg;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.VarBinaryType;
@@ -28,17 +27,20 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Factory for #{@link FieldRoaringBitmap32Agg}. */
 public class FieldRoaringBitmap32AggFactory implements FieldAggregatorFactory {
+
+    public static final String NAME = "rbm32";
+
     @Override
-    public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
+    public FieldRoaringBitmap32Agg create(DataType fieldType, CoreOptions options, String field) {
         checkArgument(
                 fieldType instanceof VarBinaryType,
                 "Data type for roaring bitmap column must be 'VarBinaryType' but was '%s'.",
                 fieldType);
-        return new FieldRoaringBitmap32Agg((VarBinaryType) fieldType);
+        return new FieldRoaringBitmap32Agg(identifier(), (VarBinaryType) fieldType);
     }
 
     @Override
     public String identifier() {
-        return FieldRoaringBitmap32Agg.NAME;
+        return NAME;
     }
 }

@@ -19,19 +19,28 @@
 package org.apache.paimon.mergetree.compact.aggregate.factory;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldBoolOrAgg;
+import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataType;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Factory for #{@link FieldBoolOrAgg}. */
 public class FieldBoolOrAggFactory implements FieldAggregatorFactory {
+
+    public static final String NAME = "bool_or";
+
     @Override
-    public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
-        return new FieldBoolOrAgg(fieldType);
+    public FieldBoolOrAgg create(DataType fieldType, CoreOptions options, String field) {
+        checkArgument(
+                fieldType instanceof BooleanType,
+                "Data type for bool or column must be 'BooleanType' but was '%s'.",
+                fieldType);
+        return new FieldBoolOrAgg(identifier(), (BooleanType) fieldType);
     }
 
     @Override
     public String identifier() {
-        return FieldBoolOrAgg.NAME;
+        return NAME;
     }
 }

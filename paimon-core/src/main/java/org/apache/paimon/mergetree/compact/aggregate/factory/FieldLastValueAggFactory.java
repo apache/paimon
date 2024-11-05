@@ -19,19 +19,21 @@
 package org.apache.paimon.mergetree.compact.aggregate.factory;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldLastValueAgg;
 import org.apache.paimon.types.DataType;
 
 /** Factory for #{@link FieldLastValueAgg}. */
 public class FieldLastValueAggFactory implements FieldAggregatorFactory {
+
+    public static final String NAME = "last_value";
+
     @Override
-    public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
-        return new FieldLastValueAgg(fieldType);
+    public FieldLastValueAgg create(DataType fieldType, CoreOptions options, String field) {
+        return new FieldLastValueAgg(identifier(), fieldType);
     }
 
     @Override
     public String identifier() {
-        return FieldLastValueAgg.NAME;
+        return NAME;
     }
 }
