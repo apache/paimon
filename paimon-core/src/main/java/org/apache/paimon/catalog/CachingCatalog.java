@@ -266,13 +266,6 @@ public class CachingCatalog extends DelegateCatalog {
         return result;
     }
 
-    public void refreshPartitions(Identifier identifier) throws TableNotExistException {
-        if (partitionCache != null) {
-            List<PartitionEntry> result = wrapped.listPartitions(identifier);
-            partitionCache.put(identifier, result);
-        }
-    }
-
     @Override
     public void dropPartition(Identifier identifier, Map<String, String> partitions)
             throws TableNotExistException, PartitionNotExistException {
@@ -313,5 +306,15 @@ public class CachingCatalog extends DelegateCatalog {
             tables.add(Identifier.fromString(ident.getFullName() + SYSTEM_TABLE_SPLITTER + type));
         }
         return tables;
+    }
+
+    // ================================== refresh ================================================
+    // following caches will affect the latency of table, so refresh method is provided for engine
+
+    public void refreshPartitions(Identifier identifier) throws TableNotExistException {
+        if (partitionCache != null) {
+            List<PartitionEntry> result = wrapped.listPartitions(identifier);
+            partitionCache.put(identifier, result);
+        }
     }
 }
