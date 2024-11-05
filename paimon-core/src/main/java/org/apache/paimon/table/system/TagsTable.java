@@ -76,10 +76,12 @@ public class TagsTable implements ReadonlyTable {
 
     public static final String TAGS = "tags";
 
+    private static final String TAG_NAME = "tag_name";
+
     public static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
-                            new DataField(0, "tag_name", SerializationUtils.newStringType(false)),
+                            new DataField(0, TAG_NAME, SerializationUtils.newStringType(false)),
                             new DataField(1, "snapshot_id", new BigIntType(false)),
                             new DataField(2, "schema_id", new BigIntType(false)),
                             new DataField(3, "commit_time", new TimestampType(false, 3)),
@@ -117,7 +119,7 @@ public class TagsTable implements ReadonlyTable {
 
     @Override
     public List<String> primaryKeys() {
-        return Collections.singletonList("tag_name");
+        return Collections.singletonList(TAG_NAME);
     }
 
     @Override
@@ -219,7 +221,6 @@ public class TagsTable implements ReadonlyTable {
             Path location = ((TagsSplit) split).location;
             Predicate predicate = ((TagsSplit) split).tagPredicate;
             TagManager tagManager = new TagManager(fileIO, location, branch);
-            String leafName = "tag_name";
 
             Map<String, Tag> nameToSnapshot = new TreeMap<>();
             Map<String, Tag> predicateMap = new TreeMap<>();
@@ -227,7 +228,7 @@ public class TagsTable implements ReadonlyTable {
                 if (predicate instanceof LeafPredicate
                         && ((LeafPredicate) predicate).function() instanceof Equal
                         && ((LeafPredicate) predicate).literals().get(0) instanceof BinaryString
-                        && predicate.visit(LeafPredicateExtractor.INSTANCE).get(leafName) != null) {
+                        && predicate.visit(LeafPredicateExtractor.INSTANCE).get(TAG_NAME) != null) {
                     String equalValue = ((LeafPredicate) predicate).literals().get(0).toString();
                     if (tagManager.tagExists(equalValue)) {
                         predicateMap.put(equalValue, tagManager.tag(equalValue));
@@ -241,14 +242,18 @@ public class TagsTable implements ReadonlyTable {
                         List<Predicate> children = compoundPredicate.children();
                         for (Predicate leaf : children) {
                             if (leaf instanceof LeafPredicate
-                                    && (((LeafPredicate) leaf).function() instanceof Equal)
+                                    && (((LeafPredicate) leaf).function() instanceof Equal
+                                            && ((LeafPredicate) predicate).literals().get(0)
+                                                    instanceof BinaryString)
                                     && predicate
                                                     .visit(LeafPredicateExtractor.INSTANCE)
-                                                    .get(leafName)
+                                                    .get(TAG_NAME)
                                             != null) {
                                 String equalValue =
                                         ((LeafPredicate) leaf).literals().get(0).toString();
-                                predicateMap.put(equalValue, tagManager.tag(equalValue));
+                                if (tagManager.tagExists(equalValue)) {
+                                    predicateMap.put(equalValue, tagManager.tag(equalValue));
+                                }
                             } else {
                                 predicateMap.clear();
                                 break;

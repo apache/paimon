@@ -205,7 +205,7 @@ public class SchemasTable implements ReadonlyTable {
 
         private Optional<Long> optionalFilterSchemaIdMax = Optional.empty();
         private Optional<Long> optionalFilterSchemaIdMin = Optional.empty();
-        private List<Long> schemaIds = new ArrayList<>();
+        private final List<Long> schemaIds = new ArrayList<>();
 
         public SchemasRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -300,7 +300,7 @@ public class SchemasTable implements ReadonlyTable {
 
             Collection<TableSchema> tableSchemas;
             if (!schemaIds.isEmpty()) {
-                tableSchemas = manager.schemasWithIds(schemaIds);
+                tableSchemas = manager.schemasWithId(schemaIds);
             } else {
                 tableSchemas =
                         manager.listWithRange(optionalFilterSchemaIdMax, optionalFilterSchemaIdMin);

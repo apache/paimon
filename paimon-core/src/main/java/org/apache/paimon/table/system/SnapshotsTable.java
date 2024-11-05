@@ -208,7 +208,7 @@ public class SnapshotsTable implements ReadonlyTable {
         private RowType readType;
         private Optional<Long> optionalFilterSnapshotIdMax = Optional.empty();
         private Optional<Long> optionalFilterSnapshotIdMin = Optional.empty();
-        private List<Long> snapshotIds = new ArrayList<>();
+        private final List<Long> snapshotIds = new ArrayList<>();
 
         public SnapshotsRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -223,8 +223,8 @@ public class SnapshotsTable implements ReadonlyTable {
             String leafName = "snapshot_id";
             if (predicate instanceof CompoundPredicate) {
                 CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
+                List<Predicate> children = compoundPredicate.children();
                 if ((compoundPredicate.function()) instanceof And) {
-                    List<Predicate> children = compoundPredicate.children();
                     for (Predicate leaf : children) {
                         handleLeafPredicate(leaf, leafName);
                     }
@@ -232,7 +232,6 @@ public class SnapshotsTable implements ReadonlyTable {
 
                 // optimize for IN filter
                 if ((compoundPredicate.function()) instanceof Or) {
-                    List<Predicate> children = compoundPredicate.children();
                     for (Predicate leaf : children) {
                         if (leaf instanceof LeafPredicate
                                 && (((LeafPredicate) leaf).function() instanceof Equal)
@@ -306,7 +305,7 @@ public class SnapshotsTable implements ReadonlyTable {
 
             Iterator<Snapshot> snapshots;
             if (!snapshotIds.isEmpty()) {
-                snapshots = snapshotManager.snapshotsWithIds(snapshotIds);
+                snapshots = snapshotManager.snapshotsWithId(snapshotIds);
             } else {
                 snapshots =
                         snapshotManager.snapshotsWithinRange(

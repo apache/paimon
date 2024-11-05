@@ -128,7 +128,7 @@ public class SchemaManager implements Serializable {
         return listAllIds().stream().map(this::schema).collect(Collectors.toList());
     }
 
-    public List<TableSchema> schemasWithIds(List<Long> schemaIds) {
+    public List<TableSchema> schemasWithId(List<Long> schemaIds) {
         return schemaIds.stream().map(this::schema).collect(Collectors.toList());
     }
 
