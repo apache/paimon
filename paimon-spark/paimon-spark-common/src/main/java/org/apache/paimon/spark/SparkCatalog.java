@@ -503,7 +503,9 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
             if (paimonTable instanceof FormatTable) {
                 return convertToFileTable(ident, (FormatTable) paimonTable);
             } else {
-                return new SparkTable(copyWithSQLConf(paimonTable, extraOptions));
+                return new SparkTable(
+                        copyWithSQLConf(
+                                paimonTable, catalogName, toIdentifier(ident), extraOptions));
             }
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);

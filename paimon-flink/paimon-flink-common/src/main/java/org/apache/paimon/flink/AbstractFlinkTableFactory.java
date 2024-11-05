@@ -35,6 +35,7 @@ import org.apache.paimon.lineage.LineageMetaFactory;
 import org.apache.paimon.lineage.TableLineageEntity;
 import org.apache.paimon.lineage.TableLineageEntityImpl;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
@@ -71,7 +72,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
@@ -239,7 +239,7 @@ public abstract class AbstractFlinkTableFactory
         CatalogTable origin = context.getCatalogTable().getOrigin();
         Table table;
 
-        Map<String, String> dynamicOptions = getDynamicTableConfigOptions(context);
+        Map<String, String> dynamicOptions = getDynamicConfigOptions(context);
         dynamicOptions.forEach(
                 (key, newValue) -> {
                     String oldValue = origin.getOptions().get(key);
@@ -249,6 +249,7 @@ public abstract class AbstractFlinkTableFactory
                 });
         Map<String, String> newOptions = new HashMap<>();
         newOptions.putAll(origin.getOptions());
+        // dynamic options should override origin options
         newOptions.putAll(dynamicOptions);
 
         FileStoreTable fileStoreTable;
@@ -324,16 +325,19 @@ public abstract class AbstractFlinkTableFactory
     /**
      * The dynamic option's format is:
      *
-     * <p>{@link
-     * FlinkConnectorOptions#TABLE_DYNAMIC_OPTION_PREFIX}.${catalog}.${database}.${tableName}.key =
-     * value. These job level configs will be extracted and injected into the target table option.
+     * <p>Global Options: key = value .
+     *
+     * <p>Table Options: {@link
+     * FlinkConnectorOptions#TABLE_DYNAMIC_OPTION_PREFIX}${catalog}.${database}.${tableName}.key =
+     * value.
+     *
+     * <p>These job level options will be extracted and injected into the target table option. Table
+     * options will override global options if there are conflicts.
      *
      * @param context The table factory context.
      * @return The dynamic options of this target table.
      */
-    static Map<String, String> getDynamicTableConfigOptions(DynamicTableFactory.Context context) {
-
-        Map<String, String> optionsFromTableConfig = new HashMap<>();
+    static Map<String, String> getDynamicConfigOptions(DynamicTableFactory.Context context) {
 
         ReadableConfig config = context.getConfiguration();
 
@@ -349,23 +353,14 @@ public abstract class AbstractFlinkTableFactory
 
         String template =
                 String.format(
-                        "(%s)\\.(%s|\\*)\\.(%s|\\*)\\.(%s|\\*)\\.(.+)",
+                        "(%s)(%s|\\*)\\.(%s|\\*)\\.(%s|\\*)\\.(.+)",
                         FlinkConnectorOptions.TABLE_DYNAMIC_OPTION_PREFIX,
                         context.getObjectIdentifier().getCatalogName(),
                         context.getObjectIdentifier().getDatabaseName(),
                         context.getObjectIdentifier().getObjectName());
         Pattern pattern = Pattern.compile(template);
-
-        conf.keySet()
-                .forEach(
-                        (key) -> {
-                            if (key.startsWith(FlinkConnectorOptions.TABLE_DYNAMIC_OPTION_PREFIX)) {
-                                Matcher matcher = pattern.matcher(key);
-                                if (matcher.find()) {
-                                    optionsFromTableConfig.put(matcher.group(5), conf.get(key));
-                                }
-                            }
-                        });
+        Map<String, String> optionsFromTableConfig =
+                OptionsUtils.convertToDynamicTableProperties(conf, "", pattern, 5);
 
         if (!optionsFromTableConfig.isEmpty()) {
             LOG.info(
