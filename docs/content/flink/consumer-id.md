@@ -78,7 +78,7 @@ About `'consumer.mode'`, since the implementation of `exactly-once` mode and `at
 different, the state of flink is incompatible and cannot be restored from the state when switching modes.
 {{< /hint >}}
 
-## Rest Consumer
+## Reset Consumer
 
 You can reset or delete a consumer with a given consumer ID and next snapshot ID and delete a consumer with a given
 consumer ID. First, you need to stop the streaming task using this consumer ID, and then execute the reset consumer
