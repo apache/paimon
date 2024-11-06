@@ -512,13 +512,12 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 "Rollback snapshot '%s' doesn't exist.",
                 snapshotId);
 
-        Snapshot snapshot = snapshotManager.snapshot(snapshotId);
         // fast return
-        if (snapshot.equals(snapshotManager.latestSnapshot())) {
+        if (new Long(snapshotId).equals(snapshotManager.latestSnapshotId())) {
             return;
         }
 
-        rollbackHelper().cleanLargerThan(snapshot);
+        rollbackHelper().cleanLargerThan(snapshotManager.snapshot(snapshotId));
     }
 
     public Snapshot findSnapshot(long fromSnapshotId) throws SnapshotNotExistException {
@@ -633,7 +632,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         Snapshot taggedSnapshot = tagManager.taggedSnapshot(tagName);
         SnapshotManager snapshotManager = snapshotManager();
         // fast return
-        if (taggedSnapshot.equals(snapshotManager.latestSnapshot())) {
+        if (new Long(taggedSnapshot.id()).equals(snapshotManager.latestSnapshotId())) {
             return;
         }
 
