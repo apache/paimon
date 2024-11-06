@@ -1352,7 +1352,7 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Time field for record level expire. It supports the following types: `timestamps in seconds with INT`,`timestamps in seconds with BIGINT`, `Timestamps in milliseconds with BIGINT` or `Timestamp`.");
+                            "Time field for record level expire. It supports the following types: `timestamps in seconds with INT`,`timestamps in seconds with BIGINT`, `timestamps in milliseconds with BIGINT` or `timestamp`.");
 
     public static final ConfigOption<String> FIELDS_DEFAULT_AGG_FUNC =
             key(FIELDS_PREFIX + "." + DEFAULT_AGG_FUNCTION)
