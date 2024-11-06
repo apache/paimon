@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.execution
 
 import org.apache.paimon.spark.{SparkCatalog, SparkUtils}
-import org.apache.paimon.spark.catalyst.plans.logical.{CreateOrReplaceTagCommand, DeleteTagCommand, PaimonCallCommand, RenameTagCommand, ShowTagsCommand}
+import org.apache.paimon.spark.catalyst.plans.logical.{CreateOrReplaceTagCommand, DeleteTagCommand, PaimonCallCommand, RenameTagCommand, RollbackCommand, ShowTagsCommand}
 
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.InternalRow
@@ -64,6 +64,9 @@ case class PaimonStrategy(spark: SparkSession)
 
     case RenameTagCommand(PaimonCatalogAndIdentifier(catalog, ident), sourceTag, targetTag) =>
       RenameTagExec(catalog, ident, sourceTag, targetTag) :: Nil
+
+    case RollbackCommand(PaimonCatalogAndIdentifier(catalog, ident), kind, value, output) =>
+      RollbackExec(catalog, ident, output, kind, value) :: Nil
 
     case _ => Nil
   }

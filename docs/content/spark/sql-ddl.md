@@ -265,3 +265,16 @@ List all tags of a table.
 SHOW TAGS T;
 ```
 
+## Rollback DDL
+Rollback to a specific version of target table.
+```sql
+-- rollback to snapshot
+ALTER TABLE T ROLLBACK TO SNAPSHOT `2`;
+
+-- rollback to tag
+ALTER TABLE T ROLLBACK TO TAG `TEST-TAG`;
+
+-- rollback to timestamp
+ALTER TABLE T ROLLBACK TO TIMESTAMP `1730876906134`;
+```
+

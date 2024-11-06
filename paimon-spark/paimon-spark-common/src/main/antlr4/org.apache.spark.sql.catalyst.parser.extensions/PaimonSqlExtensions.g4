@@ -74,6 +74,7 @@ statement
     | ALTER TABLE multipartIdentifier createReplaceTagClause                                #createOrReplaceTag
     | ALTER TABLE multipartIdentifier DELETE TAG (IF EXISTS)? identifier                    #deleteTag
     | ALTER TABLE multipartIdentifier RENAME TAG identifier TO identifier                   #renameTag
+    | ALTER TABLE multipartIdentifier ROLLBACK TO kind identifier                           #rollback
   ;
 
 callArgument
@@ -103,6 +104,12 @@ timeUnit
   | HOURS
   | MINUTES
   ;
+
+kind
+    : SNAPSHOT
+    | TAG
+    | TIMESTAMP
+    ;
 
 expression
     : constant
@@ -152,7 +159,7 @@ quotedIdentifier
 
 nonReserved
     : ALTER | AS | CALL | CREATE | DAYS | DELETE | EXISTS | HOURS | IF | NOT | OF | OR | TABLE
-    | REPLACE | RETAIN | VERSION | TAG
+    | REPLACE | RETAIN | ROLLBACK | SNAPSHOT | TAG | TIMESTAMP | VERSION
     | TRUE | FALSE
     | MAP
     ;
@@ -173,11 +180,14 @@ OR: 'OR';
 RENAME: 'RENAME';
 REPLACE: 'REPLACE';
 RETAIN: 'RETAIN';
+ROLLBACK: 'ROLLBACK';
 SHOW: 'SHOW';
+SNAPSHOT: 'SNAPSHOT';
 TABLE: 'TABLE';
 TAG: 'TAG';
 TAGS: 'TAGS';
 TO: 'TO';
+TIMESTAMP: 'TIMESTAMP';
 VERSION: 'VERSION';
 
 TRUE: 'TRUE';

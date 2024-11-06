@@ -19,7 +19,7 @@
 package org.apache.spark.sql.catalyst.parser.extensions
 
 import org.apache.paimon.spark.catalyst.plans.logical
-import org.apache.paimon.spark.catalyst.plans.logical.{CreateOrReplaceTagCommand, DeleteTagCommand, PaimonCallArgument, PaimonCallStatement, PaimonNamedArgument, PaimonPositionalArgument, RenameTagCommand, ShowTagsCommand, TagOptions}
+import org.apache.paimon.spark.catalyst.plans.logical.{CreateOrReplaceTagCommand, DeleteTagCommand, PaimonCallArgument, PaimonCallStatement, PaimonNamedArgument, PaimonPositionalArgument, RenameTagCommand, RollbackCommand, ShowTagsCommand, TagOptions}
 import org.apache.paimon.utils.TimeUtils
 
 import org.antlr.v4.runtime._
@@ -151,6 +151,14 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
       typedVisit[Seq[String]](ctx.multipartIdentifier),
       ctx.identifier(0).getText,
       ctx.identifier(1).getText)
+  }
+
+  /** Create a ROLLBACK logical command. */
+  override def visitRollback(ctx: RollbackContext): AnyRef = withOrigin(ctx) {
+    RollbackCommand(
+      typedVisit[Seq[String]](ctx.multipartIdentifier),
+      ctx.kind().getText,
+      ctx.identifier().getText)
   }
 
   private def toBuffer[T](list: java.util.List[T]) = list.asScala
