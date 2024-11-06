@@ -19,15 +19,15 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogLock;
-import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.hive.annotation.Minio;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.metastore.MetastoreClient;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.privilege.NoPrivilegeException;
 import org.apache.paimon.s3.MinioTestContainer;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.IOUtils;
@@ -203,7 +203,7 @@ public abstract class HiveCatalogITCaseBase {
     @Test
     @LocationInProperties
     public void testDbLocationWithMetastoreLocationInProperties()
-            throws Catalog.DatabaseAlreadyExistException {
+            throws Catalog.DatabaseAlreadyExistException, Catalog.DatabaseNotExistException {
         String dbLocation = minioTestContainer.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
@@ -211,7 +211,7 @@ public abstract class HiveCatalogITCaseBase {
         properties.put("location", dbLocation);
 
         catalog.createDatabase("location_test_db", false, properties);
-        assertThat(catalog.databaseExists("location_test_db"));
+        catalog.getDatabase("location_test_db");
 
         hiveShell.execute("USE location_test_db");
         hiveShell.execute("CREATE TABLE location_test_db ( a INT, b INT )");
@@ -1128,11 +1128,12 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testHiveLock() throws InterruptedException {
+    public void testHiveLock() throws InterruptedException, Catalog.TableNotExistException {
         tEnv.executeSql("CREATE TABLE t (a INT)");
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
-        CatalogLockFactory lockFactory = catalog.lockFactory().get();
+        FileStoreTable table = (FileStoreTable) catalog.getTable(new Identifier("test_db", "t"));
+        CatalogEnvironment catalogEnv = table.catalogEnvironment();
 
         AtomicInteger count = new AtomicInteger(0);
         List<Thread> threads = new ArrayList<>();
@@ -1147,11 +1148,10 @@ public abstract class HiveCatalogITCaseBase {
             Thread thread =
                     new Thread(
                             () -> {
-                                CatalogLock lock =
-                                        lockFactory.createLock(catalog.lockContext().get());
+                                Lock lock = catalogEnv.lockFactory().create();
                                 for (int j = 0; j < 10; j++) {
                                     try {
-                                        lock.runWithLock("test_db", "t", unsafeIncrement);
+                                        lock.runWithLock(unsafeIncrement);
                                     } catch (Exception e) {
                                         throw new RuntimeException(e);
                                     }

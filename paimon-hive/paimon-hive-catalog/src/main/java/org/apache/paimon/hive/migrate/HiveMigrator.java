@@ -19,6 +19,7 @@
 package org.apache.paimon.hive.migrate;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryWriter;
@@ -81,8 +82,8 @@ public class HiveMigrator implements Migrator {
     private final String targetDatabase;
     private final String targetTable;
     private final CoreOptions coreOptions;
-    private Boolean delete = true;
-    private Integer parallelism;
+
+    private Boolean deleteOriginTable = true;
 
     public HiveMigrator(
             HiveCatalog hiveCatalog,
@@ -99,7 +100,6 @@ public class HiveMigrator implements Migrator {
         this.sourceTable = sourceTable;
         this.targetDatabase = targetDatabase;
         this.targetTable = targetTable;
-        this.parallelism = parallelism;
         this.coreOptions = new CoreOptions(options);
         this.executor = createCachedThreadPool(parallelism, "HIVE_MIGRATOR");
     }
@@ -129,8 +129,8 @@ public class HiveMigrator implements Migrator {
     }
 
     @Override
-    public void deleteOriginTable(boolean delete) {
-        this.delete = delete;
+    public void deleteOriginTable(boolean deleteOriginTable) {
+        this.deleteOriginTable = deleteOriginTable;
     }
 
     @Override
@@ -145,14 +145,18 @@ public class HiveMigrator implements Migrator {
 
         // create paimon table if not exists
         Identifier identifier = Identifier.create(targetDatabase, targetTable);
-        boolean alreadyExist = hiveCatalog.tableExists(identifier);
-        if (!alreadyExist) {
+
+        boolean deleteIfFail = false;
+        try {
+            hiveCatalog.getTable(identifier);
+        } catch (Catalog.TableNotExistException e) {
             Schema schema =
                     from(
                             client.getSchema(sourceDatabase, sourceTable),
                             sourceHiveTable.getPartitionKeys(),
                             properties);
             hiveCatalog.createTable(identifier, schema, false);
+            deleteIfFail = true;
         }
 
         try {
@@ -211,14 +215,14 @@ public class HiveMigrator implements Migrator {
                 commit.commit(new ArrayList<>(commitMessages));
             }
         } catch (Exception e) {
-            if (!alreadyExist) {
+            if (deleteIfFail) {
                 hiveCatalog.dropTable(identifier, true);
             }
             throw new RuntimeException("Migrating failed", e);
         }
 
         // if all success, drop the origin table according the delete field
-        if (delete) {
+        if (deleteOriginTable) {
             client.dropTable(sourceDatabase, sourceTable, true, true);
         }
     }

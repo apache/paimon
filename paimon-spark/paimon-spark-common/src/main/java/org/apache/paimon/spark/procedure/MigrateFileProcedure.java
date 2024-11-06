@@ -88,7 +88,9 @@ public class MigrateFileProcedure extends BaseProcedure {
 
         Catalog paimonCatalog = ((WithPaimonCatalog) tableCatalog()).paimonCatalog();
 
-        if (!(paimonCatalog.tableExists(targetTableId))) {
+        try {
+            paimonCatalog.getTable(targetTableId);
+        } catch (Catalog.TableNotExistException e) {
             throw new IllegalArgumentException(
                     "Target paimon table does not exist: " + targetTable);
         }

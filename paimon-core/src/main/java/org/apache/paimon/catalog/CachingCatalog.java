@@ -62,7 +62,7 @@ public class CachingCatalog extends DelegateCatalog {
 
     private static final Logger LOG = LoggerFactory.getLogger(CachingCatalog.class);
 
-    protected final Cache<String, Map<String, String>> databaseCache;
+    protected final Cache<String, Database> databaseCache;
     protected final Cache<Identifier, Table> tableCache;
     @Nullable protected final SegmentsCache<Path> manifestCache;
 
@@ -159,16 +159,15 @@ public class CachingCatalog extends DelegateCatalog {
     }
 
     @Override
-    public Map<String, String> loadDatabaseProperties(String databaseName)
-            throws DatabaseNotExistException {
-        Map<String, String> properties = databaseCache.getIfPresent(databaseName);
-        if (properties != null) {
-            return properties;
+    public Database getDatabase(String databaseName) throws DatabaseNotExistException {
+        Database database = databaseCache.getIfPresent(databaseName);
+        if (database != null) {
+            return database;
         }
 
-        properties = super.loadDatabaseProperties(databaseName);
-        databaseCache.put(databaseName, properties);
-        return properties;
+        database = super.getDatabase(databaseName);
+        databaseCache.put(databaseName, database);
+        return database;
     }
 
     @Override
