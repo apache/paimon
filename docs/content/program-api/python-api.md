@@ -290,3 +290,49 @@ table_commit.close()
 | pyarrow.float64()                        | DOUBLE   |
 | pyarrow.string()                         | STRING   |
 | pyarrow.boolean()                        | BOOLEAN  |
+
+## Predicate
+
+You can use predicate to filter data when reading. Example:
+
+```python
+# table data:
+# f0: 0 1 2 3 4
+# f1: 5 6 7 8 9
+read_builder = table.new_read_builder()
+predicate_builder = read_builder.new_predicate_builder()
+
+# build predicate: f0 < 3 && f1 > 5
+predicate1 = predicate_builder.less_than('f0', 1);
+predicate2 = predicate_builder.greater_than('f1', 5);
+predicate = predicate_builder.and_predicates([predicate1, predicate2])
+
+read_builder = read_builder.with_filter(predicate)
+table_scan = read_builder.new_scan()
+table_read = read_builder.new_read()
+splits = table_scan.plan().splits()
+dataframe = table_read.to_pandas(splits)
+
+# result:
+# f0: 1 2
+# f1: 6 7
+```
+
+| Predicate kind        | Predicate method                              | 
+|:----------------------|:----------------------------------------------|
+| p1 and p2             | PredicateBuilder.and_predicates([p1, p2])     |
+| p1 or p2              | PredicateBuilder.or_predicates([p1, p2])      |
+| f = literal           | PredicateBuilder.equal(f, literal)            |
+| f != literal          | PredicateBuilder.not_equal(f, literal)        |
+| f < literal           | PredicateBuilder.less_than(f, literal)        |
+| f <= literal          | PredicateBuilder.less_or_equal(f, literal)    |
+| f > literal           | PredicateBuilder.greater_than(f, literal)     |
+| f >= literal          | PredicateBuilder.greater_or_equal(f, literal) |
+| f is null             | PredicateBuilder.is_null(f)                   |
+| f is not null         | PredicateBuilder.is_not_null(f)               |
+| f.startswith(literal) | PredicateBuilder.startswith(f, literal)       |
+| f.endswith(literal)   | PredicateBuilder.endswith(f, literal)         |
+| f.contains(literal)   | PredicateBuilder.contains(f, literal)         |
+| f is in [l1, l2]      | PredicateBuilder.is_in(f, [l1, l2])           |
+| f is not in [l1, l2]  | PredicateBuilder.is_not_in(f, [l1, l2])       |
+| lower <= f <= upper   | PredicateBuilder.between(f, lower, upper)     |
