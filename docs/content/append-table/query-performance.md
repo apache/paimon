@@ -65,6 +65,9 @@ scenario. Using a bitmap may consume more space but can result in greater accura
 `Bitmap`:
 * `file-index.bitmap.columns`: specify the columns that need bitmap index.
 
+`Bit-Slice Index Bitmap`
+* `file-index.bsi.columns`: specify the columns that need bsi index.
+
 More filter types will be supported...
 
 If you want to add file index to existing table, without any rewrite, you can use `rewrite_file_index` procedure. Before

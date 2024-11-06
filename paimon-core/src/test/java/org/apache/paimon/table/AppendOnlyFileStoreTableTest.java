@@ -26,7 +26,9 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fileindex.FileIndexOptions;
+import org.apache.paimon.fileindex.bitmap.BitmapFileIndexFactory;
 import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory;
+import org.apache.paimon.fileindex.bsi.BitSliceIndexBitmapFileIndexFactory;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -557,6 +559,136 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                         .equal(1, BinaryString.fromString("b")))
                         .createReader(plan.splits());
         reader.forEachRemaining(row -> assertThat(row.getString(1).toString()).isEqualTo("b"));
+    }
+
+    @Test
+    public void testBSIAndBitmapIndexInMemory() throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("event", DataTypes.STRING())
+                        .field("price", DataTypes.BIGINT())
+                        .build();
+        // in unaware-bucket mode, we split files into splits all the time
+        FileStoreTable table =
+                createUnawareBucketFileStoreTable(
+                        rowType,
+                        options -> {
+                            options.set(
+                                    FileIndexOptions.FILE_INDEX
+                                            + "."
+                                            + BitmapFileIndexFactory.BITMAP_INDEX
+                                            + "."
+                                            + CoreOptions.COLUMNS,
+                                    "event");
+                            options.set(
+                                    FileIndexOptions.FILE_INDEX
+                                            + "."
+                                            + BitSliceIndexBitmapFileIndexFactory.BSI_INDEX
+                                            + "."
+                                            + CoreOptions.COLUMNS,
+                                    "price");
+                            options.set(FILE_INDEX_IN_MANIFEST_THRESHOLD.key(), "1 MB");
+                        });
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        List<CommitMessage> result = new ArrayList<>();
+        write.write(GenericRow.of(1, BinaryString.fromString("A"), 4L));
+        write.write(GenericRow.of(1, BinaryString.fromString("B"), 2L));
+        write.write(GenericRow.of(1, BinaryString.fromString("B"), 3L));
+        write.write(GenericRow.of(1, BinaryString.fromString("C"), 3L));
+        result.addAll(write.prepareCommit(true, 0));
+        write.write(GenericRow.of(1, BinaryString.fromString("C"), 4L));
+        result.addAll(write.prepareCommit(true, 0));
+        commit.commit(0, result);
+        result.clear();
+
+        // test bitmap index and bsi index
+        Predicate predicate =
+                PredicateBuilder.and(
+                        new PredicateBuilder(rowType).equal(1, BinaryString.fromString("C")),
+                        new PredicateBuilder(rowType).greaterThan(2, 3L));
+        TableScan.Plan plan = table.newScan().withFilter(predicate).plan();
+        List<DataFileMeta> metas =
+                plan.splits().stream()
+                        .flatMap(split -> ((DataSplit) split).dataFiles().stream())
+                        .collect(Collectors.toList());
+        assertThat(metas.size()).isEqualTo(1);
+
+        RecordReader<InternalRow> reader =
+                table.newRead().withFilter(predicate).createReader(plan.splits());
+        reader.forEachRemaining(
+                row -> {
+                    assertThat(row.getString(1).toString()).isEqualTo("C");
+                    assertThat(row.getLong(2)).isEqualTo(4L);
+                });
+    }
+
+    @Test
+    public void testBSIAndBitmapIndexInDisk() throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("event", DataTypes.STRING())
+                        .field("price", DataTypes.BIGINT())
+                        .build();
+        // in unaware-bucket mode, we split files into splits all the time
+        FileStoreTable table =
+                createUnawareBucketFileStoreTable(
+                        rowType,
+                        options -> {
+                            options.set(
+                                    FileIndexOptions.FILE_INDEX
+                                            + "."
+                                            + BitmapFileIndexFactory.BITMAP_INDEX
+                                            + "."
+                                            + CoreOptions.COLUMNS,
+                                    "event");
+                            options.set(
+                                    FileIndexOptions.FILE_INDEX
+                                            + "."
+                                            + BitSliceIndexBitmapFileIndexFactory.BSI_INDEX
+                                            + "."
+                                            + CoreOptions.COLUMNS,
+                                    "price");
+                            options.set(FILE_INDEX_IN_MANIFEST_THRESHOLD.key(), "1 B");
+                        });
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        List<CommitMessage> result = new ArrayList<>();
+        write.write(GenericRow.of(1, BinaryString.fromString("A"), 4L));
+        write.write(GenericRow.of(1, BinaryString.fromString("B"), 2L));
+        write.write(GenericRow.of(1, BinaryString.fromString("B"), 3L));
+        write.write(GenericRow.of(1, BinaryString.fromString("C"), 3L));
+        result.addAll(write.prepareCommit(true, 0));
+        write.write(GenericRow.of(1, BinaryString.fromString("C"), 4L));
+        result.addAll(write.prepareCommit(true, 0));
+        commit.commit(0, result);
+        result.clear();
+
+        // test bitmap index and bsi index
+        Predicate predicate =
+                PredicateBuilder.and(
+                        new PredicateBuilder(rowType).equal(1, BinaryString.fromString("C")),
+                        new PredicateBuilder(rowType).greaterThan(2, 3L));
+        TableScan.Plan plan = table.newScan().withFilter(predicate).plan();
+        List<DataFileMeta> metas =
+                plan.splits().stream()
+                        .flatMap(split -> ((DataSplit) split).dataFiles().stream())
+                        .collect(Collectors.toList());
+        assertThat(metas.size()).isEqualTo(2);
+
+        RecordReader<InternalRow> reader =
+                table.newRead().withFilter(predicate).createReader(plan.splits());
+        reader.forEachRemaining(
+                row -> {
+                    assertThat(row.getString(1).toString()).isEqualTo("C");
+                    assertThat(row.getLong(2)).isEqualTo(4L);
+                });
     }
 
     @Test

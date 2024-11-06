@@ -68,6 +68,10 @@ public class RoaringBitmap32 {
         return roaringBitmap.getLongCardinality();
     }
 
+    public RoaringBitmap32 clone() {
+        return new RoaringBitmap32(roaringBitmap.clone());
+    }
+
     public void serialize(DataOutput out) throws IOException {
         roaringBitmap.runOptimize();
         roaringBitmap.serialize(out);
@@ -148,5 +152,9 @@ public class RoaringBitmap32 {
                                 return iterator.next().roaringBitmap;
                             }
                         }));
+    }
+
+    public static RoaringBitmap32 andNot(final RoaringBitmap32 x1, final RoaringBitmap32 x2) {
+        return new RoaringBitmap32(RoaringBitmap.andNot(x1.roaringBitmap, x2.roaringBitmap));
     }
 }

@@ -136,3 +136,105 @@ offset:                        4 bytes int (when it is negative, it represents t
 </pre>
 
 Integer are all BIT_ENDIAN.
+
+## Column Index Bytes: Bit-Slice Index Bitmap
+
+BSI file index is a numeric range index, used to accelerate range query, it can use with bitmap index.
+
+Define `'file-index.bsi.columns'`.
+
+BSI file index format (V1):
+
+<pre>
+BSI file index format (V1)
++-------------------------------------------------+
+｜ version (1 byte)                               ｜
++-------------------------------------------------+
+｜ row count (4 bytes int)                        ｜
++-------------------------------------------------+
+｜ has positive value (1 byte)                    ｜
++-------------------------------------------------+
+｜ positive bsi serialized (if has positive value)｜       
++-------------------------------------------------+
+｜ has negative value (1 byte)                    ｜
++-------------------------------------------------+
+｜ negative bsi serialized (if has negative value)｜       
++-------------------------------------------------+
+</pre>
+
+BSI only support the following data type:
+
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 10%">Paimon Data Type</th>
+      <th class="text-left" style="width: 5%">Supported</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><code>TinyIntType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>SmallIntType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>IntType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>BigIntType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>DateType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>LocalZonedTimestamp</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>TimestampType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>DecimalType(precision, scale)</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>FloatType</code></td>
+      <td>false</td>
+    </tr>
+    <tr>
+      <td><code>DoubleType</code></td>
+      <td>false</td>
+    </tr>
+    <tr>
+      <td><code>String</code></td>
+      <td>false</td>
+    </tr>
+    <tr>
+      <td><code>VarBinaryType</code>, <code>BinaryType</code></td>
+      <td>false</td>
+    </tr>
+    <tr>
+      <td><code>RowType</code></td>
+      <td>false</td>
+    </tr>
+    <tr>
+      <td><code>MapType</code></td>
+      <td>false</td>
+    </tr>
+    <tr>
+      <td><code>ArrayType</code></td>
+      <td>false</td>
+    </tr>
+    <tr>
+      <td><code>BooleanType</code></td>
+      <td>false</td>
+    </tr>
+    </tbody>
+</table>

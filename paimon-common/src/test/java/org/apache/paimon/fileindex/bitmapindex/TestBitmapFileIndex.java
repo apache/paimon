@@ -79,6 +79,13 @@ public class TestBitmapFileIndex {
 
         BitmapIndexResultLazy result5 = (BitmapIndexResultLazy) result1.or(result2);
         assert result5.get().equals(RoaringBitmap32.bitmapOf(0, 2, 4));
+
+        BitmapIndexResultLazy result6 =
+                (BitmapIndexResultLazy) reader.visitEqual(fieldRef, BinaryString.fromString("c"));
+        assert result6.get().equals(RoaringBitmap32.bitmapOf());
+
+        BitmapIndexResultLazy result7 = (BitmapIndexResultLazy) result6.and(result1);
+        assert result7.get().equals(RoaringBitmap32.bitmapOf());
     }
 
     @Test
