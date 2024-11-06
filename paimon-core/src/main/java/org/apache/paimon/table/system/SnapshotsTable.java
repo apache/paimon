@@ -36,6 +36,7 @@ import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.LessOrEqual;
 import org.apache.paimon.predicate.LessThan;
+import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
@@ -62,6 +63,7 @@ import java.io.IOException;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
@@ -206,6 +208,7 @@ public class SnapshotsTable implements ReadonlyTable {
         private RowType readType;
         private Optional<Long> optionalFilterSnapshotIdMax = Optional.empty();
         private Optional<Long> optionalFilterSnapshotIdMin = Optional.empty();
+        private final List<Long> snapshotIds = new ArrayList<>();
 
         public SnapshotsRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -220,10 +223,25 @@ public class SnapshotsTable implements ReadonlyTable {
             String leafName = "snapshot_id";
             if (predicate instanceof CompoundPredicate) {
                 CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
+                List<Predicate> children = compoundPredicate.children();
                 if ((compoundPredicate.function()) instanceof And) {
-                    List<Predicate> children = compoundPredicate.children();
                     for (Predicate leaf : children) {
                         handleLeafPredicate(leaf, leafName);
+                    }
+                }
+
+                // optimize for IN filter
+                if ((compoundPredicate.function()) instanceof Or) {
+                    for (Predicate leaf : children) {
+                        if (leaf instanceof LeafPredicate
+                                && (((LeafPredicate) leaf).function() instanceof Equal)
+                                && leaf.visit(LeafPredicateExtractor.INSTANCE).get(leafName)
+                                        != null) {
+                            snapshotIds.add((Long) ((LeafPredicate) leaf).literals().get(0));
+                        } else {
+                            snapshotIds.clear();
+                            break;
+                        }
                     }
                 }
             } else {
@@ -284,9 +302,15 @@ public class SnapshotsTable implements ReadonlyTable {
             }
             SnapshotManager snapshotManager =
                     new SnapshotManager(fileIO, ((SnapshotsSplit) split).location, branch);
-            Iterator<Snapshot> snapshots =
-                    snapshotManager.snapshotsWithinRange(
-                            optionalFilterSnapshotIdMax, optionalFilterSnapshotIdMin);
+
+            Iterator<Snapshot> snapshots;
+            if (!snapshotIds.isEmpty()) {
+                snapshots = snapshotManager.snapshotsWithId(snapshotIds);
+            } else {
+                snapshots =
+                        snapshotManager.snapshotsWithinRange(
+                                optionalFilterSnapshotIdMax, optionalFilterSnapshotIdMin);
+            }
 
             Iterator<InternalRow> rows = Iterators.transform(snapshots, this::toRow);
             if (readType != null) {

@@ -35,6 +35,7 @@ import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.LessOrEqual;
 import org.apache.paimon.predicate.LessThan;
+import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
@@ -64,6 +65,7 @@ import javax.annotation.Nullable;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -203,6 +205,7 @@ public class SchemasTable implements ReadonlyTable {
 
         private Optional<Long> optionalFilterSchemaIdMax = Optional.empty();
         private Optional<Long> optionalFilterSchemaIdMin = Optional.empty();
+        private final List<Long> schemaIds = new ArrayList<>();
 
         public SchemasRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -221,6 +224,22 @@ public class SchemasTable implements ReadonlyTable {
                     List<Predicate> children = compoundPredicate.children();
                     for (Predicate leaf : children) {
                         handleLeafPredicate(leaf, leafName);
+                    }
+                }
+
+                // optimize for IN filter
+                if ((compoundPredicate.function()) instanceof Or) {
+                    List<Predicate> children = compoundPredicate.children();
+                    for (Predicate leaf : children) {
+                        if (leaf instanceof LeafPredicate
+                                && (((LeafPredicate) leaf).function() instanceof Equal)
+                                && leaf.visit(LeafPredicateExtractor.INSTANCE).get(leafName)
+                                        != null) {
+                            schemaIds.add((Long) ((LeafPredicate) leaf).literals().get(0));
+                        } else {
+                            schemaIds.clear();
+                            break;
+                        }
                     }
                 }
             } else {
@@ -279,8 +298,14 @@ public class SchemasTable implements ReadonlyTable {
             Path location = schemasSplit.location;
             SchemaManager manager = new SchemaManager(fileIO, location, branch);
 
-            Collection<TableSchema> tableSchemas =
-                    manager.listWithRange(optionalFilterSchemaIdMax, optionalFilterSchemaIdMin);
+            Collection<TableSchema> tableSchemas;
+            if (!schemaIds.isEmpty()) {
+                tableSchemas = manager.schemasWithId(schemaIds);
+            } else {
+                tableSchemas =
+                        manager.listWithRange(optionalFilterSchemaIdMax, optionalFilterSchemaIdMin);
+            }
+
             Iterator<InternalRow> rows = Iterators.transform(tableSchemas.iterator(), this::toRow);
             if (readType != null) {
                 rows =
