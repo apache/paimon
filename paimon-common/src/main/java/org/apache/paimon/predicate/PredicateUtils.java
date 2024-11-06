@@ -46,10 +46,13 @@ public class PredicateUtils {
         for (Predicate leaf : children) {
             if (leaf instanceof LeafPredicate
                     && (((LeafPredicate) leaf).function() instanceof Equal)
-                    && leaf.visit(LeafPredicateExtractor.INSTANCE).get(leafName) != null) {
+                    && leaf.visit(LeafPredicateExtractor.INSTANCE).get(leafName) != null
+                    && matchConsumer != null) {
                 matchConsumer.accept(leaf);
             } else {
-                unMatchConsumer.accept(leaf);
+                if (unMatchConsumer != null) {
+                    unMatchConsumer.accept(leaf);
+                }
             }
         }
     }

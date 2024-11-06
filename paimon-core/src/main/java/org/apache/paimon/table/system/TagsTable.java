@@ -26,7 +26,13 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.predicate.*;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LeafPredicateExtractor;
+import org.apache.paimon.predicate.Or;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateUtils;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -219,7 +225,6 @@ public class TagsTable implements ReadonlyTable {
             TagManager tagManager = new TagManager(fileIO, location, branch);
 
             Map<String, Tag> nameToSnapshot = new TreeMap<>();
-            predicateMap = new TreeMap<>();
             if (predicate != null) {
                 if (predicate instanceof LeafPredicate
                         && ((LeafPredicate) predicate).function() instanceof Equal
@@ -240,16 +245,12 @@ public class TagsTable implements ReadonlyTable {
                                 TAG_NAME,
                                 (Predicate p) -> {
                                     String equalValue =
-                                            ((LeafPredicate) predicate)
-                                                    .literals()
-                                                    .get(0)
-                                                    .toString();
+                                            ((LeafPredicate) p).literals().get(0).toString();
                                     if (predicateMap != null && tagManager.tagExists(equalValue)) {
                                         predicateMap.put(equalValue, tagManager.tag(equalValue));
                                     }
                                 },
                                 (Predicate p) -> {
-                                    predicateMap.clear();
                                     predicateMap = null;
                                 });
                     }
