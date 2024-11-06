@@ -73,13 +73,13 @@ See [Apache Doris Website](https://doris.apache.org/docs/lakehouse/datalake-anal
 
 1. Query Paimon table with full qualified name
 
-    ```
+    ```sql
     SELECT * FROM paimon_hdfs.paimon_db.paimon_table;
     ```
 
 2. Switch to Paimon Catalog and query
 
-    ```
+    ```sql
     SWITCH paimon_hdfs;
     USE paimon_db;
     SELECT * FROM paimon_table;

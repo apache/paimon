@@ -34,9 +34,9 @@ Paimon currently supports Trino 420 and above.
 
 ## Filesystem
 
-From version 0.8, paimon share trino filesystem for all actions, which means, you should 
-config trino filesystem before using trino-paimon. You can find information about how to config
-filesystems for trino on trino official website.
+From version 0.8, Paimon share Trino filesystem for all actions, which means, you should 
+config Trino filesystem before using trino-paimon. You can find information about how to config
+filesystems for Trino on Trino official website.
 
 ## Preparing Paimon Jar File
 
@@ -113,7 +113,7 @@ If you are using HDFS, choose one of the following ways to configure your HDFS:
 - set environment variable HADOOP_CONF_DIR.
 - configure `hadoop-conf-dir` in the properties.
 
-If you are using a hadoop filesystem, you can still use trino-hdfs and trino-hive to config it.
+If you are using a Hadoop filesystem, you can still use trino-hdfs and trino-hive to config it.
 For example, if you use oss as a storage, you can write in `paimon.properties` according to [Trino Reference](https://trino.io/docs/current/connector/hive.html#hdfs-configuration):
 
 ```
