@@ -157,7 +157,7 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
   override def visitRollback(ctx: RollbackContext): AnyRef = withOrigin(ctx) {
     RollbackCommand(
       typedVisit[Seq[String]](ctx.multipartIdentifier),
-      ctx.kind().getText,
+      ctx.timeTravelKind().getText,
       ctx.identifier().getText)
   }
 

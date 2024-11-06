@@ -33,7 +33,7 @@ case class RollbackExec(
     catalog: TableCatalog,
     ident: Identifier,
     output: Seq[Attribute],
-    kind: String,
+    timeTravelKind: String,
     version: String)
   extends PaimonLeafV2CommandExec {
 
@@ -43,7 +43,7 @@ case class RollbackExec(
 
     table.asInstanceOf[SparkTable].getTable match {
       case paimonTable: FileStoreTable =>
-        kind.toUpperCase(Locale.ROOT) match {
+        timeTravelKind.toUpperCase(Locale.ROOT) match {
 
           case "SNAPSHOT" =>
             assert(version.chars.allMatch(Character.isDigit))
@@ -59,7 +59,8 @@ case class RollbackExec(
             paimonTable.rollbackTo(snapshot.id);
 
           case _ =>
-            throw new UnsupportedOperationException(s"Unsupported rollback kind '$kind'.")
+            throw new UnsupportedOperationException(
+              s"Unsupported rollback timeTravelKind '$timeTravelKind'.")
         }
       case t =>
         throw new UnsupportedOperationException(

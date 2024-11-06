@@ -74,7 +74,7 @@ statement
     | ALTER TABLE multipartIdentifier createReplaceTagClause                                #createOrReplaceTag
     | ALTER TABLE multipartIdentifier DELETE TAG (IF EXISTS)? identifier                    #deleteTag
     | ALTER TABLE multipartIdentifier RENAME TAG identifier TO identifier                   #renameTag
-    | ALTER TABLE multipartIdentifier ROLLBACK TO kind identifier                           #rollback
+    | ALTER TABLE multipartIdentifier ROLLBACK TO timeTravelKind identifier                 #rollback
   ;
 
 callArgument
@@ -105,7 +105,7 @@ timeUnit
   | MINUTES
   ;
 
-kind
+timeTravelKind
     : SNAPSHOT
     | TAG
     | TIMESTAMP

@@ -25,13 +25,13 @@ import org.apache.spark.sql.types.StringType
 
 case class RollbackCommand(
     table: Seq[String],
-    kind: String,
+    timeTravelKind: String,
     version: String,
     override val output: Seq[Attribute] = RollbackCommand.getOutputAttrs)
   extends PaimonLeafCommand {
 
   override def simpleString(maxFields: Int): String = {
-    s"Rollback to $kind '$version' for table: $table"
+    s"Rollback to $timeTravelKind '$version' for table: $table"
   }
 }
 
