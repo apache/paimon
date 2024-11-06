@@ -1351,14 +1351,8 @@ public class CoreOptions implements Serializable {
             key("record-level.time-field")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription("Time field for record level expire.");
-
-    public static final ConfigOption<TimeFieldType> RECORD_LEVEL_TIME_FIELD_TYPE =
-            key("record-level.time-field-type")
-                    .enumType(TimeFieldType.class)
-                    .defaultValue(TimeFieldType.SECONDS_INT)
                     .withDescription(
-                            "Time field type for record level expire, it can be seconds-int,seconds-long, millis-long or timestamp.");
+                            "Time field for record level expire. It supports the following types: `timestamps in seconds with INT`,`timestamps in seconds with BIGINT`, `timestamps in milliseconds with BIGINT` or `timestamp`.");
 
     public static final ConfigOption<String> FIELDS_DEFAULT_AGG_FUNC =
             key(FIELDS_PREFIX + "." + DEFAULT_AGG_FUNCTION)
@@ -2267,11 +2261,6 @@ public class CoreOptions implements Serializable {
         return options.get(RECORD_LEVEL_TIME_FIELD);
     }
 
-    @Nullable
-    public TimeFieldType recordLevelTimeFieldType() {
-        return options.get(RECORD_LEVEL_TIME_FIELD_TYPE);
-    }
-
     public boolean prepareCommitWaitCompaction() {
         if (!needLookup()) {
             return false;
@@ -2905,35 +2894,6 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         LookupLocalFileType(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-    }
-
-    /** Time field type for record level expire. */
-    public enum TimeFieldType implements DescribedEnum {
-        SECONDS_INT("seconds-int", "Timestamps in seconds with INT field type."),
-
-        SECONDS_LONG("seconds-long", "Timestamps in seconds with BIGINT field type."),
-
-        MILLIS_LONG("millis-long", "Timestamps in milliseconds with BIGINT field type."),
-
-        TIMESTAMP("timestamp", "Timestamp field type.");
-
-        private final String value;
-        private final String description;
-
-        TimeFieldType(String value, String description) {
             this.value = value;
             this.description = description;
         }
