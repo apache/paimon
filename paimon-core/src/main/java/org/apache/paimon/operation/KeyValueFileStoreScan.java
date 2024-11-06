@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.KeyValueFileStore;
+import org.apache.paimon.fileindex.FileIndexPredicate;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
@@ -31,11 +32,17 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStatsEvolution;
 import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
+import javax.annotation.Nullable;
+
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.paimon.CoreOptions.MergeEngine.AGGREGATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
@@ -54,6 +61,9 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     private final MergeEngine mergeEngine;
     private final ChangelogProducer changelogProducer;
 
+    private final boolean fileIndexReadEnabled;
+    private final Map<Long, Predicate> schemaId2DataFilter = new HashMap<>();
+
     public KeyValueFileStoreScan(
             ManifestsReader manifestsReader,
             BucketSelectConverter bucketSelectConverter,
@@ -65,7 +75,8 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             Integer scanManifestParallelism,
             boolean deletionVectorsEnabled,
             MergeEngine mergeEngine,
-            ChangelogProducer changelogProducer) {
+            ChangelogProducer changelogProducer,
+            boolean fileIndexReadEnabled) {
         super(
                 manifestsReader,
                 snapshotManager,
@@ -85,6 +96,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         this.deletionVectorsEnabled = deletionVectorsEnabled;
         this.mergeEngine = mergeEngine;
         this.changelogProducer = changelogProducer;
+        this.fileIndexReadEnabled = fileIndexReadEnabled;
     }
 
     public KeyValueFileStoreScan withKeyFilter(Predicate predicate) {
@@ -116,6 +128,26 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         }
 
         return true;
+    }
+
+    private boolean filterByFileIndex(@Nullable byte[] embeddedIndexBytes, ManifestEntry entry) {
+        if (embeddedIndexBytes == null) {
+            return true;
+        }
+
+        RowType dataRowType = scanTableSchema(entry.file().schemaId()).logicalRowType();
+        try (FileIndexPredicate predicate =
+                new FileIndexPredicate(embeddedIndexBytes, dataRowType)) {
+            Predicate dataPredicate =
+                    schemaId2DataFilter.computeIfAbsent(
+                            entry.file().schemaId(),
+                            id ->
+                                    fieldValueStatsConverters.convertFilter(
+                                            entry.file().schemaId(), valueFilter));
+            return predicate.testPredicate(dataPredicate);
+        } catch (IOException e) {
+            throw new RuntimeException("Exception happens while checking fileIndex predicate.", e);
+        }
     }
 
     private boolean isValueFilterEnabled(ManifestEntry entry) {
@@ -181,7 +213,12 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                         .getOrCreate(file.schemaId())
                         .evolution(file.valueStats(), file.rowCount(), file.valueStatsCols());
         return valueFilter.test(
-                file.rowCount(), result.minValues(), result.maxValues(), result.nullCounts());
+                        file.rowCount(),
+                        result.minValues(),
+                        result.maxValues(),
+                        result.nullCounts())
+                && (!fileIndexReadEnabled
+                        || filterByFileIndex(entry.file().embeddedIndex(), entry));
     }
 
     private static boolean noOverlapping(List<ManifestEntry> entries) {

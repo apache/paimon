@@ -19,19 +19,21 @@
 package org.apache.paimon.mergetree.compact.aggregate.factory;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldMaxAgg;
 import org.apache.paimon.types.DataType;
 
 /** Factory for #{@link FieldMaxAgg}. */
 public class FieldMaxAggFactory implements FieldAggregatorFactory {
+
+    public static final String NAME = "max";
+
     @Override
-    public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
-        return new FieldMaxAgg(fieldType);
+    public FieldMaxAgg create(DataType fieldType, CoreOptions options, String field) {
+        return new FieldMaxAgg(identifier(), fieldType);
     }
 
     @Override
     public String identifier() {
-        return FieldMaxAgg.NAME;
+        return NAME;
     }
 }

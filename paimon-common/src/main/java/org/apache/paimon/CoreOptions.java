@@ -190,6 +190,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue("changelog-")
                     .withDescription("Specify the file name prefix of changelog files.");
 
+    public static final ConfigOption<Boolean> FILE_SUFFIX_INCLUDE_COMPRESSION =
+            key("file.suffix.include.compression")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to add file compression type in the file name of data file and changelog file.");
+
     public static final ConfigOption<MemorySize> FILE_BLOCK_SIZE =
             key("file.block-size")
                     .memoryType()
@@ -1344,14 +1351,8 @@ public class CoreOptions implements Serializable {
             key("record-level.time-field")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription("Time field for record level expire.");
-
-    public static final ConfigOption<TimeFieldType> RECORD_LEVEL_TIME_FIELD_TYPE =
-            key("record-level.time-field-type")
-                    .enumType(TimeFieldType.class)
-                    .defaultValue(TimeFieldType.SECONDS_INT)
                     .withDescription(
-                            "Time field type for record level expire, it can be seconds-int,seconds-long or millis-long.");
+                            "Time field for record level expire. It supports the following types: `timestamps in seconds with INT`,`timestamps in seconds with BIGINT`, `timestamps in milliseconds with BIGINT` or `timestamp`.");
 
     public static final ConfigOption<String> FIELDS_DEFAULT_AGG_FUNC =
             key(FIELDS_PREFIX + "." + DEFAULT_AGG_FUNCTION)
@@ -1403,13 +1404,6 @@ public class CoreOptions implements Serializable {
                     .defaultValue(true)
                     .withDescription(
                             "Whether to enable asynchronous IO writing when writing files.");
-
-    @ExcludeFromDocumentation("Only used internally to support materialized table")
-    public static final ConfigOption<Long> MATERIALIZED_TABLE_SNAPSHOT =
-            key("materialized-table.snapshot")
-                    .longType()
-                    .noDefaultValue()
-                    .withDescription("The snapshot specified for the materialized table");
 
     @ExcludeFromDocumentation("Only used internally to support materialized table")
     public static final ConfigOption<String> MATERIALIZED_TABLE_DEFINITION_QUERY =
@@ -1596,6 +1590,10 @@ public class CoreOptions implements Serializable {
 
     public String changelogFilePrefix() {
         return options.get(CHANGELOG_FILE_PREFIX);
+    }
+
+    public boolean fileSuffixIncludeCompression() {
+        return options.get(FILE_SUFFIX_INCLUDE_COMPRESSION);
     }
 
     public String fieldsDefaultFunc() {
@@ -2263,11 +2261,6 @@ public class CoreOptions implements Serializable {
         return options.get(RECORD_LEVEL_TIME_FIELD);
     }
 
-    @Nullable
-    public TimeFieldType recordLevelTimeFieldType() {
-        return options.get(RECORD_LEVEL_TIME_FIELD_TYPE);
-    }
-
     public boolean prepareCommitWaitCompaction() {
         if (!needLookup()) {
             return false;
@@ -2901,33 +2894,6 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         LookupLocalFileType(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-    }
-
-    /** Time field type for record level expire. */
-    public enum TimeFieldType implements DescribedEnum {
-        SECONDS_INT("seconds-int", "Timestamps in seconds with INT field type."),
-
-        SECONDS_LONG("seconds-long", "Timestamps in seconds with BIGINT field type."),
-
-        MILLIS_LONG("millis-long", "Timestamps in milliseconds with BIGINT field type.");
-
-        private final String value;
-        private final String description;
-
-        TimeFieldType(String value, String description) {
             this.value = value;
             this.description = description;
         }

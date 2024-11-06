@@ -71,6 +71,35 @@ abstract class PaimonTagDdlTestBase extends PaimonSparkTestBase {
       Row("tag-1", 3, null))
   }
 
+  test("Tag ddl: alter table t create or replace tag syntax") {
+    spark.sql("""CREATE TABLE T (id INT, name STRING)
+                |USING PAIMON
+                |TBLPROPERTIES ('primary-key'='id')""".stripMargin)
+
+    spark.sql("insert into T values(1, 'a')")
+    spark.sql("insert into T values(2, 'b')")
+    assertResult(2)(loadTable("T").snapshotManager().snapshotCount())
+
+    // test 'replace' syntax
+    spark.sql("alter table T create tag `tag-1` as of version 1")
+    spark.sql("alter table T replace tag `tag-1` as of version 2 RETAIN 1 HOURS")
+    checkAnswer(
+      spark.sql("select tag_name,snapshot_id,time_retained from `T$tags`"),
+      Row("tag-1", 2, "PT1H") :: Nil)
+
+    // test 'create or replace' syntax
+    // tag-2 not exist, create it
+    spark.sql("alter table T create or replace tag `tag-2` as of version 1")
+    checkAnswer(
+      spark.sql("select tag_name,snapshot_id,time_retained from `T$tags` where tag_name = 'tag-2'"),
+      Row("tag-2", 1, null) :: Nil)
+    // tag-2 exists, replace it
+    spark.sql("alter table T create or replace tag `tag-2` as of version 2 RETAIN 1 HOURS")
+    checkAnswer(
+      spark.sql("select tag_name,snapshot_id,time_retained from `T$tags` where tag_name = 'tag-2'"),
+      Row("tag-2", 2, "PT1H") :: Nil)
+  }
+
   test("Tag ddl: alter table t delete tag syntax") {
     spark.sql("""CREATE TABLE T (id INT, name STRING)
                 |USING PAIMON

@@ -24,6 +24,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.lineage.LineageMetaFactory;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.Lock;
@@ -196,6 +197,12 @@ public abstract class AbstractCatalog implements Catalog {
             commit.dropPartitions(
                     Collections.singletonList(partitionSpec), BatchWriteBuilder.COMMIT_IDENTIFIER);
         }
+    }
+
+    @Override
+    public List<PartitionEntry> listPartitions(Identifier identifier)
+            throws TableNotExistException {
+        return getTable(identifier).newReadBuilder().newScan().listPartitionEntries();
     }
 
     protected abstract void createDatabaseImpl(String name, Map<String, String> properties);
@@ -393,6 +400,15 @@ public abstract class AbstractCatalog implements Catalog {
                                 lockFactory().orElse(null), lockContext().orElse(null), identifier),
                         metastoreClientFactory(identifier).orElse(null),
                         lineageMetaFactory));
+    }
+
+    protected CatalogEnvironment catalogEnvironment(Identifier identifier)
+            throws TableNotExistException {
+        return new CatalogEnvironment(
+                identifier,
+                Lock.factory(lockFactory().orElse(null), lockContext().orElse(null), identifier),
+                metastoreClientFactory(identifier).orElse(null),
+                lineageMetaFactory);
     }
 
     /**

@@ -23,6 +23,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -51,7 +52,6 @@ import java.util.stream.Stream;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FIELDS_SEPARATOR;
 import static org.apache.paimon.CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE;
-import static org.apache.paimon.mergetree.compact.aggregate.FieldAggregator.createFieldAggregator;
 import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
 
 /**
@@ -495,7 +495,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     fieldAggregators.put(
                             i,
                             () ->
-                                    createFieldAggregator(
+                                    FieldAggregatorFactory.create(
                                             fieldType,
                                             strAggFunc,
                                             ignoreRetract,
@@ -506,7 +506,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     fieldAggregators.put(
                             i,
                             () ->
-                                    createFieldAggregator(
+                                    FieldAggregatorFactory.create(
                                             fieldType,
                                             defaultAggFunc,
                                             ignoreRetract,

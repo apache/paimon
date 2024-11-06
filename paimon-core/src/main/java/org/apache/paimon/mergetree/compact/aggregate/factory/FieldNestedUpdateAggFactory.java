@@ -32,6 +32,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Factory for #{@link FieldNestedUpdateAgg}. */
 public class FieldNestedUpdateAggFactory implements FieldAggregatorFactory {
+
+    public static final String NAME = "nested_update";
+
     @Override
     public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
         return createFieldNestedUpdateAgg(fieldType, options.fieldNestedUpdateAggNestedKey(field));
@@ -39,20 +42,20 @@ public class FieldNestedUpdateAggFactory implements FieldAggregatorFactory {
 
     @Override
     public String identifier() {
-        return FieldNestedUpdateAgg.NAME;
+        return NAME;
     }
 
-    private static FieldAggregator createFieldNestedUpdateAgg(
-            DataType fieldType, List<String> nestedKey) {
+    private FieldAggregator createFieldNestedUpdateAgg(DataType fieldType, List<String> nestedKey) {
         if (nestedKey == null) {
             nestedKey = Collections.emptyList();
         }
 
-        String typeErrorMsg = "Data type of nested table column must be 'Array<Row>' but was '%s'.";
+        String typeErrorMsg =
+                "Data type for nested table column must be 'Array<Row>' but was '%s'.";
         checkArgument(fieldType instanceof ArrayType, typeErrorMsg, fieldType);
         ArrayType arrayType = (ArrayType) fieldType;
         checkArgument(arrayType.getElementType() instanceof RowType, typeErrorMsg, fieldType);
 
-        return new FieldNestedUpdateAgg(arrayType, nestedKey);
+        return new FieldNestedUpdateAgg(identifier(), arrayType, nestedKey);
     }
 }

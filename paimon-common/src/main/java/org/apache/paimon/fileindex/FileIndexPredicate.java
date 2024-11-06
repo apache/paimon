@@ -72,10 +72,10 @@ public class FileIndexPredicate implements Closeable {
             return true;
         }
 
-        Set<String> requredFieldNames = getRequiredNames(filePredicate);
+        Set<String> requiredFieldNames = getRequiredNames(filePredicate);
 
         Map<String, Collection<FileIndexReader>> indexReaders = new HashMap<>();
-        requredFieldNames.forEach(name -> indexReaders.put(name, reader.readColumnIndex(name)));
+        requiredFieldNames.forEach(name -> indexReaders.put(name, reader.readColumnIndex(name)));
         if (!new FileIndexPredicateTest(indexReaders).test(filePredicate).remain()) {
             LOG.debug(
                     "One file has been filtered: "

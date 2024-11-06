@@ -306,6 +306,19 @@ public abstract class CatalogTestBase {
                                                 ""),
                                         true))
                 .doesNotThrowAnyException();
+        // Create table throws IleaArgumentException when some table options are not set correctly
+        schema.options()
+                .put(
+                        CoreOptions.MERGE_ENGINE.key(),
+                        CoreOptions.MergeEngine.DEDUPLICATE.toString());
+        schema.options().put(CoreOptions.IGNORE_DELETE.key(), "max");
+        assertThatCode(
+                        () ->
+                                catalog.createTable(
+                                        Identifier.create("test_db", "wrong_table"), schema, false))
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage(
+                        "Unrecognized option for boolean: max. Expected either true or false(case insensitive)");
     }
 
     @Test
@@ -888,11 +901,20 @@ public abstract class CatalogTestBase {
         assertThatThrownBy(() -> catalog.createView(identifier, view, false))
                 .isInstanceOf(Catalog.ViewAlreadyExistException.class);
 
-        catalog.dropView(identifier, false);
-        assertThat(catalog.viewExists(identifier)).isFalse();
+        Identifier newIdentifier = new Identifier("view_db", "new_view");
+        catalog.renameView(new Identifier("view_db", "unknown"), newIdentifier, true);
+        assertThatThrownBy(
+                        () ->
+                                catalog.renameView(
+                                        new Identifier("view_db", "unknown"), newIdentifier, false))
+                .isInstanceOf(Catalog.ViewNotExistException.class);
+        catalog.renameView(identifier, newIdentifier, false);
 
-        catalog.dropView(identifier, true);
-        assertThatThrownBy(() -> catalog.dropView(identifier, false))
+        catalog.dropView(newIdentifier, false);
+        assertThat(catalog.viewExists(newIdentifier)).isFalse();
+
+        catalog.dropView(newIdentifier, true);
+        assertThatThrownBy(() -> catalog.dropView(newIdentifier, false))
                 .isInstanceOf(Catalog.ViewNotExistException.class);
     }
 }

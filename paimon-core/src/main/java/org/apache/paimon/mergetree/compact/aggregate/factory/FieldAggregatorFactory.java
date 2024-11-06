@@ -20,8 +20,12 @@ package org.apache.paimon.mergetree.compact.aggregate.factory;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.factories.Factory;
+import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
+import org.apache.paimon.mergetree.compact.aggregate.FieldIgnoreRetractAgg;
 import org.apache.paimon.types.DataType;
+
+import javax.annotation.Nullable;
 
 /** Factory for {@link FieldAggregator}. */
 public interface FieldAggregatorFactory extends Factory {
@@ -29,4 +33,39 @@ public interface FieldAggregatorFactory extends Factory {
     FieldAggregator create(DataType fieldType, CoreOptions options, String field);
 
     String identifier();
+
+    static FieldAggregator create(
+            DataType fieldType,
+            @Nullable String strAgg,
+            boolean ignoreRetract,
+            boolean isPrimaryKey,
+            CoreOptions options,
+            String field) {
+        FieldAggregator fieldAggregator;
+        if (isPrimaryKey) {
+            strAgg = FieldPrimaryKeyAggFactory.NAME;
+        } else if (strAgg == null) {
+            strAgg = FieldLastNonNullValueAggFactory.NAME;
+        }
+
+        FieldAggregatorFactory fieldAggregatorFactory =
+                FactoryUtil.discoverFactory(
+                        FieldAggregator.class.getClassLoader(),
+                        FieldAggregatorFactory.class,
+                        strAgg);
+        if (fieldAggregatorFactory == null) {
+            throw new RuntimeException(
+                    String.format(
+                            "Use unsupported aggregation: %s or spell aggregate function incorrectly!",
+                            strAgg));
+        }
+
+        fieldAggregator = fieldAggregatorFactory.create(fieldType, options, field);
+
+        if (ignoreRetract) {
+            fieldAggregator = new FieldIgnoreRetractAgg(fieldAggregator);
+        }
+
+        return fieldAggregator;
+    }
 }

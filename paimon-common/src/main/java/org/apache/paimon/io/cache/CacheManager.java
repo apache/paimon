@@ -77,4 +77,26 @@ public class CacheManager {
     public int fileReadCount() {
         return fileReadCount.get();
     }
+
+    /** The container for the segment. */
+    public static class SegmentContainer {
+
+        private final MemorySegment segment;
+
+        private int accessCount;
+
+        public SegmentContainer(MemorySegment segment) {
+            this.segment = segment;
+            this.accessCount = 0;
+        }
+
+        public MemorySegment access() {
+            this.accessCount++;
+            return segment;
+        }
+
+        public int getAccessCount() {
+            return accessCount;
+        }
+    }
 }

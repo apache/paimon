@@ -24,25 +24,14 @@ import org.apache.paimon.utils.HllSketchUtil;
 /** HllSketch aggregate a field of a row. */
 public class FieldHllSketchAgg extends FieldAggregator {
 
-    public static final String NAME = "hll_sketch";
-
     private static final long serialVersionUID = 1L;
 
-    public FieldHllSketchAgg(VarBinaryType dataType) {
-        super(dataType);
-    }
-
-    @Override
-    public String name() {
-        return NAME;
+    public FieldHllSketchAgg(String name, VarBinaryType dataType) {
+        super(name, dataType);
     }
 
     @Override
     public Object agg(Object accumulator, Object inputField) {
-        if (accumulator == null && inputField == null) {
-            return null;
-        }
-
         if (accumulator == null || inputField == null) {
             return accumulator == null ? inputField : accumulator;
         }

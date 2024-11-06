@@ -36,6 +36,7 @@ import org.apache.paimon.schema.SchemaChange.UpdateColumnNullability;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnPosition;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnType;
 import org.apache.paimon.schema.SchemaChange.UpdateComment;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
@@ -75,7 +76,6 @@ import java.util.stream.LongStream;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
-import static org.apache.paimon.catalog.Catalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
@@ -126,6 +126,10 @@ public class SchemaManager implements Serializable {
 
     public List<TableSchema> listAll() {
         return listAllIds().stream().map(this::schema).collect(Collectors.toList());
+    }
+
+    public List<TableSchema> schemasWithId(List<Long> schemaIds) {
+        return schemaIds.stream().map(this::schema).collect(Collectors.toList());
     }
 
     public List<TableSchema> listWithRange(
@@ -220,6 +224,9 @@ public class SchemaManager implements Serializable {
                             primaryKeys,
                             options,
                             schema.comment());
+
+            // validate table from creating table
+            FileStoreTableFactory.create(fileIO, tableRoot, newSchema).store();
 
             boolean success = commit(newSchema);
             if (success) {

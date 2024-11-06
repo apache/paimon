@@ -384,6 +384,28 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
+      <td>rollback_to_timestamp</td>
+      <td>
+         -- for Flink 1.18<br/>
+         -- rollback to the snapshot which earlier or equal than timestamp.<br/>
+         CALL sys.rollback_to_timestamp('identifier', timestamp)<br/><br/>
+         -- for Flink 1.19 and later<br/>
+         -- rollback to the snapshot which earlier or equal than timestamp.<br/>
+         CALL sys.rollback_to_timestamp(`table` => 'default.T', `timestamp` => timestamp)<br/><br/>
+      </td>
+      <td>
+         To rollback to the snapshot which earlier or equal than timestamp. Argument:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>timestamp (Long): Roll back to the snapshot which earlier or equal than timestamp.</li>
+      </td>
+      <td>
+         -- for Flink 1.18<br/>
+         CALL sys.rollback_to_timestamp('default.T', 10)
+         -- for Flink 1.19 and later<br/>
+         CALL sys.rollback_to_timestamp(`table` => 'default.T', timestamp => 1730292023000)
+      </td>
+   </tr>
+   <tr>
       <td>expire_snapshots</td>
       <td>
          -- Use named argument<br/>

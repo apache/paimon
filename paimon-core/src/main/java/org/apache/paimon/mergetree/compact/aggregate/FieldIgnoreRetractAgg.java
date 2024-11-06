@@ -21,18 +21,13 @@ package org.apache.paimon.mergetree.compact.aggregate;
 /** An aggregator which ignores retraction messages. */
 public class FieldIgnoreRetractAgg extends FieldAggregator {
 
-    private final FieldAggregator aggregator;
-
     private static final long serialVersionUID = 1L;
 
-    public FieldIgnoreRetractAgg(FieldAggregator aggregator) {
-        super(aggregator.fieldType);
-        this.aggregator = aggregator;
-    }
+    private final FieldAggregator aggregator;
 
-    @Override
-    public String name() {
-        return aggregator.name();
+    public FieldIgnoreRetractAgg(FieldAggregator aggregator) {
+        super(aggregator.name, aggregator.fieldType);
+        this.aggregator = aggregator;
     }
 
     @Override

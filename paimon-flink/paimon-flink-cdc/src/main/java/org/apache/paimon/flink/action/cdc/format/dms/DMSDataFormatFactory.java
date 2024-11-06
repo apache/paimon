@@ -16,23 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.mergetree.compact.aggregate;
+package org.apache.paimon.flink.action.cdc.format.dms;
 
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.flink.action.cdc.format.DataFormat;
+import org.apache.paimon.flink.action.cdc.format.DataFormatFactory;
 
-/** Custom FieldAggregator for Test. */
-public class TestCostomAgg extends FieldAggregator {
-    public TestCostomAgg(DataType dataType) {
-        super(dataType);
+/** Factory to create {@link DMSDataFormat}. */
+public class DMSDataFormatFactory implements DataFormatFactory {
+
+    public static final String IDENTIFIER = "aws-dms-json";
+
+    @Override
+    public DataFormat create() {
+        return new DMSDataFormat();
     }
 
     @Override
-    public String name() {
-        return "custom";
-    }
-
-    @Override
-    public Object agg(Object accumulator, Object inputField) {
-        return inputField;
+    public String identifier() {
+        return IDENTIFIER;
     }
 }

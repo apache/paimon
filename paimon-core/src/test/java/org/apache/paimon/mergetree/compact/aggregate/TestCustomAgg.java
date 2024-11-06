@@ -18,19 +18,17 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.types.DataType;
 
-/** FieldAggregatorFactory for test. */
-public class TestCostomAggFactory implements FieldAggregatorFactory {
-    @Override
-    public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
-        return new TestCostomAgg(fieldType);
+/** Custom FieldAggregator for Test. */
+public class TestCustomAgg extends FieldAggregator {
+
+    public TestCustomAgg(String name, DataType dataType) {
+        super(name, dataType);
     }
 
     @Override
-    public String identifier() {
-        return "custom";
+    public Object agg(Object accumulator, Object inputField) {
+        return inputField;
     }
 }

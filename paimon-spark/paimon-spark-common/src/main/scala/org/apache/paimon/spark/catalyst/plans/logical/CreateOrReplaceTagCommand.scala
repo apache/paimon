@@ -22,10 +22,12 @@ import org.apache.paimon.spark.leafnode.PaimonLeafCommand
 
 import org.apache.spark.sql.catalyst.expressions.Attribute
 
-case class CreateTagCommand(
+case class CreateOrReplaceTagCommand(
     table: Seq[String],
     tagName: String,
     tagOptions: TagOptions,
+    create: Boolean,
+    replace: Boolean,
     ifNotExists: Boolean)
   extends PaimonLeafCommand {
 

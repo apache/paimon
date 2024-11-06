@@ -21,6 +21,7 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -291,6 +292,14 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException, PartitionNotExistException;
 
     /**
+     * Get PartitionEntry of all partitions of the table.
+     *
+     * @param identifier path of the table to list partitions
+     * @throws TableNotExistException if the table does not exist
+     */
+    List<PartitionEntry> listPartitions(Identifier identifier) throws TableNotExistException;
+
+    /**
      * Modify an existing table from a {@link SchemaChange}.
      *
      * <p>NOTE: System tables can not be altered.
@@ -367,6 +376,19 @@ public interface Catalog extends AutoCloseable {
      */
     default List<String> listViews(String databaseName) throws DatabaseNotExistException {
         return Collections.emptyList();
+    }
+
+    /**
+     * Rename a view.
+     *
+     * @param fromView identifier of the view to rename
+     * @param toView new view identifier
+     * @throws ViewNotExistException if the fromView does not exist
+     * @throws ViewAlreadyExistException if the toView already exists
+     */
+    default void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
+            throws ViewNotExistException, ViewAlreadyExistException {
+        throw new UnsupportedOperationException();
     }
 
     /** Return a boolean that indicates whether this catalog allow upper case. */

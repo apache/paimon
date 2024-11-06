@@ -27,6 +27,7 @@ import org.apache.paimon.data.LazyGenericRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LeafPredicateExtractor;
@@ -111,7 +112,8 @@ public class FilesTable implements ReadonlyTable {
                                     12, "max_value_stats", SerializationUtils.newStringType(false)),
                             new DataField(13, "min_sequence_number", new BigIntType(true)),
                             new DataField(14, "max_sequence_number", new BigIntType(true)),
-                            new DataField(15, "creation_time", DataTypes.TIMESTAMP_MILLIS())));
+                            new DataField(15, "creation_time", DataTypes.TIMESTAMP_MILLIS()),
+                            new DataField(16, "file_source", DataTypes.STRING())));
 
     private final FileStoreTable storeTable;
 
@@ -413,7 +415,13 @@ public class FilesTable implements ReadonlyTable {
                         () -> BinaryString.fromString(statsGetter.upperValueBounds().toString()),
                         dataFileMeta::minSequenceNumber,
                         dataFileMeta::maxSequenceNumber,
-                        dataFileMeta::creationTime
+                        dataFileMeta::creationTime,
+                        () ->
+                                BinaryString.fromString(
+                                        dataFileMeta
+                                                .fileSource()
+                                                .map(FileSource::toString)
+                                                .orElse(null))
                     };
 
             return new LazyGenericRow(fields);

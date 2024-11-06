@@ -63,8 +63,7 @@ public class AbstractFlinkTableFactoryTest {
     @Test
     public void testGetDynamicOptions() {
         Configuration configuration = new Configuration();
-        configuration.setString("paimon.catalog1.db.T.k1", "v1");
-        configuration.setString("paimon.*.db.*.k2", "v2");
+        configuration.setString("k1", "v2");
         ObjectIdentifier identifier = ObjectIdentifier.of("catalog1", "db", "T");
         DynamicTableFactory.Context context =
                 new FactoryUtil.DefaultDynamicTableContext(
@@ -74,9 +73,25 @@ public class AbstractFlinkTableFactoryTest {
                         configuration,
                         AbstractFlinkTableFactoryTest.class.getClassLoader(),
                         false);
-        Map<String, String> options =
-                AbstractFlinkTableFactory.getDynamicTableConfigOptions(context);
-        assertThat(options).isEqualTo(ImmutableMap.of("k1", "v1", "k2", "v2"));
+        Map<String, String> options = AbstractFlinkTableFactory.getDynamicConfigOptions(context);
+        assertThat(options).isEqualTo(ImmutableMap.of("k1", "v2"));
+
+        configuration = new Configuration();
+        configuration.setString("k1", "v2");
+        configuration.setString("k3", "v3");
+        configuration.setString("paimon.catalog1.db.T.k1", "v1");
+        configuration.setString("paimon.*.db.*.k2", "v2");
+        identifier = ObjectIdentifier.of("catalog1", "db", "T");
+        context =
+                new FactoryUtil.DefaultDynamicTableContext(
+                        identifier,
+                        null,
+                        new HashMap<>(),
+                        configuration,
+                        AbstractFlinkTableFactoryTest.class.getClassLoader(),
+                        false);
+        options = AbstractFlinkTableFactory.getDynamicConfigOptions(context);
+        assertThat(options).isEqualTo(ImmutableMap.of("k1", "v1", "k2", "v2", "k3", "v3"));
     }
 
     private void innerTest(RowType r1, RowType r2, boolean expectEquals) {

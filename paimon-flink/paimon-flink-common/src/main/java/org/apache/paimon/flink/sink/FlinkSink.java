@@ -66,7 +66,9 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_CPU;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_OPERATOR_CHAINING;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_SUFFIX;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.generateCustomUid;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -228,6 +230,12 @@ public abstract class FlinkSink<T> implements Serializable {
                         .setParallelism(parallelism == null ? input.getParallelism() : parallelism);
 
         Options options = Options.fromMap(table.options());
+
+        String uidSuffix = options.get(SINK_OPERATOR_UID_SUFFIX);
+        if (options.get(SINK_OPERATOR_UID_SUFFIX) != null) {
+            written = written.uid(generateCustomUid(WRITER_NAME, table.name(), uidSuffix));
+        }
+
         if (options.get(SINK_USE_MANAGED_MEMORY)) {
             declareManagedMemory(written, options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY));
         }
@@ -295,6 +303,14 @@ public abstract class FlinkSink<T> implements Serializable {
                                 committerOperator)
                         .setParallelism(1)
                         .setMaxParallelism(1);
+        if (options.get(SINK_OPERATOR_UID_SUFFIX) != null) {
+            committed =
+                    committed.uid(
+                            generateCustomUid(
+                                    GLOBAL_COMMITTER_NAME,
+                                    table.name(),
+                                    options.get(SINK_OPERATOR_UID_SUFFIX)));
+        }
         configureGlobalCommitter(
                 committed, options.get(SINK_COMMITTER_CPU), options.get(SINK_COMMITTER_MEMORY));
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);

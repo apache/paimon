@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaChange;
@@ -33,6 +34,7 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caff
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalCause;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalListener;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Ticker;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Weigher;
 
 import org.checkerframework.checker.nullness.qual.NonNull;
 import org.slf4j.Logger;
@@ -52,6 +54,7 @@ import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRATION_INTERVAL
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_MAX_MEMORY;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_MEMORY;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_THRESHOLD;
+import static org.apache.paimon.options.CatalogOptions.CACHE_PARTITION_MAX_NUM;
 import static org.apache.paimon.table.system.SystemTableLoader.SYSTEM_TABLES;
 
 /** A {@link Catalog} to cache databases and tables and manifests. */
@@ -63,24 +66,30 @@ public class CachingCatalog extends DelegateCatalog {
     protected final Cache<Identifier, Table> tableCache;
     @Nullable protected final SegmentsCache<Path> manifestCache;
 
+    // partition cache will affect data latency
+    @Nullable protected final Cache<Identifier, List<PartitionEntry>> partitionCache;
+
     public CachingCatalog(Catalog wrapped) {
         this(
                 wrapped,
                 CACHE_EXPIRATION_INTERVAL_MS.defaultValue(),
                 CACHE_MANIFEST_SMALL_FILE_MEMORY.defaultValue(),
-                CACHE_MANIFEST_SMALL_FILE_THRESHOLD.defaultValue().getBytes());
+                CACHE_MANIFEST_SMALL_FILE_THRESHOLD.defaultValue().getBytes(),
+                CACHE_PARTITION_MAX_NUM.defaultValue());
     }
 
     public CachingCatalog(
             Catalog wrapped,
             Duration expirationInterval,
             MemorySize manifestMaxMemory,
-            long manifestCacheThreshold) {
+            long manifestCacheThreshold,
+            long cachedPartitionMaxNum) {
         this(
                 wrapped,
                 expirationInterval,
                 manifestMaxMemory,
                 manifestCacheThreshold,
+                cachedPartitionMaxNum,
                 Ticker.systemTicker());
     }
 
@@ -89,6 +98,7 @@ public class CachingCatalog extends DelegateCatalog {
             Duration expirationInterval,
             MemorySize manifestMaxMemory,
             long manifestCacheThreshold,
+            long cachedPartitionMaxNum,
             Ticker ticker) {
         super(wrapped);
         if (expirationInterval.isZero() || expirationInterval.isNegative()) {
@@ -111,6 +121,19 @@ public class CachingCatalog extends DelegateCatalog {
                         .expireAfterAccess(expirationInterval)
                         .ticker(ticker)
                         .build();
+        this.partitionCache =
+                cachedPartitionMaxNum == 0
+                        ? null
+                        : Caffeine.newBuilder()
+                                .softValues()
+                                .executor(Runnable::run)
+                                .expireAfterAccess(expirationInterval)
+                                .weigher(
+                                        (Weigher<Identifier, List<PartitionEntry>>)
+                                                (identifier, v) -> v.size())
+                                .maximumWeight(cachedPartitionMaxNum)
+                                .ticker(ticker)
+                                .build();
         this.manifestCache = SegmentsCache.create(manifestMaxMemory, manifestCacheThreshold);
     }
 
@@ -131,7 +154,8 @@ public class CachingCatalog extends DelegateCatalog {
                 catalog,
                 options.get(CACHE_EXPIRATION_INTERVAL_MS),
                 manifestMaxMemory,
-                manifestThreshold);
+                manifestThreshold,
+                options.get(CACHE_PARTITION_MAX_NUM));
     }
 
     @Override
@@ -227,6 +251,30 @@ public class CachingCatalog extends DelegateCatalog {
         tableCache.put(identifier, table);
     }
 
+    @Override
+    public List<PartitionEntry> listPartitions(Identifier identifier)
+            throws TableNotExistException {
+        if (partitionCache == null) {
+            return wrapped.listPartitions(identifier);
+        }
+
+        List<PartitionEntry> result = partitionCache.getIfPresent(identifier);
+        if (result == null) {
+            result = wrapped.listPartitions(identifier);
+            partitionCache.put(identifier, result);
+        }
+        return result;
+    }
+
+    @Override
+    public void dropPartition(Identifier identifier, Map<String, String> partitions)
+            throws TableNotExistException, PartitionNotExistException {
+        wrapped.dropPartition(identifier, partitions);
+        if (partitionCache != null) {
+            partitionCache.invalidate(identifier);
+        }
+    }
+
     private class TableInvalidatingRemovalListener implements RemovalListener<Identifier, Table> {
         @Override
         public void onRemoval(Identifier identifier, Table table, @NonNull RemovalCause cause) {
@@ -241,6 +289,9 @@ public class CachingCatalog extends DelegateCatalog {
     public void invalidateTable(Identifier identifier) {
         tableCache.invalidate(identifier);
         tryInvalidateSysTables(identifier);
+        if (partitionCache != null) {
+            partitionCache.invalidate(identifier);
+        }
     }
 
     private void tryInvalidateSysTables(Identifier identifier) {
@@ -255,5 +306,15 @@ public class CachingCatalog extends DelegateCatalog {
             tables.add(Identifier.fromString(ident.getFullName() + SYSTEM_TABLE_SPLITTER + type));
         }
         return tables;
+    }
+
+    // ================================== refresh ================================================
+    // following caches will affect the latency of table, so refresh method is provided for engine
+
+    public void refreshPartitions(Identifier identifier) throws TableNotExistException {
+        if (partitionCache != null) {
+            List<PartitionEntry> result = wrapped.listPartitions(identifier);
+            partitionCache.put(identifier, result);
+        }
     }
 }

@@ -71,7 +71,7 @@ singleStatement
 statement
     : CALL multipartIdentifier '(' (callArgument (',' callArgument)*)? ')'                  #call
     | SHOW TAGS multipartIdentifier                                                         #showTags
-    | ALTER TABLE multipartIdentifier CREATE TAG (IF NOT EXISTS)? identifier tagOptions     #createTag
+    | ALTER TABLE multipartIdentifier createReplaceTagClause                                #createOrReplaceTag
     | ALTER TABLE multipartIdentifier DELETE TAG (IF EXISTS)? identifier                    #deleteTag
     | ALTER TABLE multipartIdentifier RENAME TAG identifier TO identifier                   #renameTag
   ;
@@ -79,6 +79,11 @@ statement
 callArgument
     : expression                    #positionalArgument
     | identifier '=>' expression    #namedArgument
+    ;
+
+createReplaceTagClause
+    : CREATE TAG (IF NOT EXISTS)? identifier tagOptions
+    | (CREATE OR)? REPLACE TAG identifier tagOptions
     ;
 
 tagOptions
@@ -146,8 +151,8 @@ quotedIdentifier
     ;
 
 nonReserved
-    : ALTER | AS | CALL | CREATE | DAYS | DELETE | EXISTS | HOURS | IF | NOT | OF | TABLE
-    | RETAIN | VERSION | TAG
+    : ALTER | AS | CALL | CREATE | DAYS | DELETE | EXISTS | HOURS | IF | NOT | OF | OR | TABLE
+    | REPLACE | RETAIN | VERSION | TAG
     | TRUE | FALSE
     | MAP
     ;
@@ -164,7 +169,9 @@ IF : 'IF';
 MINUTES: 'MINUTES';
 NOT: 'NOT';
 OF: 'OF';
+OR: 'OR';
 RENAME: 'RENAME';
+REPLACE: 'REPLACE';
 RETAIN: 'RETAIN';
 SHOW: 'SHOW';
 TABLE: 'TABLE';

@@ -19,19 +19,28 @@
 package org.apache.paimon.mergetree.compact.aggregate.factory;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldListaggAgg;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.VarCharType;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Factory for #{@link FieldListaggAgg}. */
 public class FieldListaggAggFactory implements FieldAggregatorFactory {
+
+    public static final String NAME = "listagg";
+
     @Override
-    public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
-        return new FieldListaggAgg(fieldType, options, field);
+    public FieldListaggAgg create(DataType fieldType, CoreOptions options, String field) {
+        checkArgument(
+                fieldType instanceof VarCharType,
+                "Data type for list agg column must be 'VarCharType' but was '%s'.",
+                fieldType);
+        return new FieldListaggAgg(identifier(), (VarCharType) fieldType, options, field);
     }
 
     @Override
     public String identifier() {
-        return FieldListaggAgg.NAME;
+        return NAME;
     }
 }
