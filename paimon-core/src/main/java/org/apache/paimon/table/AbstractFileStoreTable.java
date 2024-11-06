@@ -512,7 +512,13 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 "Rollback snapshot '%s' doesn't exist.",
                 snapshotId);
 
-        rollbackHelper().cleanLargerThan(snapshotManager.snapshot(snapshotId));
+        Snapshot snapshot = snapshotManager.snapshot(snapshotId);
+        // fast return
+        if (snapshot.equals(snapshotManager.latestSnapshot())) {
+            return;
+        }
+
+        rollbackHelper().cleanLargerThan(snapshot);
     }
 
     public Snapshot findSnapshot(long fromSnapshotId) throws SnapshotNotExistException {
@@ -625,6 +631,12 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         checkArgument(tagManager.tagExists(tagName), "Rollback tag '%s' doesn't exist.", tagName);
 
         Snapshot taggedSnapshot = tagManager.taggedSnapshot(tagName);
+        SnapshotManager snapshotManager = snapshotManager();
+        // fast return
+        if (taggedSnapshot.equals(snapshotManager.latestSnapshot())) {
+            return;
+        }
+
         rollbackHelper().cleanLargerThan(taggedSnapshot);
 
         try {
@@ -632,7 +644,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             // snapshot expiration, in this case the `cleanLargerThan` method will delete all
             // snapshots, so we should write the tag file to snapshot directory and modify the
             // earliest hint
-            SnapshotManager snapshotManager = snapshotManager();
             if (!snapshotManager.snapshotExists(taggedSnapshot.id())) {
                 fileIO.writeFile(
                         snapshotManager().snapshotPath(taggedSnapshot.id()),
