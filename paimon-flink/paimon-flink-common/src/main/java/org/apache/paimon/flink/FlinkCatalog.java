@@ -187,7 +187,9 @@ public class FlinkCatalog extends AbstractCatalog {
         this.logStoreAutoRegisterTimeout = options.get(REGISTER_TIMEOUT);
         this.disableCreateTableInDefaultDatabase = options.get(DISABLE_CREATE_TABLE_IN_DEFAULT_DB);
         if (!disableCreateTableInDefaultDatabase) {
-            if (!catalog.databaseExists(defaultDatabase)) {
+            try {
+                getDatabase(defaultDatabase);
+            } catch (DatabaseNotExistException e) {
                 try {
                     catalog.createDatabase(defaultDatabase, true);
                 } catch (Catalog.DatabaseAlreadyExistException ignore) {
@@ -212,7 +214,12 @@ public class FlinkCatalog extends AbstractCatalog {
 
     @Override
     public boolean databaseExists(String databaseName) throws CatalogException {
-        return catalog.databaseExists(databaseName);
+        try {
+            catalog.getDatabase(databaseName);
+            return true;
+        } catch (Catalog.DatabaseNotExistException e) {
+            return false;
+        }
     }
 
     @Override
@@ -346,26 +353,41 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public boolean tableExists(ObjectPath tablePath) throws CatalogException {
         Identifier identifier = toIdentifier(tablePath);
-        return catalog.tableExists(identifier) || catalog.viewExists(identifier);
+        try {
+            catalog.getTable(identifier);
+            return true;
+        } catch (Catalog.TableNotExistException e) {
+            try {
+                catalog.getView(identifier);
+                return true;
+            } catch (Catalog.ViewNotExistException ex) {
+                return false;
+            }
+        }
     }
 
     @Override
     public void dropTable(ObjectPath tablePath, boolean ignoreIfNotExists)
             throws TableNotExistException, CatalogException {
         Identifier identifier = toIdentifier(tablePath);
-        if (catalog.viewExists(identifier)) {
+        try {
+            catalog.getView(identifier);
             try {
                 catalog.dropView(identifier, ignoreIfNotExists);
                 return;
             } catch (Catalog.ViewNotExistException e) {
                 throw new RuntimeException("Unexpected exception.", e);
             }
+        } catch (Catalog.ViewNotExistException ignored) {
         }
 
         try {
             Table table = null;
-            if (logStoreAutoRegister && catalog.tableExists(identifier)) {
-                table = catalog.getTable(identifier);
+            if (logStoreAutoRegister) {
+                try {
+                    table = catalog.getTable(identifier);
+                } catch (Catalog.TableNotExistException ignored) {
+                }
             }
             catalog.dropTable(toIdentifier(tablePath), ignoreIfNotExists);
             if (logStoreAutoRegister && table != null) {

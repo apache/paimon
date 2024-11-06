@@ -111,23 +111,10 @@ public abstract class CatalogTestBase {
     }
 
     @Test
-    public void testDatabaseExistsWhenExists() throws Exception {
-        // Database exists returns true when the database exists
-        catalog.createDatabase("test_db", false);
-        boolean exists = catalog.databaseExists("test_db");
-        assertThat(exists).isTrue();
-
-        // Database exists returns false when the database does not exist
-        exists = catalog.databaseExists("non_existing_db");
-        assertThat(exists).isFalse();
-    }
-
-    @Test
     public void testCreateDatabase() throws Exception {
         // Create database creates a new database when it does not exist
         catalog.createDatabase("new_db", false);
-        boolean exists = catalog.databaseExists("new_db");
-        assertThat(exists).isTrue();
+        catalog.getDatabase("new_db");
 
         catalog.createDatabase("existing_db", false);
 
@@ -148,8 +135,8 @@ public abstract class CatalogTestBase {
         // Drop database deletes the database when it exists and there are no tables
         catalog.createDatabase("db_to_drop", false);
         catalog.dropDatabase("db_to_drop", false, false);
-        boolean exists = catalog.databaseExists("db_to_drop");
-        assertThat(exists).isFalse();
+        assertThatThrownBy(() -> catalog.getDatabase("db_to_drop"))
+                .isInstanceOf(Catalog.DatabaseNotExistException.class);
 
         // Drop database does not throw exception when database does not exist and ignoreIfNotExists
         // is true
@@ -162,8 +149,8 @@ public abstract class CatalogTestBase {
         catalog.createTable(Identifier.create("db_to_drop", "table2"), DEFAULT_TABLE_SCHEMA, false);
 
         catalog.dropDatabase("db_to_drop", false, true);
-        exists = catalog.databaseExists("db_to_drop");
-        assertThat(exists).isFalse();
+        assertThatThrownBy(() -> catalog.getDatabase("db_to_drop"))
+                .isInstanceOf(Catalog.DatabaseNotExistException.class);
 
         // Drop database throws DatabaseNotEmptyException when cascade is false and there are tables
         // in the database
@@ -190,21 +177,6 @@ public abstract class CatalogTestBase {
 
         tables = catalog.listTables("test_db");
         assertThat(tables).containsExactlyInAnyOrder("table1", "table2", "table3");
-    }
-
-    @Test
-    public void testTableExists() throws Exception {
-        // Table exists returns true when the table exists in the database
-        catalog.createDatabase("test_db", false);
-        Identifier identifier = Identifier.create("test_db", "test_table");
-        catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
-
-        boolean exists = catalog.tableExists(identifier);
-        assertThat(exists).isTrue();
-
-        // Table exists returns false when the table does not exist in the database
-        exists = catalog.tableExists(Identifier.create("non_existing_db", "non_existing_table"));
-        assertThat(exists).isFalse();
     }
 
     @Test
@@ -238,8 +210,7 @@ public abstract class CatalogTestBase {
         schema.options().remove(CoreOptions.AUTO_CREATE.key());
 
         catalog.createTable(identifier, schema, false);
-        boolean exists = catalog.tableExists(identifier);
-        assertThat(exists).isTrue();
+        catalog.getTable(identifier);
 
         // Create table throws Exception when table is system table
         assertThatExceptionOfType(IllegalArgumentException.class)
@@ -381,8 +352,8 @@ public abstract class CatalogTestBase {
         Identifier identifier = Identifier.create("test_db", "table_to_drop");
         catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
         catalog.dropTable(identifier, false);
-        boolean exists = catalog.tableExists(identifier);
-        assertThat(exists).isFalse();
+        assertThatThrownBy(() -> catalog.getTable(identifier))
+                .isInstanceOf(Catalog.TableNotExistException.class);
 
         // Drop table throws Exception when table is system table
         assertThatExceptionOfType(IllegalArgumentException.class)
@@ -414,8 +385,9 @@ public abstract class CatalogTestBase {
         catalog.createTable(fromTable, DEFAULT_TABLE_SCHEMA, false);
         Identifier toTable = Identifier.create("test_db", "new_table");
         catalog.renameTable(fromTable, toTable, false);
-        assertThat(catalog.tableExists(fromTable)).isFalse();
-        assertThat(catalog.tableExists(toTable)).isTrue();
+        assertThatThrownBy(() -> catalog.getTable(fromTable))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+        catalog.getTable(toTable);
 
         // Rename table throws Exception when original or target table is system table
         assertThatExceptionOfType(IllegalArgumentException.class)
@@ -885,8 +857,6 @@ public abstract class CatalogTestBase {
 
         catalog.createView(identifier, view, false);
 
-        assertThat(catalog.viewExists(identifier)).isTrue();
-
         View catalogView = catalog.getView(identifier);
         assertThat(catalogView.fullName()).isEqualTo(view.fullName());
         assertThat(catalogView.rowType()).isEqualTo(view.rowType());
@@ -911,8 +881,6 @@ public abstract class CatalogTestBase {
         catalog.renameView(identifier, newIdentifier, false);
 
         catalog.dropView(newIdentifier, false);
-        assertThat(catalog.viewExists(newIdentifier)).isFalse();
-
         catalog.dropView(newIdentifier, true);
         assertThatThrownBy(() -> catalog.dropView(newIdentifier, false))
                 .isInstanceOf(Catalog.ViewNotExistException.class);

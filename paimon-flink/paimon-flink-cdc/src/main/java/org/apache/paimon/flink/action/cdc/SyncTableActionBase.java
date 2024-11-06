@@ -122,7 +122,7 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
     protected void beforeBuildingSourceSink() throws Exception {
         Identifier identifier = new Identifier(database, table);
         // Check if table exists before trying to get or create it
-        if (catalog.tableExists(identifier)) {
+        try {
             fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
             fileStoreTable = alterTableOptions(identifier, fileStoreTable);
             try {
@@ -146,7 +146,7 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
                 // check partition keys and primary keys in case that user specified them
                 checkConstraints();
             }
-        } else {
+        } catch (Catalog.TableNotExistException e) {
             Schema retrievedSchema = retrieveSchema();
             computedColumns = buildComputedColumns(computedColumnArgs, retrievedSchema.fields());
             Schema paimonSchema = buildPaimonSchema(retrievedSchema);

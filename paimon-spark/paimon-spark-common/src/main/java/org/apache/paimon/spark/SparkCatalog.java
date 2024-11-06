@@ -102,7 +102,9 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
         this.catalog = CatalogFactory.createCatalog(catalogContext);
         this.defaultDatabase =
                 options.getOrDefault(DEFAULT_DATABASE.key(), DEFAULT_DATABASE.defaultValue());
-        if (!catalog.databaseExists(defaultNamespace()[0])) {
+        try {
+            catalog.getDatabase(defaultNamespace()[0]);
+        } catch (Catalog.DatabaseNotExistException e) {
             try {
                 createNamespace(defaultNamespace(), new HashMap<>());
             } catch (NamespaceAlreadyExistsException ignored) {
@@ -152,10 +154,12 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
         if (!isValidateNamespace(namespace)) {
             throw new NoSuchNamespaceException(namespace);
         }
-        if (catalog.databaseExists(namespace[0])) {
+        try {
+            catalog.getDatabase(namespace[0]);
             return new String[0][];
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new NoSuchNamespaceException(namespace);
         }
-        throw new NoSuchNamespaceException(namespace);
     }
 
     @Override
@@ -167,7 +171,7 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
                 Arrays.toString(namespace));
         String dataBaseName = namespace[0];
         try {
-            return catalog.loadDatabaseProperties(dataBaseName);
+            return catalog.getDatabase(dataBaseName).options();
         } catch (Catalog.DatabaseNotExistException e) {
             throw new NoSuchNamespaceException(namespace);
         }
@@ -281,15 +285,6 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
             return (SparkTable) table;
         } else {
             throw new NoSuchTableException(ident);
-        }
-    }
-
-    @Override
-    public boolean tableExists(Identifier ident) {
-        try {
-            return catalog.tableExists(toIdentifier(ident));
-        } catch (NoSuchTableException e) {
-            return false;
         }
     }
 

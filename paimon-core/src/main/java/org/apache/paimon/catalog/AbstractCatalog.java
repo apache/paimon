@@ -98,7 +98,6 @@ public abstract class AbstractCatalog implements Catalog {
         return fileIO;
     }
 
-    @Override
     public Optional<CatalogLockFactory> lockFactory() {
         if (!lockEnabled()) {
             return Optional.empty();
@@ -118,7 +117,6 @@ public abstract class AbstractCatalog implements Catalog {
         return Optional.empty();
     }
 
-    @Override
     public Optional<CatalogLockContext> lockContext() {
         return Optional.of(CatalogLockContext.fromOptions(catalogOptions));
     }
@@ -136,26 +134,26 @@ public abstract class AbstractCatalog implements Catalog {
     public void createDatabase(String name, boolean ignoreIfExists, Map<String, String> properties)
             throws DatabaseAlreadyExistException {
         checkNotSystemDatabase(name);
-        if (databaseExists(name)) {
+        try {
+            getDatabase(name);
             if (ignoreIfExists) {
                 return;
             }
             throw new DatabaseAlreadyExistException(name);
+        } catch (DatabaseNotExistException ignored) {
         }
         createDatabaseImpl(name, properties);
     }
 
     @Override
-    public Map<String, String> loadDatabaseProperties(String name)
-            throws DatabaseNotExistException {
+    public Database getDatabase(String name) throws DatabaseNotExistException {
         if (isSystemDatabase(name)) {
-            return Collections.emptyMap();
+            return Database.of(name);
         }
-        return loadDatabasePropertiesImpl(name);
+        return getDatabaseImpl(name);
     }
 
-    protected abstract Map<String, String> loadDatabasePropertiesImpl(String name)
-            throws DatabaseNotExistException;
+    protected abstract Database getDatabaseImpl(String name) throws DatabaseNotExistException;
 
     @Override
     public void createPartition(Identifier identifier, Map<String, String> partitionSpec)
@@ -211,7 +209,9 @@ public abstract class AbstractCatalog implements Catalog {
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException {
         checkNotSystemDatabase(name);
-        if (!databaseExists(name)) {
+        try {
+            getDatabase(name);
+        } catch (DatabaseNotExistException e) {
             if (ignoreIfNotExists) {
                 return;
             }
@@ -232,9 +232,9 @@ public abstract class AbstractCatalog implements Catalog {
         if (isSystemDatabase(databaseName)) {
             return SystemTableLoader.loadGlobalTableNames();
         }
-        if (!databaseExists(databaseName)) {
-            throw new DatabaseNotExistException(databaseName);
-        }
+
+        // check db exists
+        getDatabase(databaseName);
 
         return listTablesImpl(databaseName).stream().sorted().collect(Collectors.toList());
     }
@@ -247,7 +247,9 @@ public abstract class AbstractCatalog implements Catalog {
         checkNotBranch(identifier, "dropTable");
         checkNotSystemTable(identifier, "dropTable");
 
-        if (!tableExists(identifier)) {
+        try {
+            getTable(identifier);
+        } catch (TableNotExistException e) {
             if (ignoreIfNotExists) {
                 return;
             }
@@ -268,15 +270,16 @@ public abstract class AbstractCatalog implements Catalog {
         validateFieldNameCaseInsensitive(schema.rowType().getFieldNames());
         validateAutoCreateClose(schema.options());
 
-        if (!databaseExists(identifier.getDatabaseName())) {
-            throw new DatabaseNotExistException(identifier.getDatabaseName());
-        }
+        // check db exists
+        getDatabase(identifier.getDatabaseName());
 
-        if (tableExists(identifier)) {
+        try {
+            getTable(identifier);
             if (ignoreIfExists) {
                 return;
             }
             throw new TableAlreadyExistException(identifier);
+        } catch (TableNotExistException ignored) {
         }
 
         copyTableDefaultOptions(schema.options());
@@ -299,15 +302,19 @@ public abstract class AbstractCatalog implements Catalog {
         checkNotSystemTable(toTable, "renameTable");
         validateIdentifierNameCaseInsensitive(toTable);
 
-        if (!tableExists(fromTable)) {
+        try {
+            getTable(fromTable);
+        } catch (TableNotExistException e) {
             if (ignoreIfNotExists) {
                 return;
             }
             throw new TableNotExistException(fromTable);
         }
 
-        if (tableExists(toTable)) {
+        try {
+            getTable(toTable);
             throw new TableAlreadyExistException(toTable);
+        } catch (TableNotExistException ignored) {
         }
 
         renameTableImpl(fromTable, toTable);
@@ -323,7 +330,9 @@ public abstract class AbstractCatalog implements Catalog {
         validateIdentifierNameCaseInsensitive(identifier);
         validateFieldNameCaseInsensitiveInSchemaChange(changes);
 
-        if (!tableExists(identifier)) {
+        try {
+            getTable(identifier);
+        } catch (TableNotExistException e) {
             if (ignoreIfNotExists) {
                 return;
             }
@@ -451,6 +460,12 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected abstract TableSchema getDataTableSchema(Identifier identifier)
             throws TableNotExistException;
+
+    /** Get metastore client factory for the table specified by {@code identifier}. */
+    protected Optional<MetastoreClient.Factory> metastoreClientFactory(Identifier identifier)
+            throws TableNotExistException {
+        return Optional.empty();
+    }
 
     @Override
     public Path getTableLocation(Identifier identifier) {

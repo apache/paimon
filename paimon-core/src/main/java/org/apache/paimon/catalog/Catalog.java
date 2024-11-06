@@ -22,7 +22,6 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
@@ -33,7 +32,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
@@ -73,43 +71,11 @@ public interface Catalog extends AutoCloseable {
     FileIO fileIO();
 
     /**
-     * Get lock factory from catalog. Lock is used to support multiple concurrent writes on the
-     * object store.
-     */
-    Optional<CatalogLockFactory> lockFactory();
-
-    /** Get lock context for lock factory to create a lock. */
-    default Optional<CatalogLockContext> lockContext() {
-        return Optional.empty();
-    }
-
-    /** Get metastore client factory for the table specified by {@code identifier}. */
-    default Optional<MetastoreClient.Factory> metastoreClientFactory(Identifier identifier)
-            throws TableNotExistException {
-        return Optional.empty();
-    }
-
-    /**
      * Get the names of all databases in this catalog.
      *
      * @return a list of the names of all databases
      */
     List<String> listDatabases();
-
-    /**
-     * Check if a database exists in this catalog.
-     *
-     * @param databaseName Name of the database
-     * @return true if the given database exists in the catalog false otherwise
-     */
-    default boolean databaseExists(String databaseName) {
-        try {
-            loadDatabaseProperties(databaseName);
-            return true;
-        } catch (DatabaseNotExistException e) {
-            return false;
-        }
-    }
 
     /**
      * Create a database, see {@link Catalog#createDatabase(String name, boolean ignoreIfExists, Map
@@ -135,13 +101,13 @@ public interface Catalog extends AutoCloseable {
             throws DatabaseAlreadyExistException;
 
     /**
-     * Load database properties.
+     * Return a {@link Database} identified by the given name.
      *
      * @param name Database name
-     * @return The requested database's properties
+     * @return The requested {@link Database}
      * @throws DatabaseNotExistException if the requested database does not exist
      */
-    Map<String, String> loadDatabaseProperties(String name) throws DatabaseNotExistException;
+    Database getDatabase(String name) throws DatabaseNotExistException;
 
     /**
      * Drop a database.
@@ -185,20 +151,6 @@ public interface Catalog extends AutoCloseable {
      * @throws DatabaseNotExistException if the database does not exist
      */
     List<String> listTables(String databaseName) throws DatabaseNotExistException;
-
-    /**
-     * Check if a table exists in this catalog.
-     *
-     * @param identifier Path of the table
-     * @return true if the given table exists in the catalog false otherwise
-     */
-    default boolean tableExists(Identifier identifier) {
-        try {
-            return getTable(identifier) != null;
-        } catch (TableNotExistException e) {
-            return false;
-        }
-    }
 
     /**
      * Drop a table.
@@ -273,6 +225,9 @@ public interface Catalog extends AutoCloseable {
     /**
      * Create the partition of the specify table.
      *
+     * <p>Only catalog with metastore can support this method, and only table with
+     * 'metastore.partitioned-table' can support this method.
+     *
      * @param identifier path of the table to drop partition
      * @param partitionSpec the partition to be created
      * @throws TableNotExistException if the table does not exist
@@ -313,20 +268,6 @@ public interface Catalog extends AutoCloseable {
     default void alterTable(Identifier identifier, SchemaChange change, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         alterTable(identifier, Collections.singletonList(change), ignoreIfNotExists);
-    }
-
-    /**
-     * Check if a view exists in this catalog.
-     *
-     * @param identifier Path of the view
-     * @return true if the given view exists in the catalog false otherwise
-     */
-    default boolean viewExists(Identifier identifier) {
-        try {
-            return getView(identifier) != null;
-        } catch (ViewNotExistException e) {
-            return false;
-        }
     }
 
     /**
