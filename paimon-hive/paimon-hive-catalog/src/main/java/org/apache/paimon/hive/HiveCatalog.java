@@ -297,10 +297,18 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public Map<String, String> loadDatabasePropertiesImpl(String name)
+    public org.apache.paimon.catalog.Database getDatabaseImpl(String name)
             throws DatabaseNotExistException {
         try {
-            return convertToProperties(clients.run(client -> client.getDatabase(name)));
+            Database database = clients.run(client -> client.getDatabase(name));
+            Map<String, String> options = new HashMap<>(database.getParameters());
+            if (database.getLocationUri() != null) {
+                options.put(DB_LOCATION_PROP, database.getLocationUri());
+            }
+            if (database.getDescription() != null) {
+                options.put(COMMENT_PROP, database.getDescription());
+            }
+            return org.apache.paimon.catalog.Database.of(name, options, database.getDescription());
         } catch (NoSuchObjectException e) {
             throw new DatabaseNotExistException(name);
         } catch (TException e) {
@@ -310,17 +318,6 @@ public class HiveCatalog extends AbstractCatalog {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted in call to loadDatabaseProperties " + name, e);
         }
-    }
-
-    private Map<String, String> convertToProperties(Database database) {
-        Map<String, String> properties = new HashMap<>(database.getParameters());
-        if (database.getLocationUri() != null) {
-            properties.put(DB_LOCATION_PROP, database.getLocationUri());
-        }
-        if (database.getDescription() != null) {
-            properties.put(COMMENT_PROP, database.getDescription());
-        }
-        return properties;
     }
 
     @Override
@@ -395,31 +392,21 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     protected List<String> listTablesImpl(String databaseName) {
         try {
-            return clients.run(
-                    client ->
-                            client.getAllTables(databaseName).stream()
-                                    .filter(t -> tableExists(new Identifier(databaseName, t)))
-                                    .collect(Collectors.toList()));
+            List<String> allTables = clients.run(client -> client.getAllTables(databaseName));
+            List<String> result = new ArrayList<>(allTables.size());
+            for (String table : allTables) {
+                try {
+                    getTable(new Identifier(databaseName, table));
+                    result.add(table);
+                } catch (TableNotExistException ignored) {
+                }
+            }
+            return result;
         } catch (TException e) {
             throw new RuntimeException("Failed to list all tables in database " + databaseName, e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted in call to listTables " + databaseName, e);
-        }
-    }
-
-    @Override
-    public boolean tableExists(Identifier identifier) {
-        if (isTableInSystemDatabase(identifier)) {
-            return super.tableExists(identifier);
-        }
-
-        try {
-            Table table = getHmsTable(identifier);
-            return isPaimonTable(identifier, table)
-                    || (formatTableEnabled() && isFormatTable(table));
-        } catch (TableNotExistException e) {
-            return false;
         }
     }
 
@@ -462,9 +449,7 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public void createView(Identifier identifier, View view, boolean ignoreIfExists)
             throws ViewAlreadyExistException, DatabaseNotExistException {
-        if (!databaseExists(identifier.getDatabaseName())) {
-            throw new DatabaseNotExistException(identifier.getDatabaseName());
-        }
+        getDatabase(identifier.getDatabaseName());
 
         try {
             getView(identifier);
@@ -541,9 +526,7 @@ public class HiveCatalog extends AbstractCatalog {
         if (isSystemDatabase(databaseName)) {
             return Collections.emptyList();
         }
-        if (!databaseExists(databaseName)) {
-            throw new DatabaseNotExistException(databaseName);
-        }
+        getDatabase(databaseName);
 
         try {
             List<String> tables = clients.run(client -> client.getAllTables(databaseName));
@@ -571,15 +554,21 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
             throws ViewNotExistException, ViewAlreadyExistException {
-        if (!viewExists(fromView)) {
+        try {
+            getView(fromView);
+        } catch (ViewNotExistException e) {
             if (ignoreIfNotExists) {
                 return;
             }
             throw new ViewNotExistException(fromView);
         }
-        if (viewExists(toView)) {
+
+        try {
+            getView(toView);
             throw new ViewAlreadyExistException(toView);
+        } catch (ViewNotExistException ignored) {
         }
+
         try {
             String fromDB = fromView.getDatabaseName();
             String fromViewName = fromView.getTableName();
@@ -870,7 +859,9 @@ public class HiveCatalog extends AbstractCatalog {
         checkNotSystemDatabase(databaseName);
 
         // create database if needed
-        if (!databaseExists(databaseName)) {
+        try {
+            getDatabase(databaseName);
+        } catch (DatabaseNotExistException e) {
             createDatabaseImpl(databaseName, Collections.emptyMap());
         }
 
