@@ -101,10 +101,10 @@ public interface Catalog extends AutoCloseable {
             throws DatabaseAlreadyExistException;
 
     /**
-     * Load database properties.
+     * Return a {@link Database} identified by the given name.
      *
      * @param name Database name
-     * @return The requested database's properties
+     * @return The requested {@link Database}
      * @throws DatabaseNotExistException if the requested database does not exist
      */
     Database getDatabase(String name) throws DatabaseNotExistException;
