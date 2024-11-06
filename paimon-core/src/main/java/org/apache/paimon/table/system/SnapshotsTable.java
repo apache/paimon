@@ -27,17 +27,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.predicate.And;
-import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.Equal;
-import org.apache.paimon.predicate.GreaterOrEqual;
-import org.apache.paimon.predicate.GreaterThan;
-import org.apache.paimon.predicate.LeafPredicate;
-import org.apache.paimon.predicate.LeafPredicateExtractor;
-import org.apache.paimon.predicate.LessOrEqual;
-import org.apache.paimon.predicate.LessThan;
-import org.apache.paimon.predicate.Or;
-import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.*;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -208,7 +198,7 @@ public class SnapshotsTable implements ReadonlyTable {
         private RowType readType;
         private Optional<Long> optionalFilterSnapshotIdMax = Optional.empty();
         private Optional<Long> optionalFilterSnapshotIdMin = Optional.empty();
-        private final List<Long> snapshotIds = new ArrayList<>();
+        private List<Long> snapshotIds = new ArrayList<>();
 
         public SnapshotsRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -223,26 +213,28 @@ public class SnapshotsTable implements ReadonlyTable {
             String leafName = "snapshot_id";
             if (predicate instanceof CompoundPredicate) {
                 CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
-                List<Predicate> children = compoundPredicate.children();
                 if ((compoundPredicate.function()) instanceof And) {
-                    for (Predicate leaf : children) {
-                        handleLeafPredicate(leaf, leafName);
-                    }
+                    PredicateUtils.traverseCompoundPredicate(
+                            predicate,
+                            leafName,
+                            (Predicate p) -> handleLeafPredicate(p, leafName),
+                            null);
                 }
 
                 // optimize for IN filter
                 if ((compoundPredicate.function()) instanceof Or) {
-                    for (Predicate leaf : children) {
-                        if (leaf instanceof LeafPredicate
-                                && (((LeafPredicate) leaf).function() instanceof Equal)
-                                && leaf.visit(LeafPredicateExtractor.INSTANCE).get(leafName)
-                                        != null) {
-                            snapshotIds.add((Long) ((LeafPredicate) leaf).literals().get(0));
-                        } else {
-                            snapshotIds.clear();
-                            break;
-                        }
-                    }
+                    PredicateUtils.traverseCompoundPredicate(
+                            predicate,
+                            leafName,
+                            (Predicate p) -> {
+                                if (snapshotIds != null) {
+                                    snapshotIds.add((Long) ((LeafPredicate) p).literals().get(0));
+                                }
+                            },
+                            (Predicate p) -> {
+                                snapshotIds.clear();
+                                snapshotIds = null;
+                            });
                 }
             } else {
                 handleLeafPredicate(predicate, leafName);
@@ -304,7 +296,7 @@ public class SnapshotsTable implements ReadonlyTable {
                     new SnapshotManager(fileIO, ((SnapshotsSplit) split).location, branch);
 
             Iterator<Snapshot> snapshots;
-            if (!snapshotIds.isEmpty()) {
+            if (snapshotIds != null && !snapshotIds.isEmpty()) {
                 snapshots = snapshotManager.snapshotsWithId(snapshotIds);
             } else {
                 snapshots =

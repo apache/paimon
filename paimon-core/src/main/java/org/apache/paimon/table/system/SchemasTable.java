@@ -26,17 +26,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.predicate.And;
-import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.Equal;
-import org.apache.paimon.predicate.GreaterOrEqual;
-import org.apache.paimon.predicate.GreaterThan;
-import org.apache.paimon.predicate.LeafPredicate;
-import org.apache.paimon.predicate.LeafPredicateExtractor;
-import org.apache.paimon.predicate.LessOrEqual;
-import org.apache.paimon.predicate.LessThan;
-import org.apache.paimon.predicate.Or;
-import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.*;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -205,7 +195,7 @@ public class SchemasTable implements ReadonlyTable {
 
         private Optional<Long> optionalFilterSchemaIdMax = Optional.empty();
         private Optional<Long> optionalFilterSchemaIdMin = Optional.empty();
-        private final List<Long> schemaIds = new ArrayList<>();
+        private List<Long> schemaIds = new ArrayList<>();
 
         public SchemasRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -221,26 +211,29 @@ public class SchemasTable implements ReadonlyTable {
             if (predicate instanceof CompoundPredicate) {
                 CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
                 if ((compoundPredicate.function()) instanceof And) {
-                    List<Predicate> children = compoundPredicate.children();
-                    for (Predicate leaf : children) {
-                        handleLeafPredicate(leaf, leafName);
-                    }
+                    PredicateUtils.traverseCompoundPredicate(
+                            predicate,
+                            leafName,
+                            (Predicate p) -> {
+                                handleLeafPredicate(p, leafName);
+                            },
+                            null);
                 }
 
                 // optimize for IN filter
                 if ((compoundPredicate.function()) instanceof Or) {
-                    List<Predicate> children = compoundPredicate.children();
-                    for (Predicate leaf : children) {
-                        if (leaf instanceof LeafPredicate
-                                && (((LeafPredicate) leaf).function() instanceof Equal)
-                                && leaf.visit(LeafPredicateExtractor.INSTANCE).get(leafName)
-                                        != null) {
-                            schemaIds.add((Long) ((LeafPredicate) leaf).literals().get(0));
-                        } else {
-                            schemaIds.clear();
-                            break;
-                        }
-                    }
+                    PredicateUtils.traverseCompoundPredicate(
+                            predicate,
+                            leafName,
+                            (Predicate p) -> {
+                                if (schemaIds != null) {
+                                    schemaIds.add((Long) ((LeafPredicate) p).literals().get(0));
+                                }
+                            },
+                            (Predicate p) -> {
+                                schemaIds.clear();
+                                schemaIds = null;
+                            });
                 }
             } else {
                 handleLeafPredicate(predicate, leafName);
@@ -299,7 +292,7 @@ public class SchemasTable implements ReadonlyTable {
             SchemaManager manager = new SchemaManager(fileIO, location, branch);
 
             Collection<TableSchema> tableSchemas;
-            if (!schemaIds.isEmpty()) {
+            if (schemaIds != null && !schemaIds.isEmpty()) {
                 tableSchemas = manager.schemasWithId(schemaIds);
             } else {
                 tableSchemas =

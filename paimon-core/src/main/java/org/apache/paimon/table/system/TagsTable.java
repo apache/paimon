@@ -26,12 +26,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.Equal;
-import org.apache.paimon.predicate.LeafPredicate;
-import org.apache.paimon.predicate.LeafPredicateExtractor;
-import org.apache.paimon.predicate.Or;
-import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.*;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -191,6 +186,7 @@ public class TagsTable implements ReadonlyTable {
 
         private final FileIO fileIO;
         private RowType readType;
+        private Map<String, Tag> predicateMap = new TreeMap<>();
 
         public TagsRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -223,7 +219,7 @@ public class TagsTable implements ReadonlyTable {
             TagManager tagManager = new TagManager(fileIO, location, branch);
 
             Map<String, Tag> nameToSnapshot = new TreeMap<>();
-            Map<String, Tag> predicateMap = new TreeMap<>();
+            predicateMap = new TreeMap<>();
             if (predicate != null) {
                 if (predicate instanceof LeafPredicate
                         && ((LeafPredicate) predicate).function() instanceof Equal
@@ -239,31 +235,28 @@ public class TagsTable implements ReadonlyTable {
                     CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
                     // optimize for IN filter
                     if ((compoundPredicate.function()) instanceof Or) {
-                        List<Predicate> children = compoundPredicate.children();
-                        for (Predicate leaf : children) {
-                            if (leaf instanceof LeafPredicate
-                                    && (((LeafPredicate) leaf).function() instanceof Equal
-                                            && ((LeafPredicate) leaf).literals().get(0)
-                                                    instanceof BinaryString)
-                                    && predicate
-                                                    .visit(LeafPredicateExtractor.INSTANCE)
-                                                    .get(TAG_NAME)
-                                            != null) {
-                                String equalValue =
-                                        ((LeafPredicate) leaf).literals().get(0).toString();
-                                if (tagManager.tagExists(equalValue)) {
-                                    predicateMap.put(equalValue, tagManager.tag(equalValue));
-                                }
-                            } else {
-                                predicateMap.clear();
-                                break;
-                            }
-                        }
+                        PredicateUtils.traverseCompoundPredicate(
+                                predicate,
+                                TAG_NAME,
+                                (Predicate p) -> {
+                                    String equalValue =
+                                            ((LeafPredicate) predicate)
+                                                    .literals()
+                                                    .get(0)
+                                                    .toString();
+                                    if (predicateMap != null && tagManager.tagExists(equalValue)) {
+                                        predicateMap.put(equalValue, tagManager.tag(equalValue));
+                                    }
+                                },
+                                (Predicate p) -> {
+                                    predicateMap.clear();
+                                    predicateMap = null;
+                                });
                     }
                 }
             }
 
-            if (!predicateMap.isEmpty()) {
+            if (predicateMap != null && !predicateMap.isEmpty()) {
                 nameToSnapshot.putAll(predicateMap);
             } else {
                 for (Pair<Tag, String> tag : tagManager.tagObjects()) {
