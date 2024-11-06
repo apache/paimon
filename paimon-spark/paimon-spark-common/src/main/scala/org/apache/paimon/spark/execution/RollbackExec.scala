@@ -63,7 +63,7 @@ case class RollbackExec(
         }
       case t =>
         throw new UnsupportedOperationException(
-          s"Can not delete tag for non-paimon FileStoreTable: $t")
+          s"Can not rollback for non-paimon FileStoreTable: $t")
     }
     Seq(InternalRow(UTF8String.fromString("success")))
   }
