@@ -88,7 +88,7 @@ public final class HiveCatalogOptions {
     public static final ConfigOption<Boolean> FORMAT_TABLE_ENABLED =
             ConfigOptions.key("format-table.enabled")
                     .booleanType()
-                    .defaultValue(false)
+                    .defaultValue(true)
                     .withDescription(
                             "Whether to support format tables, format table corresponds to a regular Hive table, allowing read and write operations. "
                                     + "However, during these processes, it does not connect to the metastore; hence, newly added partitions will not be reflected in"
