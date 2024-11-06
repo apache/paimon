@@ -338,7 +338,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         }
     }
 
-    @Timeout(120)
+    @Timeout(60)
     @ParameterizedTest()
     @ValueSource(booleans = {false, true})
     public void testRecreateTableWithException(boolean isReloadData) throws Exception {
@@ -407,14 +407,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         if (isReloadData) {
             bEnv.executeSql("INSERT INTO t VALUES " + String.join(", ", values)).await();
         }
-        assertThatCode(
-                        () -> {
-                            while (true) {
-                                if (it.hasNext()) {
-                                    it.next();
-                                }
-                            }
-                        })
+        assertThatCode(it::next)
                 .rootCause()
                 .hasMessageContaining(
                         "The next expected snapshot is too big! Most possible cause might be the table had been recreated.");
