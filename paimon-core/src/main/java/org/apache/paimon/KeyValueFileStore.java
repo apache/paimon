@@ -70,7 +70,6 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
     private final Supplier<RecordEqualiser> logDedupEqualSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
-    private final String tableName;
 
     public KeyValueFileStore(
             FileIO fileIO,
@@ -86,7 +85,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             MergeFunctionFactory<KeyValue> mfFactory,
             String tableName,
             CatalogEnvironment catalogEnvironment) {
-        super(fileIO, schemaManager, schema, options, partitionType, catalogEnvironment);
+        super(fileIO, schemaManager, schema, tableName, options, partitionType, catalogEnvironment);
         this.crossPartitionUpdate = crossPartitionUpdate;
         this.bucketKeyType = bucketKeyType;
         this.keyType = keyType;
@@ -99,7 +98,6 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 options.changelogRowDeduplicate()
                         ? ValueEqualiserSupplier.fromIgnoreFields(valueType, logDedupIgnoreFields)
                         : () -> null;
-        this.tableName = tableName;
     }
 
     @Override

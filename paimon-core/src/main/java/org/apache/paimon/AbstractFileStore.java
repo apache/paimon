@@ -72,6 +72,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     protected final FileIO fileIO;
     protected final SchemaManager schemaManager;
     protected final TableSchema schema;
+    protected final String tableName;
     protected final CoreOptions options;
     protected final RowType partitionType;
     private final CatalogEnvironment catalogEnvironment;
@@ -83,12 +84,14 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             FileIO fileIO,
             SchemaManager schemaManager,
             TableSchema schema,
+            String tableName,
             CoreOptions options,
             RowType partitionType,
             CatalogEnvironment catalogEnvironment) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
+        this.tableName = tableName;
         this.options = options;
         this.partitionType = partitionType;
         this.catalogEnvironment = catalogEnvironment;
@@ -209,6 +212,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         return new FileStoreCommitImpl(
                 fileIO,
                 schemaManager,
+                tableName,
                 commitUser,
                 partitionType,
                 options.partitionDefaultName(),

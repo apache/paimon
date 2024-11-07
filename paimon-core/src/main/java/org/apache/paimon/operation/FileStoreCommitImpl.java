@@ -112,6 +112,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
+    private final String tableName;
     private final String commitUser;
     private final RowType partitionType;
     private final String partitionDefaultName;
@@ -142,6 +143,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     public FileStoreCommitImpl(
             FileIO fileIO,
             SchemaManager schemaManager,
+            String tableName,
             String commitUser,
             RowType partitionType,
             String partitionDefaultName,
@@ -165,6 +167,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             int commitMaxRetries) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
+        this.tableName = tableName;
         this.commitUser = commitUser;
         this.partitionType = partitionType;
         this.partitionDefaultName = partitionDefaultName;
@@ -1331,8 +1334,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             for (SimpleFileEntry entry : mergedEntries) {
                 Preconditions.checkState(
                         entry.kind() != FileKind.DELETE,
-                        "Trying to delete file %s which is not previously added.",
-                        entry.fileName());
+                        "Trying to delete file %s for table %s which is not previously added.",
+                        entry.fileName(),
+                        tableName);
             }
         } catch (Throwable e) {
             if (partitionExpire != null && partitionExpire.isValueExpiration()) {
