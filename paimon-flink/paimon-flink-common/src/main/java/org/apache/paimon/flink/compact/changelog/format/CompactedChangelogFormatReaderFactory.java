@@ -20,6 +20,7 @@ package org.apache.paimon.flink.compact.changelog.format;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
@@ -79,6 +80,11 @@ public class CompactedChangelogFormatReaderFactory implements FormatReaderFactor
                     @Override
                     public long fileSize() {
                         return length;
+                    }
+
+                    @Override
+                    public FileIndexResult fileIndex() {
+                        return context.fileIndex();
                     }
                 });
     }
