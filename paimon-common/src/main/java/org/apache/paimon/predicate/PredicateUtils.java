@@ -18,6 +18,8 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.utils.Preconditions;
+
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -37,10 +39,10 @@ public class PredicateUtils {
             String leafName,
             Consumer<Predicate> matchConsumer,
             Consumer<Predicate> unMatchConsumer) {
-        if (!(predicate instanceof CompoundPredicate)) {
-            throw new RuntimeException(
-                    "PredicateUtils##handleCompoundPredicate should handle with a CompoundPredicate.");
-        }
+        Preconditions.checkState(
+                predicate instanceof CompoundPredicate,
+                "PredicateUtils##handleCompoundPredicate should handle with a CompoundPredicate.");
+
         CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
         List<Predicate> children = compoundPredicate.children();
         for (Predicate leaf : children) {
