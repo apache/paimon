@@ -156,4 +156,13 @@ public class CatalogOptions {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Sync all table properties to hive metastore");
+
+    public static final ConfigOption<Boolean> FORMAT_TABLE_ENABLED =
+            ConfigOptions.key("format-table.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to support format tables, format table corresponds to a regular csv, parquet or orc table, allowing read and write operations. "
+                                    + "However, during these processes, it does not connect to the metastore; hence, newly added partitions will not be reflected in"
+                                    + " the metastore and need to be manually added as separate partition operations.");
 }

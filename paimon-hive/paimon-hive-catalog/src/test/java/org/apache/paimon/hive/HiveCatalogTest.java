@@ -273,4 +273,9 @@ public class HiveCatalogTest extends CatalogTestBase {
     protected boolean supportsView() {
         return true;
     }
+
+    @Override
+    protected boolean supportsFormatTable() {
+        return true;
+    }
 }

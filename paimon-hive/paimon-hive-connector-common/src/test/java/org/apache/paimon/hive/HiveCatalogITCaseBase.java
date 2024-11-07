@@ -39,7 +39,6 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
-import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
@@ -275,7 +274,8 @@ public abstract class HiveCatalogITCaseBase {
                 .await();
         tEnv.executeSql("CREATE TABLE s ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
                 .await();
-        assertThat(collect("SHOW TABLES")).isEqualTo(Arrays.asList(Row.of("s"), Row.of("t")));
+        assertThat(collect("SHOW TABLES"))
+                .containsExactlyInAnyOrder(Row.of("s"), Row.of("t"), Row.of("hive_table"));
 
         tEnv.executeSql(
                         "CREATE TABLE IF NOT EXISTS s ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
@@ -294,16 +294,13 @@ public abstract class HiveCatalogITCaseBase {
         Path tablePath = new Path(path, "test_db.db/s");
         assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
         tEnv.executeSql("DROP TABLE s").await();
-        assertThat(collect("SHOW TABLES")).isEqualTo(Collections.singletonList(Row.of("t")));
+        assertThat(collect("SHOW TABLES"))
+                .containsExactlyInAnyOrder(Row.of("t"), Row.of("hive_table"));
         assertThat(tablePath.getFileSystem().exists(tablePath)).isFalse();
         tEnv.executeSql("DROP TABLE IF EXISTS s").await();
         assertThatThrownBy(() -> tEnv.executeSql("DROP TABLE s").await())
                 .isInstanceOf(ValidationException.class)
                 .hasMessage("Table with identifier 'my_hive.test_db.s' does not exist.");
-
-        assertThatThrownBy(() -> tEnv.executeSql("DROP TABLE hive_table").await())
-                .isInstanceOf(ValidationException.class)
-                .hasMessage("Table with identifier 'my_hive.test_db.hive_table' does not exist.");
 
         // alter table
         tEnv.executeSql("ALTER TABLE t SET ( 'manifest.target-file-size' = '16MB' )").await();
@@ -329,9 +326,9 @@ public abstract class HiveCatalogITCaseBase {
                                 tEnv.executeSql(
                                                 "ALTER TABLE hive_table SET ( 'manifest.target-file-size' = '16MB' )")
                                         .await())
-                .isInstanceOf(RuntimeException.class)
+                .rootCause()
                 .hasMessage(
-                        "Table `my_hive`.`test_db`.`hive_table` doesn't exist or is a temporary table.");
+                        "Only support alter data table, but is: class org.apache.paimon.table.FormatTable$FormatTableImpl");
     }
 
     @Test
@@ -656,15 +653,6 @@ public abstract class HiveCatalogITCaseBase {
                         Arrays.asList(
                                 "true\t1\t1\t1\t1234567890123456789\t1.23\t3.14159\t1234.56\tABC\tv1\tHello, World!\t01\t010203\t2023-01-01\t2023-01-01 12:00:00.123\t[\"value1\",\"value2\",\"value3\"]\tvalue1\tvalue1\tvalue2\t{\"f0\":\"v1\",\"f1\":1}\tv1\t1",
                                 "false\t2\t2\t2\t234567890123456789\t2.34\t2.111111\t2345.67\tDEF\tv2\tApache Paimon\t04\t040506\t2023-02-01\t2023-02-01 12:00:00.456\t[\"value4\",\"value5\",\"value6\"]\tvalue4\tvalue11\tvalue22\t{\"f0\":\"v2\",\"f1\":2}\tv2\t2"));
-
-        assertThatThrownBy(
-                        () ->
-                                tEnv.executeSql(
-                                                "INSERT INTO hive_table VALUES (1, 'Hi'), (2, 'Hello')")
-                                        .await())
-                .isInstanceOf(TableException.class)
-                .hasMessage(
-                        "Cannot find table '`my_hive`.`test_db`.`hive_table`' in any of the catalogs [default_catalog, my_hive], nor as a temporary table.");
     }
 
     @Test

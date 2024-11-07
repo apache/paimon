@@ -44,6 +44,7 @@ import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.CatalogTableType;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -97,13 +98,13 @@ import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
-import static org.apache.paimon.hive.HiveCatalogOptions.FORMAT_TABLE_ENABLED;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
 import static org.apache.paimon.hive.HiveTableUtils.convertToFormatTable;
 import static org.apache.paimon.options.CatalogOptions.ALLOW_UPPER_CASE;
+import static org.apache.paimon.options.CatalogOptions.FORMAT_TABLE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.SYNC_ALL_PROPERTIES;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
@@ -111,6 +112,7 @@ import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.HadoopUtils.addHadoopConfIfFound;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
 /** A catalog implementation for Hive. */
@@ -172,8 +174,8 @@ public class HiveCatalog extends AbstractCatalog {
         this.clients = new CachedClientPool(hiveConf, options, clientClassName);
     }
 
-    private boolean formatTableEnabled() {
-        return options.get(FORMAT_TABLE_ENABLED);
+    private boolean formatTableDisabled() {
+        return !options.get(FORMAT_TABLE_ENABLED);
     }
 
     @Override
@@ -607,7 +609,7 @@ public class HiveCatalog extends AbstractCatalog {
         } catch (TableNotExistException ignore) {
         }
 
-        if (!formatTableEnabled()) {
+        if (formatTableDisabled()) {
             throw new TableNotExistException(identifier);
         }
 
@@ -620,7 +622,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public void createFormatTable(Identifier identifier, Schema schema) {
-        if (!formatTableEnabled()) {
+        if (formatTableDisabled()) {
             throw new UnsupportedOperationException(
                     "Format table is not enabled for " + identifier);
         }
@@ -641,7 +643,7 @@ public class HiveCatalog extends AbstractCatalog {
                         schema.comment());
         try {
             Path location = getTableLocation(identifier, null);
-            Table hiveTable = createHiveTable(identifier, newSchema, location);
+            Table hiveTable = createHiveFormatTable(identifier, newSchema, location);
             clients.execute(client -> client.createTable(hiveTable));
         } catch (Exception e) {
             // we don't need to delete directories since HMS will roll back db and fs if failed.
@@ -727,12 +729,10 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private Table createHiveTable(Identifier identifier, TableSchema tableSchema, Path location) {
+        checkArgument(Options.fromMap(tableSchema.options()).get(TYPE) != FORMAT_TABLE);
+
         Map<String, String> tblProperties;
-        String provider = PAIMON_TABLE_TYPE_VALUE;
-        if (Options.fromMap(tableSchema.options()).get(TYPE) == FORMAT_TABLE) {
-            provider = tableSchema.options().get(FILE_FORMAT.key());
-        }
-        if (syncAllProperties() || !provider.equals(PAIMON_TABLE_TYPE_VALUE)) {
+        if (syncAllProperties()) {
             tblProperties = new HashMap<>(tableSchema.options());
 
             // add primary-key, partition-key to tblproperties
@@ -748,8 +748,32 @@ public class HiveCatalog extends AbstractCatalog {
             }
         }
 
+        Table table = newHmsTable(identifier, tblProperties, PAIMON_TABLE_TYPE_VALUE);
+        updateHmsTable(table, identifier, tableSchema, PAIMON_TABLE_TYPE_VALUE, location);
+        return table;
+    }
+
+    private Table createHiveFormatTable(
+            Identifier identifier, TableSchema tableSchema, Path location) {
+        Options options = Options.fromMap(tableSchema.options());
+        checkArgument(options.get(TYPE) == FORMAT_TABLE);
+
+        String provider = tableSchema.options().get(FILE_FORMAT.key());
+        checkNotNull(provider, FILE_FORMAT.key() + " should be configured.");
+        // valid supported format
+        FormatTable.Format.valueOf(provider.toUpperCase());
+
+        Map<String, String> tblProperties = new HashMap<>();
+
         Table table = newHmsTable(identifier, tblProperties, provider);
         updateHmsTable(table, identifier, tableSchema, provider, location);
+
+        if (FormatTable.Format.CSV.toString().equalsIgnoreCase(provider)) {
+            table.getSd()
+                    .getSerdeInfo()
+                    .getParameters()
+                    .put(FIELD_DELIM, options.get(FIELD_DELIMITER));
+        }
         return table;
     }
 
@@ -796,6 +820,11 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     protected void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
+        Table table = getHmsTable(identifier);
+        if (!isPaimonTable(identifier, table)) {
+            throw new UnsupportedOperationException("Only data table support alter table.");
+        }
+
         final SchemaManager schemaManager = schemaManager(identifier, getTableLocation(identifier));
         // first commit changes to underlying files
         TableSchema schema = schemaManager.commitChanges(changes);
@@ -805,12 +834,6 @@ public class HiveCatalog extends AbstractCatalog {
             return;
         }
         try {
-            Table table =
-                    clients.run(
-                            client ->
-                                    client.getTable(
-                                            identifier.getDatabaseName(),
-                                            identifier.getTableName()));
             alterTableToHms(table, identifier, schema);
         } catch (Exception te) {
             schemaManager.deleteSchema(schema.id());
