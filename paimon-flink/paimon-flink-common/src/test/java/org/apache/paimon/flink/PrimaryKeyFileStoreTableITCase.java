@@ -37,6 +37,8 @@ import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -52,6 +54,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Tests for changelog table with primary keys. */
 public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
@@ -333,6 +336,81 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                 assertThat(row.getField(1)).isNotEqualTo((int) row.getField(0) * 10);
             }
         }
+    }
+
+    @Timeout(60)
+    @ParameterizedTest()
+    @ValueSource(booleans = {false, true})
+    public void testRecreateTableWithException(boolean isReloadData) throws Exception {
+        TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
+        bEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
+        bEnv.executeSql("USE CATALOG testCatalog");
+        bEnv.executeSql(
+                "CREATE TABLE t ( pt INT, k INT, v INT, PRIMARY KEY (pt, k) NOT ENFORCED ) "
+                        + "PARTITIONED BY (pt) "
+                        + "WITH ("
+                        + "    'bucket' = '2'\n"
+                        + "    ,'continuous.discovery-interval' = '1s'\n"
+                        + ")");
+
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .parallelism(4)
+                        .checkpointIntervalMs(1000)
+                        .build();
+        sEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
+        sEnv.executeSql("USE CATALOG testCatalog");
+        CloseableIterator<Row> it = sEnv.executeSql("SELECT * FROM t").collect();
+
+        // first write
+        List<String> values = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            values.add(String.format("(0, %d, %d)", i, i));
+            values.add(String.format("(1, %d, %d)", i, i));
+        }
+        bEnv.executeSql("INSERT INTO t VALUES " + String.join(", ", values)).await();
+        List<Row> expected = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            expected.add(Row.ofKind(RowKind.INSERT, 0, i, i));
+            expected.add(Row.ofKind(RowKind.INSERT, 1, i, i));
+        }
+        assertStreamingResult(it, expected);
+
+        // second write
+        values.clear();
+        for (int i = 0; i < 10; i++) {
+            values.add(String.format("(0, %d, %d)", i, i + 1));
+            values.add(String.format("(1, %d, %d)", i, i + 1));
+        }
+        bEnv.executeSql("INSERT INTO t VALUES " + String.join(", ", values)).await();
+
+        // start a read job
+        for (int i = 0; i < 10; i++) {
+            expected.add(Row.ofKind(RowKind.UPDATE_BEFORE, 0, i, i));
+            expected.add(Row.ofKind(RowKind.UPDATE_BEFORE, 1, i, i));
+            expected.add(Row.ofKind(RowKind.UPDATE_AFTER, 0, i, i + 1));
+            expected.add(Row.ofKind(RowKind.UPDATE_AFTER, 1, i, i + 1));
+        }
+        assertStreamingResult(it, expected.subList(20, 60));
+
+        // delete table and recreate a same table
+        bEnv.executeSql("DROP TABLE t");
+        bEnv.executeSql(
+                "CREATE TABLE t ( pt INT, k INT, v INT, PRIMARY KEY (pt, k) NOT ENFORCED ) "
+                        + "PARTITIONED BY (pt) "
+                        + "WITH ("
+                        + "    'bucket' = '2'\n"
+                        + ")");
+
+        // if reload data, it will generate a new snapshot for recreated table
+        if (isReloadData) {
+            bEnv.executeSql("INSERT INTO t VALUES " + String.join(", ", values)).await();
+        }
+        assertThatCode(it::next)
+                .rootCause()
+                .hasMessageContaining(
+                        "The next expected snapshot is too big! Most possible cause might be the table had been recreated.");
     }
 
     @Test
