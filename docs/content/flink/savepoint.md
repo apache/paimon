@@ -41,12 +41,12 @@ metadata left. This is very safe, so we recommend using this feature to stop and
 
 ## Tag with Savepoint
 
-In Flink, we may consume from kafka and then write to paimon. Since flink's checkpoint only retains a limited number,
+In Flink, we may consume from Kafka and then write to Paimon. Since Flink's checkpoint only retains a limited number,
 we will trigger a savepoint at certain time (such as code upgrades, data updates, etc.) to ensure that the state can
 be retained for a longer time, so that the job can be restored incrementally.
 
-Paimon's snapshot is similar to flink's checkpoint, and both will automatically expire, but the tag feature of paimon
-allows snapshots to be retained for a long time. Therefore, we can combine the two features of paimon's tag and flink's
+Paimon's snapshot is similar to Flink's checkpoint, and both will automatically expire, but the tag feature of Paimon
+allows snapshots to be retained for a long time. Therefore, we can combine the two features of Paimon's tag and Flink's
 savepoint to achieve incremental recovery of job from the specified savepoint.
 
 {{< hint warning >}}
@@ -64,7 +64,7 @@ You can set `sink.savepoint.auto-tag` to `true` to enable the feature of automat
 
 **Step 2: Trigger savepoint.**
 
-You can refer to [flink savepoint](https://nightlies.apache.org/flink/flink-docs-stable/docs/ops/state/savepoints/#operations)
+You can refer to [Flink savepoint](https://nightlies.apache.org/flink/flink-docs-stable/docs/ops/state/savepoints/#operations)
 to learn how to configure and trigger savepoint.
 
 **Step 3: Choose the tag corresponding to the savepoint.**
@@ -74,7 +74,7 @@ The tag corresponding to the savepoint will be named in the form of `savepoint-$
 
 **Step 4: Rollback the paimon table.**
 
-[Rollback]({{< ref "maintenance/manage-tags#rollback-to-tag" >}}) the paimon table to the specified tag.
+[Rollback]({{< ref "maintenance/manage-tags#rollback-to-tag" >}}) the Paimon table to the specified tag.
 
 **Step 5: Restart from the savepoint.**
 

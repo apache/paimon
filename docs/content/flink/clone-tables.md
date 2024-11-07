@@ -39,10 +39,10 @@ However, if you want to clone the table while writing it at the same time, submi
 
 ```sql
 CALL sys.clone(
-    warehouse => 'source_warehouse_path`,
+    warehouse => 'source_warehouse_path',
     [`database` => 'source_database_name',]
     [`table` => 'source_table_name',] 
-    target_warehouse => 'target_warehouse_path`,
+    target_warehouse => 'target_warehouse_path',
     [target_database => 'target_database_name',]
     [target_table => 'target_table_name',]
     [parallelism => <parallelism>]
