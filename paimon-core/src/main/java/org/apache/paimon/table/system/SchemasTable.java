@@ -225,9 +225,7 @@ public class SchemasTable implements ReadonlyTable {
                     PredicateUtils.traverseCompoundPredicate(
                             predicate,
                             leafName,
-                            (Predicate p) -> {
-                                handleLeafPredicate(p, leafName);
-                            },
+                            (Predicate p) -> handleLeafPredicate(p, leafName),
                             null);
                 }
 

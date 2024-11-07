@@ -39,7 +39,7 @@ public class PredicateUtils {
             String leafName,
             Consumer<Predicate> matchConsumer,
             Consumer<Predicate> unMatchConsumer) {
-        Preconditions.checkState(
+        Preconditions.checkArgument(
                 predicate instanceof CompoundPredicate,
                 "PredicateUtils.traverseCompoundPredicate only supports processing Predicates of CompoundPredicate type.");
 
