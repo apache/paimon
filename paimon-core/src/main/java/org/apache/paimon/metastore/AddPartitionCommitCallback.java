@@ -88,14 +88,16 @@ public class AddPartitionCommitCallback implements CommitCallback {
 
     private void addPartitions(Set<BinaryRow> partitions) {
         try {
-            List<BinaryRow> filteredPartitions = new ArrayList<>();
+            List<BinaryRow> newPartitions = new ArrayList<>();
             for (BinaryRow partition : partitions) {
                 if (!cache.get(partition, () -> false)) {
-                    filteredPartitions.add(partition);
+                    newPartitions.add(partition);
                 }
             }
-            client.addPartitions(filteredPartitions);
-            filteredPartitions.forEach(partition -> cache.put(partition, true));
+            if (!newPartitions.isEmpty()) {
+                client.addPartitions(newPartitions);
+                newPartitions.forEach(partition -> cache.put(partition, true));
+            }
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

@@ -18,9 +18,8 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.catalog.{Catalog, CatalogContext, CatalogFactory, Identifier}
-import org.apache.paimon.options.{CatalogOptions, Options}
-import org.apache.paimon.spark.catalog.Catalogs
+import org.apache.paimon.catalog.{Catalog, Identifier}
+import org.apache.paimon.spark.catalog.WithPaimonCatalog
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 import org.apache.paimon.spark.sql.{SparkVersionSupport, WithTableOptions}
 import org.apache.paimon.table.FileStoreTable
@@ -36,7 +35,6 @@ import org.scalactic.source.Position
 import org.scalatest.Tag
 
 import java.io.File
-import java.util.{HashMap => JHashMap}
 import java.util.TimeZone
 
 import scala.util.Random
@@ -49,7 +47,9 @@ class PaimonSparkTestBase
 
   protected lazy val tempDBDir: File = Utils.createTempDir
 
-  protected lazy val catalog: Catalog = initCatalog()
+  protected def paimonCatalog: Catalog = {
+    spark.sessionState.catalogManager.currentCatalog.asInstanceOf[WithPaimonCatalog].paimonCatalog()
+  }
 
   protected val dbName0: String = "test"
 
@@ -122,18 +122,12 @@ class PaimonSparkTestBase
     super.test(testName, testTags: _*)(testFun)(pos)
   }
 
-  private def initCatalog(): Catalog = {
-    val currentCatalog = spark.sessionState.catalogManager.currentCatalog.name()
-    val options =
-      new JHashMap[String, String](Catalogs.catalogOptions(currentCatalog, spark.sessionState.conf))
-    options.put(CatalogOptions.CACHE_ENABLED.key(), "false")
-    val catalogContext =
-      CatalogContext.create(Options.fromMap(options), spark.sessionState.newHadoopConf())
-    CatalogFactory.createCatalog(catalogContext)
+  def loadTable(tableName: String): FileStoreTable = {
+    loadTable(dbName0, tableName)
   }
 
-  def loadTable(tableName: String): FileStoreTable = {
-    catalog.getTable(Identifier.create(dbName0, tableName)).asInstanceOf[FileStoreTable]
+  def loadTable(dbName: String, tableName: String): FileStoreTable = {
+    paimonCatalog.getTable(Identifier.create(dbName, tableName)).asInstanceOf[FileStoreTable]
   }
 
   protected def createRelationV2(tableName: String): LogicalPlan = {
