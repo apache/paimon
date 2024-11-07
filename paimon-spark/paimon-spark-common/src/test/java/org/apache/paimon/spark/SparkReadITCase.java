@@ -456,11 +456,15 @@ public class SparkReadITCase extends SparkReadTestBase {
                 "INSERT INTO paimon.default."
                         + tableName
                         + " VALUES (2, STRUCT(20, STRUCT('banana', 200)))");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, STRUCT(30, STRUCT('cat', 100)))");
         assertThat(
                         spark.sql("SELECT v.f2.f1, k FROM paimon.default." + tableName)
                                 .collectAsList().stream()
                                 .map(Row::toString))
-                .containsExactlyInAnyOrder("[apple,1]", "[banana,2]");
+                .containsExactlyInAnyOrder("[cat,1]", "[banana,2]");
     }
 
     private void innerTest(String tableName, boolean hasPk, boolean partitioned) {
