@@ -399,25 +399,17 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
         Preconditions.checkArgument(identifier.getSystemTableName() == null);
+        TableSchema tableSchema = getDataTableSchema(identifier);
         return FileStoreTableFactory.create(
                 fileIO,
                 getTableLocation(identifier),
-                getDataTableSchema(identifier),
+                tableSchema,
                 new CatalogEnvironment(
                         identifier,
                         Lock.factory(
                                 lockFactory().orElse(null), lockContext().orElse(null), identifier),
-                        metastoreClientFactory(identifier).orElse(null),
+                        metastoreClientFactory(identifier, tableSchema).orElse(null),
                         lineageMetaFactory));
-    }
-
-    protected CatalogEnvironment catalogEnvironment(Identifier identifier)
-            throws TableNotExistException {
-        return new CatalogEnvironment(
-                identifier,
-                Lock.factory(lockFactory().orElse(null), lockContext().orElse(null), identifier),
-                metastoreClientFactory(identifier).orElse(null),
-                lineageMetaFactory);
     }
 
     /**
@@ -462,8 +454,8 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableNotExistException;
 
     /** Get metastore client factory for the table specified by {@code identifier}. */
-    protected Optional<MetastoreClient.Factory> metastoreClientFactory(Identifier identifier)
-            throws TableNotExistException {
+    public Optional<MetastoreClient.Factory> metastoreClientFactory(
+            Identifier identifier, TableSchema schema) {
         return Optional.empty();
     }
 

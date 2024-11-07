@@ -191,12 +191,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public Optional<MetastoreClient.Factory> metastoreClientFactory(Identifier identifier)
-            throws TableNotExistException {
-        return metastoreClientFactory(identifier, getDataTableSchema(identifier));
-    }
-
-    private Optional<MetastoreClient.Factory> metastoreClientFactory(
+    public Optional<MetastoreClient.Factory> metastoreClientFactory(
             Identifier identifier, TableSchema schema) {
         Identifier tableIdentifier =
                 new Identifier(identifier.getDatabaseName(), identifier.getTableName());
