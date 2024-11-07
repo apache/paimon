@@ -41,7 +41,7 @@ public class PredicateUtils {
             Consumer<Predicate> unMatchConsumer) {
         Preconditions.checkState(
                 predicate instanceof CompoundPredicate,
-                "PredicateUtils##handleCompoundPredicate should handle with a CompoundPredicate.");
+                "PredicateUtils.traverseCompoundPredicate only supports processing Predicates of CompoundPredicate type.");
 
         CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
         List<Predicate> children = compoundPredicate.children();
