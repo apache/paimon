@@ -194,16 +194,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             throws IOException {
         FileIndexResult fileIndexResult = null;
         if (fileIndexReadEnabled) {
-            //            boolean skip =
-            //                    FileIndexSkipper.skip(
-            //                            fileIO,
-            //                            bulkFormatMapping.getDataSchema(),
-            //                            bulkFormatMapping.getDataFilters(),
-            //                            dataFilePathFactory,
-            //                            file);
-            //            if (skip) {
-            //                return new EmptyRecordReader<>();
-            //            }
             fileIndexResult =
                     FileIndexEvaluator.evaluate(
                             fileIO,
