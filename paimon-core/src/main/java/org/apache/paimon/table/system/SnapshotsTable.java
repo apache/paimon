@@ -242,12 +242,7 @@ public class SnapshotsTable implements ReadonlyTable {
                                     snapshotIds.add((Long) ((LeafPredicate) p).literals().get(0));
                                 }
                             },
-                            (Predicate p) -> {
-                                if (snapshotIds != null) {
-                                    snapshotIds.clear();
-                                    snapshotIds = null;
-                                }
-                            });
+                            (Predicate p) -> snapshotIds = null);
                 }
             } else {
                 handleLeafPredicate(predicate, leafName);

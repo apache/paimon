@@ -239,12 +239,7 @@ public class SchemasTable implements ReadonlyTable {
                                     schemaIds.add((Long) ((LeafPredicate) p).literals().get(0));
                                 }
                             },
-                            (Predicate p) -> {
-                                if (schemaIds != null) {
-                                    schemaIds.clear();
-                                    schemaIds = null;
-                                }
-                            });
+                            (Predicate p) -> schemaIds = null);
                 }
             } else {
                 handleLeafPredicate(predicate, leafName);

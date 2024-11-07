@@ -250,12 +250,7 @@ public class TagsTable implements ReadonlyTable {
                                         predicateMap.put(equalValue, tagManager.tag(equalValue));
                                     }
                                 },
-                                (Predicate p) -> {
-                                    if (predicateMap != null) {
-                                        predicateMap.clear();
-                                        predicateMap = null;
-                                    }
-                                });
+                                (Predicate p) -> predicateMap = null);
                     }
                 }
             }
