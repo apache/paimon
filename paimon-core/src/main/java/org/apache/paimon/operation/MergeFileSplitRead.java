@@ -160,16 +160,18 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         this.pushdownProjection = projection.pushdownProjection;
         this.outerProjection = projection.outerProjection;
         if (pushdownProjection != null) {
-            List<DataField> fields = tableRowType.getFields();
-            List<String> projectedFieldNames =
-                    Arrays.stream(
-                                    Arrays.stream(pushdownProjection)
-                                            .mapToInt(arr -> arr[0])
-                                            .toArray())
-                            .mapToObj(fields::get)
-                            .map(DataField::name)
-                            .collect(Collectors.toList());
-            RowType pushdownRowType = readType.project(projectedFieldNames);
+            List<DataField> tableFields = tableRowType.getFields();
+            List<DataField> readFields = readType.getFields();
+            List<DataField> finalReadFields = new ArrayList<>();
+            for (int i : Arrays.stream(pushdownProjection).mapToInt(arr -> arr[0]).toArray()) {
+                DataField requiredField = tableFields.get(i);
+                finalReadFields.add(
+                        readFields.stream()
+                                .filter(x -> x.name().equals(requiredField.name()))
+                                .findFirst()
+                                .orElse(requiredField));
+            }
+            RowType pushdownRowType = new RowType(finalReadFields);
             readerFactoryBuilder.withReadValueType(pushdownRowType);
             mergeSorter.setProjectedValueType(pushdownRowType);
         }
