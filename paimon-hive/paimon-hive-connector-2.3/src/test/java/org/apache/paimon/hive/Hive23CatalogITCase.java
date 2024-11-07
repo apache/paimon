@@ -113,7 +113,7 @@ public class Hive23CatalogITCase extends HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testCreateExistTableInHive() throws Exception {
+    public void testCreateExistTableInHive() {
         tEnv.executeSql(
                 String.join(
                         "\n",
@@ -133,7 +133,6 @@ public class Hive23CatalogITCase extends HiveCatalogITCaseBase {
                                 tEnv.executeSql(
                                                 "CREATE TABLE hive_table(a INT, b INT, c INT, d INT)")
                                         .await())
-                .isInstanceOf(TableException.class)
                 .hasMessage(
                         "Could not execute CreateTable in path `my_hive_custom_client`.`test_db`.`hive_table`");
         assertThat(

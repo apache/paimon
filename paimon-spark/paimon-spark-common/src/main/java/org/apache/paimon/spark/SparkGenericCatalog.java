@@ -317,7 +317,7 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
                 options.put(METASTORE.key(), metastore);
             }
         }
-        options.put(HiveCatalogOptions.FORMAT_TABLE_ENABLED.key(), "false");
+        options.put(CatalogOptions.FORMAT_TABLE_ENABLED.key(), "false");
         String sessionCatalogDefaultDatabase = SQLConfUtils.defaultDatabase(sqlConf);
         if (options.containsKey(DEFAULT_DATABASE.key())) {
             String userDefineDefaultDatabase = options.get(DEFAULT_DATABASE.key());

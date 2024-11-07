@@ -768,7 +768,9 @@ public class FlinkCatalog extends AbstractCatalog {
             throw new TableNotExistException(getName(), tablePath);
         }
 
-        Preconditions.checkArgument(table instanceof FileStoreTable, "Can't alter system table.");
+        checkArgument(
+                table instanceof FileStoreTable,
+                "Only support alter data table, but is: " + table.getClass());
         validateAlterTable(toCatalogTable(table), newTable);
         Map<String, Integer> oldTableNonPhysicalColumnIndex =
                 FlinkCatalogPropertiesUtil.nonPhysicalColumns(

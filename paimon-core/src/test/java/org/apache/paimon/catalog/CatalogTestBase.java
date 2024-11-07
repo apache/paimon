@@ -25,6 +25,7 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -884,5 +885,51 @@ public abstract class CatalogTestBase {
         catalog.dropView(newIdentifier, true);
         assertThatThrownBy(() -> catalog.dropView(newIdentifier, false))
                 .isInstanceOf(Catalog.ViewNotExistException.class);
+    }
+
+    protected boolean supportsFormatTable() {
+        return false;
+    }
+
+    @Test
+    public void testFormatTable() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+
+        Identifier identifier = new Identifier("format_db", "my_format");
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+
+        // create table
+        Schema schema =
+                Schema.newBuilder()
+                        .column("str", DataTypes.STRING())
+                        .column("int", DataTypes.INT())
+                        .option("type", "format-table")
+                        .option("file.format", "csv")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        assertThat(catalog.listTables(identifier.getDatabaseName()))
+                .contains(identifier.getTableName());
+        assertThat(catalog.getTable(identifier)).isInstanceOf(FormatTable.class);
+
+        // alter table
+        SchemaChange schemaChange = SchemaChange.addColumn("new_col", DataTypes.STRING());
+        assertThatThrownBy(() -> catalog.alterTable(identifier, schemaChange, false))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Only data table support alter table.");
+
+        // drop table
+        catalog.dropTable(identifier, false);
+        assertThatThrownBy(() -> catalog.getTable(identifier))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+
+        // rename table
+        catalog.createTable(identifier, schema, false);
+        Identifier newIdentifier = new Identifier("format_db", "new_format");
+        catalog.renameTable(identifier, newIdentifier, false);
+        assertThatThrownBy(() -> catalog.getTable(identifier))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+        assertThat(catalog.getTable(newIdentifier)).isInstanceOf(FormatTable.class);
     }
 }
