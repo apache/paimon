@@ -157,7 +157,6 @@ public class JdbcCatalog extends AbstractCatalog {
                         row -> row.getString(JdbcUtils.DATABASE_NAME),
                         JdbcUtils.LIST_ALL_PROPERTY_DATABASES_SQL,
                         catalogKey));
-
         return databases.stream().distinct().collect(Collectors.toList());
     }
 
