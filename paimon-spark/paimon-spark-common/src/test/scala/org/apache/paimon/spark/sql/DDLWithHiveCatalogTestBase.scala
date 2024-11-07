@@ -257,14 +257,14 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
       catalogName =>
         val dbName = "default"
         val tblName = "t"
-        sql(s"USE $catalogName.$dbName")
+        spark.sql(s"USE $catalogName.$dbName")
         withTable(tblName) {
-          sql("""
-                |CREATE TABLE t (id INT, pt INT)
-                |USING PAIMON
-                |TBLPROPERTIES ('metastore.partitioned-table' = 'true')
-                |PARTITIONED BY (pt)
-                |""".stripMargin)
+          spark.sql(s"""
+                       |CREATE TABLE $tblName (id INT, pt INT)
+                       |USING PAIMON
+                       |TBLPROPERTIES ('metastore.partitioned-table' = 'true')
+                       |PARTITIONED BY (pt)
+                       |""".stripMargin)
 
           val metastoreClient = loadTable(dbName, tblName)
             .catalogEnvironment()
@@ -273,20 +273,24 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
             .asInstanceOf[HiveMetastoreClient]
             .client()
 
-          sql("INSERT INTO t VALUES (1, 1), (2, 2), (3, 3)")
+          spark.sql(s"INSERT INTO $tblName VALUES (1, 1), (2, 2), (3, 3)")
           // check partitions in paimon
-          checkAnswer(sql("show partitions t"), Seq(Row("pt=1"), Row("pt=2"), Row("pt=3")))
+          checkAnswer(
+            spark.sql(s"show partitions $tblName"),
+            Seq(Row("pt=1"), Row("pt=2"), Row("pt=3")))
           // check partitions in HMS
           assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 3)
 
-          sql("INSERT INTO t VALUES (4, 3), (5, 4)")
+          spark.sql(s"INSERT INTO $tblName VALUES (4, 3), (5, 4)")
           checkAnswer(
-            sql("show partitions t"),
+            spark.sql(s"show partitions $tblName"),
             Seq(Row("pt=1"), Row("pt=2"), Row("pt=3"), Row("pt=4")))
           assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 4)
 
-          sql("ALTER TABLE t DROP PARTITION (pt=1)")
-          checkAnswer(sql("show partitions t"), Seq(Row("pt=2"), Row("pt=3"), Row("pt=4")))
+          spark.sql(s"ALTER TABLE $tblName DROP PARTITION (pt=1)")
+          checkAnswer(
+            spark.sql(s"show partitions $tblName"),
+            Seq(Row("pt=2"), Row("pt=3"), Row("pt=4")))
           assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 3)
         }
     }
