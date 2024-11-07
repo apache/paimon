@@ -189,7 +189,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     public void testChangeTableInSystemDatabase() {
         sql("USE sys");
         assertThatCode(() -> sql("ALTER TABLE all_table_options SET ('bucket-num' = '5')"))
-                .hasRootCauseMessage("Can't alter system table.");
+                .rootCause()
+                .hasMessageContaining("Only support alter data table, but is: ");
     }
 
     @Test
