@@ -162,12 +162,8 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         this.outerProjection = projection.outerProjection;
         if (pushdownProjection != null) {
             RowType pushdownRowType =
-                    tableSchema
-                            .logicalRowType()
-                            .project(
-                                    Arrays.stream(pushdownProjection)
-                                            .mapToInt(arr -> arr[0])
-                                            .toArray());
+                    readType.project(
+                            Arrays.stream(pushdownProjection).mapToInt(arr -> arr[0]).toArray());
             readerFactoryBuilder.withReadValueType(pushdownRowType);
             mergeSorter.setProjectedValueType(pushdownRowType);
         }
