@@ -242,6 +242,7 @@ public class SchemasTable implements ReadonlyTable {
                                 }
                             },
                             (Predicate p) -> {
+                                schemaIds.clear();
                                 schemaIds = null;
                             });
                 }
