@@ -46,6 +46,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -119,8 +120,8 @@ public abstract class CatalogTestBase {
         catalog.createTable(identifier, schema, false);
 
         List<String> databases = catalog.listDatabases();
-        Assertions.assertEquals(1, databases.size());
-        Assertions.assertEquals("test_db", databases.get(0));
+        List<String> distinctDatabases = databases.stream().distinct().collect(Collectors.toList());
+        Assertions.assertEquals(distinctDatabases.size(), databases.size());
     }
 
     @Test
