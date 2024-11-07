@@ -244,7 +244,6 @@ public class SchemasTable implements ReadonlyTable {
                                     schemaIds.clear();
                                     schemaIds = null;
                                 }
-
                             });
                 }
             } else {
