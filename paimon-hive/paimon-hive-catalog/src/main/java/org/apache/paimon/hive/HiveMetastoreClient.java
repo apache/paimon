@@ -41,6 +41,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /** {@link MetastoreClient} for Hive tables. */
 public class HiveMetastoreClient implements MetastoreClient {
@@ -82,6 +83,14 @@ public class HiveMetastoreClient implements MetastoreClient {
     }
 
     @Override
+    public void addPartitions(List<BinaryRow> partitions) throws Exception {
+        addPartitionsSpec(
+                partitions.stream()
+                        .map(partitionComputer::generatePartValues)
+                        .collect(Collectors.toList()));
+    }
+
+    @Override
     public void addPartition(LinkedHashMap<String, String> partitionSpec) throws Exception {
         List<String> partitionValues = new ArrayList<>(partitionSpec.values());
         try {
@@ -111,6 +120,33 @@ public class HiveMetastoreClient implements MetastoreClient {
 
             clients.execute(client -> client.add_partition(hivePartition));
         }
+    }
+
+    @Override
+    public void addPartitionsSpec(List<LinkedHashMap<String, String>> partitionSpecsList)
+            throws Exception {
+        String databaseName = identifier.getDatabaseName();
+        String tableName = identifier.getTableName();
+        ArrayList<Partition> hivePartitions = new ArrayList<>();
+        int currentTime = (int) (System.currentTimeMillis() / 1000);
+        for (LinkedHashMap<String, String> partitionSpec : partitionSpecsList) {
+            List<String> partitionValues = new ArrayList<>(partitionSpec.values());
+            StorageDescriptor newSd = new StorageDescriptor(sd);
+            newSd.setLocation(
+                    sd.getLocation()
+                            + "/"
+                            + PartitionPathUtils.generatePartitionPath(partitionSpec));
+            Partition hivePartition = new Partition();
+            hivePartition.setDbName(databaseName);
+            hivePartition.setTableName(tableName);
+            hivePartition.setValues(partitionValues);
+            hivePartition.setSd(newSd);
+            hivePartition.setCreateTime(currentTime);
+            hivePartition.setLastAccessTime(currentTime);
+            hivePartitions.add(hivePartition);
+        }
+
+        clients.execute(client -> client.add_partitions(hivePartitions, true, false));
     }
 
     @Override
