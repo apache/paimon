@@ -240,8 +240,11 @@ public class SchemasTable implements ReadonlyTable {
                                 }
                             },
                             (Predicate p) -> {
-                                schemaIds.clear();
-                                schemaIds = null;
+                                if (schemaIds != null) {
+                                    schemaIds.clear();
+                                    schemaIds = null;
+                                }
+
                             });
                 }
             } else {

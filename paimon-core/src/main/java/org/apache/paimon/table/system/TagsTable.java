@@ -251,8 +251,10 @@ public class TagsTable implements ReadonlyTable {
                                     }
                                 },
                                 (Predicate p) -> {
-                                    predicateMap.clear();
-                                    predicateMap = null;
+                                    if (predicateMap != null) {
+                                        predicateMap.clear();
+                                        predicateMap = null;
+                                    }
                                 });
                     }
                 }

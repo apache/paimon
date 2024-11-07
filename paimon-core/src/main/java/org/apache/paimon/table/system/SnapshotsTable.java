@@ -243,8 +243,10 @@ public class SnapshotsTable implements ReadonlyTable {
                                 }
                             },
                             (Predicate p) -> {
-                                snapshotIds.clear();
-                                snapshotIds = null;
+                                if (snapshotIds != null) {
+                                    snapshotIds.clear();
+                                    snapshotIds = null;
+                                }
                             });
                 }
             } else {
