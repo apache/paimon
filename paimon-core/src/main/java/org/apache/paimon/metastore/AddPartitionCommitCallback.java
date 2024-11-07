@@ -90,7 +90,9 @@ public class AddPartitionCommitCallback implements CommitCallback {
         try {
             List<BinaryRow> filteredPartitions = new ArrayList<>();
             for (BinaryRow partition : partitions) {
-                if (!cache.get(partition, () -> false)) filteredPartitions.add(partition);
+                if (!cache.get(partition, () -> false)) {
+                    filteredPartitions.add(partition);
+                }
             }
             client.addPartitions(filteredPartitions);
             filteredPartitions.forEach(partition -> cache.put(partition, true));
