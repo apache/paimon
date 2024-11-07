@@ -44,6 +44,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Projection;
@@ -131,11 +132,9 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     @Override
     public MergeFileSplitRead withReadType(RowType readType) {
         // todo: replace projectedFields with readType
+        RowType tableRowType = tableSchema.logicalRowType();
         int[][] projectedFields =
-                Arrays.stream(
-                                tableSchema
-                                        .logicalRowType()
-                                        .getFieldIndices(readType.getFieldNames()))
+                Arrays.stream(tableRowType.getFieldIndices(readType.getFieldNames()))
                         .mapToObj(i -> new int[] {i})
                         .toArray(int[][]::new);
         int[][] newProjectedFields = projectedFields;
@@ -161,9 +160,16 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         this.pushdownProjection = projection.pushdownProjection;
         this.outerProjection = projection.outerProjection;
         if (pushdownProjection != null) {
-            RowType pushdownRowType =
-                    readType.project(
-                            Arrays.stream(pushdownProjection).mapToInt(arr -> arr[0]).toArray());
+            List<DataField> fields = tableRowType.getFields();
+            List<String> projectedFieldNames =
+                    Arrays.stream(
+                                    Arrays.stream(pushdownProjection)
+                                            .mapToInt(arr -> arr[0])
+                                            .toArray())
+                            .mapToObj(fields::get)
+                            .map(DataField::name)
+                            .collect(Collectors.toList());
+            RowType pushdownRowType = readType.project(projectedFieldNames);
             readerFactoryBuilder.withReadValueType(pushdownRowType);
             mergeSorter.setProjectedValueType(pushdownRowType);
         }
