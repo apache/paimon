@@ -643,7 +643,7 @@ public class HiveCatalog extends AbstractCatalog {
                         schema.comment());
         try {
             Path location = getTableLocation(identifier, null);
-            Table hiveTable = createHiveTable(identifier, newSchema, location);
+            Table hiveTable = createHiveFormatTable(identifier, newSchema, location);
             clients.execute(client -> client.createTable(hiveTable));
         } catch (Exception e) {
             // we don't need to delete directories since HMS will roll back db and fs if failed.
@@ -729,15 +729,10 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private Table createHiveTable(Identifier identifier, TableSchema tableSchema, Path location) {
+        checkArgument(Options.fromMap(tableSchema.options()).get(TYPE) != FORMAT_TABLE);
+
         Map<String, String> tblProperties;
-        String provider = PAIMON_TABLE_TYPE_VALUE;
-        if (Options.fromMap(tableSchema.options()).get(TYPE) == FORMAT_TABLE) {
-            provider = tableSchema.options().get(FILE_FORMAT.key());
-            checkNotNull(provider, FILE_FORMAT.key() + " should be configured.");
-            // valid supported format
-            FormatTable.Format.valueOf(provider.toUpperCase());
-        }
-        if (syncAllProperties() || !provider.equals(PAIMON_TABLE_TYPE_VALUE)) {
+        if (syncAllProperties()) {
             tblProperties = new HashMap<>(tableSchema.options());
 
             // add primary-key, partition-key to tblproperties
@@ -753,8 +748,32 @@ public class HiveCatalog extends AbstractCatalog {
             }
         }
 
+        Table table = newHmsTable(identifier, tblProperties, PAIMON_TABLE_TYPE_VALUE);
+        updateHmsTable(table, identifier, tableSchema, PAIMON_TABLE_TYPE_VALUE, location);
+        return table;
+    }
+
+    private Table createHiveFormatTable(
+            Identifier identifier, TableSchema tableSchema, Path location) {
+        Options options = Options.fromMap(tableSchema.options());
+        checkArgument(options.get(TYPE) == FORMAT_TABLE);
+
+        String provider = tableSchema.options().get(FILE_FORMAT.key());
+        checkNotNull(provider, FILE_FORMAT.key() + " should be configured.");
+        // valid supported format
+        FormatTable.Format.valueOf(provider.toUpperCase());
+
+        Map<String, String> tblProperties = new HashMap<>();
+
         Table table = newHmsTable(identifier, tblProperties, provider);
         updateHmsTable(table, identifier, tableSchema, provider, location);
+
+        if (FormatTable.Format.CSV.toString().equalsIgnoreCase(provider)) {
+            table.getSd()
+                    .getSerdeInfo()
+                    .getParameters()
+                    .put(FIELD_DELIM, options.get(FIELD_DELIMITER));
+        }
         return table;
     }
 

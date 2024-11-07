@@ -25,8 +25,9 @@ import org.apache.paimon.options.ConfigOptions;
 public class FormatTableOptions {
 
     public static final ConfigOption<String> FIELD_DELIMITER =
-            ConfigOptions.key("csv.field-delimiter")
+            ConfigOptions.key("field-delimiter")
                     .stringType()
                     .defaultValue(",")
-                    .withDescription("Optional field delimiter character (',' by default)");
+                    .withDescription(
+                            "Optional field delimiter character for CSV (',' by default).");
 }

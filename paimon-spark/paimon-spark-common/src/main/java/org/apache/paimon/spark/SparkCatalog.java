@@ -28,6 +28,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
 import org.apache.paimon.spark.catalog.SupportFunction;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.FormatTableOptions;
 
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
@@ -511,8 +512,11 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
         StructType schema = SparkTypeUtils.fromPaimonRowType(formatTable.rowType());
         List<String> pathList = new ArrayList<>();
         pathList.add(formatTable.location());
-        CaseInsensitiveStringMap dsOptions = new CaseInsensitiveStringMap(formatTable.options());
+        Options options = Options.fromMap(formatTable.options());
+        CaseInsensitiveStringMap dsOptions = new CaseInsensitiveStringMap(options.toMap());
         if (formatTable.format() == FormatTable.Format.CSV) {
+            options.set("sep", options.get(FormatTableOptions.FIELD_DELIMITER));
+            dsOptions = new CaseInsensitiveStringMap(options.toMap());
             return new CSVTable(
                     ident.name(),
                     SparkSession.active(),

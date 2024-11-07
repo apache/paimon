@@ -21,6 +21,7 @@ package org.apache.paimon.spark;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.TestHiveMetastore;
 
+import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -28,12 +29,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.FileNotFoundException;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Base tests for spark read. */
 public class SparkCatalogWithHiveTest {
+
     private static TestHiveMetastore testHiveMetastore;
 
     private static final int PORT = 9087;
@@ -51,7 +54,6 @@ public class SparkCatalogWithHiveTest {
 
     @Test
     public void testCreateFormatTable(@TempDir java.nio.file.Path tempDir) {
-        // firstly, we use hive metastore to create table, and check the result.
         Path warehousePath = new Path("file:" + tempDir.toString());
         SparkSession spark =
                 SparkSession.builder()
@@ -73,6 +75,9 @@ public class SparkCatalogWithHiveTest {
 
         spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
         spark.sql("USE spark_catalog.my_db1");
+
+        // test orc table
+
         spark.sql("CREATE TABLE IF NOT EXISTS table_orc (a INT, bb INT, c STRING) USING orc");
 
         assertThat(
@@ -80,35 +85,30 @@ public class SparkCatalogWithHiveTest {
                                 .map(s -> s.get(1))
                                 .map(Object::toString))
                 .containsExactlyInAnyOrder("table_orc");
-        spark.close();
 
-        SparkSession spark1 =
-                SparkSession.builder()
-                        .config("spark.sql.warehouse.dir", warehousePath.toString())
-                        // with hive metastore
-                        .config("spark.sql.catalogImplementation", "hive")
-                        .config("hive.metastore.uris", "thrift://localhost:" + PORT)
-                        .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
-                        .config("spark.sql.catalog.spark_catalog.metastore", "hive")
-                        .config(
-                                "spark.sql.catalog.spark_catalog.hive.metastore.uris",
-                                "thrift://localhost:" + PORT)
-                        .config("spark.sql.catalog.spark_catalog.format-table.enabled", "true")
-                        .config(
-                                "spark.sql.catalog.spark_catalog.warehouse",
-                                warehousePath.toString())
-                        .master("local[2]")
-                        .getOrCreate();
-        spark1.sql("USE spark_catalog.my_db1");
         assertThat(
-                        spark1.sql("EXPLAIN EXTENDED SELECT * from table_orc").collectAsList()
+                        spark.sql("EXPLAIN EXTENDED SELECT * from table_orc").collectAsList()
                                 .stream()
                                 .map(s -> s.get(0))
                                 .map(Object::toString)
                                 .filter(s -> s.contains("OrcScan"))
                                 .count())
                 .isGreaterThan(0);
-        spark1.close();
+
+        // test csv table
+
+        spark.sql(
+                "CREATE TABLE IF NOT EXISTS table_csv (a INT, bb INT, c STRING) USING csv OPTIONS ('field-delimiter' ';')");
+        spark.sql("INSERT INTO table_csv VALUES (1, 1, '1'), (2, 2, '2')").collect();
+        assertThat(spark.sql("DESCRIBE FORMATTED table_csv").collectAsList().toString())
+                .contains("sep=;");
+        assertThat(
+                        spark.sql("SELECT * FROM table_csv").collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[1,1,1]", "[2,2,2]");
+
+        spark.close();
     }
 
     @Test
