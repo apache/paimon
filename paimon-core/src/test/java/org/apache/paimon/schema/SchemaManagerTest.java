@@ -576,12 +576,12 @@ public class SchemaManagerTest {
         assertThat(manager.latest().get().logicalRowType()).isEqualTo(outerType);
 
         assertThatCode(() -> manager.commitChanges(addColumn))
-                .hasMessageContaining("Column [v, f2, f3] already exists");
+                .hasMessageContaining("Column v.f2.f3 already exists");
         SchemaChange middleColumnNotExistAddColumn =
                 SchemaChange.addColumn(
                         Arrays.asList("v", "invalid", "f4"), DataTypes.STRING(), "", null);
         assertThatCode(() -> manager.commitChanges(middleColumnNotExistAddColumn))
-                .hasMessageContaining("Column [v, invalid] does not exist");
+                .hasMessageContaining("Column v.invalid does not exist");
 
         SchemaChange dropColumn = SchemaChange.dropColumn(Arrays.asList("v", "f2", "f1"));
         manager.commitChanges(dropColumn);
@@ -600,10 +600,10 @@ public class SchemaManagerTest {
         assertThat(manager.latest().get().logicalRowType()).isEqualTo(outerType);
 
         assertThatCode(() -> manager.commitChanges(dropColumn))
-                .hasMessageContaining("Column [v, f2, f1] does not exist");
+                .hasMessageContaining("Column v.f2.f1 does not exist");
         SchemaChange middleColumnNotExistDropColumn =
                 SchemaChange.dropColumn(Arrays.asList("v", "invalid", "f2"));
         assertThatCode(() -> manager.commitChanges(middleColumnNotExistDropColumn))
-                .hasMessageContaining("Column [v, invalid] does not exist");
+                .hasMessageContaining("Column v.invalid does not exist");
     }
 }

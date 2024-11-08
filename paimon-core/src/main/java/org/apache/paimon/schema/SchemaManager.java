@@ -299,7 +299,7 @@ public class SchemaManager implements Serializable {
                                 if (field.name().equals(fieldName)) {
                                     throw new Catalog.ColumnAlreadyExistException(
                                             identifierFromPath(tableRoot.toString(), true, branch),
-                                            addColumn.fieldNames().toString());
+                                            String.join(".", addColumn.fieldNames()));
                                 }
                             }
 
@@ -353,7 +353,7 @@ public class SchemaManager implements Serializable {
                             if (!newFields.removeIf(f -> f.name().equals(fieldName))) {
                                 throw new Catalog.ColumnNotExistException(
                                         identifierFromPath(tableRoot.toString(), true, branch),
-                                        drop.fieldNames().toString());
+                                        String.join(".", drop.fieldNames()));
                             }
                             if (newFields.isEmpty()) {
                                 throw new IllegalArgumentException(
@@ -639,7 +639,7 @@ public class SchemaManager implements Serializable {
 
             throw new Catalog.ColumnNotExistException(
                     identifierFromPath(tableRoot.toString(), true, branch),
-                    Arrays.asList(updateFieldNames).subList(0, depth + 1).toString());
+                    String.join(".", Arrays.asList(updateFieldNames).subList(0, depth + 1)));
         }
 
         protected abstract void updateLastColumn(List<DataField> newFields, String fieldName)
@@ -667,7 +667,7 @@ public class SchemaManager implements Serializable {
 
                 throw new Catalog.ColumnNotExistException(
                         identifierFromPath(tableRoot.toString(), true, branch),
-                        Arrays.toString(updateFieldNames));
+                        String.join(".", updateFieldNames));
             }
         }.updateIntermediateColumn(newFields, 0);
     }
