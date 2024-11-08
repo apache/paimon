@@ -120,7 +120,7 @@ public class CodeGenUtils {
     private static <T> Pair<Class<?>, Object[]> generateClass(
             Supplier<GeneratedClass<T>> supplier) {
         long time = System.currentTimeMillis();
-        RuntimeException ex;
+        OutOfMemoryError toThrow;
 
         do {
             try {
@@ -134,13 +134,15 @@ public class CodeGenUtils {
                 try {
                     Thread.sleep(5_000);
                 } catch (InterruptedException e) {
-                    Thread.interrupted();
-                    throw new RuntimeException("Sleep interrupted", error);
+                    Thread.currentThread().interrupt();
+                    throw error;
                 }
-                ex = new RuntimeException("Meet meta space oom while generating class.", error);
+                toThrow = error;
             }
-        } while ((System.currentTimeMillis() - time) < 60_000);
-        throw ex;
+        } while ((System.currentTimeMillis() - time) < 120_000);
+
+        // retry fail
+        throw toThrow;
     }
 
     private static class ClassKey {
