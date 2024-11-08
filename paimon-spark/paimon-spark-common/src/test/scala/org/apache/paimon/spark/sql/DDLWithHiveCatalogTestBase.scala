@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.hive.HiveMetastoreClient
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.table.FileStoreTable
 
@@ -248,6 +249,50 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
           spark.sql(s"USE default")
           spark.sql(s"DROP DATABASE paimon_db CASCADE")
       }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: sync partitions to HMS") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        val dbName = "default"
+        val tblName = "t"
+        spark.sql(s"USE $catalogName.$dbName")
+        withTable(tblName) {
+          spark.sql(s"""
+                       |CREATE TABLE $tblName (id INT, pt INT)
+                       |USING PAIMON
+                       |TBLPROPERTIES ('metastore.partitioned-table' = 'true')
+                       |PARTITIONED BY (pt)
+                       |""".stripMargin)
+
+          val metastoreClient = loadTable(dbName, tblName)
+            .catalogEnvironment()
+            .metastoreClientFactory()
+            .create()
+            .asInstanceOf[HiveMetastoreClient]
+            .client()
+
+          spark.sql(s"INSERT INTO $tblName VALUES (1, 1), (2, 2), (3, 3)")
+          // check partitions in paimon
+          checkAnswer(
+            spark.sql(s"show partitions $tblName"),
+            Seq(Row("pt=1"), Row("pt=2"), Row("pt=3")))
+          // check partitions in HMS
+          assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 3)
+
+          spark.sql(s"INSERT INTO $tblName VALUES (4, 3), (5, 4)")
+          checkAnswer(
+            spark.sql(s"show partitions $tblName"),
+            Seq(Row("pt=1"), Row("pt=2"), Row("pt=3"), Row("pt=4")))
+          assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 4)
+
+          spark.sql(s"ALTER TABLE $tblName DROP PARTITION (pt=1)")
+          checkAnswer(
+            spark.sql(s"show partitions $tblName"),
+            Seq(Row("pt=2"), Row("pt=3"), Row("pt=4")))
+          assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 3)
+        }
     }
   }
 

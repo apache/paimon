@@ -352,7 +352,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
           .column("ts", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE())
           .column("ts_ntz", DataTypes.TIMESTAMP())
           .build
-        catalog.createTable(identifier, schema, false)
+        paimonCatalog.createTable(identifier, schema, false)
         sql(
           s"INSERT INTO paimon_tbl VALUES (timestamp'2024-01-01 00:00:00', timestamp_ntz'2024-01-01 00:00:00')")
 
@@ -370,7 +370,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
         // Due to previous design, read timestamp ltz type with spark 3.3 and below will cause problems,
         // skip testing it
         if (gteqSpark3_4) {
-          val table = catalog.getTable(identifier)
+          val table = paimonCatalog.getTable(identifier)
           val builder = table.newReadBuilder.withProjection(Array[Int](0, 1))
           val splits = builder.newScan().plan().splits()
           builder.newRead
@@ -405,7 +405,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
           // Due to previous design, read timestamp ltz type with spark 3.3 and below will cause problems,
           // skip testing it
           if (gteqSpark3_4) {
-            val table = catalog.getTable(identifier)
+            val table = paimonCatalog.getTable(identifier)
             val builder = table.newReadBuilder.withProjection(Array[Int](0, 1))
             val splits = builder.newScan().plan().splits()
             builder.newRead
@@ -423,7 +423,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
         }
       }
     } finally {
-      catalog.dropTable(identifier, true)
+      paimonCatalog.dropTable(identifier, true)
     }
   }
 

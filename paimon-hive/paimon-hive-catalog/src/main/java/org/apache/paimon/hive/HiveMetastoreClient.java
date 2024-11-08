@@ -41,6 +41,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /** {@link MetastoreClient} for Hive tables. */
 public class HiveMetastoreClient implements MetastoreClient {
@@ -82,6 +83,14 @@ public class HiveMetastoreClient implements MetastoreClient {
     }
 
     @Override
+    public void addPartitions(List<BinaryRow> partitions) throws Exception {
+        addPartitionsSpec(
+                partitions.stream()
+                        .map(partitionComputer::generatePartValues)
+                        .collect(Collectors.toList()));
+    }
+
+    @Override
     public void addPartition(LinkedHashMap<String, String> partitionSpec) throws Exception {
         List<String> partitionValues = new ArrayList<>(partitionSpec.values());
         try {
@@ -94,23 +103,21 @@ public class HiveMetastoreClient implements MetastoreClient {
             // do nothing if the partition already exists
         } catch (NoSuchObjectException e) {
             // partition not found, create new partition
-            StorageDescriptor newSd = new StorageDescriptor(sd);
-            newSd.setLocation(
-                    sd.getLocation()
-                            + "/"
-                            + PartitionPathUtils.generatePartitionPath(partitionSpec));
-
-            Partition hivePartition = new Partition();
-            hivePartition.setDbName(identifier.getDatabaseName());
-            hivePartition.setTableName(identifier.getTableName());
-            hivePartition.setValues(partitionValues);
-            hivePartition.setSd(newSd);
-            int currentTime = (int) (System.currentTimeMillis() / 1000);
-            hivePartition.setCreateTime(currentTime);
-            hivePartition.setLastAccessTime(currentTime);
-
+            Partition hivePartition =
+                    toHivePartition(partitionSpec, (int) (System.currentTimeMillis() / 1000));
             clients.execute(client -> client.add_partition(hivePartition));
         }
+    }
+
+    @Override
+    public void addPartitionsSpec(List<LinkedHashMap<String, String>> partitionSpecsList)
+            throws Exception {
+        int currentTime = (int) (System.currentTimeMillis() / 1000);
+        List<Partition> hivePartitions =
+                partitionSpecsList.stream()
+                        .map(partitionSpec -> toHivePartition(partitionSpec, currentTime))
+                        .collect(Collectors.toList());
+        clients.execute(client -> client.add_partitions(hivePartitions, true, false));
     }
 
     @Override
@@ -177,6 +184,21 @@ public class HiveMetastoreClient implements MetastoreClient {
 
     public IMetaStoreClient client() throws TException, InterruptedException {
         return clients.run(client -> client);
+    }
+
+    private Partition toHivePartition(
+            LinkedHashMap<String, String> partitionSpec, int currentTime) {
+        Partition hivePartition = new Partition();
+        StorageDescriptor newSd = new StorageDescriptor(sd);
+        newSd.setLocation(
+                sd.getLocation() + "/" + PartitionPathUtils.generatePartitionPath(partitionSpec));
+        hivePartition.setDbName(identifier.getDatabaseName());
+        hivePartition.setTableName(identifier.getTableName());
+        hivePartition.setValues(new ArrayList<>(partitionSpec.values()));
+        hivePartition.setSd(newSd);
+        hivePartition.setCreateTime(currentTime);
+        hivePartition.setLastAccessTime(currentTime);
+        return hivePartition;
     }
 
     /** Factory to create {@link HiveMetastoreClient}. */
