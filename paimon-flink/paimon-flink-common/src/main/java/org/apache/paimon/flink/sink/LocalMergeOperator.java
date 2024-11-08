@@ -20,13 +20,17 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
-import org.apache.paimon.codegen.RecordComparator;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.mergetree.SortBufferWriteBuffer;
 import org.apache.paimon.mergetree.compact.MergeFunction;
+import org.apache.paimon.mergetree.localmerge.HashMapLocalMerger;
+import org.apache.paimon.mergetree.localmerge.LocalMerger;
+import org.apache.paimon.mergetree.localmerge.SortBufferLocalMerger;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
@@ -43,6 +47,7 @@ import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
 import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.Output;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
@@ -63,13 +68,10 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
     private final boolean ignoreDelete;
 
     private transient Projection keyProjection;
-    private transient RecordComparator keyComparator;
 
-    private transient long recordCount;
     private transient RowKindGenerator rowKindGenerator;
-    private transient MergeFunction<KeyValue> mergeFunction;
 
-    private transient SortBufferWriteBuffer buffer;
+    private transient LocalMerger merger;
     private transient long currentWatermark;
 
     private transient boolean endOfInput;
@@ -87,17 +89,14 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
     public void open() throws Exception {
         super.open();
 
-        RowType keyType = PrimaryKeyTableUtils.addKeyNamePrefix(schema.logicalPrimaryKeysType());
+        List<String> primaryKeys = schema.primaryKeys();
         RowType valueType = schema.logicalRowType();
         CoreOptions options = new CoreOptions(schema.options());
 
-        keyProjection =
-                CodeGenUtils.newProjection(valueType, schema.projection(schema.primaryKeys()));
-        keyComparator = new KeyComparatorSupplier(keyType).get();
+        keyProjection = CodeGenUtils.newProjection(valueType, schema.projection(primaryKeys));
 
-        recordCount = 0;
         rowKindGenerator = RowKindGenerator.create(schema, options);
-        mergeFunction =
+        MergeFunction<KeyValue> mergeFunction =
                 PrimaryKeyTableUtils.createMergeFunctionFactory(
                                 schema,
                                 new KeyValueFieldsExtractor() {
@@ -117,26 +116,51 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
                                 })
                         .create();
 
-        buffer =
-                new SortBufferWriteBuffer(
-                        keyType,
-                        valueType,
-                        UserDefinedSeqComparator.create(valueType, options),
-                        new HeapMemorySegmentPool(
-                                options.localMergeBufferSize(), options.pageSize()),
-                        false,
-                        MemorySize.MAX_VALUE,
-                        options.localSortMaxNumFileHandles(),
-                        options.spillCompressOptions(),
-                        null);
-        currentWatermark = Long.MIN_VALUE;
+        boolean canHashMerger = true;
+        for (DataField field : valueType.getFields()) {
+            if (primaryKeys.contains(field.name())) {
+                continue;
+            }
 
+            if (!BinaryRow.isInFixedLengthPart(field.type())) {
+                canHashMerger = false;
+                break;
+            }
+        }
+
+        HeapMemorySegmentPool pool =
+                new HeapMemorySegmentPool(options.localMergeBufferSize(), options.pageSize());
+        UserDefinedSeqComparator udsComparator =
+                UserDefinedSeqComparator.create(valueType, options);
+        if (canHashMerger) {
+            merger =
+                    new HashMapLocalMerger(
+                            valueType, primaryKeys, pool, mergeFunction, udsComparator);
+        } else {
+            RowType keyType =
+                    PrimaryKeyTableUtils.addKeyNamePrefix(schema.logicalPrimaryKeysType());
+            SortBufferWriteBuffer sortBuffer =
+                    new SortBufferWriteBuffer(
+                            keyType,
+                            valueType,
+                            udsComparator,
+                            pool,
+                            false,
+                            MemorySize.MAX_VALUE,
+                            options.localSortMaxNumFileHandles(),
+                            options.spillCompressOptions(),
+                            null);
+            merger =
+                    new SortBufferLocalMerger(
+                            sortBuffer, new KeyComparatorSupplier(keyType).get(), mergeFunction);
+        }
+
+        currentWatermark = Long.MIN_VALUE;
         endOfInput = false;
     }
 
     @Override
     public void processElement(StreamRecord<InternalRow> record) throws Exception {
-        recordCount++;
         InternalRow row = record.getValue();
 
         RowKind rowKind = RowKindGenerator.getRowKind(rowKindGenerator, row);
@@ -147,10 +171,10 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
         // row kind must be INSERT when it is divided into key and value
         row.setRowKind(RowKind.INSERT);
 
-        InternalRow key = keyProjection.apply(row);
-        if (!buffer.put(recordCount, rowKind, key, row)) {
+        BinaryRow key = keyProjection.apply(row);
+        if (!merger.put(rowKind, key, row)) {
             flushBuffer();
-            if (!buffer.put(recordCount, rowKind, key, row)) {
+            if (!merger.put(rowKind, key, row)) {
                 // change row kind back
                 row.setRowKind(rowKind);
                 output.collect(record);
@@ -180,33 +204,35 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
 
     @Override
     public void close() throws Exception {
-        if (buffer != null) {
-            buffer.clear();
+        if (merger != null) {
+            merger.clear();
         }
 
         super.close();
     }
 
     private void flushBuffer() throws Exception {
-        if (buffer.size() == 0) {
+        if (merger.size() == 0) {
             return;
         }
 
-        buffer.forEach(
-                keyComparator,
-                mergeFunction,
-                null,
-                kv -> {
-                    InternalRow row = kv.value();
-                    row.setRowKind(kv.valueKind());
-                    output.collect(new StreamRecord<>(row));
-                });
-        buffer.clear();
+        merger.forEach(row -> output.collect(new StreamRecord<>(row)));
+        merger.clear();
 
         if (currentWatermark != Long.MIN_VALUE) {
             super.processWatermark(new Watermark(currentWatermark));
             // each watermark should only be emitted once
             currentWatermark = Long.MIN_VALUE;
         }
+    }
+
+    @VisibleForTesting
+    LocalMerger merger() {
+        return merger;
+    }
+
+    @VisibleForTesting
+    void setOutput(Output<StreamRecord<InternalRow>> output) {
+        this.output = output;
     }
 }
