@@ -541,7 +541,7 @@ public abstract class CatalogTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 Catalog.ColumnNotExistException.class,
-                                "Column [non_existing_col] does not exist in the test_db.test_table table."));
+                                "Column non_existing_col does not exist in the test_db.test_table table."));
     }
 
     @Test
@@ -647,7 +647,7 @@ public abstract class CatalogTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 Catalog.ColumnNotExistException.class,
-                                "Column [non_existing_col] does not exist in the test_db.test_table table."));
+                                "Column non_existing_col does not exist in the test_db.test_table table."));
         // Alter table update a column type throws Exception when column is partition columns
         assertThatThrownBy(
                         () ->
@@ -718,7 +718,7 @@ public abstract class CatalogTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 Catalog.ColumnNotExistException.class,
-                                "Column [non_existing_col] does not exist in the test_db.test_table table."));
+                                "Column non_existing_col does not exist in the test_db.test_table table."));
     }
 
     @Test
@@ -774,7 +774,7 @@ public abstract class CatalogTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 Catalog.ColumnNotExistException.class,
-                                "Column [non_existing_col] does not exist in the test_db.test_table table."));
+                                "Column non_existing_col does not exist in the test_db.test_table table."));
 
         // Alter table update a column nullability throws Exception when column is pk columns
         assertThatThrownBy(

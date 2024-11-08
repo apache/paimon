@@ -371,10 +371,9 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
             }
         } else if (change instanceof TableChange.AddColumn) {
             TableChange.AddColumn add = (TableChange.AddColumn) change;
-            validateAlterNestedField(add.fieldNames());
             SchemaChange.Move move = getMove(add.position(), add.fieldNames());
             return SchemaChange.addColumn(
-                    add.fieldNames()[0],
+                    Arrays.asList(add.fieldNames()),
                     toPaimonType(add.dataType()).copy(add.isNullable()),
                     add.comment(),
                     move);
@@ -384,8 +383,7 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
             return SchemaChange.renameColumn(rename.fieldNames()[0], rename.newName());
         } else if (change instanceof TableChange.DeleteColumn) {
             TableChange.DeleteColumn delete = (TableChange.DeleteColumn) change;
-            validateAlterNestedField(delete.fieldNames());
-            return SchemaChange.dropColumn(delete.fieldNames()[0]);
+            return SchemaChange.dropColumn(Arrays.asList(delete.fieldNames()));
         } else if (change instanceof TableChange.UpdateColumnType) {
             TableChange.UpdateColumnType update = (TableChange.UpdateColumnType) change;
             validateAlterNestedField(update.fieldNames());

@@ -40,7 +40,6 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
-import org.apache.paimon.types.DataTypeVisitor;
 import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
@@ -282,44 +281,52 @@ public class SchemaManager implements Serializable {
                 } else if (change instanceof AddColumn) {
                     AddColumn addColumn = (AddColumn) change;
                     SchemaChange.Move move = addColumn.move();
-                    if (newFields.stream().anyMatch(f -> f.name().equals(addColumn.fieldName()))) {
-                        throw new Catalog.ColumnAlreadyExistException(
-                                identifierFromPath(tableRoot.toString(), true, branch),
-                                addColumn.fieldName());
-                    }
                     Preconditions.checkArgument(
                             addColumn.dataType().isNullable(),
                             "Column %s cannot specify NOT NULL in the %s table.",
-                            addColumn.fieldName(),
+                            String.join(".", addColumn.fieldNames()),
                             identifierFromPath(tableRoot.toString(), true, branch).getFullName());
                     int id = highestFieldId.incrementAndGet();
                     DataType dataType =
                             ReassignFieldId.reassign(addColumn.dataType(), highestFieldId);
 
-                    DataField dataField =
-                            new DataField(
-                                    id, addColumn.fieldName(), dataType, addColumn.description());
+                    new NestedColumnModifier<Catalog.ColumnAlreadyExistException>(
+                            addColumn.fieldNames().toArray(new String[0])) {
+                        @Override
+                        protected void updateLastColumn(List<DataField> newFields, String fieldName)
+                                throws Catalog.ColumnAlreadyExistException {
+                            for (DataField field : newFields) {
+                                if (field.name().equals(fieldName)) {
+                                    throw new Catalog.ColumnAlreadyExistException(
+                                            identifierFromPath(tableRoot.toString(), true, branch),
+                                            String.join(".", addColumn.fieldNames()));
+                                }
+                            }
 
-                    // key: name ; value : index
-                    Map<String, Integer> map = new HashMap<>();
-                    for (int i = 0; i < newFields.size(); i++) {
-                        map.put(newFields.get(i).name(), i);
-                    }
+                            DataField dataField =
+                                    new DataField(id, fieldName, dataType, addColumn.description());
 
-                    if (null != move) {
-                        if (move.type().equals(SchemaChange.Move.MoveType.FIRST)) {
-                            newFields.add(0, dataField);
-                        } else if (move.type().equals(SchemaChange.Move.MoveType.AFTER)) {
-                            int fieldIndex = map.get(move.referenceFieldName());
-                            newFields.add(fieldIndex + 1, dataField);
+                            // key: name ; value : index
+                            Map<String, Integer> map = new HashMap<>();
+                            for (int i = 0; i < newFields.size(); i++) {
+                                map.put(newFields.get(i).name(), i);
+                            }
+
+                            if (null != move) {
+                                if (move.type().equals(SchemaChange.Move.MoveType.FIRST)) {
+                                    newFields.add(0, dataField);
+                                } else if (move.type().equals(SchemaChange.Move.MoveType.AFTER)) {
+                                    int fieldIndex = map.get(move.referenceFieldName());
+                                    newFields.add(fieldIndex + 1, dataField);
+                                }
+                            } else {
+                                newFields.add(dataField);
+                            }
                         }
-                    } else {
-                        newFields.add(dataField);
-                    }
-
+                    }.updateIntermediateColumn(newFields, 0);
                 } else if (change instanceof RenameColumn) {
                     RenameColumn rename = (RenameColumn) change;
-                    columnChangeValidation(oldTableSchema, change);
+                    renameColumnValidation(oldTableSchema, rename);
                     if (newFields.stream().anyMatch(f -> f.name().equals(rename.newName()))) {
                         throw new Catalog.ColumnAlreadyExistException(
                                 identifierFromPath(tableRoot.toString(), true, branch),
@@ -329,7 +336,6 @@ public class SchemaManager implements Serializable {
                     updateNestedColumn(
                             newFields,
                             new String[] {rename.fieldName()},
-                            0,
                             (field) ->
                                     new DataField(
                                             field.id(),
@@ -338,16 +344,23 @@ public class SchemaManager implements Serializable {
                                             field.description()));
                 } else if (change instanceof DropColumn) {
                     DropColumn drop = (DropColumn) change;
-                    columnChangeValidation(oldTableSchema, change);
-                    if (!newFields.removeIf(
-                            f -> f.name().equals(((DropColumn) change).fieldName()))) {
-                        throw new Catalog.ColumnNotExistException(
-                                identifierFromPath(tableRoot.toString(), true, branch),
-                                drop.fieldName());
-                    }
-                    if (newFields.isEmpty()) {
-                        throw new IllegalArgumentException("Cannot drop all fields in table");
-                    }
+                    dropColumnValidation(oldTableSchema, drop);
+                    new NestedColumnModifier<Catalog.ColumnNotExistException>(
+                            drop.fieldNames().toArray(new String[0])) {
+                        @Override
+                        protected void updateLastColumn(List<DataField> newFields, String fieldName)
+                                throws Catalog.ColumnNotExistException {
+                            if (!newFields.removeIf(f -> f.name().equals(fieldName))) {
+                                throw new Catalog.ColumnNotExistException(
+                                        identifierFromPath(tableRoot.toString(), true, branch),
+                                        String.join(".", drop.fieldNames()));
+                            }
+                            if (newFields.isEmpty()) {
+                                throw new IllegalArgumentException(
+                                        "Cannot drop all fields in table");
+                            }
+                        }
+                    }.updateIntermediateColumn(newFields, 0);
                 } else if (change instanceof UpdateColumnType) {
                     UpdateColumnType update = (UpdateColumnType) change;
                     if (oldTableSchema.partitionKeys().contains(update.fieldName())) {
@@ -356,9 +369,9 @@ public class SchemaManager implements Serializable {
                                         "Cannot update partition column [%s] type in the table[%s].",
                                         update.fieldName(), tableRoot.getName()));
                     }
-                    updateColumn(
+                    updateNestedColumn(
                             newFields,
-                            update.fieldName(),
+                            new String[] {update.fieldName()},
                             (field) -> {
                                 DataType targetType = update.newDataType();
                                 if (update.keepNullability()) {
@@ -392,7 +405,6 @@ public class SchemaManager implements Serializable {
                     updateNestedColumn(
                             newFields,
                             update.fieldNames(),
-                            0,
                             (field) ->
                                     new DataField(
                                             field.id(),
@@ -404,7 +416,6 @@ public class SchemaManager implements Serializable {
                     updateNestedColumn(
                             newFields,
                             update.fieldNames(),
-                            0,
                             (field) ->
                                     new DataField(
                                             field.id(),
@@ -569,74 +580,96 @@ public class SchemaManager implements Serializable {
                 .collect(Collectors.toList());
     }
 
-    private static void columnChangeValidation(TableSchema schema, SchemaChange change) {
-        /// TODO support partition and primary keys schema evolution
-        if (change instanceof DropColumn) {
-            String columnToDrop = ((DropColumn) change).fieldName();
-            if (schema.partitionKeys().contains(columnToDrop)
-                    || schema.primaryKeys().contains(columnToDrop)) {
-                throw new UnsupportedOperationException(
-                        String.format(
-                                "Cannot drop partition key or primary key: [%s]", columnToDrop));
-            }
-        } else if (change instanceof RenameColumn) {
-            String columnToRename = ((RenameColumn) change).fieldName();
-            if (schema.partitionKeys().contains(columnToRename)) {
-                throw new UnsupportedOperationException(
-                        String.format("Cannot rename partition column: [%s]", columnToRename));
-            }
-        } else {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Validation for %s is not supported",
-                            change.getClass().getSimpleName()));
+    private static void dropColumnValidation(TableSchema schema, DropColumn change) {
+        // primary keys and partition keys can't be nested columns
+        if (change.fieldNames().size() > 1) {
+            return;
+        }
+        String columnToDrop = change.fieldNames().get(0);
+        if (schema.partitionKeys().contains(columnToDrop)
+                || schema.primaryKeys().contains(columnToDrop)) {
+            throw new UnsupportedOperationException(
+                    String.format("Cannot drop partition key or primary key: [%s]", columnToDrop));
         }
     }
 
-    /** This method is hacky, newFields may be immutable. We should use {@link DataTypeVisitor}. */
+    private static void renameColumnValidation(TableSchema schema, RenameColumn change) {
+        String columnToRename = change.fieldName();
+        if (schema.partitionKeys().contains(columnToRename)) {
+            throw new UnsupportedOperationException(
+                    String.format("Cannot rename partition column: [%s]", columnToRename));
+        }
+    }
+
+    private abstract class NestedColumnModifier<E extends Exception> {
+
+        private final String[] updateFieldNames;
+
+        private NestedColumnModifier(String[] updateFieldNames) {
+            this.updateFieldNames = updateFieldNames;
+        }
+
+        public void updateIntermediateColumn(List<DataField> newFields, int depth)
+                throws Catalog.ColumnNotExistException, E {
+            if (depth == updateFieldNames.length - 1) {
+                updateLastColumn(newFields, updateFieldNames[depth]);
+                return;
+            }
+
+            for (int i = 0; i < newFields.size(); i++) {
+                DataField field = newFields.get(i);
+                if (!field.name().equals(updateFieldNames[depth])) {
+                    continue;
+                }
+
+                List<DataField> nestedFields =
+                        new ArrayList<>(
+                                ((org.apache.paimon.types.RowType) field.type()).getFields());
+                updateIntermediateColumn(nestedFields, depth + 1);
+                newFields.set(
+                        i,
+                        new DataField(
+                                field.id(),
+                                field.name(),
+                                new org.apache.paimon.types.RowType(
+                                        field.type().isNullable(), nestedFields),
+                                field.description()));
+                return;
+            }
+
+            throw new Catalog.ColumnNotExistException(
+                    identifierFromPath(tableRoot.toString(), true, branch),
+                    String.join(".", Arrays.asList(updateFieldNames).subList(0, depth + 1)));
+        }
+
+        protected abstract void updateLastColumn(List<DataField> newFields, String fieldName)
+                throws E;
+    }
+
     private void updateNestedColumn(
             List<DataField> newFields,
             String[] updateFieldNames,
-            int index,
             Function<DataField, DataField> updateFunc)
             throws Catalog.ColumnNotExistException {
-        boolean found = false;
-        for (int i = 0; i < newFields.size(); i++) {
-            DataField field = newFields.get(i);
-            if (field.name().equals(updateFieldNames[index])) {
-                found = true;
-                if (index == updateFieldNames.length - 1) {
-                    newFields.set(i, updateFunc.apply(field));
-                    break;
-                } else {
-                    List<DataField> nestedFields =
-                            new ArrayList<>(
-                                    ((org.apache.paimon.types.RowType) field.type()).getFields());
-                    updateNestedColumn(nestedFields, updateFieldNames, index + 1, updateFunc);
-                    newFields.set(
-                            i,
-                            new DataField(
-                                    field.id(),
-                                    field.name(),
-                                    new org.apache.paimon.types.RowType(
-                                            field.type().isNullable(), nestedFields),
-                                    field.description()));
-                }
-            }
-        }
-        if (!found) {
-            throw new Catalog.ColumnNotExistException(
-                    identifierFromPath(tableRoot.toString(), true, branch),
-                    Arrays.toString(updateFieldNames));
-        }
-    }
+        new NestedColumnModifier<Catalog.ColumnNotExistException>(updateFieldNames) {
+            @Override
+            protected void updateLastColumn(List<DataField> newFields, String fieldName)
+                    throws Catalog.ColumnNotExistException {
+                for (int i = 0; i < newFields.size(); i++) {
+                    DataField field = newFields.get(i);
+                    if (!field.name().equals(fieldName)) {
+                        continue;
+                    }
 
-    private void updateColumn(
-            List<DataField> newFields,
-            String updateFieldName,
-            Function<DataField, DataField> updateFunc)
-            throws Catalog.ColumnNotExistException {
-        updateNestedColumn(newFields, new String[] {updateFieldName}, 0, updateFunc);
+                    newFields.set(i, updateFunc.apply(field));
+                    return;
+                }
+
+                throw new Catalog.ColumnNotExistException(
+                        identifierFromPath(tableRoot.toString(), true, branch),
+                        String.join(".", updateFieldNames));
+            }
+        }.updateIntermediateColumn(newFields, 0);
     }
 
     @VisibleForTesting

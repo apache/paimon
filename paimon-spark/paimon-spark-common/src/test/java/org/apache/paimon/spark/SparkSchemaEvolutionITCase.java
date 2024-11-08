@@ -23,6 +23,8 @@ import org.apache.spark.sql.AnalysisException;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.HashMap;
 import java.util.List;
@@ -704,5 +706,86 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                                         },
                                         ","))
                 .collect(Collectors.toList());
+    }
+
+    @ParameterizedTest()
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testAddAndDropNestedColumn(String formatType) {
+        String tableName = "testAddNestedColumnTable";
+        spark.sql(
+                "CREATE TABLE paimon.default."
+                        + tableName
+                        + " (k INT NOT NULL, v STRUCT<f1: INT, f2: STRUCT<f1: STRING, f2: INT>>) "
+                        + "TBLPROPERTIES ('bucket' = '1', 'primary-key' = 'k', 'file.format' = '"
+                        + formatType
+                        + "')");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, STRUCT(10, STRUCT('apple', 100))), (2, STRUCT(20, STRUCT('banana', 200)))");
+        assertThat(
+                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
+                                .stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder("[1,[10,[apple,100]]]", "[2,[20,[banana,200]]]");
+        assertThat(
+                        spark.sql("SELECT v.f2.f1, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder("[apple,1]", "[banana,2]");
+
+        spark.sql("ALTER TABLE paimon.default." + tableName + " ADD COLUMN v.f3 STRING");
+        spark.sql("ALTER TABLE paimon.default." + tableName + " ADD COLUMN v.f2.f3 BIGINT");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, STRUCT(11, STRUCT('APPLE', 101, 1001), 'one')), (3, STRUCT(31, STRUCT('CHERRY', 301, 3001), 'three'))");
+        assertThat(
+                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
+                                .stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder(
+                        "[1,[11,[APPLE,101,1001],one]]",
+                        "[2,[20,[banana,200,null],null]]",
+                        "[3,[31,[CHERRY,301,3001],three]]");
+        assertThat(
+                        spark.sql("SELECT v.f2.f2, v.f3, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder("[101,one,1]", "[200,null,2]", "[301,three,3]");
+
+        spark.sql("ALTER TABLE paimon.default." + tableName + " DROP COLUMN v.f2.f1");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, STRUCT(12, STRUCT(102, 1002), 'one')), (4, STRUCT(42, STRUCT(402, 4002), 'four'))");
+        assertThat(
+                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
+                                .stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder(
+                        "[1,[12,[102,1002],one]]",
+                        "[2,[20,[200,null],null]]",
+                        "[3,[31,[301,3001],three]]",
+                        "[4,[42,[402,4002],four]]");
+
+        spark.sql(
+                "ALTER TABLE paimon.default."
+                        + tableName
+                        + " ADD COLUMN v.f2.f1 DECIMAL(5, 2) AFTER f2");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, STRUCT(13, STRUCT(103, 100.03, 1003), 'one')), (5, STRUCT(53, STRUCT(503, 500.03, 5003), 'five'))");
+        assertThat(
+                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
+                                .stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder(
+                        "[1,[13,[103,100.03,1003],one]]",
+                        "[2,[20,[200,null,null],null]]",
+                        "[3,[31,[301,null,3001],three]]",
+                        "[4,[42,[402,null,4002],four]]",
+                        "[5,[53,[503,500.03,5003],five]]");
     }
 }
