@@ -119,6 +119,32 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                 });
     }
 
+    @Test
+    public void testReadWriteTableWithBitSliceIndex() throws Catalog.TableNotExistException {
+
+        spark.sql(
+                "CREATE TABLE T(a int) TBLPROPERTIES ("
+                        + "'file-index.bsi.columns'='a',"
+                        + "'file-index.in-manifest-threshold'='1B');");
+        spark.sql("INSERT INTO T VALUES (0),(1),(2),(3),(4),(5);");
+
+        // check query result
+        List<Row> rows = spark.sql("SELECT a FROM T where a>=3;").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[3], [4], [5]]");
+
+        // check index reader
+        foreachIndexReader(
+                fileIndexReader -> {
+                    FileIndexResult fileIndexResult =
+                            fileIndexReader.visitGreaterOrEqual(
+                                    new FieldRef(0, "", new IntType()), 3);
+                    assertThat(fileIndexResult).isInstanceOf(BitmapIndexResultLazy.class);
+                    RoaringBitmap32 roaringBitmap32 =
+                            ((BitmapIndexResultLazy) fileIndexResult).get();
+                    assertThat(roaringBitmap32).isEqualTo(RoaringBitmap32.bitmapOf(3, 4, 5));
+                });
+    }
+
     protected void foreachIndexReader(Consumer<FileIndexReader> consumer)
             throws Catalog.TableNotExistException {
         Path tableRoot = fileSystemCatalog.getTableLocation(Identifier.create("db", "T"));
@@ -128,7 +154,7 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                         tableRoot,
                         RowType.of(),
                         new CoreOptions(new Options()).partitionDefaultName(),
-                        CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                        CoreOptions.FILE_FORMAT.defaultValue(),
                         CoreOptions.DATA_FILE_PREFIX.defaultValue(),
                         CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
                         CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
@@ -154,12 +180,11 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                                 .collect(Collectors.toList());
                 // assert index file exist and only one index file
                 assert indexFiles.size() == 1;
-                try {
-                    FileIndexFormat.Reader reader =
-                            FileIndexFormat.createReader(
-                                    fileIO.newInputStream(
-                                            dataFilePathFactory.toPath(indexFiles.get(0))),
-                                    tableSchema.logicalRowType());
+                try (FileIndexFormat.Reader reader =
+                        FileIndexFormat.createReader(
+                                fileIO.newInputStream(
+                                        dataFilePathFactory.toPath(indexFiles.get(0))),
+                                tableSchema.logicalRowType())) {
                     Optional<FileIndexReader> fileIndexReader =
                             reader.readColumnIndex("a").stream().findFirst();
                     // assert index reader exist
