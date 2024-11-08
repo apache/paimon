@@ -24,7 +24,6 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.Preconditions;
@@ -86,14 +85,6 @@ public class HmsReporter implements Closeable {
                 for (DataFileMeta fileMeta : fileMetas) {
                     totalSize += fileMeta.fileSize();
                 }
-
-                if (split.deletionFiles().isPresent()) {
-                    fileCount += split.deletionFiles().get().size();
-                    totalSize +=
-                            split.deletionFiles().get().stream()
-                                    .map(DeletionFile::length)
-                                    .reduce(0L, Long::sum);
-                }
             }
             Map<String, String> statistic = new HashMap<>();
             statistic.put(NUM_FILES_PROP, String.valueOf(fileCount));
@@ -101,7 +92,7 @@ public class HmsReporter implements Closeable {
             statistic.put(NUM_ROWS_PROP, String.valueOf(rowCount));
             statistic.put(HIVE_LAST_UPDATE_TIME_PROP, String.valueOf(modifyTime / 1000));
 
-            LOG.info("alter partition {} with statistic {}.", partition, statistic);
+            LOG.info("alter partition {} with statistic {}.", partitionSpec, statistic);
             metastoreClient.alterPartition(partitionSpec, statistic, modifyTime);
         }
     }
