@@ -241,8 +241,7 @@ public class SchemaManager implements Serializable {
 
     /** Update {@link SchemaChange}s. */
     public TableSchema commitChanges(List<SchemaChange> changes)
-            throws Catalog.TableNotExistException,
-                    Catalog.ColumnAlreadyExistException,
+            throws Catalog.TableNotExistException, Catalog.ColumnAlreadyExistException,
                     Catalog.ColumnNotExistException {
         SnapshotManager snapshotManager = new SnapshotManager(fileIO, tableRoot, branch);
         boolean hasSnapshots = (snapshotManager.latestSnapshotId() != null);
