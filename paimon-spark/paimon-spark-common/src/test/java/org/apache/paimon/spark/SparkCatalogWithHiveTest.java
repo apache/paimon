@@ -95,6 +95,9 @@ public class SparkCatalogWithHiveTest {
                                 .count())
                 .isGreaterThan(0);
 
+        // todo: There are some bugs with Spark CSV table's options. In Spark 3.x, both reading and
+        // writing using the default delimiter value ',' even if we set specific it. In Spark 4.x,
+        // reading is correct, but writing is still incorrect, just skip it for now.
         // test csv table
 
         spark.sql(
