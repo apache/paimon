@@ -440,6 +440,33 @@ public class SparkReadITCase extends SparkReadTestBase {
         innerTest("MyTable6", false, true);
     }
 
+    @Test
+    public void testReadNestedColumnTable() {
+        String tableName = "testAddNestedColumnTable";
+        spark.sql(
+                "CREATE TABLE paimon.default."
+                        + tableName
+                        + " (k INT NOT NULL, v STRUCT<f1: INT, f2: STRUCT<f1: STRING, f2: INT>>) "
+                        + "TBLPROPERTIES ('bucket' = '1', 'primary-key' = 'k', 'file.format' = 'parquet')");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, STRUCT(10, STRUCT('apple', 100)))");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (2, STRUCT(20, STRUCT('banana', 200)))");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, STRUCT(30, STRUCT('cat', 100)))");
+        assertThat(
+                        spark.sql("SELECT v.f2.f1, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder("[cat,1]", "[banana,2]");
+    }
+
     private void innerTest(String tableName, boolean hasPk, boolean partitioned) {
         String ddlTemplate =
                 "CREATE TABLE default.%s (\n"
