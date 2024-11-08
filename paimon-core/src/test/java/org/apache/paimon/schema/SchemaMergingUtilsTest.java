@@ -44,6 +44,7 @@ import org.apache.paimon.types.VarCharType;
 import org.assertj.core.util.Lists;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -90,6 +91,27 @@ public class SchemaMergingUtilsTest {
         List<DataField> fields = merged.fields();
         assertThat(fields.size()).isEqualTo(5);
         assertThat(fields.get(4).type() instanceof RowType).isTrue();
+    }
+
+    @Test
+    public void testMergeTableSchemaNotChanges() {
+        // Init the table schema
+        DataField a = new DataField(0, "a", new IntType());
+        DataField b = new DataField(1, "b", new DoubleType());
+        TableSchema current =
+                new TableSchema(
+                        0,
+                        Lists.newArrayList(a, b),
+                        3,
+                        new ArrayList<>(),
+                        Lists.newArrayList("a"),
+                        new HashMap<>(),
+                        "");
+
+        // fake the RowType of data with different field sequences
+        RowType t = new RowType(Lists.newArrayList(b, a));
+        TableSchema merged = SchemaMergingUtils.mergeSchemas(current, t, false);
+        assertThat(merged.id()).isEqualTo(0);
     }
 
     @Test
