@@ -241,7 +241,8 @@ public class SchemaManager implements Serializable {
 
     /** Update {@link SchemaChange}s. */
     public TableSchema commitChanges(List<SchemaChange> changes)
-            throws Catalog.TableNotExistException, Catalog.ColumnAlreadyExistException,
+            throws Catalog.TableNotExistException,
+                    Catalog.ColumnAlreadyExistException,
                     Catalog.ColumnNotExistException {
         SnapshotManager snapshotManager = new SnapshotManager(fileIO, tableRoot, branch);
         boolean hasSnapshots = (snapshotManager.latestSnapshotId() != null);
@@ -284,7 +285,7 @@ public class SchemaManager implements Serializable {
                     Preconditions.checkArgument(
                             addColumn.dataType().isNullable(),
                             "Column %s cannot specify NOT NULL in the %s table.",
-                            addColumn.fieldNames(),
+                            String.join(".", addColumn.fieldNames()),
                             identifierFromPath(tableRoot.toString(), true, branch).getFullName());
                     int id = highestFieldId.incrementAndGet();
                     DataType dataType =
