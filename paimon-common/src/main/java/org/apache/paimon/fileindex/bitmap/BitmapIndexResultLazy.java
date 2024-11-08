@@ -38,13 +38,9 @@ public class BitmapIndexResultLazy extends LazyField<RoaringBitmap32> implements
     public FileIndexResult and(FileIndexResult fileIndexResult) {
         if (fileIndexResult instanceof BitmapIndexResultLazy) {
             return new BitmapIndexResultLazy(
-                    () -> {
-                        if (!remain()) {
-                            return get();
-                        }
-                        return RoaringBitmap32.and(
-                                get(), ((BitmapIndexResultLazy) fileIndexResult).get());
-                    });
+                    () ->
+                            RoaringBitmap32.and(
+                                    get(), ((BitmapIndexResultLazy) fileIndexResult).get()));
         }
         return FileIndexResult.super.and(fileIndexResult);
     }
