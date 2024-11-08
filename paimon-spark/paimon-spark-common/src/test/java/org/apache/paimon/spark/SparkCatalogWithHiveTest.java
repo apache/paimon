@@ -98,10 +98,10 @@ public class SparkCatalogWithHiveTest {
         // test csv table
 
         spark.sql(
-                "CREATE TABLE IF NOT EXISTS table_csv (a INT, bb INT, c STRING) USING csv OPTIONS ('field-delimiter' ';')");
+                "CREATE TABLE IF NOT EXISTS table_csv (a INT, bb INT, c STRING) USING csv OPTIONS ('field-delimiter' ',')");
         spark.sql("INSERT INTO table_csv VALUES (1, 1, '1'), (2, 2, '2')").collect();
         assertThat(spark.sql("DESCRIBE FORMATTED table_csv").collectAsList().toString())
-                .contains("sep=;");
+                .contains("sep=,");
         assertThat(
                         spark.sql("SELECT * FROM table_csv").collectAsList().stream()
                                 .map(Row::toString)
