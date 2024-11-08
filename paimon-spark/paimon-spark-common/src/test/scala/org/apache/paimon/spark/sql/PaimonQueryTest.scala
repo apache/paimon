@@ -280,55 +280,56 @@ class PaimonQueryTest extends PaimonSparkTestBase {
                          |""".stripMargin)
 
                   // Since Spark 4.0, when `spark.sql.ansi.enabled` is `true` and `array[i]` does not exist, an exception
-              // will be thrown instead of returning null. Here, just disabled it and return null for test.
-              withSQLConf("spark.sql.ansi.enabled" -> "false") {
-                checkAnswer(
-                  sql(s"""
-                         |SELECT
-                         |  course.grade, name, teacher.address, course.course_name,
-                         |  m['k1'].d, m['k1'].s,
-                         |  l[1].d, l[1].s,
-                         |  s.s2['k2'].a[0].i,
-                         |  map_keys(m2).i
-                         |FROM students ORDER BY name
-                         |""".stripMargin),
-                  Seq(
-                    Row(
-                      85.0,
-                      "Alice",
-                      Row("Street 1", "City 1"),
-                      "Math",
-                      1.0,
-                      "s1",
-                      11.0,
-                      "s11",
-                      null,
-                      Seq(1, 1)),
-                    Row(
-                      92.0,
-                      "Bob",
-                      Row("Street 2", "City 2"),
-                      "Biology",
-                      null,
-                      null,
-                      22.0,
-                      "s22",
-                      22,
-                      Seq(2)),
-                    Row(
-                      95.0,
-                      "Cathy",
-                      Row("Street 3", "City 3"),
-                      "History",
-                      3.0,
-                      "s3",
-                      null,
-                      null,
-                      33,
-                      Seq(3, 3))
-                  )
-                )
-              }
+                  // will be thrown instead of returning null. Here, just disabled it and return null for test.
+                  withSQLConf("spark.sql.ansi.enabled" -> "false") {
+                    checkAnswer(
+                      sql(s"""
+                             |SELECT
+                             |  course.grade, name, teacher.address, course.course_name,
+                             |  m['k1'].d, m['k1'].s,
+                             |  l[1].d, l[1].s,
+                             |  s.s2['k2'].a[0].i,
+                             |  map_keys(m2).i
+                             |FROM students ORDER BY name
+                             |""".stripMargin),
+                      Seq(
+                        Row(
+                          85.0,
+                          "Alice",
+                          Row("Street 1", "City 1"),
+                          "Math",
+                          1.0,
+                          "s1",
+                          11.0,
+                          "s11",
+                          null,
+                          Seq(1, 1)),
+                        Row(
+                          92.0,
+                          "Bob",
+                          Row("Street 2", "City 2"),
+                          "Biology",
+                          null,
+                          null,
+                          22.0,
+                          "s22",
+                          22,
+                          Seq(2)),
+                        Row(
+                          95.0,
+                          "Cathy",
+                          Row("Street 3", "City 3"),
+                          "History",
+                          3.0,
+                          "s3",
+                          null,
+                          null,
+                          33,
+                          Seq(3, 3))
+                      )
+                    )
+                  }
+                }
             }
         }
     }
