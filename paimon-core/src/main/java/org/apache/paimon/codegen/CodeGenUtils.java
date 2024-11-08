@@ -107,14 +107,7 @@ public class CodeGenUtils {
 
         try {
             Pair<Class<?>, Object[]> result =
-                    COMPILED_CLASS_CACHE.get(
-                            classKey,
-                            () -> {
-                                GeneratedClass<T> generatedClass = supplier.get();
-                                return Pair.of(
-                                        generatedClass.compile(CodeGenUtils.class.getClassLoader()),
-                                        generatedClass.getReferences());
-                            });
+                    COMPILED_CLASS_CACHE.get(classKey, () -> generateClass(supplier));
 
             //noinspection unchecked
             return (T) GeneratedClass.newInstance(result.getLeft(), result.getRight());
@@ -122,6 +115,32 @@ public class CodeGenUtils {
             throw new RuntimeException(
                     "Could not instantiate generated class '" + classType + "'", e);
         }
+    }
+
+    private static <T> Pair<Class<?>, Object[]> generateClass(
+            Supplier<GeneratedClass<T>> supplier) {
+        long time = System.currentTimeMillis();
+        RuntimeException ex;
+
+        do {
+            try {
+                GeneratedClass<T> generatedClass = supplier.get();
+                return Pair.of(
+                        generatedClass.compile(CodeGenUtils.class.getClassLoader()),
+                        generatedClass.getReferences());
+            } catch (OutOfMemoryError error) {
+                // try to gc meta space
+                System.gc();
+                try {
+                    Thread.sleep(5_000);
+                } catch (InterruptedException e) {
+                    Thread.interrupted();
+                    throw new RuntimeException("Sleep interrupted", error);
+                }
+                ex = new RuntimeException("Meet meta space oom while generating class.", error);
+            }
+        } while ((System.currentTimeMillis() - time) < 60_000);
+        throw ex;
     }
 
     private static class ClassKey {
