@@ -23,21 +23,25 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
 
+import javax.annotation.Nullable;
+
 /** the context for creating RecordReader {@link RecordReader}. */
 public class FormatReaderContext implements FormatReaderFactory.Context {
 
     private final FileIO fileIO;
     private final Path file;
     private final long fileSize;
-    private FileIndexResult fileIndexResult;
+    @Nullable private final FileIndexResult fileIndexResult;
 
     public FormatReaderContext(FileIO fileIO, Path file, long fileSize) {
+        this(fileIO, file, fileSize, null);
+    }
+
+    public FormatReaderContext(
+            FileIO fileIO, Path file, long fileSize, @Nullable FileIndexResult fileIndexResult) {
         this.fileIO = fileIO;
         this.file = file;
         this.fileSize = fileSize;
-    }
-
-    public void setFileIndexResult(FileIndexResult fileIndexResult) {
         this.fileIndexResult = fileIndexResult;
     }
 
