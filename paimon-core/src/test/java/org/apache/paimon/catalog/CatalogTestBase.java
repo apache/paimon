@@ -37,6 +37,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -46,6 +47,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -109,6 +111,18 @@ public abstract class CatalogTestBase {
 
         List<String> databases = catalog.listDatabases();
         assertThat(databases).contains("db1", "db2", "db3");
+    }
+
+    @Test
+    public void testDuplicatedDatabaseAfterCreatingTable() throws Exception {
+        catalog.createDatabase("test_db", false);
+        Identifier identifier = Identifier.create("test_db", "new_table");
+        Schema schema = Schema.newBuilder().column("pk1", DataTypes.INT()).build();
+        catalog.createTable(identifier, schema, false);
+
+        List<String> databases = catalog.listDatabases();
+        List<String> distinctDatabases = databases.stream().distinct().collect(Collectors.toList());
+        Assertions.assertEquals(distinctDatabases.size(), databases.size());
     }
 
     @Test

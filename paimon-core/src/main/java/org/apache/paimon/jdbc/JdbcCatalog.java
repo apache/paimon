@@ -52,6 +52,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.jdbc.JdbcCatalogLock.acquireTimeout;
 import static org.apache.paimon.jdbc.JdbcCatalogLock.checkMaxSleep;
@@ -156,7 +157,7 @@ public class JdbcCatalog extends AbstractCatalog {
                         row -> row.getString(JdbcUtils.DATABASE_NAME),
                         JdbcUtils.LIST_ALL_PROPERTY_DATABASES_SQL,
                         catalogKey));
-        return databases;
+        return databases.stream().distinct().collect(Collectors.toList());
     }
 
     @Override
