@@ -64,6 +64,8 @@ public abstract class CompactTask implements Callable<CompactResult> {
                                             .map(DataFileMeta::fileSize)
                                             .reduce(Long::sum)
                                             .orElse(0L));
+                            metricsReporter.reportDropDeletedRecordCount(
+                                    result.getDropDeletedRecordCount());
                         }
                     },
                     LOG);

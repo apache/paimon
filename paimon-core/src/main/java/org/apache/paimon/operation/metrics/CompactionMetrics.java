@@ -44,6 +44,8 @@ public class CompactionMetrics {
     public static final String AVG_COMPACTION_TIME = "avgCompactionTime";
     public static final String COMPACTION_COMPLETED_COUNT = "compactionCompletedCount";
     public static final String COMPACTION_QUEUED_COUNT = "compactionQueuedCount";
+    public static final String COMPACTION_DROP_DELETED_RECORD_COUNT =
+            "compactionDropDeletedRecordCount";
     public static final String MAX_COMPACTION_INPUT_SIZE = "maxCompactionInputSize";
     public static final String MAX_COMPACTION_OUTPUT_SIZE = "maxCompactionOutputSize";
     public static final String AVG_COMPACTION_INPUT_SIZE = "avgCompactionInputSize";
@@ -55,8 +57,9 @@ public class CompactionMetrics {
     private final Map<PartitionAndBucket, ReporterImpl> reporters;
     private final Map<Long, CompactTimer> compactTimers;
     private final Queue<Long> compactionTimes;
-    private Counter compactionsCompletedCounter;
-    private Counter compactionsQueuedCounter;
+    private Counter compactionCompletedCounter;
+    private Counter compactionQueuedCounter;
+    private Counter compactionDropDeletedRecordCounter;
 
     public CompactionMetrics(MetricRegistry registry, String tableName) {
         this.metricGroup = registry.tableMetricGroup(GROUP_NAME, tableName);
@@ -91,8 +94,10 @@ public class CompactionMetrics {
                 AVG_COMPACTION_TIME, () -> getCompactionTimeStream().average().orElse(0.0));
         metricGroup.gauge(COMPACTION_THREAD_BUSY, () -> getCompactBusyStream().sum());
 
-        compactionsCompletedCounter = metricGroup.counter(COMPACTION_COMPLETED_COUNT);
-        compactionsQueuedCounter = metricGroup.counter(COMPACTION_QUEUED_COUNT);
+        compactionCompletedCounter = metricGroup.counter(COMPACTION_COMPLETED_COUNT);
+        compactionQueuedCounter = metricGroup.counter(COMPACTION_QUEUED_COUNT);
+        compactionDropDeletedRecordCounter =
+                metricGroup.counter(COMPACTION_DROP_DELETED_RECORD_COUNT);
     }
 
     private LongStream getLevel0FileCountStream() {
@@ -134,6 +139,8 @@ public class CompactionMetrics {
         void increaseCompactionsQueuedCount();
 
         void decreaseCompactionsQueuedCount();
+
+        void reportDropDeletedRecordCount(long dropDeletedRecordCount);
 
         void reportCompactionInputSize(long bytes);
 
@@ -188,17 +195,22 @@ public class CompactionMetrics {
 
         @Override
         public void increaseCompactionsCompletedCount() {
-            compactionsCompletedCounter.inc();
+            compactionCompletedCounter.inc();
         }
 
         @Override
         public void increaseCompactionsQueuedCount() {
-            compactionsQueuedCounter.inc();
+            compactionQueuedCounter.inc();
         }
 
         @Override
         public void decreaseCompactionsQueuedCount() {
-            compactionsQueuedCounter.dec();
+            compactionQueuedCounter.dec();
+        }
+
+        @Override
+        public void reportDropDeletedRecordCount(long dropDeletedRecordCount) {
+            compactionDropDeletedRecordCounter.inc(dropDeletedRecordCount);
         }
 
         @Override

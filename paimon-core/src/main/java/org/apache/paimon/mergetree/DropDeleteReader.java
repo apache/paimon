@@ -32,6 +32,7 @@ import java.io.IOException;
  */
 public class DropDeleteReader implements RecordReader<KeyValue> {
 
+    private long dropDeletedRecordCount = 0L;
     private final RecordReader<KeyValue> reader;
 
     public DropDeleteReader(RecordReader<KeyValue> reader) {
@@ -58,6 +59,7 @@ public class DropDeleteReader implements RecordReader<KeyValue> {
                     if (kv.isAdd()) {
                         return kv;
                     }
+                    ++dropDeletedRecordCount;
                 }
             }
 
@@ -66,6 +68,11 @@ public class DropDeleteReader implements RecordReader<KeyValue> {
                 batch.releaseBatch();
             }
         };
+    }
+
+    @Override
+    public long skippedRecordCount() {
+        return dropDeletedRecordCount;
     }
 
     @Override

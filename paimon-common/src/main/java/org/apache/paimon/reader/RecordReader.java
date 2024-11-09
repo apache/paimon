@@ -48,6 +48,11 @@ public interface RecordReader<T> extends Closeable {
     @Nullable
     RecordIterator<T> readBatch() throws IOException;
 
+    /** Return the number of records that skipped by this reader. */
+    default long skippedRecordCount() {
+        return 0L;
+    }
+
     /** Closes the reader and should release all resources. */
     @Override
     void close() throws IOException;

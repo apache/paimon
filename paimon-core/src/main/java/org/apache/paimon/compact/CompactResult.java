@@ -35,6 +35,8 @@ public class CompactResult {
 
     @Nullable private CompactDeletionFile deletionFile;
 
+    private long dropDeletedRecordCount;
+
     public CompactResult() {
         this(Collections.emptyList(), Collections.emptyList());
     }
@@ -75,10 +77,19 @@ public class CompactResult {
         return deletionFile;
     }
 
+    public void setDropDeletedRecordCount(long dropDeletedRecordCount) {
+        this.dropDeletedRecordCount = dropDeletedRecordCount;
+    }
+
+    public long getDropDeletedRecordCount() {
+        return dropDeletedRecordCount;
+    }
+
     public void merge(CompactResult that) {
         before.addAll(that.before);
         after.addAll(that.after);
         changelog.addAll(that.changelog);
+        dropDeletedRecordCount += that.dropDeletedRecordCount;
 
         if (deletionFile != null || that.deletionFile != null) {
             throw new UnsupportedOperationException(

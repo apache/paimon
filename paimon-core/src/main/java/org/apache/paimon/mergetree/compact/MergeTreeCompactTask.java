@@ -139,7 +139,7 @@ public class MergeTreeCompactTask extends CompactTask {
         }
         if (candidate.size() == 1) {
             List<SortedRun> section = candidate.get(0);
-            if (section.size() == 0) {
+            if (section.isEmpty()) {
                 return;
             } else if (section.size() == 1) {
                 for (DataFileMeta file : section.get(0).files()) {

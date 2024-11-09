@@ -104,7 +104,11 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
 
         List<DataFileMeta> before = extractFilesFromSections(sections);
         notifyRewriteCompactBefore(before);
-        return new CompactResult(before, writer.result());
+        CompactResult compactResult = new CompactResult(before, writer.result());
+        if (dropDelete && reader != null) {
+            compactResult.setDropDeletedRecordCount(reader.skippedRecordCount());
+        }
+        return compactResult;
     }
 
     protected <T> RecordReader<T> readerForMergeTree(

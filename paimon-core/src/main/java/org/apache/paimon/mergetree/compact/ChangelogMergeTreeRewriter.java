@@ -126,6 +126,7 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
         RollingFileWriter<KeyValue, DataFileMeta> compactFileWriter = null;
         RollingFileWriter<KeyValue, DataFileMeta> changelogFileWriter = null;
         Exception collectedExceptions = null;
+        long dropDeletedRecordCount = 0L;
 
         try {
             iterator =
@@ -143,10 +144,12 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
             while (iterator.hasNext()) {
                 ChangelogResult result = iterator.next();
                 KeyValue keyValue = result.result();
-                if (compactFileWriter != null
-                        && keyValue != null
-                        && (!dropDelete || keyValue.isAdd())) {
-                    compactFileWriter.write(keyValue);
+                if (compactFileWriter != null && keyValue != null) {
+                    if ((!dropDelete || keyValue.isAdd())) {
+                        compactFileWriter.write(keyValue);
+                    } else {
+                        ++dropDeletedRecordCount;
+                    }
                 }
                 if (produceChangelog) {
                     for (KeyValue kv : result.changelogs()) {
@@ -190,7 +193,11 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
                 changelogFileWriter != null
                         ? changelogFileWriter.result()
                         : Collections.emptyList();
-        return new CompactResult(before, after, changelogFiles);
+        CompactResult compactResult = new CompactResult(before, after, changelogFiles);
+        if (dropDelete) {
+            compactResult.setDropDeletedRecordCount(dropDeletedRecordCount);
+        }
+        return compactResult;
     }
 
     @Override
