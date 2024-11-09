@@ -298,7 +298,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         result =
                 sql(
                         "SELECT schema_id, fields, partition_keys, "
-                                + "primary_keys, options, `comment` FROM T$schemas where schema_id>0 and schema_id<3");
+                                + "primary_keys, options, `comment` FROM T$schemas where schema_id>0 and schema_id<3 order by schema_id");
         assertThat(result.toString())
                 .isEqualTo(
                         "[+I[1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
@@ -312,7 +312,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         result =
                 sql(
                         "SELECT schema_id, fields, partition_keys, "
-                                + "primary_keys, options, `comment` FROM T$schemas where schema_id in (1, 3)");
+                                + "primary_keys, options, `comment` FROM T$schemas where schema_id in (1, 3) order by schema_id");
         assertThat(result.toString())
                 .isEqualTo(
                         "[+I[1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
