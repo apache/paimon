@@ -26,12 +26,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.Equal;
-import org.apache.paimon.predicate.LeafPredicate;
-import org.apache.paimon.predicate.LeafPredicateExtractor;
-import org.apache.paimon.predicate.Or;
-import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.*;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -239,25 +234,18 @@ public class TagsTable implements ReadonlyTable {
                     CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
                     // optimize for IN filter
                     if ((compoundPredicate.function()) instanceof Or) {
-                        List<Predicate> children = compoundPredicate.children();
-                        for (Predicate leaf : children) {
-                            if (leaf instanceof LeafPredicate
-                                    && (((LeafPredicate) leaf).function() instanceof Equal
-                                            && ((LeafPredicate) leaf).literals().get(0)
-                                                    instanceof BinaryString)
-                                    && predicate
-                                                    .visit(LeafPredicateExtractor.INSTANCE)
-                                                    .get(TAG_NAME)
-                                            != null) {
-                                String equalValue =
-                                        ((LeafPredicate) leaf).literals().get(0).toString();
-                                if (tagManager.tagExists(equalValue)) {
-                                    predicateMap.put(equalValue, tagManager.tag(equalValue));
-                                }
-                            } else {
-                                predicateMap.clear();
-                                break;
-                            }
+                        Optional<List<Object>> leafs =
+                                InPredicateVisitor.extractInElements(predicate, TAG_NAME);
+                        if (leafs.isPresent()) {
+                            leafs.get().stream()
+                                    .forEach(
+                                            leaf -> {
+                                                if (tagManager.tagExists(leaf.toString())) {
+                                                    predicateMap.put(
+                                                            leaf.toString(),
+                                                            tagManager.tag(leaf.toString()));
+                                                }
+                                            });
                         }
                     }
                 }

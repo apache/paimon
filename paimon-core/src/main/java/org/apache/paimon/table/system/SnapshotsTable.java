@@ -27,17 +27,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.predicate.And;
-import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.Equal;
-import org.apache.paimon.predicate.GreaterOrEqual;
-import org.apache.paimon.predicate.GreaterThan;
-import org.apache.paimon.predicate.LeafPredicate;
-import org.apache.paimon.predicate.LeafPredicateExtractor;
-import org.apache.paimon.predicate.LessOrEqual;
-import org.apache.paimon.predicate.LessThan;
-import org.apache.paimon.predicate.Or;
-import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.*;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -231,18 +221,11 @@ public class SnapshotsTable implements ReadonlyTable {
                 }
 
                 // optimize for IN filter
-                if ((compoundPredicate.function()) instanceof Or) {
-                    for (Predicate leaf : children) {
-                        if (leaf instanceof LeafPredicate
-                                && (((LeafPredicate) leaf).function() instanceof Equal)
-                                && leaf.visit(LeafPredicateExtractor.INSTANCE).get(leafName)
-                                        != null) {
-                            snapshotIds.add((Long) ((LeafPredicate) leaf).literals().get(0));
-                        } else {
-                            snapshotIds.clear();
-                            break;
-                        }
-                    }
+                Optional<List<Object>> leafs =
+                        InPredicateVisitor.extractInElements(predicate, leafName);
+                if (leafs.isPresent()) {
+                    leafs.get().stream()
+                            .forEach(leaf -> snapshotIds.add(Long.parseLong(leaf.toString())));
                 }
             } else {
                 handleLeafPredicate(predicate, leafName);
