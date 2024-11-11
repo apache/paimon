@@ -352,6 +352,3 @@ public class OrcReaderFactory implements FormatReaderFactory {
         };
     }
 }
-/*
-
-*/
