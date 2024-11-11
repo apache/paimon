@@ -335,6 +335,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader withBuckets(List<Integer> buckets) {
+            snapshotReader.withBuckets(buckets);
+            return this;
+        }
+
+        @Override
         public SnapshotReader withBucketFilter(Filter<Integer> bucketFilter) {
             snapshotReader.withBucketFilter(bucketFilter);
             return this;

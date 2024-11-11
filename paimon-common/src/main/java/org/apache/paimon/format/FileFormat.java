@@ -21,6 +21,7 @@ package org.apache.paimon.format;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
+import org.apache.paimon.fs.ObjectCacheManager;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
@@ -28,6 +29,7 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -39,6 +41,9 @@ import java.util.ServiceLoader;
  * <p>NOTE: This class must be thread safe.
  */
 public abstract class FileFormat {
+
+    private static final ObjectCacheManager<String, FileFormatFactory> formatFactoryCache =
+            ObjectCacheManager.newObjectCacheManager(Duration.ofDays(365), 1000);
 
     protected String formatIdentifier;
 
@@ -92,9 +97,17 @@ public abstract class FileFormat {
 
     private static Optional<FileFormat> fromIdentifier(
             String formatIdentifier, FormatContext context, ClassLoader classLoader) {
+
+        FileFormatFactory fileFormatFactory =
+                formatFactoryCache.getIfPresent(formatIdentifier.toLowerCase());
+        if (fileFormatFactory != null) {
+            return Optional.of(fileFormatFactory.create(context));
+        }
+
         ServiceLoader<FileFormatFactory> serviceLoader =
                 ServiceLoader.load(FileFormatFactory.class, classLoader);
         for (FileFormatFactory factory : serviceLoader) {
+            formatFactoryCache.put(factory.identifier(), factory);
             if (factory.identifier().equals(formatIdentifier.toLowerCase())) {
                 return Optional.of(factory.create(context));
             }

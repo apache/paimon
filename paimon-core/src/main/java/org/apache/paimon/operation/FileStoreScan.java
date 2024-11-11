@@ -55,6 +55,8 @@ public interface FileStoreScan {
 
     FileStoreScan withBucket(int bucket);
 
+    FileStoreScan withBuckets(List<Integer> buckets);
+
     FileStoreScan withBucketFilter(Filter<Integer> bucketFilter);
 
     FileStoreScan withPartitionBucket(BinaryRow partition, int bucket);

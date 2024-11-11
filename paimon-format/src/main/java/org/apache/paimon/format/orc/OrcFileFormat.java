@@ -31,6 +31,7 @@ import org.apache.paimon.format.orc.filter.OrcSimpleStatsExtractor;
 import org.apache.paimon.format.orc.reader.OrcSplitReaderUtil;
 import org.apache.paimon.format.orc.writer.RowDataVectorizer;
 import org.apache.paimon.format.orc.writer.Vectorizer;
+import org.apache.paimon.fs.ObjectCacheManager;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -44,12 +45,14 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.orc.OrcConf;
 import org.apache.orc.TypeDescription;
 
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -70,13 +73,29 @@ public class OrcFileFormat extends FileFormat {
     private final int readBatchSize;
     private final int writeBatchSize;
 
+    private static final org.apache.hadoop.conf.Configuration emptyConf =
+            new org.apache.hadoop.conf.Configuration();
+    private static final ObjectCacheManager<Properties, Configuration> configCache =
+            ObjectCacheManager.newObjectCacheManager(Duration.ofDays(365), 1000);
+
+    static {
+        emptyConf.set("paimon.empty.configuration", "paimon.empty.configuration");
+    }
+
     public OrcFileFormat(FormatContext formatContext) {
         super(IDENTIFIER);
         this.orcProperties = getOrcProperties(formatContext.formatOptions(), formatContext);
-        this.readerConf = new org.apache.hadoop.conf.Configuration();
-        this.orcProperties.forEach((k, v) -> readerConf.set(k.toString(), v.toString()));
-        this.writerConf = new org.apache.hadoop.conf.Configuration();
-        this.orcProperties.forEach((k, v) -> writerConf.set(k.toString(), v.toString()));
+        Configuration conf;
+        Configuration cachedConf = configCache.getIfPresent(orcProperties);
+        if (cachedConf != null) {
+            conf = cachedConf;
+        } else {
+            conf = new org.apache.hadoop.conf.Configuration(emptyConf);
+            this.orcProperties.forEach((k, v) -> conf.set(k.toString(), v.toString()));
+            configCache.put(orcProperties, conf);
+        }
+        this.readerConf = conf;
+        this.writerConf = conf;
         this.readBatchSize = formatContext.readBatchSize();
         this.writeBatchSize = formatContext.writeBatchSize();
     }
@@ -146,7 +165,6 @@ public class OrcFileFormat extends FileFormat {
 
     private static Properties getOrcProperties(Options options, FormatContext formatContext) {
         Properties orcProperties = new Properties();
-
         Properties properties = new Properties();
         options.addAllToProperties(properties);
         properties.forEach((k, v) -> orcProperties.put(IDENTIFIER + "." + k, v));

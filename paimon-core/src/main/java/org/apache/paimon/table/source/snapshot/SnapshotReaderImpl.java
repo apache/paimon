@@ -245,6 +245,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
         return this;
     }
 
+    public SnapshotReader withBuckets(List<Integer> buckets) {
+        scan.withBuckets(buckets);
+        return this;
+    }
+
     @Override
     public SnapshotReader withBucketFilter(Filter<Integer> bucketFilter) {
         scan.withBucketFilter(bucketFilter);
@@ -271,7 +276,13 @@ public class SnapshotReaderImpl implements SnapshotReader {
                             Math.abs(file.hashCode() % numberOfParallelSubtasks)
                                     == indexOfThisSubtask);
         } else {
-            withBucketFilter(bucket -> bucket % numberOfParallelSubtasks == indexOfThisSubtask);
+            List<Integer> buckets = new ArrayList<>();
+            for (int bucket = 0; bucket < numberOfParallelSubtasks; bucket++) {
+                if (bucket % numberOfParallelSubtasks == indexOfThisSubtask) {
+                    buckets.add(bucket);
+                }
+            }
+            withBuckets(buckets);
         }
         return this;
     }

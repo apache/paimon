@@ -23,6 +23,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.utils.Filter;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -45,6 +46,14 @@ public interface InnerTableScan extends TableScan {
 
     default InnerTableScan withBucketFilter(Filter<Integer> bucketFilter) {
         return this;
+    }
+
+    default InnerTableScan withBucket(Integer bucket) {
+        return withBuckets(Collections.singletonList(bucket));
+    }
+
+    default InnerTableScan withBuckets(List<Integer> buckets) {
+        throw new RuntimeException("not impl withBuckets for " + this.getClass().getName());
     }
 
     default InnerTableScan withLevelFilter(Filter<Integer> levelFilter) {
