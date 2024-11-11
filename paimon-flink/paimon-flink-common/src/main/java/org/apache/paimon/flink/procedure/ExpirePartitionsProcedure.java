@@ -63,6 +63,10 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
                         name = "expire_strategy",
                         type = @DataTypeHint("STRING"),
                         isOptional = true),
+                @ArgumentHint(
+                        name = "max_expires",
+                        type = @DataTypeHint("INTEGER"),
+                        isOptional = true)
             })
     public @DataTypeHint("ROW< expired_partitions STRING>") Row[] call(
             ProcedureContext procedureContext,
@@ -70,7 +74,8 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
             String expirationTime,
             String timestampFormatter,
             String timestampPattern,
-            String expireStrategy)
+            String expireStrategy,
+            Integer maxExpires)
             throws Catalog.TableNotExistException {
         FileStoreTable fileStoreTable = (FileStoreTable) table(tableId);
         FileStore fileStore = fileStoreTable.store();
@@ -93,6 +98,9 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
                                                 .metastoreClientFactory())
                                 .map(MetastoreClient.Factory::create)
                                 .orElse(null));
+        if (maxExpires != null) {
+            partitionExpire.withMaxExpires(maxExpires);
+        }
         List<Map<String, String>> expired = partitionExpire.expire(Long.MAX_VALUE);
         return expired == null || expired.isEmpty()
                 ? new Row[] {Row.of("No expired partitions.")}

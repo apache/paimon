@@ -25,8 +25,10 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
+import org.apache.paimon.operation.AppendOnlyFixedBucketFileStoreWrite;
+import org.apache.paimon.operation.AppendOnlyUnawareBucketFileStoreWrite;
+import org.apache.paimon.operation.BucketSelectConverter;
 import org.apache.paimon.operation.RawFileSplitRead;
-import org.apache.paimon.operation.ScanBucketFilter;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -36,6 +38,7 @@ import org.apache.paimon.types.RowType;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 
 import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
@@ -46,7 +49,6 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
 
     private final RowType bucketKeyType;
     private final RowType rowType;
-    private final String tableName;
 
     public AppendOnlyFileStore(
             FileIO fileIO,
@@ -58,10 +60,9 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
             RowType rowType,
             String tableName,
             CatalogEnvironment catalogEnvironment) {
-        super(fileIO, schemaManager, schema, options, partitionType, catalogEnvironment);
+        super(fileIO, schemaManager, schema, tableName, options, partitionType, catalogEnvironment);
         this.bucketKeyType = bucketKeyType;
         this.rowType = rowType;
-        this.tableName = tableName;
     }
 
     @Override
@@ -94,57 +95,69 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     @Override
     public AppendOnlyFileStoreWrite newWrite(
             String commitUser, ManifestCacheFilter manifestFilter) {
-        return new AppendOnlyFileStoreWrite(
-                fileIO,
-                newRead(),
-                schema.id(),
-                commitUser,
-                rowType,
-                pathFactory(),
-                snapshotManager(),
-                newScan(true).withManifestCacheFilter(manifestFilter),
-                options,
-                bucketMode(),
+        DeletionVectorsMaintainer.Factory dvMaintainerFactory =
                 options.deletionVectorsEnabled()
                         ? DeletionVectorsMaintainer.factory(newIndexFileHandler())
-                        : null,
-                tableName);
+                        : null;
+        if (bucketMode() == BucketMode.BUCKET_UNAWARE) {
+            return new AppendOnlyUnawareBucketFileStoreWrite(
+                    fileIO,
+                    newRead(),
+                    schema.id(),
+                    rowType,
+                    partitionType,
+                    pathFactory(),
+                    snapshotManager(),
+                    newScan(true).withManifestCacheFilter(manifestFilter),
+                    options,
+                    dvMaintainerFactory,
+                    tableName);
+        } else {
+            return new AppendOnlyFixedBucketFileStoreWrite(
+                    fileIO,
+                    newRead(),
+                    schema.id(),
+                    commitUser,
+                    rowType,
+                    partitionType,
+                    pathFactory(),
+                    snapshotManager(),
+                    newScan(true).withManifestCacheFilter(manifestFilter),
+                    options,
+                    dvMaintainerFactory,
+                    tableName);
+        }
     }
 
     private AppendOnlyFileStoreScan newScan(boolean forWrite) {
-        ScanBucketFilter bucketFilter =
-                new ScanBucketFilter(bucketKeyType) {
-                    @Override
-                    public void pushdown(Predicate predicate) {
-                        if (bucketMode() != BucketMode.HASH_FIXED) {
-                            return;
-                        }
-
-                        if (bucketKeyType.getFieldCount() == 0) {
-                            return;
-                        }
-
-                        List<Predicate> bucketFilters =
-                                pickTransformFieldMapping(
-                                        splitAnd(predicate),
-                                        rowType.getFieldNames(),
-                                        bucketKeyType.getFieldNames());
-                        if (bucketFilters.size() > 0) {
-                            setBucketKeyFilter(and(bucketFilters));
-                        }
+        BucketSelectConverter bucketSelectConverter =
+                predicate -> {
+                    if (bucketMode() != BucketMode.HASH_FIXED) {
+                        return Optional.empty();
                     }
+
+                    if (bucketKeyType.getFieldCount() == 0) {
+                        return Optional.empty();
+                    }
+
+                    List<Predicate> bucketFilters =
+                            pickTransformFieldMapping(
+                                    splitAnd(predicate),
+                                    rowType.getFieldNames(),
+                                    bucketKeyType.getFieldNames());
+                    if (!bucketFilters.isEmpty()) {
+                        return BucketSelectConverter.create(and(bucketFilters), bucketKeyType);
+                    }
+                    return Optional.empty();
                 };
 
         return new AppendOnlyFileStoreScan(
                 newManifestsReader(forWrite),
-                partitionType,
-                bucketFilter,
+                bucketSelectConverter,
                 snapshotManager(),
                 schemaManager,
                 schema,
                 manifestFileFactory(forWrite),
-                options.bucket(),
-                forWrite,
                 options.scanManifestParallelism(),
                 options.fileIndexReadEnabled());
     }

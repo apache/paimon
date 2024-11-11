@@ -390,7 +390,7 @@ public interface Arrow2PaimonVectorConverter {
                                 return Timestamp.fromMicros(value);
                             } else {
                                 return Timestamp.fromEpochMillis(
-                                        value / 1_000_000, (int) value % 1_000_000);
+                                        value / 1_000_000, (int) (value % 1_000_000));
                             }
                         }
                     };
@@ -417,7 +417,7 @@ public interface Arrow2PaimonVectorConverter {
                                 return Timestamp.fromMicros(value);
                             } else {
                                 return Timestamp.fromEpochMillis(
-                                        value / 1_000_000, (int) value % 1_000_000);
+                                        value / 1_000_000, (int) (value % 1_000_000));
                             }
                         }
                     };

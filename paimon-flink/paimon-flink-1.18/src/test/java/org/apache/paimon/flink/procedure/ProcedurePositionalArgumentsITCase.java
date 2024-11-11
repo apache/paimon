@@ -24,6 +24,7 @@ import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 
@@ -55,6 +56,8 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
 
         assertThatCode(() -> sql("CALL sys.compact('default.T')")).doesNotThrowAnyException();
         assertThatCode(() -> sql("CALL sys.compact('default.T', 'pt=1')"))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> sql("CALL sys.compact('default.T', '', '')"))
                 .doesNotThrowAnyException();
         assertThatCode(() -> sql("CALL sys.compact('default.T', 'pt=1', '', '')"))
                 .doesNotThrowAnyException();
@@ -244,7 +247,10 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
         sql("INSERT INTO T VALUES ('1', '2024-06-01')");
         sql("INSERT INTO T VALUES ('2', '9024-06-01')");
         assertThat(read(table)).containsExactlyInAnyOrder("1:2024-06-01", "2:9024-06-01");
-        sql("CALL sys.expire_partitions('default.T', '1 d', 'yyyy-MM-dd', '$dt', 'values-time')");
+        assertThat(
+                        sql(
+                                "CALL sys.expire_partitions('default.T', '1 d', 'yyyy-MM-dd', '$dt', 'values-time')"))
+                .containsExactly(Row.of("dt=2024-06-01"));
         assertThat(read(table)).containsExactlyInAnyOrder("2:9024-06-01");
     }
 
@@ -317,13 +323,13 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
         sql("CALL sys.create_branch('default.T', 'test', 'tag1')");
         sql("CALL sys.create_branch('default.T', 'test2', 'tag2')");
 
-        assertThat(collectToString("SELECT branch_name, created_from_snapshot FROM `T$branches`"))
-                .containsExactlyInAnyOrder("+I[test, 1]", "+I[test2, 2]");
+        assertThat(collectToString("SELECT branch_name FROM `T$branches`"))
+                .containsExactlyInAnyOrder("+I[test]", "+I[test2]");
 
         sql("CALL sys.delete_branch('default.T', 'test')");
 
-        assertThat(collectToString("SELECT branch_name, created_from_snapshot FROM `T$branches`"))
-                .containsExactlyInAnyOrder("+I[test2, 2]");
+        assertThat(collectToString("SELECT branch_name FROM `T$branches`"))
+                .containsExactlyInAnyOrder("+I[test2]");
 
         sql("CALL sys.fast_forward('default.T', 'test2')");
 
@@ -485,5 +491,61 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
                         + ")");
         assertThatCode(() -> sql("CALL sys.rewrite_file_index('default.T', 'pt = 0')"))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testExpireTags() throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " k STRING,"
+                        + " dt STRING,"
+                        + " PRIMARY KEY (k, dt) NOT ENFORCED"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + " 'bucket' = '1'"
+                        + ")");
+        FileStoreTable table = paimonTable("T");
+        for (int i = 1; i <= 3; i++) {
+            sql("INSERT INTO T VALUES ('" + i + "', '" + i + "')");
+        }
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(3L);
+
+        sql("CALL sys.create_tag('default.T', 'tag-1', 1)");
+        sql("CALL sys.create_tag('default.T', 'tag-2', 2, '1d')");
+        sql("CALL sys.create_tag('default.T', 'tag-3', 3, '1s')");
+
+        assertThat(sql("select count(*) from `T$tags`")).containsExactly(Row.of(3L));
+
+        Thread.sleep(1000);
+        assertThat(sql("CALL sys.expire_tags('default.T')"))
+                .containsExactlyInAnyOrder(Row.of("tag-3"));
+    }
+
+    @Test
+    public void testReplaceTags() throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " id INT,"
+                        + " NAME STRING,"
+                        + " PRIMARY KEY (id) NOT ENFORCED"
+                        + ") WITH ('bucket' = '1'"
+                        + ")");
+        sql("INSERT INTO T VALUES (1, 'a')");
+        sql("INSERT INTO T VALUES (2, 'b')");
+        assertThat(paimonTable("T").snapshotManager().snapshotCount()).isEqualTo(2L);
+
+        Assertions.assertThatThrownBy(() -> sql("CALL sys.replace_tag('default.T', 'test_tag')"))
+                .hasMessageContaining("Tag name 'test_tag' does not exist.");
+
+        sql("CALL sys.create_tag('default.T', 'test_tag')");
+        assertThat(sql("select tag_name,snapshot_id,time_retained from `T$tags`"))
+                .containsExactly(Row.of("test_tag", 2L, null));
+
+        sql("CALL sys.replace_tag('default.T', 'test_tag', 1)");
+        assertThat(sql("select tag_name,snapshot_id,time_retained from `T$tags`"))
+                .containsExactly(Row.of("test_tag", 1L, null));
+
+        sql("CALL sys.replace_tag('default.T', 'test_tag', 2, '1 d')");
+        assertThat(sql("select tag_name,snapshot_id,time_retained from `T$tags`"))
+                .containsExactly(Row.of("test_tag", 2L, "PT24H"));
     }
 }

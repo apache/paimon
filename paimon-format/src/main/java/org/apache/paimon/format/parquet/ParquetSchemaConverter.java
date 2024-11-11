@@ -18,8 +18,11 @@
 
 package org.apache.paimon.format.parquet;
 
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
@@ -47,14 +50,13 @@ import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT64;
 public class ParquetSchemaConverter {
 
     static final String MAP_REPEATED_NAME = "key_value";
+    static final String MAP_KEY_NAME = "key";
+    static final String MAP_VALUE_NAME = "value";
+    static final String LIST_NAME = "list";
     static final String LIST_ELEMENT_NAME = "element";
 
     public static MessageType convertToParquetMessageType(String name, RowType rowType) {
-        Type[] types = new Type[rowType.getFieldCount()];
-        for (int i = 0; i < rowType.getFieldCount(); i++) {
-            types[i] = convertToParquetType(rowType.getFieldNames().get(i), rowType.getTypeAt(i));
-        }
-        return new MessageType(name, types);
+        return new MessageType(name, convertToParquetTypes(rowType));
     }
 
     public static Type convertToParquetType(String name, DataType type) {
@@ -149,8 +151,8 @@ public class ParquetSchemaConverter {
                         repetition,
                         name,
                         MAP_REPEATED_NAME,
-                        convertToParquetType("key", keyType),
-                        convertToParquetType("value", mapType.getValueType()));
+                        convertToParquetType(MAP_KEY_NAME, keyType),
+                        convertToParquetType(MAP_VALUE_NAME, mapType.getValueType()));
             case MULTISET:
                 MultisetType multisetType = (MultisetType) type;
                 DataType elementType = multisetType.getElementType();
@@ -163,8 +165,8 @@ public class ParquetSchemaConverter {
                         repetition,
                         name,
                         MAP_REPEATED_NAME,
-                        convertToParquetType("key", elementType),
-                        convertToParquetType("value", new IntType(false)));
+                        convertToParquetType(MAP_KEY_NAME, elementType),
+                        convertToParquetType(MAP_VALUE_NAME, new IntType(false)));
             case ROW:
                 RowType rowType = (RowType) type;
                 return new GroupType(repetition, name, convertToParquetTypes(rowType));
@@ -194,8 +196,47 @@ public class ParquetSchemaConverter {
 
     private static List<Type> convertToParquetTypes(RowType rowType) {
         List<Type> types = new ArrayList<>(rowType.getFieldCount());
-        for (int i = 0; i < rowType.getFieldCount(); i++) {
-            types.add(convertToParquetType(rowType.getFieldNames().get(i), rowType.getTypeAt(i)));
+        for (DataField field : rowType.getFields()) {
+            Type parquetType = convertToParquetType(field.name(), field.type());
+            Type typeWithId = parquetType.withId(field.id());
+            if (field.type().getTypeRoot() == DataTypeRoot.ARRAY) {
+                GroupType groupType = (GroupType) parquetType;
+                GroupType wrapperType = (GroupType) groupType.getFields().get(0);
+                Type elementTypeWithId =
+                        wrapperType
+                                .getFields()
+                                .get(0)
+                                .withId(SpecialFields.getArrayElementFieldId(field.id()));
+                typeWithId =
+                        ConversionPatterns.listOfElements(
+                                        groupType.getRepetition(),
+                                        groupType.getName(),
+                                        elementTypeWithId)
+                                .withId(field.id());
+            } else if (field.type().getTypeRoot() == DataTypeRoot.MAP
+                    || field.type().getTypeRoot() == DataTypeRoot.MULTISET) {
+                GroupType groupType = (GroupType) parquetType;
+                GroupType wrapperType = (GroupType) groupType.getFields().get(0);
+                Type keyTypeWithId =
+                        wrapperType
+                                .getFields()
+                                .get(0)
+                                .withId(SpecialFields.getMapKeyFieldId(field.id()));
+                Type valueTypeWithId =
+                        wrapperType
+                                .getFields()
+                                .get(1)
+                                .withId(SpecialFields.getMapValueFieldId(field.id()));
+                typeWithId =
+                        ConversionPatterns.mapType(
+                                        groupType.getRepetition(),
+                                        groupType.getName(),
+                                        MAP_REPEATED_NAME,
+                                        keyTypeWithId,
+                                        valueTypeWithId)
+                                .withId(field.id());
+            }
+            types.add(typeWithId);
         }
         return types;
     }

@@ -44,7 +44,7 @@ public class FlinkConnectorOptions {
 
     public static final String NONE = "none";
 
-    public static final String TABLE_DYNAMIC_OPTION_PREFIX = "paimon";
+    public static final String TABLE_DYNAMIC_OPTION_PREFIX = "paimon.";
 
     public static final int MIN_CLUSTERING_SAMPLE_FACTOR = 20;
 
@@ -244,15 +244,6 @@ public class FlinkConnectorOptions {
                             "Weight of managed memory for RocksDB in cross-partition update, Flink will compute the memory size "
                                     + "according to the weight, the actual memory used depends on the running environment.");
 
-    public static final ConfigOption<Boolean> SCAN_PUSH_DOWN =
-            ConfigOptions.key("scan.push-down")
-                    .booleanType()
-                    .defaultValue(true)
-                    .withDescription(
-                            "If true, flink will push down projection, filters, limit to the source. The cost is that it "
-                                    + "is difficult to reuse the source in a job. With flink 1.18 or higher version, it "
-                                    + "is possible to reuse the source even with projection push down.");
-
     public static final ConfigOption<Boolean> SOURCE_CHECKPOINT_ALIGN_ENABLED =
             ConfigOptions.key("source.checkpoint-align.enabled")
                     .booleanType()
@@ -320,6 +311,15 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "If the pending snapshot count exceeds the threshold, lookup operator will refresh the table in sync.");
 
+    public static final ConfigOption<String> LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST =
+            ConfigOptions.key("lookup.refresh.time-periods-blacklist")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The blacklist contains several time periods. During these time periods, the lookup table's "
+                                    + "cache refreshing is forbidden. Blacklist format is start1->end1,start2->end2,... , "
+                                    + "and the time format is yyyy-MM-dd HH:mm. Only used when lookup table is FULL cache mode.");
+
     public static final ConfigOption<Boolean> SINK_AUTO_TAG_FOR_SAVEPOINT =
             ConfigOptions.key("sink.savepoint.auto-tag")
                     .booleanType()
@@ -364,12 +364,13 @@ public class FlinkConnectorOptions {
                             "You can specify time interval for partition, for example, "
                                     + "daily partition is '1 d', hourly partition is '1 h'.");
 
-    public static final ConfigOption<Boolean> PARTITION_MARK_DONE_WHEN_END_INPUT =
-            ConfigOptions.key("partition.end-input-to-done")
-                    .booleanType()
-                    .defaultValue(false)
+    public static final ConfigOption<Duration> PARTITION_IDLE_TIME_TO_REPORT_STATISTIC =
+            key("partition.idle-time-to-report-statistic")
+                    .durationType()
+                    .defaultValue(Duration.ofHours(1))
                     .withDescription(
-                            "Whether mark the done status to indicate that the data is ready when end input.");
+                            "Set a time duration when a partition has no new data after this time duration, "
+                                    + "start to report the partition statistics to hms.");
 
     public static final ConfigOption<String> CLUSTERING_COLUMNS =
             key("sink.clustering.by-columns")
@@ -413,6 +414,33 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Optional endInput watermark used in case of batch mode or bounded stream.");
 
+    public static final ConfigOption<Boolean> CHANGELOG_PRECOMMIT_COMPACT =
+            key("changelog.precommit-compact")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, it will add a changelog compact coordinator and worker operator after the writer operator,"
+                                    + "in order to compact several changelog files from the same partition into large ones, "
+                                    + "which can decrease the number of small files. ");
+
+    public static final ConfigOption<String> SOURCE_OPERATOR_UID_SUFFIX =
+            key("source.operator-uid.suffix")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Set the uid suffix for the source operators. After setting, the uid format is "
+                                    + "${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. If the uid suffix is not set, flink will "
+                                    + "automatically generate the operator uid, which may be incompatible when the topology changes.");
+
+    public static final ConfigOption<String> SINK_OPERATOR_UID_SUFFIX =
+            key("sink.operator-uid.suffix")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Set the uid suffix for the writer, dynamic bucket assigner and committer operators. The uid format is "
+                                    + "${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. If the uid suffix is not set, flink will "
+                                    + "automatically generate the operator uid, which may be incompatible when the topology changes.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);
@@ -426,6 +454,11 @@ public class FlinkConnectorOptions {
             }
         }
         return list;
+    }
+
+    public static String generateCustomUid(
+            String uidPrefix, String tableName, String userDefinedSuffix) {
+        return String.format("%s_%s_%s", uidPrefix, tableName, userDefinedSuffix);
     }
 
     /** The mode of lookup cache. */

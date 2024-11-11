@@ -28,6 +28,7 @@ import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreePattern.{SCALAR_SUBQUERY, SCALAR_SUBQUERY_REFERENCE, TreePattern}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 import org.apache.spark.sql.internal.SQLConf
+import org.apache.spark.sql.paimon.shims
 import org.apache.spark.sql.types.{DataType, StructType}
 
 import scala.collection.mutable.ArrayBuffer
@@ -95,7 +96,7 @@ trait MergePaimonScalarSubqueriesBase extends Rule[LogicalPlan] with PredicateHe
     val newPlan = removeReferences(planWithReferences, cache)
     val subqueryCTEs = cache.filter(_.merged).map(_.plan.asInstanceOf[CTERelationDef])
     if (subqueryCTEs.nonEmpty) {
-      WithCTE(newPlan, subqueryCTEs)
+      WithCTE(newPlan, subqueryCTEs.toSeq)
     } else {
       newPlan
     }
@@ -335,22 +336,24 @@ trait MergePaimonScalarSubqueriesBase extends Rule[LogicalPlan] with PredicateHe
   // Only allow aggregates of the same implementation because merging different implementations
   // could cause performance regression.
   private def supportedAggregateMerge(newPlan: Aggregate, cachedPlan: Aggregate) = {
-    val newPlanAggregateExpressions = newPlan.aggregateExpressions.flatMap(_.collect {
-      case a: AggregateExpression => a
-    })
-    val cachedPlanAggregateExpressions = cachedPlan.aggregateExpressions.flatMap(_.collect {
-      case a: AggregateExpression => a
-    })
-    val newPlanSupportsHashAggregate = Aggregate.supportsHashAggregate(
-      newPlanAggregateExpressions.flatMap(_.aggregateFunction.aggBufferAttributes))
-    val cachedPlanSupportsHashAggregate = Aggregate.supportsHashAggregate(
-      cachedPlanAggregateExpressions.flatMap(_.aggregateFunction.aggBufferAttributes))
+    val aggregateExpressionsSeq = Seq(newPlan, cachedPlan).map {
+      plan => plan.aggregateExpressions.flatMap(_.collect { case a: AggregateExpression => a })
+    }
+    val groupByExpressionSeq = Seq(newPlan, cachedPlan).map(_.groupingExpressions)
+
+    val Seq(newPlanSupportsHashAggregate, cachedPlanSupportsHashAggregate) =
+      aggregateExpressionsSeq.zip(groupByExpressionSeq).map {
+        case (aggregateExpressions, groupByExpressions) =>
+          shims.Aggregate.supportsHashAggregate(
+            aggregateExpressions.flatMap(_.aggregateFunction.aggBufferAttributes),
+            groupByExpressions)
+      }
+
     newPlanSupportsHashAggregate && cachedPlanSupportsHashAggregate ||
     newPlanSupportsHashAggregate == cachedPlanSupportsHashAggregate && {
-      val newPlanSupportsObjectHashAggregate =
-        Aggregate.supportsObjectHashAggregate(newPlanAggregateExpressions)
-      val cachedPlanSupportsObjectHashAggregate =
-        Aggregate.supportsObjectHashAggregate(cachedPlanAggregateExpressions)
+      val Seq(newPlanSupportsObjectHashAggregate, cachedPlanSupportsObjectHashAggregate) =
+        aggregateExpressionsSeq.map(
+          aggregateExpressions => Aggregate.supportsObjectHashAggregate(aggregateExpressions))
       newPlanSupportsObjectHashAggregate && cachedPlanSupportsObjectHashAggregate ||
       newPlanSupportsObjectHashAggregate == cachedPlanSupportsObjectHashAggregate
     }

@@ -23,6 +23,8 @@ import org.apache.spark.sql.AnalysisException;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.HashMap;
 import java.util.List;
@@ -203,7 +205,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 UnsupportedOperationException.class,
-                                "Cannot drop/rename partition key[a]"));
+                                "Cannot rename partition column: [a]"));
     }
 
     @Test
@@ -254,7 +256,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 UnsupportedOperationException.class,
-                                "Cannot drop/rename partition key[a]"));
+                                "Cannot drop partition key or primary key: [a]"));
     }
 
     @Test
@@ -276,7 +278,72 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 UnsupportedOperationException.class,
-                                "Cannot drop/rename primary key[b]"));
+                                "Cannot drop partition key or primary key: [b]"));
+    }
+
+    @Test
+    public void testRenamePrimaryKey() {
+        spark.sql(
+                "CREATE TABLE test_rename_primary_key_table (\n"
+                        + "a BIGINT NOT NULL,\n"
+                        + "b STRING)\n"
+                        + "TBLPROPERTIES ('primary-key' = 'a')");
+
+        spark.sql("INSERT INTO test_rename_primary_key_table VALUES(1, 'aaa'), (2, 'bbb')");
+
+        spark.sql("ALTER TABLE test_rename_primary_key_table RENAME COLUMN a to a_");
+
+        List<Row> result =
+                spark.sql("SHOW CREATE TABLE test_rename_primary_key_table").collectAsList();
+        assertThat(result.toString())
+                .contains(
+                        showCreateString(
+                                "test_rename_primary_key_table", "a_ BIGINT NOT NULL", "b STRING"))
+                .contains("'primary-key' = 'a_'");
+
+        List<String> actual =
+                spark.sql("SELECT * FROM test_rename_primary_key_table").collectAsList().stream()
+                        .map(Row::toString)
+                        .collect(Collectors.toList());
+
+        assertThat(actual).containsExactlyInAnyOrder("[1,aaa]", "[2,bbb]");
+
+        spark.sql("INSERT INTO test_rename_primary_key_table VALUES(1, 'AAA'), (2, 'BBB')");
+
+        actual =
+                spark.sql("SELECT * FROM test_rename_primary_key_table").collectAsList().stream()
+                        .map(Row::toString)
+                        .collect(Collectors.toList());
+        assertThat(actual).containsExactlyInAnyOrder("[1,AAA]", "[2,BBB]");
+    }
+
+    @Test
+    public void testRenameBucketKey() {
+        spark.sql(
+                "CREATE TABLE test_rename_bucket_key_table (\n"
+                        + "a BIGINT NOT NULL,\n"
+                        + "b STRING)\n"
+                        + "TBLPROPERTIES ('bucket-key' = 'a,b', 'bucket'='16')");
+
+        spark.sql("INSERT INTO test_rename_bucket_key_table VALUES(1, 'aaa'), (2, 'bbb')");
+
+        spark.sql("ALTER TABLE test_rename_bucket_key_table RENAME COLUMN b to b_");
+
+        List<Row> result =
+                spark.sql("SHOW CREATE TABLE test_rename_bucket_key_table").collectAsList();
+        assertThat(result.toString())
+                .contains(
+                        showCreateString(
+                                "test_rename_bucket_key_table", "a BIGINT NOT NULL", "b_ STRING"))
+                .contains("'bucket-key' = 'a,b_'");
+
+        List<String> actual =
+                spark.sql("SELECT * FROM test_rename_bucket_key_table where b_ = 'bbb'")
+                        .collectAsList().stream()
+                        .map(Row::toString)
+                        .collect(Collectors.toList());
+
+        assertThat(actual).containsExactlyInAnyOrder("[2,bbb]");
     }
 
     @Test
@@ -639,5 +706,115 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                                         },
                                         ","))
                 .collect(Collectors.toList());
+    }
+
+    @ParameterizedTest()
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testAddAndDropNestedColumn(String formatType) {
+        String tableName = "testAddNestedColumnTable";
+        spark.sql(
+                "CREATE TABLE paimon.default."
+                        + tableName
+                        + " (k INT NOT NULL, v STRUCT<f1: INT, f2: STRUCT<f1: STRING, f2: INT>>) "
+                        + "TBLPROPERTIES ('bucket' = '1', 'primary-key' = 'k', 'file.format' = '"
+                        + formatType
+                        + "')");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, STRUCT(10, STRUCT('apple', 100))), (2, STRUCT(20, STRUCT('banana', 200)))");
+        assertThat(
+                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
+                                .stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder("[1,[10,[apple,100]]]", "[2,[20,[banana,200]]]");
+        assertThat(
+                        spark.sql("SELECT v.f2.f1, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder("[apple,1]", "[banana,2]");
+
+        spark.sql("ALTER TABLE paimon.default." + tableName + " ADD COLUMN v.f3 STRING");
+        spark.sql("ALTER TABLE paimon.default." + tableName + " ADD COLUMN v.f2.f3 BIGINT");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, STRUCT(11, STRUCT('APPLE', 101, 1001), 'one')), (3, STRUCT(31, STRUCT('CHERRY', 301, 3001), 'three'))");
+        assertThat(
+                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
+                                .stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder(
+                        "[1,[11,[APPLE,101,1001],one]]",
+                        "[2,[20,[banana,200,null],null]]",
+                        "[3,[31,[CHERRY,301,3001],three]]");
+        assertThat(
+                        spark.sql("SELECT v.f2.f2, v.f3, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder("[101,one,1]", "[200,null,2]", "[301,three,3]");
+
+        spark.sql("ALTER TABLE paimon.default." + tableName + " DROP COLUMN v.f2.f1");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, STRUCT(12, STRUCT(102, 1002), 'one')), (4, STRUCT(42, STRUCT(402, 4002), 'four'))");
+        assertThat(
+                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
+                                .stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder(
+                        "[1,[12,[102,1002],one]]",
+                        "[2,[20,[200,null],null]]",
+                        "[3,[31,[301,3001],three]]",
+                        "[4,[42,[402,4002],four]]");
+
+        spark.sql(
+                "ALTER TABLE paimon.default."
+                        + tableName
+                        + " ADD COLUMN v.f2.f1 DECIMAL(5, 2) AFTER f2");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, STRUCT(13, STRUCT(103, 100.03, 1003), 'one')), (5, STRUCT(53, STRUCT(503, 500.03, 5003), 'five'))");
+        assertThat(
+                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
+                                .stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder(
+                        "[1,[13,[103,100.03,1003],one]]",
+                        "[2,[20,[200,null,null],null]]",
+                        "[3,[31,[301,null,3001],three]]",
+                        "[4,[42,[402,null,4002],four]]",
+                        "[5,[53,[503,500.03,5003],five]]");
+    }
+
+    @ParameterizedTest()
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testRenameNestedColumn(String formatType) {
+        String tableName = "testRenameNestedColumnTable";
+        spark.sql(
+                "CREATE TABLE paimon.default."
+                        + tableName
+                        + " (k INT NOT NULL, v STRUCT<f1: INT, f2: STRUCT<f1: STRING, f2: INT>>) "
+                        + "TBLPROPERTIES ('file.format' = '"
+                        + formatType
+                        + "')");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, STRUCT(10, STRUCT('apple', 100))), (2, STRUCT(20, STRUCT('banana', 200)))");
+        assertThat(
+                        spark.sql("SELECT v.f2.f1, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder("[apple,1]", "[banana,2]");
+
+        spark.sql("ALTER TABLE paimon.default." + tableName + " RENAME COLUMN v.f2.f1 to f100");
+        assertThat(
+                        spark.sql("SELECT v.f2.f100, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder("[apple,1]", "[banana,2]");
     }
 }

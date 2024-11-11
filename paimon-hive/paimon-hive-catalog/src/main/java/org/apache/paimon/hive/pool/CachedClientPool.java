@@ -134,21 +134,9 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
     }
 
     @Override
-    public <R> R run(Action<R, IMetaStoreClient, TException> action, boolean retry)
-            throws TException, InterruptedException {
-        return clientPool().run(action, retry);
-    }
-
-    @Override
     public void execute(ExecuteAction<IMetaStoreClient, TException> action)
             throws TException, InterruptedException {
         clientPool().execute(action);
-    }
-
-    @Override
-    public void execute(ExecuteAction<IMetaStoreClient, TException> action, boolean retry)
-            throws TException, InterruptedException {
-        clientPool().execute(action, retry);
     }
 
     @VisibleForTesting

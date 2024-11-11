@@ -21,6 +21,8 @@ package org.apache.paimon.utils;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
+import org.apache.paimon.statistics.TruncateSimpleColStatsCollector;
+import org.apache.paimon.table.SpecialFields;
 
 import java.util.List;
 
@@ -37,15 +39,16 @@ public class StatsCollectorFactories {
         SimpleColStatsCollector.Factory[] modes =
                 new SimpleColStatsCollector.Factory[fields.size()];
         for (int i = 0; i < fields.size(); i++) {
+            String field = fields.get(i);
             String fieldMode =
                     cfg.get(
-                            key(String.format(
-                                            "%s.%s.%s",
-                                            FIELDS_PREFIX, fields.get(i), STATS_MODE_SUFFIX))
+                            key(String.format("%s.%s.%s", FIELDS_PREFIX, field, STATS_MODE_SUFFIX))
                                     .stringType()
                                     .noDefaultValue());
             if (fieldMode != null) {
                 modes[i] = SimpleColStatsCollector.from(fieldMode);
+            } else if (SpecialFields.isSystemField(field)) {
+                modes[i] = () -> new TruncateSimpleColStatsCollector(128);
             } else {
                 modes[i] = SimpleColStatsCollector.from(cfg.get(CoreOptions.METADATA_STATS_MODE));
             }

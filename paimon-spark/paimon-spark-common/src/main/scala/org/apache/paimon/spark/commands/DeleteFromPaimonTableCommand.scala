@@ -47,8 +47,7 @@ case class DeleteFromPaimonTableCommand(
   extends PaimonLeafRunnableCommand
   with PaimonCommand
   with ExpressionHelper
-  with SupportsSubquery
-  with SQLHelper {
+  with SupportsSubquery {
 
   private lazy val writer = PaimonSparkWriter(table)
 
@@ -60,7 +59,7 @@ case class DeleteFromPaimonTableCommand(
     } else {
       val (partitionCondition, otherCondition) = splitPruePartitionAndOtherPredicates(
         condition,
-        table.partitionKeys().asScala,
+        table.partitionKeys().asScala.toSeq,
         sparkSession.sessionState.conf.resolver)
 
       val partitionPredicate = if (partitionCondition.isEmpty) {
@@ -83,7 +82,8 @@ case class DeleteFromPaimonTableCommand(
         val rowDataPartitionComputer = new InternalRowPartitionComputer(
           table.coreOptions().partitionDefaultName(),
           table.schema().logicalPartitionType(),
-          table.partitionKeys.asScala.toArray
+          table.partitionKeys.asScala.toArray,
+          table.coreOptions().legacyPartitionName()
         )
         val dropPartitions = matchedPartitions.map {
           partition => rowDataPartitionComputer.generatePartValues(partition).asScala.asJava

@@ -41,8 +41,9 @@ public class ArrowBatchReader {
     private final VectorizedColumnBatch batch;
     private final Arrow2PaimonVectorConverter[] convertors;
     private final RowType projectedRowType;
+    private final boolean allowUpperCase;
 
-    public ArrowBatchReader(RowType rowType) {
+    public ArrowBatchReader(RowType rowType, boolean allowUpperCase) {
         this.internalRowSerializer = new InternalRowSerializer(rowType);
         ColumnVector[] columnVectors = new ColumnVector[rowType.getFieldCount()];
         this.convertors = new Arrow2PaimonVectorConverter[rowType.getFieldCount()];
@@ -52,6 +53,7 @@ public class ArrowBatchReader {
         for (int i = 0; i < columnVectors.length; i++) {
             this.convertors[i] = Arrow2PaimonVectorConverter.construct(rowType.getTypeAt(i));
         }
+        this.allowUpperCase = allowUpperCase;
     }
 
     public Iterable<InternalRow> readBatch(VectorSchemaRoot vsr) {
@@ -60,7 +62,9 @@ public class ArrowBatchReader {
         List<DataField> dataFields = projectedRowType.getFields();
         for (int i = 0; i < dataFields.size(); ++i) {
             try {
-                Field field = arrowSchema.findField(dataFields.get(i).name().toLowerCase());
+                String fieldName = dataFields.get(i).name();
+                Field field =
+                        arrowSchema.findField(allowUpperCase ? fieldName : fieldName.toLowerCase());
                 int idx = arrowSchema.getFields().indexOf(field);
                 mapping[i] = idx;
             } catch (IllegalArgumentException e) {

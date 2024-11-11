@@ -359,10 +359,20 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                 .isEqualTo(Arrays.asList("20001|21", "202|22"));
     }
 
-    @Test
-    public void testBatchFilter() throws Exception {
-        writeData();
-        FileStoreTable table = createFileStoreTable();
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testBatchFilter(boolean statsDenseStore) throws Exception {
+        Consumer<Options> optionsSetter =
+                options -> {
+                    options.set(CoreOptions.METADATA_STATS_DENSE_STORE, statsDenseStore);
+                    if (statsDenseStore) {
+                        // pk table doesn't need value stats
+                        options.set(CoreOptions.METADATA_STATS_MODE, "none");
+                    }
+                };
+        writeData(optionsSetter);
+        FileStoreTable table = createFileStoreTable(optionsSetter);
+
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
 
         Predicate predicate = and(builder.equal(2, 201L), builder.equal(1, 21));
@@ -604,7 +614,11 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     private void writeData() throws Exception {
-        FileStoreTable table = createFileStoreTable();
+        writeData(options -> {});
+    }
+
+    private void writeData(Consumer<Options> optionsSetter) throws Exception {
+        FileStoreTable table = createFileStoreTable(optionsSetter);
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
 
@@ -658,10 +672,6 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     @Test
     public void testReadFilter() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        if (table.coreOptions().fileFormat().getFormatIdentifier().equals("parquet")) {
-            // TODO support parquet reader filter push down
-            return;
-        }
 
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -775,6 +785,81 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                             conf.set(DELETION_VECTORS_ENABLED, true);
                         });
         innerTestWithShard(table);
+    }
+
+    @Test
+    public void testDeletionVectorsWithFileIndexInFile() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(BUCKET, 1);
+                            conf.set(DELETION_VECTORS_ENABLED, true);
+                            conf.set(TARGET_FILE_SIZE, MemorySize.ofBytes(1));
+                            conf.set("file-index.bloom-filter.columns", "b");
+                        });
+
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 1, 300L));
+        write.write(rowData(1, 2, 400L));
+        write.write(rowData(1, 3, 200L));
+        write.write(rowData(1, 4, 500L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(rowData(1, 5, 100L));
+        write.write(rowData(1, 6, 600L));
+        write.write(rowData(1, 7, 400L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(2);
+        TableRead read = table.newRead().withFilter(builder.equal(2, 300L));
+        assertThat(getResult(read, splits, BATCH_ROW_TO_STRING))
+                .hasSameElementsAs(
+                        Arrays.asList(
+                                "1|1|300|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|2|400|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|3|200|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|4|500|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
+    public void testDeletionVectorsWithFileIndexInMeta() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(BUCKET, 1);
+                            conf.set(DELETION_VECTORS_ENABLED, true);
+                            conf.set(TARGET_FILE_SIZE, MemorySize.ofBytes(1));
+                            conf.set("file-index.bloom-filter.columns", "b");
+                            conf.set("file-index.bloom-filter.b.items", "20");
+                        });
+
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 1, 300L));
+        write.write(rowData(1, 2, 400L));
+        write.write(rowData(1, 3, 200L));
+        write.write(rowData(1, 4, 500L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(rowData(1, 5, 100L));
+        write.write(rowData(1, 6, 600L));
+        write.write(rowData(1, 7, 400L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
+        Predicate predicate = builder.equal(2, 300L);
+
+        List<Split> splits =
+                toSplits(table.newSnapshotReader().withFilter(predicate).read().dataSplits());
+
+        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(1);
     }
 
     @Test
@@ -961,9 +1046,10 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowDataToString);
         assertThat(result).containsExactlyInAnyOrder("+I[+I, 1, 10, 100]");
 
-        // Read by projection
+        // Read by requiredType
+        RowType rowType = auditLogTable.rowType();
         snapshotReader = auditLogTable.newSnapshotReader();
-        read = auditLogTable.newRead().withProjection(new int[] {2, 0, 1});
+        read = auditLogTable.newRead().withReadType(rowType.project("a", "rowkind", "pt"));
         Function<InternalRow, String> projectToString1 =
                 row ->
                         internalRowToString(
@@ -974,9 +1060,9 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(result)
                 .containsExactlyInAnyOrder("+I[20, +I, 2]", "+I[30, +U, 1]", "+I[10, +I, 1]");
 
-        // Read by projection without row kind
+        // Read by requiredType without rowkind
         snapshotReader = auditLogTable.newSnapshotReader();
-        read = auditLogTable.newRead().withProjection(new int[] {2, 1});
+        read = auditLogTable.newRead().withReadType(rowType.project("a", "pt"));
         Function<InternalRow, String> projectToString2 =
                 row -> internalRowToString(row, DataTypes.ROW(DataTypes.INT(), DataTypes.INT()));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), projectToString2);
@@ -1003,7 +1089,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite("");
         StreamTableCommit commit = table.newCommit("");
-        // 1. inserts
+        // 1. Inserts
         write.write(GenericRow.of(1, 1, 3, 3));
         write.write(GenericRow.of(1, 1, 1, 1));
         write.write(GenericRow.of(1, 1, 2, 2));
@@ -1029,6 +1115,13 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         commit.commit(3, write.prepareCommit(true, 3));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
         assertThat(result).isEmpty();
+
+        // 5. Inserts
+        write.write(GenericRow.of(1, 1, 2, 2));
+        commit.commit(4, write.prepareCommit(true, 4));
+        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 2, 2]");
+
         write.close();
         commit.close();
     }
@@ -1408,15 +1501,23 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                 .hasMessage("Unsupported streaming scan for read optimized table");
     }
 
-    @Test
-    public void testReadDeletionVectorTable() throws Exception {
-        FileStoreTable table =
-                createFileStoreTable(
-                        options -> {
-                            // let level has many files
-                            options.set(TARGET_FILE_SIZE, new MemorySize(1));
-                            options.set(DELETION_VECTORS_ENABLED, true);
-                        });
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testReadDeletionVectorTable(boolean statsDenseStore) throws Exception {
+        Consumer<Options> optionsSetter =
+                options -> {
+                    // let level has many files
+                    options.set(TARGET_FILE_SIZE, new MemorySize(1));
+                    options.set(DELETION_VECTORS_ENABLED, true);
+
+                    options.set(CoreOptions.METADATA_STATS_DENSE_STORE, statsDenseStore);
+                    if (statsDenseStore) {
+                        options.set(CoreOptions.METADATA_STATS_MODE, "none");
+                        options.set("fields.b.stats-mode", "full");
+                    }
+                };
+
+        FileStoreTable table = createFileStoreTable(optionsSetter);
         StreamTableWrite write = table.newWrite(commitUser);
         IOManager ioManager = IOManager.create(tablePath.toString());
         write.withIOManager(ioManager);
@@ -1814,11 +1915,6 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Override
-    protected FileStoreTable createFileStoreTable(Consumer<Options> configure) throws Exception {
-        return createFileStoreTable(configure, ROW_TYPE);
-    }
-
-    @Override
     protected FileStoreTable overwriteTestFileStoreTable() throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
@@ -1835,7 +1931,8 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
     }
 
-    private FileStoreTable createFileStoreTable(Consumer<Options> configure, RowType rowType)
+    @Override
+    protected FileStoreTable createFileStoreTable(Consumer<Options> configure, RowType rowType)
             throws Exception {
         Options options = new Options();
         options.set(CoreOptions.PATH, tablePath.toString());

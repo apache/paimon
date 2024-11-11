@@ -92,7 +92,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                 "org.apache.paimon.avro.generated.record:manifest_entry,"
                         + "manifest_entry_data_file:r2,"
                         + "r2_partition:r102");
-        FileFormat manifestFileAvro = FileFormat.getFileFormat(manifestFileAvroOptions, "avro");
+        FileFormat manifestFileAvro = FileFormat.fromIdentifier("avro", manifestFileAvroOptions);
         return new IcebergManifestFile(
                 table.fileIO(),
                 partitionType,

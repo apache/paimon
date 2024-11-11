@@ -25,31 +25,20 @@ import org.apache.paimon.utils.InternalRowUtils;
 /** max aggregate a field of a row. */
 public class FieldMaxAgg extends FieldAggregator {
 
-    public static final String NAME = "max";
+    private static final long serialVersionUID = 1L;
 
-    public FieldMaxAgg(DataType dataType) {
-        super(dataType);
-    }
-
-    @Override
-    String name() {
-        return NAME;
+    public FieldMaxAgg(String name, DataType dataType) {
+        super(name, dataType);
     }
 
     @Override
     public Object agg(Object accumulator, Object inputField) {
-        Object max;
-
         if (accumulator == null || inputField == null) {
-            max = (accumulator == null ? inputField : accumulator);
-        } else {
-            DataTypeRoot type = fieldType.getTypeRoot();
-            if (InternalRowUtils.compare(accumulator, inputField, type) < 0) {
-                max = inputField;
-            } else {
-                max = accumulator;
-            }
+            return accumulator == null ? inputField : accumulator;
         }
-        return max;
+        DataTypeRoot type = fieldType.getTypeRoot();
+        return InternalRowUtils.compare(accumulator, inputField, type) < 0
+                ? inputField
+                : accumulator;
     }
 }

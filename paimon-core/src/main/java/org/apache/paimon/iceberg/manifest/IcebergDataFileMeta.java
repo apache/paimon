@@ -22,7 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.iceberg.metadata.IcebergSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -109,21 +109,22 @@ public class IcebergDataFileMeta {
             BinaryRow partition,
             long recordCount,
             long fileSizeInBytes,
-            TableSchema tableSchema,
+            IcebergSchema icebergSchema,
             SimpleStats stats) {
         Map<Integer, Long> nullValueCounts = new HashMap<>();
         Map<Integer, byte[]> lowerBounds = new HashMap<>();
         Map<Integer, byte[]> upperBounds = new HashMap<>();
 
         List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
-        int numFields = tableSchema.fields().size();
+        int numFields = icebergSchema.fields().size();
         for (int i = 0; i < numFields; i++) {
-            fieldGetters.add(InternalRow.createFieldGetter(tableSchema.fields().get(i).type(), i));
+            fieldGetters.add(
+                    InternalRow.createFieldGetter(icebergSchema.fields().get(i).dataType(), i));
         }
 
         for (int i = 0; i < numFields; i++) {
-            int fieldId = tableSchema.fields().get(i).id();
-            DataType type = tableSchema.fields().get(i).type();
+            int fieldId = icebergSchema.fields().get(i).id();
+            DataType type = icebergSchema.fields().get(i).dataType();
             nullValueCounts.put(fieldId, stats.nullCounts().getLong(i));
             Object minValue = fieldGetters.get(i).getFieldOrNull(stats.minValues());
             Object maxValue = fieldGetters.get(i).getFieldOrNull(stats.maxValues());
@@ -204,7 +205,7 @@ public class IcebergDataFileMeta {
                         128,
                         "upper_bounds",
                         DataTypes.MAP(DataTypes.INT().notNull(), DataTypes.BYTES().notNull())));
-        return new RowType(fields);
+        return new RowType(false, fields);
     }
 
     @Override

@@ -306,6 +306,10 @@ public class BinaryStringUtils {
     /** Used by {@code CAST(x as TIMESTAMP)}. */
     public static Timestamp toTimestamp(BinaryString input, int precision)
             throws DateTimeException {
+        if (StringUtils.isNumeric(input.toString())) {
+            long epoch = toLong(input);
+            return fromMillisToTimestamp(epoch, precision);
+        }
         return DateTimeUtils.parseTimestampData(input.toString(), precision);
     }
 
@@ -313,6 +317,35 @@ public class BinaryStringUtils {
     public static Timestamp toTimestamp(BinaryString input, int precision, TimeZone timeZone)
             throws DateTimeException {
         return DateTimeUtils.parseTimestampData(input.toString(), precision, timeZone);
+    }
+
+    // Helper method to convert epoch to Timestamp with the provided precision.
+    private static Timestamp fromMillisToTimestamp(long epoch, int precision) {
+        // Calculate milliseconds and nanoseconds from epoch based on precision
+        long millis;
+        int nanosOfMillis;
+
+        switch (precision) {
+            case 0: // seconds
+                millis = epoch * 1000;
+                nanosOfMillis = 0;
+                break;
+            case 3: // milliseconds
+                millis = epoch;
+                nanosOfMillis = 0;
+                break;
+            case 6: // microseconds
+                millis = epoch / 1000;
+                nanosOfMillis = (int) ((epoch % 1000) * 1000);
+                break;
+            case 9: // nanoseconds
+                millis = epoch / 1_000_000;
+                nanosOfMillis = (int) (epoch % 1_000_000);
+                break;
+            default:
+                throw new RuntimeException("Unsupported precision: " + precision);
+        }
+        return Timestamp.fromEpochMillis(millis, nanosOfMillis);
     }
 
     public static BinaryString toCharacterString(BinaryString strData, DataType type) {

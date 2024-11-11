@@ -498,7 +498,11 @@ public class FlinkGenericCatalog extends AbstractCatalog {
      */
     public Procedure getProcedure(ObjectPath procedurePath)
             throws ProcedureNotExistException, CatalogException {
-        return ProcedureUtil.getProcedure(paimon.catalog(), procedurePath)
-                .orElse(flink.getProcedure(procedurePath));
+        Optional<Procedure> procedure = ProcedureUtil.getProcedure(paimon.catalog(), procedurePath);
+        if (procedure.isPresent()) {
+            return procedure.get();
+        } else {
+            return flink.getProcedure(procedurePath);
+        }
     }
 }

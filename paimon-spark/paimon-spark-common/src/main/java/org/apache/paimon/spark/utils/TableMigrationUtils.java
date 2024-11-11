@@ -24,6 +24,7 @@ import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.hive.migrate.HiveMigrator;
 import org.apache.paimon.migrate.Migrator;
 
+import java.util.List;
 import java.util.Map;
 
 /** Migration util to choose importer according to connector. */
@@ -56,6 +57,27 @@ public class TableMigrationUtils {
                         options);
             default:
                 throw new UnsupportedOperationException("Unsupported connector " + connector);
+        }
+    }
+
+    public static List<Migrator> getImporters(
+            String connector,
+            Catalog catalog,
+            String sourceDatabase,
+            Integer parallelism,
+            Map<String, String> options) {
+        switch (connector) {
+            case "hive":
+                if (catalog instanceof CachingCatalog) {
+                    catalog = ((CachingCatalog) catalog).wrapped();
+                }
+                if (!(catalog instanceof HiveCatalog)) {
+                    throw new IllegalArgumentException("Only support Hive Catalog");
+                }
+                return HiveMigrator.databaseMigrators(
+                        (HiveCatalog) catalog, sourceDatabase, options, parallelism);
+            default:
+                throw new UnsupportedOperationException("Don't support connector " + connector);
         }
     }
 }

@@ -26,6 +26,7 @@ import org.apache.paimon.table.source.{DataSplit, Split}
 
 import org.junit.jupiter.api.Assertions
 
+import java.util
 import java.util.{HashMap => JHashMap}
 
 import scala.collection.JavaConverters._
@@ -42,7 +43,18 @@ class ScanHelperTest extends PaimonSparkTestBase {
       0.until(fileNum).foreach {
         i =>
           val path = s"f$i.parquet"
-          files += DataFileMeta.forAppend(path, 750000, 30000, null, 0, 29999, 1, FileSource.APPEND)
+          files += DataFileMeta.forAppend(
+            path,
+            750000,
+            30000,
+            null,
+            0,
+            29999,
+            1,
+            new java.util.ArrayList[String](),
+            null,
+            FileSource.APPEND,
+            null)
       }
 
       val dataSplits = mutable.ArrayBuffer.empty[Split]
@@ -67,7 +79,18 @@ class ScanHelperTest extends PaimonSparkTestBase {
 
   test("Paimon: reshuffle one split") {
     val files = List(
-      DataFileMeta.forAppend("f1.parquet", 750000, 30000, null, 0, 29999, 1, FileSource.APPEND)
+      DataFileMeta.forAppend(
+        "f1.parquet",
+        750000,
+        30000,
+        null,
+        0,
+        29999,
+        1,
+        new java.util.ArrayList[String](),
+        null,
+        FileSource.APPEND,
+        null)
     ).asJava
 
     val dataSplits: Array[Split] = Array(

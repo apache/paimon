@@ -84,7 +84,7 @@ public class ArrowFormatWriterTest {
 
     @Test
     public void testWrite() {
-        try (ArrowFormatWriter writer = new ArrowFormatWriter(PRIMITIVE_TYPE, 4096, false)) {
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(PRIMITIVE_TYPE, 4096, true)) {
             List<InternalRow> list = new ArrayList<>();
             List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
 
@@ -100,7 +100,7 @@ public class ArrowFormatWriterTest {
             writer.flush();
             VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
 
-            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(PRIMITIVE_TYPE);
+            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(PRIMITIVE_TYPE, true);
             Iterable<InternalRow> rows = arrowBatchReader.readBatch(vectorSchemaRoot);
 
             Iterator<InternalRow> iterator = rows.iterator();
@@ -118,7 +118,7 @@ public class ArrowFormatWriterTest {
 
     @Test
     public void testReadWithSchemaMessUp() {
-        try (ArrowFormatWriter writer = new ArrowFormatWriter(PRIMITIVE_TYPE, 4096, false)) {
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(PRIMITIVE_TYPE, 4096, true)) {
             List<InternalRow> list = new ArrayList<>();
             List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
 
@@ -142,7 +142,7 @@ public class ArrowFormatWriterTest {
             }
             vectors.set(vectors.size() - 1, vector0);
 
-            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(PRIMITIVE_TYPE);
+            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(PRIMITIVE_TYPE, true);
             Iterable<InternalRow> rows = arrowBatchReader.readBatch(new VectorSchemaRoot(vectors));
 
             Iterator<InternalRow> iterator = rows.iterator();
@@ -160,7 +160,7 @@ public class ArrowFormatWriterTest {
 
     @Test
     public void testArrowBundleRecords() {
-        try (ArrowFormatWriter writer = new ArrowFormatWriter(PRIMITIVE_TYPE, 4096, false)) {
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(PRIMITIVE_TYPE, 4096, true)) {
             List<InternalRow> list = new ArrayList<>();
             List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
 
@@ -177,7 +177,7 @@ public class ArrowFormatWriterTest {
             VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
 
             Iterator<InternalRow> iterator =
-                    new ArrowBundleRecords(vectorSchemaRoot, PRIMITIVE_TYPE).iterator();
+                    new ArrowBundleRecords(vectorSchemaRoot, PRIMITIVE_TYPE, true).iterator();
             for (int i = 0; i < 1000; i++) {
                 InternalRow actual = iterator.next();
                 InternalRow expectec = list.get(i);
@@ -192,7 +192,7 @@ public class ArrowFormatWriterTest {
 
     @Test
     public void testCWriter() {
-        try (ArrowFormatCWriter writer = new ArrowFormatCWriter(PRIMITIVE_TYPE, 4096, false)) {
+        try (ArrowFormatCWriter writer = new ArrowFormatCWriter(PRIMITIVE_TYPE, 4096, true)) {
             List<InternalRow> list = new ArrayList<>();
             List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
 
@@ -208,7 +208,7 @@ public class ArrowFormatWriterTest {
             writer.flush();
             VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
 
-            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(PRIMITIVE_TYPE);
+            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(PRIMITIVE_TYPE, true);
             Iterable<InternalRow> rows = arrowBatchReader.readBatch(vectorSchemaRoot);
 
             Iterator<InternalRow> iterator = rows.iterator();

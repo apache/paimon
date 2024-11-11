@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-name: UTCase and ITCase Non Flink
+name: UTCase and ITCase Others
 
 on:
   push:
@@ -53,6 +53,11 @@ jobs:
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          mvn -T 1C -B clean install -pl '!paimon-e2e-tests' -Pskip-paimon-flink-tests -Duser.timezone=$jvm_timezone
+          test_modules="!paimon-e2e-tests,"
+          for suffix in 3.5 3.4 3.3 3.2 common_2.12; do
+          test_modules+="!org.apache.paimon:paimon-spark-${suffix},"
+          done
+          test_modules="${test_modules%,}"
+          mvn -T 1C -B clean install -pl "${test_modules}" -Pskip-paimon-flink-tests -Duser.timezone=$jvm_timezone
         env:
           MAVEN_OPTS: -Xmx4096m

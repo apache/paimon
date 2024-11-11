@@ -120,7 +120,7 @@ public class TableSchema implements Serializable {
         // try to trim to validate primary keys
         trimmedPrimaryKeys();
 
-        // try to validate and initalize the bucket keys
+        // try to validate and initialize the bucket keys
         List<String> tmpBucketKeys = originalBucketKeys();
         if (tmpBucketKeys.isEmpty()) {
             tmpBucketKeys = trimmedPrimaryKeys();

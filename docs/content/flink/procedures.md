@@ -71,6 +71,7 @@ All available procedures are listed below.
          -- Use indexed argument<br/>
          CALL [catalog.]sys.compact('table') <br/><br/>
          CALL [catalog.]sys.compact('table', 'partitions') <br/><br/> 
+         CALL [catalog.]sys.compact('table', 'order_strategy', 'order_by') <br/><br/>
          CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by') <br/><br/>
          CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options') <br/><br/>
          CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options', 'where') <br/><br/>
@@ -222,6 +223,46 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
+      <td>replace_tag</td>
+      <td>
+         -- Use named argument<br/>
+         -- replace tag with new time retained <br/>
+         CALL [catalog.]sys.replace_tag(`table` => 'identifier', tag => 'tagName', time_retained => 'timeRetained') <br/>
+         -- replace tag with new snapshot id and time retained <br/>
+         CALL [catalog.]sys.replace_tag(`table` => 'identifier', snapshot_id => 'snapshotId') <br/><br/>
+         -- Use indexed argument<br/>
+         -- replace tag with new snapshot id and time retained <br/>
+         CALL [catalog.]sys.replace_tag('identifier', 'tagName', 'snapshotId', 'timeRetained') <br/>
+      </td>
+      <td>
+         To replace an existing tag with new tag info. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>tag: name of the existed tag. Cannot be empty.</li>
+            <li>snapshot(Long):  id of the snapshot which the tag is based on, it is optional.</li>
+            <li>time_retained: The maximum time retained for the existing tag, it is optional.</li>
+      </td>
+      <td>
+         -- for Flink 1.18<br/>
+         CALL sys.replace_tag('default.T', 'my_tag', 5, '1 d')<br/><br/>
+         -- for Flink 1.19 and later<br/>
+         CALL sys.replace_tag(`table` => 'default.T', tag => 'my_tag', snapshot_id => 5, time_retained => '1 d')<br/><br/>
+      </td>
+   </tr>
+   <tr>
+      <td>expire_tags</td>
+      <td>
+         CALL [catalog.]sys.expire_tags('identifier', 'older_than')
+      </td>
+      <td>
+         To expire tags by time. Arguments:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>older_than: tagCreateTime before which tags will be removed.</li>
+      </td>
+      <td>
+         CALL sys.expire_tags(table => 'default.T', older_than => '2024-09-06 11:00:00')
+      </td>
+   </tr>
+   <tr>
       <td>merge_into</td>
       <td>
          -- for Flink 1.18<br/>
@@ -241,10 +282,13 @@ All available procedures are listed below.
             matched_upsert_setting => 'matchedUpsertSetting',<br/>
             not_matched_insert_condition => 'notMatchedInsertCondition',<br/>
             not_matched_insert_values => 'notMatchedInsertValues',<br/>
-            matched_delete_condition => 'matchedDeleteCondition') <br/><br/>
+            matched_delete_condition => 'matchedDeleteCondition',<br/>
+            not_matched_by_source_upsert_condition => 'notMatchedBySourceUpsertCondition',<br/>
+            not_matched_by_source_upsert_setting => 'notMatchedBySourceUpsertSetting',<br/>
+            not_matched_by_source_delete_condition => 'notMatchedBySourceDeleteCondition') <br/><br/>
       </td>
       <td>
-         To perform "MERGE INTO" syntax. See <a href="/how-to/writing-tables#merging-into-table">merge_into action</a> for
+         To perform "MERGE INTO" syntax. See <a href="/flink/action-jars#merging-into-table">merge_into action</a> for
          details of arguments.
       </td>
       <td>
@@ -268,12 +312,13 @@ All available procedures are listed below.
       <td>remove_orphan_files</td>
       <td>
          -- Use named argument<br/>
-         CALL [catalog.]sys.remove_orphan_files(`table` => 'identifier', older_than => 'olderThan', dry_run => 'dryRun') <br/><br/>
+         CALL [catalog.]sys.remove_orphan_files(`table` => 'identifier', older_than => 'olderThan', dry_run => 'dryRun', mode => 'mode') <br/><br/>
          -- Use indexed argument<br/>
          CALL [catalog.]sys.remove_orphan_files('identifier')<br/><br/>
          CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan')<br/><br/>
          CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun')<br/><br/>
-         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun','parallelism')
+         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun','parallelism')<br/><br/>
+         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun','parallelism','mode')
       </td>
       <td>
          To remove the orphan data files and metadata files. Arguments:
@@ -283,11 +328,13 @@ All available procedures are listed below.
             </li>
             <li>dryRun: when true, view only orphan files, don't actually remove files. Default is false.</li>
             <li>parallelism: The maximum number of concurrent deleting files. By default is the number of processors available to the Java virtual machine.</li>
+            <li>mode: The mode of remove orphan clean procedure (local or distributed) . By default is distributed.</li>
       </td>
       <td>CALL remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00')<br/><br/>
           CALL remove_orphan_files(`table` => 'default.*', older_than => '2023-10-31 12:00:00')<br/><br/>
           CALL remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true)<br/><br/>
-          CALL remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => '5')
+          CALL remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => '5')<br/><br/>
+          CALL remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => '5', mode => 'local')
       </td>
    </tr>
    <tr>
@@ -334,6 +381,28 @@ All available procedures are listed below.
          CALL sys.rollback_to('default.T', 10)
          -- for Flink 1.19 and later<br/>
          CALL sys.rollback_to(`table` => 'default.T', snapshot_id => 10)
+      </td>
+   </tr>
+   <tr>
+      <td>rollback_to_timestamp</td>
+      <td>
+         -- for Flink 1.18<br/>
+         -- rollback to the snapshot which earlier or equal than timestamp.<br/>
+         CALL sys.rollback_to_timestamp('identifier', timestamp)<br/><br/>
+         -- for Flink 1.19 and later<br/>
+         -- rollback to the snapshot which earlier or equal than timestamp.<br/>
+         CALL sys.rollback_to_timestamp(`table` => 'default.T', `timestamp` => timestamp)<br/><br/>
+      </td>
+      <td>
+         To rollback to the snapshot which earlier or equal than timestamp. Argument:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>timestamp (Long): Roll back to the snapshot which earlier or equal than timestamp.</li>
+      </td>
+      <td>
+         -- for Flink 1.18<br/>
+         CALL sys.rollback_to_timestamp('default.T', 10)
+         -- for Flink 1.19 and later<br/>
+         CALL sys.rollback_to_timestamp(`table` => 'default.T', timestamp => 1730292023000)
       </td>
    </tr>
    <tr>

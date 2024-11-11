@@ -25,9 +25,8 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.stats.SimpleStats;
-import org.apache.paimon.stats.SimpleStatsConverter;
-import org.apache.paimon.stats.SimpleStatsConverters;
+import org.apache.paimon.stats.SimpleStatsEvolution;
+import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -41,7 +40,8 @@ import java.util.Map;
 /** {@link FileStoreScan} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
-    private final SimpleStatsConverters simpleStatsConverters;
+    private final BucketSelectConverter bucketSelectConverter;
+    private final SimpleStatsEvolutions simpleStatsEvolutions;
 
     private final boolean fileIndexReadEnabled;
 
@@ -52,35 +52,29 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
     public AppendOnlyFileStoreScan(
             ManifestsReader manifestsReader,
-            RowType partitionType,
-            ScanBucketFilter bucketFilter,
+            BucketSelectConverter bucketSelectConverter,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
             TableSchema schema,
             ManifestFile.Factory manifestFileFactory,
-            int numOfBuckets,
-            boolean checkNumOfBuckets,
             Integer scanManifestParallelism,
             boolean fileIndexReadEnabled) {
         super(
                 manifestsReader,
-                partitionType,
-                bucketFilter,
                 snapshotManager,
                 schemaManager,
                 schema,
                 manifestFileFactory,
-                numOfBuckets,
-                checkNumOfBuckets,
                 scanManifestParallelism);
-        this.simpleStatsConverters =
-                new SimpleStatsConverters(sid -> scanTableSchema(sid).fields(), schema.id());
+        this.bucketSelectConverter = bucketSelectConverter;
+        this.simpleStatsEvolutions =
+                new SimpleStatsEvolutions(sid -> scanTableSchema(sid).fields(), schema.id());
         this.fileIndexReadEnabled = fileIndexReadEnabled;
     }
 
     public AppendOnlyFileStoreScan withFilter(Predicate predicate) {
         this.filter = predicate;
-        this.bucketKeyFilter.pushdown(predicate);
+        this.bucketSelectConverter.convert(predicate).ifPresent(this::withTotalAwareBucketFilter);
         return this;
     }
 
@@ -91,15 +85,18 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             return true;
         }
 
-        SimpleStatsConverter serializer =
-                simpleStatsConverters.getOrCreate(entry.file().schemaId());
-        SimpleStats stats = entry.file().valueStats();
+        SimpleStatsEvolution evolution = simpleStatsEvolutions.getOrCreate(entry.file().schemaId());
+        SimpleStatsEvolution.Result stats =
+                evolution.evolution(
+                        entry.file().valueStats(),
+                        entry.file().rowCount(),
+                        entry.file().valueStatsCols());
 
         return filter.test(
                         entry.file().rowCount(),
-                        serializer.evolution(stats.minValues()),
-                        serializer.evolution(stats.maxValues()),
-                        serializer.evolution(stats.nullCounts(), entry.file().rowCount()))
+                        stats.minValues(),
+                        stats.maxValues(),
+                        stats.nullCounts())
                 && (!fileIndexReadEnabled || testFileIndex(entry.file().embeddedIndex(), entry));
     }
 
@@ -119,11 +116,11 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
         Predicate dataPredicate =
                 dataFilterMapping.computeIfAbsent(
                         entry.file().schemaId(),
-                        id -> simpleStatsConverters.convertFilter(entry.file().schemaId(), filter));
+                        id -> simpleStatsEvolutions.convertFilter(entry.file().schemaId(), filter));
 
         try (FileIndexPredicate predicate =
                 new FileIndexPredicate(embeddedIndexBytes, dataRowType)) {
-            return predicate.testPredicate(dataPredicate);
+            return predicate.evaluate(dataPredicate).remain();
         } catch (IOException e) {
             throw new RuntimeException("Exception happens while checking predicate.", e);
         }

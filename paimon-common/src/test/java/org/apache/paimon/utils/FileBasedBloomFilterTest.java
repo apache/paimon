@@ -19,12 +19,16 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.io.PageFileInput;
+import org.apache.paimon.io.cache.Cache;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
+import org.apache.paimon.testutils.junit.parameterized.Parameters;
 
 import org.assertj.core.api.Assertions;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
@@ -33,14 +37,26 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 
 /** Test for {@link FileBasedBloomFilter}. */
+@ExtendWith(ParameterizedTestExtension.class)
 public class FileBasedBloomFilterTest {
 
     @TempDir Path tempDir;
+    private final Cache.CacheType cacheType;
 
-    @Test
+    public FileBasedBloomFilterTest(Cache.CacheType cacheType) {
+        this.cacheType = cacheType;
+    }
+
+    @Parameters(name = "{0}")
+    public static List<Cache.CacheType> getVarSeg() {
+        return Arrays.asList(Cache.CacheType.CAFFEINE, Cache.CacheType.GUAVA);
+    }
+
+    @TestTemplate
     public void testProbe() throws IOException {
         MemorySegment segment = MemorySegment.wrap(new byte[1000]);
         BloomFilter.Builder builder = new BloomFilter.Builder(segment, 100);
@@ -48,7 +64,7 @@ public class FileBasedBloomFilterTest {
         Arrays.stream(inputs).forEach(i -> builder.addHash(Integer.hashCode(i)));
         File file = writeFile(segment.getArray());
 
-        CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1));
+        CacheManager cacheManager = new CacheManager(cacheType, MemorySize.ofMebiBytes(1));
         FileBasedBloomFilter filter =
                 new FileBasedBloomFilter(
                         PageFileInput.create(file, 1024, null, 0, null),
@@ -59,7 +75,8 @@ public class FileBasedBloomFilterTest {
 
         Arrays.stream(inputs)
                 .forEach(i -> Assertions.assertThat(filter.testHash(Integer.hashCode(i))).isTrue());
-        cacheManager.cache().invalidateAll();
+        filter.close();
+        Assertions.assertThat(cacheManager.cache().asMap()).isEmpty();
         Assertions.assertThat(filter.bloomFilter().getMemorySegment()).isNull();
     }
 

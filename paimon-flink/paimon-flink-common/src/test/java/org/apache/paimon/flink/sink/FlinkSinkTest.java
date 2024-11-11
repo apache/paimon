@@ -36,17 +36,15 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.api.common.state.ListState;
-import org.apache.flink.api.common.state.ListStateDescriptor;
-import org.apache.flink.runtime.io.disk.iomanager.IOManagerAsync;
-import org.apache.flink.runtime.state.StateInitializationContextImpl;
+import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.operators.SimpleOperatorFactory;
-import org.apache.flink.streaming.api.operators.collect.utils.MockOperatorStateStore;
 import org.apache.flink.streaming.api.transformations.OneInputTransformation;
+import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -90,20 +88,14 @@ public class FlinkSinkTest {
                                         ((OneInputTransformation) written.getTransformation())
                                                 .getOperatorFactory())
                                 .getOperator());
-        StateInitializationContextImpl context =
-                new StateInitializationContextImpl(
-                        null,
-                        new MockOperatorStateStore() {
-                            @Override
-                            public <S> ListState<S> getUnionListState(
-                                    ListStateDescriptor<S> stateDescriptor) throws Exception {
-                                return getListState(stateDescriptor);
-                            }
-                        },
-                        null,
-                        null,
-                        null);
-        operator.initStateAndWriter(context, (a, b, c) -> true, new IOManagerAsync(), "123");
+
+        TypeSerializer<Committable> serializer =
+                new CommittableTypeInfo().createSerializer(new ExecutionConfig());
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> harness =
+                new OneInputStreamOperatorTestHarness<>(operator);
+        harness.setup(serializer);
+        harness.initializeEmptyState();
+
         return ((KeyValueFileStoreWrite) ((StoreSinkWriteImpl) operator.write).write.getWrite())
                 .bufferSpillable();
     }

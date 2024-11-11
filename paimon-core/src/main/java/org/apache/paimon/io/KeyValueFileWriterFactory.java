@@ -23,6 +23,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueSerializer;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsExtractor;
@@ -52,6 +53,7 @@ public class KeyValueFileWriterFactory {
     private final WriteFormatContext formatContext;
     private final long suggestedFileSize;
     private final CoreOptions options;
+    private final FileIndexOptions fileIndexOptions;
 
     private KeyValueFileWriterFactory(
             FileIO fileIO,
@@ -68,6 +70,7 @@ public class KeyValueFileWriterFactory {
         this.formatContext = formatContext;
         this.suggestedFileSize = suggestedFileSize;
         this.options = options;
+        this.fileIndexOptions = options.indexColumnsOptions();
     }
 
     public RowType keyType() {
@@ -117,7 +120,8 @@ public class KeyValueFileWriterFactory {
                 level,
                 formatContext.compression(level),
                 options,
-                fileSource);
+                fileSource,
+                fileIndexOptions);
     }
 
     public void deleteFile(String filename, int level) {
@@ -238,7 +242,8 @@ public class KeyValueFileWriterFactory {
                         format,
                         parentFactories.get(format).createDataFilePathFactory(partition, bucket));
 
-                FileFormat fileFormat = FileFormat.getFileFormat(options.toConfiguration(), format);
+                FileFormat fileFormat =
+                        FileFormat.fromIdentifier(format, options.toConfiguration());
                 // In avro format, minValue, maxValue, and nullCount are not counted, set
                 // StatsExtractor is Optional.empty() and will use SimpleStatsExtractor to collect
                 // stats

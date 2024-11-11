@@ -117,7 +117,6 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
                                 + "'table-default.opt1'='value1', "
                                 + "'table-default.opt2'='value2', "
                                 + "'table-default.opt3'='value3', "
-                                + "'fs.allow-hadoop-fallback'='false',"
                                 + "'lock.enabled'='false'"
                                 + ")",
                         path));
@@ -134,7 +133,6 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
         assertThat(tableOptions).containsEntry("opt1", "value1");
         assertThat(tableOptions).containsEntry("opt2", "value2");
         assertThat(tableOptions).containsEntry("opt3", "value3");
-        assertThat(tableOptions).doesNotContainKey("fs.allow-hadoop-fallback");
         assertThat(tableOptions).doesNotContainKey("lock.enabled");
 
         // check table options override catalog's
@@ -147,7 +145,6 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
         assertThat(tableOptions).containsEntry("opt1", "value1");
         assertThat(tableOptions).containsEntry("opt2", "value2");
         assertThat(tableOptions).containsEntry("opt3", "value4");
-        assertThat(tableOptions).doesNotContainKey("fs.allow-hadoop-fallback");
         assertThat(tableOptions).doesNotContainKey("lock.enabled");
     }
 

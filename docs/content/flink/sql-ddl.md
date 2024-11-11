@@ -203,6 +203,9 @@ Paimon will automatically collect the statistics of the data file for speeding u
 The statistics collector mode can be configured by `'metadata.stats-mode'`, by default is `'truncate(16)'`.
 You can configure the field level by setting `'fields.{field_name}.stats-mode'`.
 
+For the stats mode of `none`, we suggest that you configure `metadata.stats-dense-store` = `true`, which will
+significantly reduce the storage size of the manifest.
+
 ### Field Default Value
 
 Paimon table currently supports setting default values for fields in table properties by `'fields.item_id.default-value'`,

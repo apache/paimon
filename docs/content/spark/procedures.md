@@ -110,6 +110,31 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>rename_tag</td>
+      <td>
+         Rename a tag with a new tag name. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>tag_name: name of the tag. Cannot be empty.</li>
+            <li>target_tag_name: the new tag name to rename. Cannot be empty.</li>
+      </td>
+      <td>
+         CALL sys.rename_tag(table => 'default.T', tag_name => 'tag1', target_tag_name => 'tag2')
+      </td>
+    </tr>
+    <tr>
+      <td>replace_tag</td>
+      <td>
+         Replace an existing tag with new tag info. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>tag: name of the existed tag. Cannot be empty.</li>
+            <li>snapshot(Long):  id of the snapshot which the tag is based on, it is optional.</li>
+            <li>time_retained: The maximum time retained for the existing tag, it is optional.</li>
+      </td>
+      <td>
+         CALL sys.replace_tag(table => 'default.T', tag_name => 'tag1', snapshot => 10, time_retained => '1 d')
+      </td>
+    </tr>
+    <tr>
       <td>delete_tag</td>
       <td>
          To delete a tag. Arguments:
@@ -117,6 +142,17 @@ This section introduce all available spark procedures about paimon.
             <li>tag: name of the tag to be deleted. If you specify multiple tags, delimiter is ','.</li>
       </td>
       <td>CALL sys.delete_tag(table => 'default.T', tag => 'my_tag')</td>
+    </tr>
+    <tr>
+      <td>expire_tags</td>
+      <td>
+         To expire tags by time. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>older_than: tagCreateTime before which tags will be removed.</li>
+      </td>
+      <td>
+         CALL sys.expire_tags(table => 'default.T', older_than => '2024-09-06 11:00:00')
+      </td>
     </tr>
     <tr>
       <td>rollback</td>
@@ -129,6 +165,29 @@ This section introduce all available spark procedures about paimon.
           CALL sys.rollback(table => 'default.T', version => 'my_tag')<br/><br/>
           CALL sys.rollback(table => 'default.T', version => 10)
       </td>
+    </tr>
+    <tr>
+      <td>rollback_to_timestamp</td>
+      <td>
+         To rollback to the snapshot which earlier or equal than timestamp. Argument:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>timestamp: roll back to the snapshot which earlier or equal than timestamp.</li>
+      </td>
+      <td>
+          CALL sys.rollback_to_timestamp(table => 'default.T', timestamp => 1730292023000)<br/><br/>
+      </td>
+    </tr>
+    <tr>
+      <td>migrate_database</td>
+      <td>
+         Migrate hive table to a paimon table. Arguments:
+            <li>source_type: the origin table's type to be migrated, such as hive. Cannot be empty.</li>
+            <li>database: name of the origin database to be migrated. Cannot be empty.</li>
+            <li>options: the table options of the paimon table to migrate.</li>
+            <li>options_map: Options map for adding key-value options which is a map.</li>
+            <li>parallelism: the parallelism for migrate process, default is core numbers of machine.</li>
+      </td>
+      <td>CALL sys.migrate_database(source_type => 'hive', database => 'db01', options => 'file.format=parquet', options_map => map('k1','v1'), parallelism => 6)</td>
     </tr>
     <tr>
       <td>migrate_table</td>
@@ -164,12 +223,14 @@ This section introduce all available spark procedures about paimon.
             <li>older_than: to avoid deleting newly written files, this procedure only deletes orphan files older than 1 day by default. This argument can modify the interval.</li>
             <li>dry_run: when true, view only orphan files, don't actually remove files. Default is false.</li>
             <li>parallelism: The maximum number of concurrent deleting files. By default is the number of processors available to the Java virtual machine.</li>
+            <li>mode: The mode of remove orphan clean procedure (local or distributed) . By default is distributed.</li>
       </td>
       <td>
           CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00')<br/><br/>
           CALL sys.remove_orphan_files(table => 'default.*', older_than => '2023-10-31 12:00:00')<br/><br/>
           CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true)<br/><br/>
-          CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true, parallelism => '5')
+          CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true, parallelism => '5')<br/><br/>
+          CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true, parallelism => '5', mode => 'local')
       </td>
     </tr>
     <tr>

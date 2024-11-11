@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.SnapshotManager;
@@ -194,44 +195,13 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         sql("CALL sys.create_branch('default.T', 'test', 'tag1')");
         sql("CALL sys.create_branch('default.T', 'test2', 'tag2')");
 
-        assertThat(collectResult("SELECT branch_name, created_from_snapshot FROM `T$branches`"))
-                .containsExactlyInAnyOrder("+I[test, 1]", "+I[test2, 2]");
+        assertThat(collectResult("SELECT branch_name FROM `T$branches`"))
+                .containsExactlyInAnyOrder("+I[test]", "+I[test2]");
 
         sql("CALL sys.delete_branch('default.T', 'test')");
 
-        assertThat(collectResult("SELECT branch_name, created_from_snapshot FROM `T$branches`"))
-                .containsExactlyInAnyOrder("+I[test2, 2]");
-    }
-
-    @Test
-    public void testBranchManagerGetBranchSnapshotsList() throws Exception {
-        sql(
-                "CREATE TABLE T ("
-                        + " pt INT"
-                        + ", k INT"
-                        + ", v STRING"
-                        + ", PRIMARY KEY (pt, k) NOT ENFORCED"
-                        + " ) PARTITIONED BY (pt) WITH ("
-                        + " 'bucket' = '2'"
-                        + " )");
-
-        sql("INSERT INTO T VALUES (1, 10, 'hxh')");
-        sql("INSERT INTO T VALUES (1, 20, 'hxh')");
-        sql("INSERT INTO T VALUES (1, 30, 'hxh')");
-
-        FileStoreTable table = paimonTable("T");
-        checkSnapshots(table.snapshotManager(), 1, 3);
-
-        sql("CALL sys.create_tag('default.T', 'tag1', 1)");
-        sql("CALL sys.create_tag('default.T', 'tag2', 2)");
-        sql("CALL sys.create_tag('default.T', 'tag3', 3)");
-
-        sql("CALL sys.create_branch('default.T', 'test1', 'tag1')");
-        sql("CALL sys.create_branch('default.T', 'test2', 'tag2')");
-        sql("CALL sys.create_branch('default.T', 'test3', 'tag3')");
-
-        assertThat(collectResult("SELECT created_from_snapshot FROM `T$branches`"))
-                .containsExactlyInAnyOrder("+I[1]", "+I[2]", "+I[3]");
+        assertThat(collectResult("SELECT branch_name FROM `T$branches`"))
+                .containsExactlyInAnyOrder("+I[test2]");
     }
 
     @Test
@@ -527,6 +497,43 @@ public class BranchSqlITCase extends CatalogITCaseBase {
                             sql("ALTER TABLE t2 SET ('scan.fallback-branch' = 'test')");
                         })
                 .satisfies(anyCauseMatches(IllegalArgumentException.class, errMsg));
+    }
+
+    @Test
+    public void testReadBranchTableWithMultiSchemaIds() throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " pt INT"
+                        + ", k INT"
+                        + ", v STRING"
+                        + ", PRIMARY KEY (pt, k) NOT ENFORCED"
+                        + " ) PARTITIONED BY (pt) WITH ("
+                        + " 'bucket' = '2'"
+                        + " )");
+
+        sql("INSERT INTO T VALUES" + " (1, 10, 'apple')," + " (1, 20, 'banana')");
+
+        sql("ALTER TABLE `T` ADD (v2 INT)");
+
+        sql("INSERT INTO T VALUES" + " (2, 10, 'cat', 2)," + " (2, 20, 'dog', 2)");
+
+        sql("ALTER TABLE `T` ADD (v3 INT)");
+
+        sql("CALL sys.create_tag('default.T', 'tag1', 2)");
+
+        sql("CALL sys.create_branch('default.T', 'test', 'tag1')");
+
+        FileStoreTable table = paimonTable("T");
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location(), "test");
+        List<Long> schemaIds = schemaManager.listAllIds();
+        assertThat(schemaIds.size()).isEqualTo(2);
+
+        assertThat(collectResult("SELECT * FROM T$branch_test"))
+                .containsExactlyInAnyOrder(
+                        "+I[1, 10, apple, null]",
+                        "+I[1, 20, banana, null]",
+                        "+I[2, 10, cat, 2]",
+                        "+I[2, 20, dog, 2]");
     }
 
     private List<String> collectResult(String sql) throws Exception {

@@ -42,10 +42,10 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC;
-import static org.apache.paimon.flink.FlinkCatalog.LAST_UPDATE_TIME_KEY;
-import static org.apache.paimon.flink.FlinkCatalog.NUM_FILES_KEY;
-import static org.apache.paimon.flink.FlinkCatalog.NUM_ROWS_KEY;
-import static org.apache.paimon.flink.FlinkCatalog.TOTAL_SIZE_KEY;
+import static org.apache.paimon.catalog.Catalog.LAST_UPDATE_TIME_PROP;
+import static org.apache.paimon.catalog.Catalog.NUM_FILES_PROP;
+import static org.apache.paimon.catalog.Catalog.NUM_ROWS_PROP;
+import static org.apache.paimon.catalog.Catalog.TOTAL_SIZE_PROP;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -70,14 +70,23 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("CREATE TABLE T (a INT, b INT)");
         sql("INSERT INTO T VALUES (1, 2)");
         sql("INSERT INTO T VALUES (3, 4)");
+        sql("INSERT INTO T VALUES (5, 6)");
 
         List<Row> result = sql("SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots");
-        assertThat(result).containsExactly(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
+        assertThat(result)
+                .containsExactly(
+                        Row.of(1L, 0L, "APPEND"),
+                        Row.of(2L, 0L, "APPEND"),
+                        Row.of(3L, 0L, "APPEND"));
 
         result =
                 sql(
                         "SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots WHERE schema_id = 0");
-        assertThat(result).containsExactly(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
+        assertThat(result)
+                .containsExactly(
+                        Row.of(1L, 0L, "APPEND"),
+                        Row.of(2L, 0L, "APPEND"),
+                        Row.of(3L, 0L, "APPEND"));
 
         result =
                 sql(
@@ -87,7 +96,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         result =
                 sql(
                         "SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots WHERE snapshot_id > 1");
-        assertThat(result).containsExactly(Row.of(2L, 0L, "APPEND"));
+        assertThat(result).containsExactly(Row.of(2L, 0L, "APPEND"), Row.of(3L, 0L, "APPEND"));
 
         result =
                 sql(
@@ -97,12 +106,30 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         result =
                 sql(
                         "SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots WHERE snapshot_id >= 1");
-        assertThat(result).contains(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
+        assertThat(result)
+                .contains(
+                        Row.of(1L, 0L, "APPEND"),
+                        Row.of(2L, 0L, "APPEND"),
+                        Row.of(3L, 0L, "APPEND"));
 
         result =
                 sql(
                         "SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots WHERE snapshot_id <= 2");
         assertThat(result).contains(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
+
+        result =
+                sql(
+                        "SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots WHERE snapshot_id in (1, 2)");
+        assertThat(result).contains(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
+
+        result =
+                sql(
+                        "SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots WHERE snapshot_id in (1, 2) or schema_id=0");
+        assertThat(result)
+                .contains(
+                        Row.of(1L, 0L, "APPEND"),
+                        Row.of(2L, 0L, "APPEND"),
+                        Row.of(3L, 0L, "APPEND"));
     }
 
     @Test
@@ -162,7 +189,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     public void testChangeTableInSystemDatabase() {
         sql("USE sys");
         assertThatCode(() -> sql("ALTER TABLE all_table_options SET ('bucket-num' = '5')"))
-                .hasRootCauseMessage("Can't alter system table.");
+                .rootCause()
+                .hasMessageContaining("Only support alter data table, but is: ");
     }
 
     @Test
@@ -271,7 +299,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         result =
                 sql(
                         "SELECT schema_id, fields, partition_keys, "
-                                + "primary_keys, options, `comment` FROM T$schemas where schema_id>0 and schema_id<3");
+                                + "primary_keys, options, `comment` FROM T$schemas where schema_id>0 and schema_id<3 order by schema_id");
         assertThat(result.toString())
                 .isEqualTo(
                         "[+I[1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
@@ -280,6 +308,42 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 + "+I[2, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},"
                                 + "{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], {\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\","
                                 + "\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\"}, ]]");
+
+        // test for IN filter
+        result =
+                sql(
+                        "SELECT schema_id, fields, partition_keys, "
+                                + "primary_keys, options, `comment` FROM T$schemas where schema_id in (1, 3) order by schema_id");
+        assertThat(result.toString())
+                .isEqualTo(
+                        "[+I[1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\"}, ], "
+                                + "+I[3, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},"
+                                + "{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\",\"snapshot.num-retained.min\":\"18\"}, ]]");
+
+        result =
+                sql(
+                        "SELECT schema_id, fields, partition_keys, "
+                                + "primary_keys, options, `comment` FROM T$schemas where schema_id in (1, 3) or fields='[{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}]' order by schema_id");
+        assertThat(result.toString())
+                .isEqualTo(
+                        "[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
+                                + "{\"a.aa.aaa\":\"val1\",\"b.bb.bbb\":\"val2\"}, ], "
+                                + "+I[1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\"}, ], "
+                                + "+I[2, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\"}, ], "
+                                + "+I[3, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},"
+                                + "{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\",\"snapshot.num-retained.min\":\"18\"}, ], "
+                                + "+I[4, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\",\"manifest.format\":\"avro\","
+                                + "\"snapshot.num-retained.min\":\"18\"}, ]]");
 
         // check with not exist schema id
         assertThatThrownBy(
@@ -554,10 +618,10 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertThat(partitionPropertiesMap1)
                 .allSatisfy(
                         (par, properties) -> {
-                            assertThat(properties.get(NUM_ROWS_KEY)).isEqualTo("2");
-                            assertThat(properties.get(LAST_UPDATE_TIME_KEY)).isNotBlank();
-                            assertThat(properties.get(NUM_FILES_KEY)).isEqualTo("1");
-                            assertThat(properties.get(TOTAL_SIZE_KEY)).isNotBlank();
+                            assertThat(properties.get(NUM_ROWS_PROP)).isEqualTo("2");
+                            assertThat(properties.get(LAST_UPDATE_TIME_PROP)).isNotBlank();
+                            assertThat(properties.get(NUM_FILES_PROP)).isEqualTo("1");
+                            assertThat(properties.get(TOTAL_SIZE_PROP)).isNotBlank();
                         });
         // update p1 data
         sql("UPDATE PK_T SET word = 'c' WHERE id = 2");
@@ -589,8 +653,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertThat(partitionPropertiesMap1)
                 .allSatisfy(
                         (par, properties) -> {
-                            assertThat(properties.get(NUM_ROWS_KEY)).isEqualTo("1");
-                            assertThat(properties.get(LAST_UPDATE_TIME_KEY)).isNotBlank();
+                            assertThat(properties.get(NUM_ROWS_PROP)).isEqualTo("1");
+                            assertThat(properties.get(LAST_UPDATE_TIME_PROP)).isNotBlank();
                         });
 
         // append data to p1
@@ -844,20 +908,35 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("CREATE TABLE T (a INT, b INT)");
         sql("INSERT INTO T VALUES (1, 2)");
         sql("INSERT INTO T VALUES (3, 4)");
+        sql("INSERT INTO T VALUES (5, 6)");
 
         paimonTable("T").createTag("tag1", 1);
         paimonTable("T").createTag("tag2", 2);
+        paimonTable("T").createTag("tag3", 3);
 
         List<Row> result =
                 sql(
                         "SELECT tag_name, snapshot_id, schema_id, record_count FROM T$tags ORDER BY tag_name");
-
-        assertThat(result).containsExactly(Row.of("tag1", 1L, 0L, 1L), Row.of("tag2", 2L, 0L, 2L));
+        assertThat(result)
+                .containsExactly(
+                        Row.of("tag1", 1L, 0L, 1L),
+                        Row.of("tag2", 2L, 0L, 2L),
+                        Row.of("tag3", 3L, 0L, 3L));
 
         result =
                 sql(
                         "SELECT tag_name, snapshot_id, schema_id, record_count FROM T$tags where tag_name = 'tag1' ");
         assertThat(result).containsExactly(Row.of("tag1", 1L, 0L, 1L));
+
+        result =
+                sql(
+                        "SELECT tag_name, snapshot_id, schema_id, record_count FROM T$tags where tag_name in ('tag1', 'tag3')");
+        assertThat(result).containsExactly(Row.of("tag1", 1L, 0L, 1L), Row.of("tag3", 3L, 0L, 3L));
+
+        result =
+                sql(
+                        "SELECT tag_name, snapshot_id, schema_id, record_count FROM T$tags where tag_name in ('tag1') or snapshot_id=2");
+        assertThat(result).containsExactly(Row.of("tag1", 1L, 0L, 1L), Row.of("tag2", 2L, 0L, 2L));
     }
 
     @Test
@@ -1063,13 +1142,13 @@ public class CatalogTableITCase extends CatalogITCaseBase {
             Long expectedNumFiles) {
         Map<String, String> newPartitionProperties = newProperties.get(partition);
         Map<String, String> oldPartitionProperties = oldProperties.get(partition);
-        assertThat(newPartitionProperties.get(NUM_ROWS_KEY))
+        assertThat(newPartitionProperties.get(NUM_ROWS_PROP))
                 .isEqualTo(String.valueOf(expectedNumRows));
-        assertThat(Long.valueOf(newPartitionProperties.get(LAST_UPDATE_TIME_KEY)))
-                .isGreaterThan(Long.valueOf(oldPartitionProperties.get(LAST_UPDATE_TIME_KEY)));
-        assertThat(newPartitionProperties.get(NUM_FILES_KEY))
+        assertThat(Long.valueOf(newPartitionProperties.get(LAST_UPDATE_TIME_PROP)))
+                .isGreaterThan(Long.valueOf(oldPartitionProperties.get(LAST_UPDATE_TIME_PROP)));
+        assertThat(newPartitionProperties.get(NUM_FILES_PROP))
                 .isEqualTo(String.valueOf(expectedNumFiles));
-        assertThat(Long.valueOf(newPartitionProperties.get(TOTAL_SIZE_KEY)))
-                .isGreaterThan(Long.valueOf(oldPartitionProperties.get(TOTAL_SIZE_KEY)));
+        assertThat(Long.valueOf(newPartitionProperties.get(TOTAL_SIZE_PROP)))
+                .isGreaterThan(Long.valueOf(oldPartitionProperties.get(TOTAL_SIZE_PROP)));
     }
 }

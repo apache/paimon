@@ -24,24 +24,30 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.sink.PartitionKeyExtractor;
 import org.apache.paimon.utils.SerializableFunction;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 
 import javax.annotation.Nullable;
 
 import java.util.Map;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_SUFFIX;
+import static org.apache.paimon.flink.FlinkConnectorOptions.generateCustomUid;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 
 /** Sink for dynamic bucket table. */
 public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Integer>> {
 
     private static final long serialVersionUID = 1L;
+
+    private static final String DYNAMIC_BUCKET_ASSIGNER_NAME = "dynamic-bucket-assigner";
 
     public DynamicBucketSink(
             FileStoreTable table, @Nullable Map<String, String> overwritePartition) {
@@ -88,10 +94,19 @@ public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Inte
                         initialCommitUser, table, numAssigners, extractorFunction(), false);
         TupleTypeInfo<Tuple2<T, Integer>> rowWithBucketType =
                 new TupleTypeInfo<>(partitionByKeyHash.getType(), BasicTypeInfo.INT_TYPE_INFO);
-        DataStream<Tuple2<T, Integer>> bucketAssigned =
+        SingleOutputStreamOperator<Tuple2<T, Integer>> bucketAssigned =
                 partitionByKeyHash
-                        .transform("dynamic-bucket-assigner", rowWithBucketType, assignerOperator)
+                        .transform(
+                                DYNAMIC_BUCKET_ASSIGNER_NAME, rowWithBucketType, assignerOperator)
                         .setParallelism(partitionByKeyHash.getParallelism());
+
+        String uidSuffix = table.options().get(SINK_OPERATOR_UID_SUFFIX.key());
+        if (!StringUtils.isNullOrWhitespaceOnly(uidSuffix)) {
+            bucketAssigned =
+                    bucketAssigned.uid(
+                            generateCustomUid(
+                                    DYNAMIC_BUCKET_ASSIGNER_NAME, table.name(), uidSuffix));
+        }
 
         // 3. shuffle by partition & bucket
         DataStream<Tuple2<T, Integer>> partitionByBucket =

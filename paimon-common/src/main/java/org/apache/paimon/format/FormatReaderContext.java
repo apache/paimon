@@ -18,9 +18,12 @@
 
 package org.apache.paimon.format;
 
+import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
+
+import javax.annotation.Nullable;
 
 /** the context for creating RecordReader {@link RecordReader}. */
 public class FormatReaderContext implements FormatReaderFactory.Context {
@@ -28,11 +31,18 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
     private final FileIO fileIO;
     private final Path file;
     private final long fileSize;
+    @Nullable private final FileIndexResult fileIndexResult;
 
     public FormatReaderContext(FileIO fileIO, Path file, long fileSize) {
+        this(fileIO, file, fileSize, null);
+    }
+
+    public FormatReaderContext(
+            FileIO fileIO, Path file, long fileSize, @Nullable FileIndexResult fileIndexResult) {
         this.fileIO = fileIO;
         this.file = file;
         this.fileSize = fileSize;
+        this.fileIndexResult = fileIndexResult;
     }
 
     @Override
@@ -48,5 +58,10 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
     @Override
     public long fileSize() {
         return fileSize;
+    }
+
+    @Override
+    public FileIndexResult fileIndex() {
+        return fileIndexResult;
     }
 }

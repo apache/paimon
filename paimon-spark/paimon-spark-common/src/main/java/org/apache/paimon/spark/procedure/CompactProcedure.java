@@ -43,6 +43,7 @@ import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.sink.CompactionTaskSerializer;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ParameterUtils;
@@ -340,8 +341,13 @@ public class CompactProcedure extends BaseProcedure {
             @Nullable Predicate filter,
             @Nullable Duration partitionIdleTime,
             JavaSparkContext javaSparkContext) {
-        List<UnawareAppendCompactionTask> compactionTasks =
-                new UnawareAppendTableCompactionCoordinator(table, false, filter).run();
+        List<UnawareAppendCompactionTask> compactionTasks;
+        try {
+            compactionTasks =
+                    new UnawareAppendTableCompactionCoordinator(table, false, filter).run();
+        } catch (EndOfScanException e) {
+            compactionTasks = new ArrayList<>();
+        }
         if (partitionIdleTime != null) {
             Map<BinaryRow, Long> partitionInfo =
                     table.newSnapshotReader().partitionEntries().stream()

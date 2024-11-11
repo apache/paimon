@@ -27,7 +27,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fileindex.FileIndexFormat;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexResult;
-import org.apache.paimon.fileindex.bitmap.BitmapIndexResultLazy;
+import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -103,19 +103,46 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                         + "'file-index.in-manifest-threshold'='1B');");
         spark.sql("INSERT INTO T VALUES (0),(1),(2),(3),(4),(5);");
 
+        List<Row> rows1 = spark.sql("SELECT a FROM T where a>3;").collectAsList();
+        assertThat(rows1.toString()).isEqualTo("[[4], [5]]");
+
         // check query result
-        List<Row> rows = spark.sql("SELECT a FROM T where a='3';").collectAsList();
-        assertThat(rows.toString()).isEqualTo("[[3]]");
+        List<Row> rows2 = spark.sql("SELECT a FROM T where a=3;").collectAsList();
+        assertThat(rows2.toString()).isEqualTo("[[3]]");
 
         // check index reader
         foreachIndexReader(
                 fileIndexReader -> {
                     FileIndexResult fileIndexResult =
                             fileIndexReader.visitEqual(new FieldRef(0, "", new IntType()), 3);
-                    assert fileIndexResult instanceof BitmapIndexResultLazy;
-                    RoaringBitmap32 roaringBitmap32 =
-                            ((BitmapIndexResultLazy) fileIndexResult).get();
+                    assert fileIndexResult instanceof BitmapIndexResult;
+                    RoaringBitmap32 roaringBitmap32 = ((BitmapIndexResult) fileIndexResult).get();
                     assert roaringBitmap32.equals(RoaringBitmap32.bitmapOf(3));
+                });
+    }
+
+    @Test
+    public void testReadWriteTableWithBitSliceIndex() throws Catalog.TableNotExistException {
+
+        spark.sql(
+                "CREATE TABLE T(a int) TBLPROPERTIES ("
+                        + "'file-index.bsi.columns'='a',"
+                        + "'file-index.in-manifest-threshold'='1B');");
+        spark.sql("INSERT INTO T VALUES (0),(1),(2),(3),(4),(5);");
+
+        // check query result
+        List<Row> rows = spark.sql("SELECT a FROM T where a>=3;").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[3], [4], [5]]");
+
+        // check index reader
+        foreachIndexReader(
+                fileIndexReader -> {
+                    FileIndexResult fileIndexResult =
+                            fileIndexReader.visitGreaterOrEqual(
+                                    new FieldRef(0, "", new IntType()), 3);
+                    assertThat(fileIndexResult).isInstanceOf(BitmapIndexResult.class);
+                    RoaringBitmap32 roaringBitmap32 = ((BitmapIndexResult) fileIndexResult).get();
+                    assertThat(roaringBitmap32).isEqualTo(RoaringBitmap32.bitmapOf(3, 4, 5));
                 });
     }
 
@@ -128,9 +155,12 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                         tableRoot,
                         RowType.of(),
                         new CoreOptions(new Options()).partitionDefaultName(),
-                        CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                        CoreOptions.FILE_FORMAT.defaultValue(),
                         CoreOptions.DATA_FILE_PREFIX.defaultValue(),
-                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue());
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue());
 
         Table table = fileSystemCatalog.getTable(Identifier.create("db", "T"));
         ReadBuilder readBuilder = table.newReadBuilder();
@@ -151,12 +181,11 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                                 .collect(Collectors.toList());
                 // assert index file exist and only one index file
                 assert indexFiles.size() == 1;
-                try {
-                    FileIndexFormat.Reader reader =
-                            FileIndexFormat.createReader(
-                                    fileIO.newInputStream(
-                                            dataFilePathFactory.toPath(indexFiles.get(0))),
-                                    tableSchema.logicalRowType());
+                try (FileIndexFormat.Reader reader =
+                        FileIndexFormat.createReader(
+                                fileIO.newInputStream(
+                                        dataFilePathFactory.toPath(indexFiles.get(0))),
+                                tableSchema.logicalRowType())) {
                     Optional<FileIndexReader> fileIndexReader =
                             reader.readColumnIndex("a").stream().findFirst();
                     // assert index reader exist

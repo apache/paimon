@@ -36,14 +36,16 @@ abstract class PaimonBaseScanBuilder(table: Table)
 
   protected var requiredSchema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType())
 
-  protected var pushed: Array[(Filter, Predicate)] = Array.empty
+  protected var pushedPredicates: Array[(Filter, Predicate)] = Array.empty
 
-  protected var reservedFilters: Array[Filter] = Array.empty
+  protected var partitionFilters: Array[Filter] = Array.empty
+
+  protected var postScanFilters: Array[Filter] = Array.empty
 
   protected var pushDownLimit: Option[Int] = None
 
   override def build(): Scan = {
-    PaimonScan(table, requiredSchema, pushed.map(_._2), reservedFilters, pushDownLimit)
+    PaimonScan(table, requiredSchema, pushedPredicates.map(_._2), partitionFilters, pushDownLimit)
   }
 
   /**
@@ -54,7 +56,7 @@ abstract class PaimonBaseScanBuilder(table: Table)
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
     val pushable = mutable.ArrayBuffer.empty[(Filter, Predicate)]
     val postScan = mutable.ArrayBuffer.empty[Filter]
-    val reserved = mutable.ArrayBuffer.empty[Filter]
+    val partitionFilter = mutable.ArrayBuffer.empty[Filter]
 
     val converter = new SparkFilterConverter(table.rowType)
     val visitor = new PartitionPredicateVisitor(table.partitionKeys())
@@ -66,7 +68,7 @@ abstract class PaimonBaseScanBuilder(table: Table)
         } else {
           pushable.append((filter, predicate))
           if (predicate.visit(visitor)) {
-            reserved.append(filter)
+            partitionFilter.append(filter)
           } else {
             postScan.append(filter)
           }
@@ -74,16 +76,19 @@ abstract class PaimonBaseScanBuilder(table: Table)
     }
 
     if (pushable.nonEmpty) {
-      this.pushed = pushable.toArray
+      this.pushedPredicates = pushable.toArray
     }
-    if (reserved.nonEmpty) {
-      this.reservedFilters = reserved.toArray
+    if (partitionFilter.nonEmpty) {
+      this.partitionFilters = partitionFilter.toArray
+    }
+    if (postScan.nonEmpty) {
+      this.postScanFilters = postScan.toArray
     }
     postScan.toArray
   }
 
   override def pushedFilters(): Array[Filter] = {
-    pushed.map(_._1)
+    pushedPredicates.map(_._1)
   }
 
   override def pruneColumns(requiredSchema: StructType): Unit = {

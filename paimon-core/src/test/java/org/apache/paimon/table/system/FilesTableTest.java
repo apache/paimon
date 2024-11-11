@@ -159,8 +159,7 @@ public class FilesTableTest extends TableTestBase {
     }
 
     @Test
-    public void testReadFilesFromNotExistSnapshot() throws Exception {
-
+    public void testReadFilesFromNotExistSnapshot() {
         filesTable =
                 (FilesTable)
                         filesTable.copy(
@@ -212,7 +211,9 @@ public class FilesTableTest extends TableTestBase {
                                             maxCol1, maxKey, partition1, partition2)),
                             file.minSequenceNumber(),
                             file.maxSequenceNumber(),
-                            file.creationTime()));
+                            file.creationTime(),
+                            BinaryString.fromString(
+                                    file.fileSource().map(Object::toString).orElse(null))));
         }
         return expectedRow;
     }

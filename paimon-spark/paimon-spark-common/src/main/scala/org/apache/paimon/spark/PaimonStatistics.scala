@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.stats.ColStats
 import org.apache.paimon.types.{DataField, DataType, RowType}
 
@@ -65,19 +64,13 @@ case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
 
     val wholeSchemaSize = getSizeForRow(scan.tableRowType)
 
-    val requiredDataSchemaSize = scan.requiredTableFields.map {
-      field =>
-        val dataField = scan.tableRowType.getField(field.name)
-        getSizeForField(dataField)
-    }.sum
+    val requiredDataSchemaSize =
+      scan.readTableRowType.getFields.asScala.map(field => getSizeForField(field)).sum
     val requiredDataSizeInBytes =
       paimonStats.mergedRecordSize().getAsLong * (requiredDataSchemaSize.toDouble / wholeSchemaSize)
 
-    val metadataSchemaSize = scan.metadataFields.map {
-      field =>
-        val dataField = PaimonMetadataColumn.get(field.name, scan.partitionType).toPaimonDataField
-        getSizeForField(dataField)
-    }.sum
+    val metadataSchemaSize =
+      scan.metadataColumns.map(field => getSizeForField(field.toPaimonDataField)).sum
     val metadataSizeInBytes = paimonStats.mergedRecordCount().getAsLong * metadataSchemaSize
 
     val sizeInBytes = (requiredDataSizeInBytes + metadataSizeInBytes).toLong
@@ -136,12 +129,12 @@ object PaimonColumnStats {
   def apply(v1ColStats: ColumnStat): PaimonColumnStats = {
     import PaimonImplicits._
     PaimonColumnStats(
-      if (v1ColStats.nullCount.isDefined) OptionalLong.of(v1ColStats.nullCount.get.longValue())
+      if (v1ColStats.nullCount.isDefined) OptionalLong.of(v1ColStats.nullCount.get.longValue)
       else OptionalLong.empty(),
       v1ColStats.min,
       v1ColStats.max,
       if (v1ColStats.distinctCount.isDefined)
-        OptionalLong.of(v1ColStats.distinctCount.get.longValue())
+        OptionalLong.of(v1ColStats.distinctCount.get.longValue)
       else OptionalLong.empty(),
       if (v1ColStats.avgLen.isDefined) OptionalLong.of(v1ColStats.avgLen.get.longValue())
       else OptionalLong.empty(),

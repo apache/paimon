@@ -26,6 +26,7 @@ import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -59,6 +60,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -199,7 +201,8 @@ public class IcebergCompatibilityTest {
         commit.commit(2, commitMessages2);
         assertThat(table.latestSnapshotId()).hasValue(3L);
 
-        IcebergPathFactory pathFactory = new IcebergPathFactory(table.location());
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
         Path metadata3Path = pathFactory.toMetadataPath(3);
         assertThat(table.fileIO().exists(metadata3Path)).isTrue();
 
@@ -296,7 +299,8 @@ public class IcebergCompatibilityTest {
         // Number of snapshots will become 5 with the next commit, however only 3 Iceberg snapshots
         // are kept. So the first 2 Iceberg snapshots will be expired.
 
-        IcebergPathFactory pathFactory = new IcebergPathFactory(table.location());
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
         IcebergManifestList manifestList = IcebergManifestList.create(table, pathFactory);
         Set<String> usingManifests = new HashSet<>();
         for (IcebergManifestFileMeta fileMeta :
@@ -372,7 +376,8 @@ public class IcebergCompatibilityTest {
                             DataTypes.STRING(),
                             DataTypes.BINARY(20),
                             DataTypes.VARBINARY(20),
-                            DataTypes.DATE()
+                            DataTypes.DATE(),
+                            DataTypes.TIMESTAMP(6)
                         },
                         new String[] {
                             "v_int",
@@ -385,7 +390,8 @@ public class IcebergCompatibilityTest {
                             "v_varchar",
                             "v_binary",
                             "v_varbinary",
-                            "v_date"
+                            "v_date",
+                            "v_timestamp"
                         });
         FileStoreTable table =
                 createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
@@ -406,7 +412,8 @@ public class IcebergCompatibilityTest {
                         BinaryString.fromString("cat"),
                         "B_apple".getBytes(),
                         "B_cat".getBytes(),
-                        100);
+                        100,
+                        Timestamp.fromLocalDateTime(LocalDateTime.of(2024, 10, 10, 11, 22, 33)));
         write.write(lowerBounds);
         GenericRow upperBounds =
                 GenericRow.of(
@@ -420,7 +427,8 @@ public class IcebergCompatibilityTest {
                         BinaryString.fromString("dog"),
                         "B_banana".getBytes(),
                         "B_dog".getBytes(),
-                        200);
+                        200,
+                        Timestamp.fromLocalDateTime(LocalDateTime.of(2024, 10, 20, 11, 22, 33)));
         write.write(upperBounds);
         commit.commit(1, write.prepareCommit(false, 1));
 
@@ -448,6 +456,9 @@ public class IcebergCompatibilityTest {
             } else if (type.getTypeRoot() == DataTypeRoot.DECIMAL) {
                 lower = new BigDecimal(lowerBounds.getField(i).toString());
                 upper = new BigDecimal(upperBounds.getField(i).toString());
+            } else if (type.getTypeRoot() == DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE) {
+                lower = ((Timestamp) lowerBounds.getField(i)).toMicros();
+                upper = ((Timestamp) upperBounds.getField(i)).toMicros();
             } else {
                 lower = lowerBounds.getField(i);
                 upper = upperBounds.getField(i);
@@ -458,6 +469,9 @@ public class IcebergCompatibilityTest {
             if (type.getTypeRoot() == DataTypeRoot.DATE) {
                 expectedLower = LocalDate.ofEpochDay((int) lower).toString();
                 expectedUpper = LocalDate.ofEpochDay((int) upper).toString();
+            } else if (type.getTypeRoot() == DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE) {
+                expectedLower = Timestamp.fromMicros((long) lower).toString();
+                expectedUpper = Timestamp.fromMicros((long) upper).toString();
             }
 
             assertThat(
@@ -689,11 +703,12 @@ public class IcebergCompatibilityTest {
 
         Options options = new Options(customOptions);
         options.set(CoreOptions.BUCKET, numBuckets);
-        options.set(CoreOptions.METADATA_ICEBERG_COMPATIBLE, true);
+        options.set(
+                IcebergOptions.METADATA_ICEBERG_STORAGE, IcebergOptions.StorageType.TABLE_LOCATION);
         options.set(CoreOptions.FILE_FORMAT, "avro");
         options.set(CoreOptions.TARGET_FILE_SIZE, MemorySize.ofKibiBytes(32));
-        options.set(AbstractIcebergCommitCallback.COMPACT_MIN_FILE_NUM, 4);
-        options.set(AbstractIcebergCommitCallback.COMPACT_MIN_FILE_NUM, 8);
+        options.set(IcebergOptions.COMPACT_MIN_FILE_NUM, 4);
+        options.set(IcebergOptions.COMPACT_MIN_FILE_NUM, 8);
         options.set(CoreOptions.MANIFEST_TARGET_FILE_SIZE, MemorySize.ofKibiBytes(8));
         Schema schema =
                 new Schema(rowType.getFields(), partitionKeys, primaryKeys, options.toMap(), "");

@@ -39,6 +39,7 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -104,6 +105,8 @@ public interface SnapshotReader {
     List<PartitionEntry> partitionEntries();
 
     List<BucketEntry> bucketEntries();
+
+    Iterator<ManifestEntry> readFileIterator();
 
     /** Result plan of this scan. */
     interface Plan extends TableScan.Plan {

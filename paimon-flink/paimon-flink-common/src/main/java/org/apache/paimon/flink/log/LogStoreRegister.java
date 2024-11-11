@@ -46,11 +46,14 @@ public interface LogStoreRegister {
             ClassLoader classLoader) {
         Options tableOptions = Options.fromMap(options);
         String logStore = tableOptions.get(LOG_SYSTEM);
-        if (!tableOptions.get(LOG_SYSTEM).equalsIgnoreCase(NONE)
-                && !catalog.tableExists(identifier)) {
-            LogStoreRegister logStoreRegister =
-                    getLogStoreRegister(identifier, classLoader, tableOptions, logStore);
-            options.putAll(logStoreRegister.registerTopic());
+        if (!tableOptions.get(LOG_SYSTEM).equalsIgnoreCase(NONE)) {
+            try {
+                catalog.getTable(identifier);
+            } catch (Catalog.TableNotExistException e) {
+                LogStoreRegister logStoreRegister =
+                        getLogStoreRegister(identifier, classLoader, tableOptions, logStore);
+                options.putAll(logStoreRegister.registerTopic());
+            }
         }
     }
 

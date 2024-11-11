@@ -145,7 +145,7 @@ public abstract class MergeTreeTestBase {
                 options.get(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER) + 1);
         this.options = new CoreOptions(options);
         RowType keyType = new RowType(singletonList(new DataField(0, "k", new IntType())));
-        RowType valueType = new RowType(singletonList(new DataField(0, "v", new IntType())));
+        RowType valueType = new RowType(singletonList(new DataField(1, "v", new IntType())));
 
         String identifier = "avro";
         FileFormat flushingAvro = new FlushingFileFormat(identifier);
@@ -161,20 +161,12 @@ public abstract class MergeTreeTestBase {
                         new KeyValueFieldsExtractor() {
                             @Override
                             public List<DataField> keyFields(TableSchema schema) {
-                                return Collections.singletonList(
-                                        new DataField(
-                                                0,
-                                                "k",
-                                                new org.apache.paimon.types.IntType(false)));
+                                return keyType.getFields();
                             }
 
                             @Override
                             public List<DataField> valueFields(TableSchema schema) {
-                                return Collections.singletonList(
-                                        new DataField(
-                                                0,
-                                                "v",
-                                                new org.apache.paimon.types.IntType(false)));
+                                return valueType.getFields();
                             }
                         },
                         new CoreOptions(new HashMap<>()));

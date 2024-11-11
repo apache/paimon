@@ -27,6 +27,12 @@ under the License.
     </thead>
     <tbody>
         <tr>
+            <td><h5>changelog.precommit-compact</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, it will add a changelog compact coordinator and worker operator after the writer operator,in order to compact several changelog files from the same partition into large ones, which can decrease the number of small files. </td>
+        </tr>
+        <tr>
             <td><h5>end-input.watermark</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
@@ -81,16 +87,22 @@ under the License.
             <td>If the pending snapshot count exceeds the threshold, lookup operator will refresh the table in sync.</td>
         </tr>
         <tr>
-            <td><h5>partition.end-input-to-done</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether mark the done status to indicate that the data is ready when end input.</td>
+            <td><h5>lookup.refresh.time-periods-blacklist</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The blacklist contains several time periods. During these time periods, the lookup table's cache refreshing is forbidden. Blacklist format is start1-&gt;end1,start2-&gt;end2,... , and the time format is yyyy-MM-dd HH:mm. Only used when lookup table is FULL cache mode.</td>
         </tr>
         <tr>
             <td><h5>partition.idle-time-to-done</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
             <td>Set a time duration when a partition has no new data after this time duration, mark the done status to indicate that the data is ready.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.idle-time-to-report-statistic</h5></td>
+            <td style="word-wrap: break-word;">1 h</td>
+            <td>Duration</td>
+            <td>Set a time duration when a partition has no new data after this time duration, start to report the partition statistics to hms.</td>
         </tr>
         <tr>
             <td><h5>partition.time-interval</h5></td>
@@ -115,12 +127,6 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
             <td>Define a custom parallelism for the scan source. By default, if this option is not defined, the planner will derive the parallelism for each statement individually by also considering the global configuration. If user enable the scan.infer-parallelism, the planner will derive the parallelism by inferred parallelism.</td>
-        </tr>
-        <tr>
-            <td><h5>scan.push-down</h5></td>
-            <td style="word-wrap: break-word;">true</td>
-            <td>Boolean</td>
-            <td>If true, flink will push down projection, filters, limit to the source. The cost is that it is difficult to reuse the source in a job. With flink 1.18 or higher version, it is possible to reuse the source even with projection push down.</td>
         </tr>
         <tr>
             <td><h5>scan.remove-normalize</h5></td>
@@ -225,6 +231,12 @@ under the License.
             <td>Weight of writer buffer in managed memory, Flink will compute the memory size for writer according to the weight, the actual memory used depends on the running environment.</td>
         </tr>
         <tr>
+            <td><h5>sink.operator-uid.suffix</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Set the uid suffix for the writer, dynamic bucket assigner and committer operators. The uid format is ${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. If the uid suffix is not set, flink will automatically generate the operator uid, which may be incompatible when the topology changes.</td>
+        </tr>
+        <tr>
             <td><h5>sink.parallelism</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
@@ -253,6 +265,12 @@ under the License.
             <td style="word-wrap: break-word;">30 s</td>
             <td>Duration</td>
             <td>If the new snapshot has not been generated when the checkpoint starts to trigger, the enumerator will block the checkpoint and wait for the new snapshot. Set the maximum waiting time to avoid infinite waiting, if timeout, the checkpoint will fail. Note that it should be set smaller than the checkpoint timeout.</td>
+        </tr>
+        <tr>
+            <td><h5>source.operator-uid.suffix</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Set the uid suffix for the source operators. After setting, the uid format is ${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. If the uid suffix is not set, flink will automatically generate the operator uid, which may be incompatible when the topology changes.</td>
         </tr>
         <tr>
             <td><h5>streaming-read.shuffle-bucket-with-partition</h5></td>

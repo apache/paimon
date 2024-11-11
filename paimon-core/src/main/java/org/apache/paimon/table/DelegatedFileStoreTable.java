@@ -58,6 +58,10 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
         this.wrapped = wrapped;
     }
 
+    public FileStoreTable wrapped() {
+        return wrapped;
+    }
+
     @Override
     public String name() {
         return wrapped.name();
@@ -176,6 +180,16 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     @Override
     public void createTag(String tagName, long fromSnapshotId, Duration timeRetained) {
         wrapped.createTag(tagName, fromSnapshotId, timeRetained);
+    }
+
+    @Override
+    public void renameTag(String tagName, String targetTagName) {
+        wrapped.renameTag(tagName, targetTagName);
+    }
+
+    @Override
+    public void replaceTag(String tagName, Long fromSnapshotId, Duration timeRetained) {
+        wrapped.replaceTag(tagName, fromSnapshotId, timeRetained);
     }
 
     @Override

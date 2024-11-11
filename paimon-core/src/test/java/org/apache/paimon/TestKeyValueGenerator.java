@@ -30,10 +30,10 @@ import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.SchemaEvolutionTableTestBase;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -70,53 +70,36 @@ public class TestKeyValueGenerator {
     // * comment: string, length from 10 to 1000
     public static final RowType DEFAULT_ROW_TYPE =
             RowType.of(
-                    new DataType[] {
-                        new VarCharType(false, 8),
-                        new IntType(false),
-                        new IntType(false),
-                        new BigIntType(false),
-                        new BigIntType(),
-                        new ArrayType(new IntType()),
-                        new VarCharType(Integer.MAX_VALUE)
-                    },
-                    new String[] {
-                        "dt", "hr", "shopId", "orderId", "itemId", "priceAmount", "comment"
-                    });
+                    new DataField(0, "dt", new VarCharType(false, 8)),
+                    new DataField(1, "hr", new IntType(false)),
+                    new DataField(2, "shopId", new IntType(false)),
+                    new DataField(3, "orderId", new BigIntType(false)),
+                    new DataField(4, "itemId", new BigIntType()),
+                    new DataField(5, "priceAmount", new ArrayType(new IntType())),
+                    new DataField(6, "comment", new VarCharType(Integer.MAX_VALUE)));
     public static final RowType DEFAULT_PART_TYPE =
             new RowType(DEFAULT_ROW_TYPE.getFields().subList(0, 2));
 
     public static final RowType SINGLE_PARTITIONED_ROW_TYPE =
-            RowType.of(
-                    new DataType[] {
-                        new VarCharType(false, 8),
-                        new IntType(false),
-                        new BigIntType(false),
-                        new BigIntType(),
-                        new ArrayType(new IntType()),
-                        new VarCharType(Integer.MAX_VALUE)
-                    },
-                    new String[] {"dt", "shopId", "orderId", "itemId", "priceAmount", "comment"});
+            DEFAULT_ROW_TYPE.project("dt", "shopId", "orderId", "itemId", "priceAmount", "comment");
+
     public static final RowType SINGLE_PARTITIONED_PART_TYPE =
             RowType.of(SINGLE_PARTITIONED_ROW_TYPE.getTypeAt(0));
 
     public static final RowType NON_PARTITIONED_ROW_TYPE =
-            RowType.of(
-                    new DataType[] {
-                        new IntType(false),
-                        new BigIntType(false),
-                        new BigIntType(),
-                        new ArrayType(new IntType()),
-                        new VarCharType(Integer.MAX_VALUE)
-                    },
-                    new String[] {"shopId", "orderId", "itemId", "priceAmount", "comment"});
+            DEFAULT_ROW_TYPE.project("shopId", "orderId", "itemId", "priceAmount", "comment");
     public static final RowType NON_PARTITIONED_PART_TYPE = RowType.of();
 
     public static final List<String> KEY_NAME_LIST = Arrays.asList("shopId", "orderId");
 
     public static final RowType KEY_TYPE =
             RowType.of(
-                    new DataType[] {new IntType(false), new BigIntType(false)},
-                    new String[] {"key_shopId", "key_orderId"});
+                    new DataField(
+                            2 + SpecialFields.KEY_FIELD_ID_START, "key_shopId", new IntType(false)),
+                    new DataField(
+                            3 + SpecialFields.KEY_FIELD_ID_START,
+                            "key_orderId",
+                            new BigIntType(false)));
 
     public static final InternalRowSerializer DEFAULT_ROW_SERIALIZER =
             new InternalRowSerializer(DEFAULT_ROW_TYPE);
@@ -407,7 +390,13 @@ public class TestKeyValueGenerator {
         public List<DataField> keyFields(TableSchema schema) {
             return schema.fields().stream()
                     .filter(f -> KEY_NAME_LIST.contains(f.name()))
-                    .map(f -> new DataField(f.id(), "key_" + f.name(), f.type(), f.description()))
+                    .map(
+                            f ->
+                                    new DataField(
+                                            f.id() + SpecialFields.KEY_FIELD_ID_START,
+                                            "key_" + f.name(),
+                                            f.type(),
+                                            f.description()))
                     .collect(Collectors.toList());
         }
 

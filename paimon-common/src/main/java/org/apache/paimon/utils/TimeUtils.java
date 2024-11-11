@@ -104,6 +104,19 @@ public class TimeUtils {
         }
     }
 
+    /**
+     * Parse the given number and unitLabel to a java {@link Duration}. The usage is in format
+     * "(digital number, time unit label)", e.g. "(1, DAYS)".
+     *
+     * @param number a digital number
+     * @param unitLabel time unit label
+     */
+    public static Duration parseDuration(long number, String unitLabel) {
+        ChronoUnit unit = LABEL_TO_UNIT_MAP.get(unitLabel.toLowerCase(Locale.US));
+        checkNotNull(unit);
+        return Duration.of(number, unit);
+    }
+
     private static Map<String, ChronoUnit> initMap() {
         Map<String, ChronoUnit> labelToUnit = new HashMap<>();
         for (TimeUnit timeUnit : TimeUnit.values()) {

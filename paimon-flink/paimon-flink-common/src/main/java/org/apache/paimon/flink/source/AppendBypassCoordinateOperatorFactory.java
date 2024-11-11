@@ -25,15 +25,13 @@ import org.apache.flink.streaming.api.operators.AbstractStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
-import org.apache.flink.streaming.api.operators.YieldingOperatorFactory;
 import org.apache.flink.types.Either;
 
 /** Factory of {@link AppendBypassCoordinateOperator}. */
 public class AppendBypassCoordinateOperatorFactory<CommitT>
         extends AbstractStreamOperatorFactory<Either<CommitT, UnawareAppendCompactionTask>>
-        implements YieldingOperatorFactory<Either<CommitT, UnawareAppendCompactionTask>>,
-                OneInputStreamOperatorFactory<
-                        CommitT, Either<CommitT, UnawareAppendCompactionTask>> {
+        implements OneInputStreamOperatorFactory<
+                CommitT, Either<CommitT, UnawareAppendCompactionTask>> {
 
     private final FileStoreTable table;
 
@@ -47,8 +45,7 @@ public class AppendBypassCoordinateOperatorFactory<CommitT>
                     StreamOperatorParameters<Either<CommitT, UnawareAppendCompactionTask>>
                             parameters) {
         AppendBypassCoordinateOperator<CommitT> operator =
-                new AppendBypassCoordinateOperator<>(
-                        table, processingTimeService, getMailboxExecutor());
+                new AppendBypassCoordinateOperator<>(table, processingTimeService);
         operator.setup(
                 parameters.getContainingTask(),
                 parameters.getStreamConfig(),

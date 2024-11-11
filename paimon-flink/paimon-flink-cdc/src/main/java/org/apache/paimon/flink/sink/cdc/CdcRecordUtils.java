@@ -54,7 +54,7 @@ public class CdcRecordUtils {
         GenericRow genericRow = new GenericRow(dataFields.size());
         for (int i = 0; i < dataFields.size(); i++) {
             DataField dataField = dataFields.get(i);
-            String fieldValue = record.fields().get(dataField.name());
+            String fieldValue = record.data().get(dataField.name());
             if (fieldValue != null) {
                 genericRow.setField(
                         i, TypeUtils.castFromCdcValueString(fieldValue, dataField.type()));
@@ -83,7 +83,7 @@ public class CdcRecordUtils {
         List<String> fieldNames =
                 dataFields.stream().map(DataField::name).collect(Collectors.toList());
 
-        for (Map.Entry<String, String> field : record.fields().entrySet()) {
+        for (Map.Entry<String, String> field : record.data().entrySet()) {
             String key = field.getKey();
             String value = field.getValue();
 
@@ -117,14 +117,14 @@ public class CdcRecordUtils {
     }
 
     public static CdcRecord fromGenericRow(GenericRow row, List<String> fieldNames) {
-        Map<String, String> fields = new HashMap<>();
+        Map<String, String> data = new HashMap<>();
         for (int i = 0; i < row.getFieldCount(); i++) {
             Object field = row.getField(i);
             if (field != null) {
-                fields.put(fieldNames.get(i), field.toString());
+                data.put(fieldNames.get(i), field.toString());
             }
         }
 
-        return new CdcRecord(row.getRowKind(), fields);
+        return new CdcRecord(row.getRowKind(), data);
     }
 }

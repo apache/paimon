@@ -43,6 +43,8 @@ public class FileStorePathFactory {
     private final String formatIdentifier;
     private final String dataFilePrefix;
     private final String changelogFilePrefix;
+    private final boolean fileSuffixIncludeCompression;
+    private final String fileCompression;
 
     private final AtomicInteger manifestFileCount;
     private final AtomicInteger manifestListCount;
@@ -56,14 +58,20 @@ public class FileStorePathFactory {
             String defaultPartValue,
             String formatIdentifier,
             String dataFilePrefix,
-            String changelogFilePrefix) {
+            String changelogFilePrefix,
+            boolean legacyPartitionName,
+            boolean fileSuffixIncludeCompression,
+            String fileCompression) {
         this.root = root;
         this.uuid = UUID.randomUUID().toString();
 
-        this.partitionComputer = getPartitionComputer(partitionType, defaultPartValue);
+        this.partitionComputer =
+                getPartitionComputer(partitionType, defaultPartValue, legacyPartitionName);
         this.formatIdentifier = formatIdentifier;
         this.dataFilePrefix = dataFilePrefix;
         this.changelogFilePrefix = changelogFilePrefix;
+        this.fileSuffixIncludeCompression = fileSuffixIncludeCompression;
+        this.fileCompression = fileCompression;
 
         this.manifestFileCount = new AtomicInteger(0);
         this.manifestListCount = new AtomicInteger(0);
@@ -78,9 +86,10 @@ public class FileStorePathFactory {
 
     @VisibleForTesting
     public static InternalRowPartitionComputer getPartitionComputer(
-            RowType partitionType, String defaultPartValue) {
+            RowType partitionType, String defaultPartValue, boolean legacyPartitionName) {
         String[] partitionColumns = partitionType.getFieldNames().toArray(new String[0]);
-        return new InternalRowPartitionComputer(defaultPartValue, partitionType, partitionColumns);
+        return new InternalRowPartitionComputer(
+                defaultPartValue, partitionType, partitionColumns, legacyPartitionName);
     }
 
     public Path newManifestFile() {
@@ -110,7 +119,9 @@ public class FileStorePathFactory {
                 bucketPath(partition, bucket),
                 formatIdentifier,
                 dataFilePrefix,
-                changelogFilePrefix);
+                changelogFilePrefix,
+                fileSuffixIncludeCompression,
+                fileCompression);
     }
 
     public Path bucketPath(BinaryRow partition, int bucket) {

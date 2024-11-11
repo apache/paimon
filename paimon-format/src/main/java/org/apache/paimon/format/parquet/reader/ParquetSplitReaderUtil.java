@@ -370,12 +370,12 @@ public class ParquetSplitReaderUtil {
     }
 
     public static List<ParquetField> buildFieldsList(
-            List<DataField> childrens, List<String> fieldNames, MessageColumnIO columnIO) {
+            List<DataField> children, List<String> fieldNames, MessageColumnIO columnIO) {
         List<ParquetField> list = new ArrayList<>();
-        for (int i = 0; i < childrens.size(); i++) {
+        for (int i = 0; i < children.size(); i++) {
             list.add(
                     constructField(
-                            childrens.get(i), lookupColumnByName(columnIO, fieldNames.get(i))));
+                            children.get(i), lookupColumnByName(columnIO, fieldNames.get(i))));
         }
         return list;
     }

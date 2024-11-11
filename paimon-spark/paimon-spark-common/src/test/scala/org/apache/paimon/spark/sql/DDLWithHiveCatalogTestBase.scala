@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.hive.HiveMetastoreClient
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.table.FileStoreTable
 
@@ -53,6 +54,126 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                   .asInstanceOf[FileStoreTable]
                 Assertions.assertEquals("paimon_tbl", fileStoreTable.name())
                 Assertions.assertEquals("paimon_db.paimon_tbl", fileStoreTable.fullName())
+              }
+            }
+        }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: drop partition for paimon table sparkCatalogName") {
+    Seq(paimonHiveCatalogName).foreach {
+      catalogName =>
+        spark.sql(s"USE $catalogName")
+        withTempDir {
+          dBLocation =>
+            withDatabase("paimon_db") {
+              val comment = "this is a test comment"
+              spark.sql(
+                s"CREATE DATABASE paimon_db LOCATION '${dBLocation.getCanonicalPath}' COMMENT '$comment'")
+              Assertions.assertEquals(getDatabaseLocation("paimon_db"), dBLocation.getCanonicalPath)
+              Assertions.assertEquals(getDatabaseComment("paimon_db"), comment)
+
+              withTable("paimon_db.paimon_tbl") {
+                spark.sql(s"""
+                             |CREATE TABLE paimon_db.paimon_tbl (id STRING, name STRING, pt STRING)
+                             |USING PAIMON
+                             |PARTITIONED BY (name, pt)
+                             |TBLPROPERTIES('metastore.partitioned-table' = 'true')
+                             |""".stripMargin)
+                Assertions.assertEquals(
+                  getTableLocation("paimon_db.paimon_tbl"),
+                  s"${dBLocation.getCanonicalPath}/paimon_tbl")
+                spark.sql("insert into paimon_db.paimon_tbl select '1', 'n', 'cc'")
+                spark.sql("insert into paimon_db.paimon_tbl select '1', 'n1', 'aa'")
+                spark.sql("insert into paimon_db.paimon_tbl select '1', 'n2', 'bb'")
+
+                spark.sql("show partitions paimon_db.paimon_tbl")
+                checkAnswer(
+                  spark.sql("show partitions paimon_db.paimon_tbl"),
+                  Row("name=n/pt=cc") :: Row("name=n1/pt=aa") :: Row("name=n2/pt=bb") :: Nil)
+                spark.sql(
+                  "alter table paimon_db.paimon_tbl drop partition (name='n1', `pt`='aa'), partition (name='n2', `pt`='bb')")
+                spark.sql("show partitions paimon_db.paimon_tbl")
+                checkAnswer(
+                  spark.sql("show partitions paimon_db.paimon_tbl"),
+                  Row("name=n/pt=cc") :: Nil)
+
+              }
+
+              // disable metastore.partitioned-table
+              withTable("paimon_db.paimon_tbl2") {
+                spark.sql(s"""
+                             |CREATE TABLE paimon_db.paimon_tbl2 (id STRING, name STRING, pt STRING)
+                             |USING PAIMON
+                             |PARTITIONED BY (name, pt)
+                             |TBLPROPERTIES('metastore.partitioned-table' = 'false')
+                             |""".stripMargin)
+                Assertions.assertEquals(
+                  getTableLocation("paimon_db.paimon_tbl2"),
+                  s"${dBLocation.getCanonicalPath}/paimon_tbl2")
+                spark.sql("insert into paimon_db.paimon_tbl2 select '1', 'n', 'cc'")
+                spark.sql("insert into paimon_db.paimon_tbl2 select '1', 'n1', 'aa'")
+                spark.sql("insert into paimon_db.paimon_tbl2 select '1', 'n2', 'bb'")
+
+                spark.sql("show partitions paimon_db.paimon_tbl2")
+                checkAnswer(
+                  spark.sql("show partitions paimon_db.paimon_tbl2"),
+                  Row("name=n/pt=cc") :: Row("name=n1/pt=aa") :: Row("name=n2/pt=bb") :: Nil)
+                spark.sql(
+                  "alter table paimon_db.paimon_tbl2 drop partition (name='n1', `pt`='aa'), partition (name='n2', `pt`='bb')")
+                spark.sql("show partitions paimon_db.paimon_tbl2")
+                checkAnswer(
+                  spark.sql("show partitions paimon_db.paimon_tbl2"),
+                  Row("name=n/pt=cc") :: Nil)
+
+              }
+            }
+        }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: create partition for paimon table sparkCatalogName") {
+    Seq(paimonHiveCatalogName).foreach {
+      catalogName =>
+        spark.sql(s"USE $catalogName")
+        withTempDir {
+          dBLocation =>
+            withDatabase("paimon_db") {
+              val comment = "this is a test comment"
+              spark.sql(
+                s"CREATE DATABASE paimon_db LOCATION '${dBLocation.getCanonicalPath}' COMMENT '$comment'")
+              Assertions.assertEquals(getDatabaseLocation("paimon_db"), dBLocation.getCanonicalPath)
+              Assertions.assertEquals(getDatabaseComment("paimon_db"), comment)
+
+              withTable("paimon_db.paimon_tbl") {
+                spark.sql(s"""
+                             |CREATE TABLE paimon_db.paimon_tbl (id STRING, name STRING, pt STRING)
+                             |USING PAIMON
+                             |PARTITIONED BY (name, pt)
+                             |TBLPROPERTIES('metastore.partitioned-table' = 'true')
+                             |""".stripMargin)
+                Assertions.assertEquals(
+                  getTableLocation("paimon_db.paimon_tbl"),
+                  s"${dBLocation.getCanonicalPath}/paimon_tbl")
+                spark.sql("insert into paimon_db.paimon_tbl select '1', 'n', 'cc'")
+
+                spark.sql("alter table paimon_db.paimon_tbl add partition(name='cc', `pt`='aa') ")
+              }
+
+              // disable metastore.partitioned-table
+              withTable("paimon_db.paimon_tbl2") {
+                spark.sql(s"""
+                             |CREATE TABLE paimon_db.paimon_tbl2 (id STRING, name STRING, pt STRING)
+                             |USING PAIMON
+                             |PARTITIONED BY (name, pt)
+                             |TBLPROPERTIES('metastore.partitioned-table' = 'false')
+                             |""".stripMargin)
+                Assertions.assertEquals(
+                  getTableLocation("paimon_db.paimon_tbl2"),
+                  s"${dBLocation.getCanonicalPath}/paimon_tbl2")
+                spark.sql("insert into paimon_db.paimon_tbl2 select '1', 'n', 'cc'")
+
+                spark.sql("alter table paimon_db.paimon_tbl2 add partition(name='cc', `pt`='aa') ")
               }
             }
         }
@@ -128,6 +249,50 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
           spark.sql(s"USE default")
           spark.sql(s"DROP DATABASE paimon_db CASCADE")
       }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: sync partitions to HMS") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        val dbName = "default"
+        val tblName = "t"
+        spark.sql(s"USE $catalogName.$dbName")
+        withTable(tblName) {
+          spark.sql(s"""
+                       |CREATE TABLE $tblName (id INT, pt INT)
+                       |USING PAIMON
+                       |TBLPROPERTIES ('metastore.partitioned-table' = 'true')
+                       |PARTITIONED BY (pt)
+                       |""".stripMargin)
+
+          val metastoreClient = loadTable(dbName, tblName)
+            .catalogEnvironment()
+            .metastoreClientFactory()
+            .create()
+            .asInstanceOf[HiveMetastoreClient]
+            .client()
+
+          spark.sql(s"INSERT INTO $tblName VALUES (1, 1), (2, 2), (3, 3)")
+          // check partitions in paimon
+          checkAnswer(
+            spark.sql(s"show partitions $tblName"),
+            Seq(Row("pt=1"), Row("pt=2"), Row("pt=3")))
+          // check partitions in HMS
+          assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 3)
+
+          spark.sql(s"INSERT INTO $tblName VALUES (4, 3), (5, 4)")
+          checkAnswer(
+            spark.sql(s"show partitions $tblName"),
+            Seq(Row("pt=1"), Row("pt=2"), Row("pt=3"), Row("pt=4")))
+          assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 4)
+
+          spark.sql(s"ALTER TABLE $tblName DROP PARTITION (pt=1)")
+          checkAnswer(
+            spark.sql(s"show partitions $tblName"),
+            Seq(Row("pt=2"), Row("pt=3"), Row("pt=4")))
+          assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 3)
+        }
     }
   }
 

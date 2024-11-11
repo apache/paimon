@@ -34,7 +34,7 @@ public class TableMigrationUtils {
             String connector,
             Catalog catalog,
             String sourceDatabase,
-            String souceTableName,
+            String sourceTableName,
             String targetDatabase,
             String targetTableName,
             Integer parallelism,
@@ -50,7 +50,7 @@ public class TableMigrationUtils {
                 return new HiveMigrator(
                         (HiveCatalog) catalog,
                         sourceDatabase,
-                        souceTableName,
+                        sourceTableName,
                         targetDatabase,
                         targetTableName,
                         parallelism,

@@ -18,22 +18,15 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.paimon.utils.TimeUtils;
-
 import org.apache.flink.api.java.tuple.Tuple3;
 
 import java.time.Duration;
 import java.util.Map;
-import java.util.Optional;
 
 /** Factory to create {@link CreateTagAction}. */
-public class CreateTagActionFactory implements ActionFactory {
+public class CreateTagActionFactory extends CreateOrReplaceTagActionFactory {
 
     public static final String IDENTIFIER = "create_tag";
-
-    private static final String TAG_NAME = "tag_name";
-    private static final String SNAPSHOT = "snapshot";
-    private static final String TIME_RETAINED = "time_retained";
 
     @Override
     public String identifier() {
@@ -41,33 +34,20 @@ public class CreateTagActionFactory implements ActionFactory {
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterToolAdapter params) {
-        checkRequiredArgument(params, TAG_NAME);
-
-        Tuple3<String, String, String> tablePath = getTablePath(params);
-        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
-        String tagName = params.get(TAG_NAME);
-
-        Long snapshot = null;
-        if (params.has(SNAPSHOT)) {
-            snapshot = Long.parseLong(params.get(SNAPSHOT));
-        }
-
-        Duration timeRetained = null;
-        if (params.has(TIME_RETAINED)) {
-            timeRetained = TimeUtils.parseDuration(params.get(TIME_RETAINED));
-        }
-
-        CreateTagAction action =
-                new CreateTagAction(
-                        tablePath.f0,
-                        tablePath.f1,
-                        tablePath.f2,
-                        catalogConfig,
-                        tagName,
-                        snapshot,
-                        timeRetained);
-        return Optional.of(action);
+    Action createOrReplaceTagAction(
+            Tuple3<String, String, String> tablePath,
+            Map<String, String> catalogConfig,
+            String tagName,
+            Long snapshot,
+            Duration timeRetained) {
+        return new CreateTagAction(
+                tablePath.f0,
+                tablePath.f1,
+                tablePath.f2,
+                catalogConfig,
+                tagName,
+                snapshot,
+                timeRetained);
     }
 
     @Override

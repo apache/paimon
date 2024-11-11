@@ -20,8 +20,8 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.types.RowType;
 
-import java.util.Arrays;
 import java.util.List;
 
 /** Inner {@link TableRead} contains filter and projection push down. */
@@ -36,16 +36,18 @@ public interface InnerTableRead extends TableRead {
 
     InnerTableRead withFilter(Predicate predicate);
 
+    /** Use {@link #withReadType(RowType)} instead. */
+    @Deprecated
     default InnerTableRead withProjection(int[] projection) {
         if (projection == null) {
             return this;
         }
-        int[][] nestedProjection =
-                Arrays.stream(projection).mapToObj(i -> new int[] {i}).toArray(int[][]::new);
-        return withProjection(nestedProjection);
+        throw new UnsupportedOperationException();
     }
 
-    InnerTableRead withProjection(int[][] projection);
+    default InnerTableRead withReadType(RowType readType) {
+        throw new UnsupportedOperationException();
+    }
 
     default InnerTableRead forceKeepDelete() {
         return this;

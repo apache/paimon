@@ -169,6 +169,9 @@ public class HashLookupStoreReader
 
     @Override
     public void close() throws IOException {
+        if (bloomFilter != null) {
+            bloomFilter.close();
+        }
         inputView.close();
         inputView = null;
     }

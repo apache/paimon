@@ -172,4 +172,51 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
     checkAnswer(spark.sql(s"CALL sys.remove_orphan_files(table => 'test.*')"), Row(0) :: Nil)
   }
 
+  test("Paimon procedure: remove orphan files with mode") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id STRING, name STRING)
+                 |USING PAIMON
+                 |TBLPROPERTIES ('primary-key'='id')
+                 |""".stripMargin)
+
+    spark.sql(s"INSERT INTO T VALUES ('1', 'a'), ('2', 'b')")
+
+    val table = loadTable("T")
+    val fileIO = table.fileIO()
+    val tablePath = table.location()
+
+    val orphanFile1 = new Path(tablePath, ORPHAN_FILE_1)
+    val orphanFile2 = new Path(tablePath, ORPHAN_FILE_2)
+
+    fileIO.tryToWriteAtomic(orphanFile1, "a")
+    Thread.sleep(2000)
+    fileIO.tryToWriteAtomic(orphanFile2, "b")
+
+    // by default, no file deleted
+    checkAnswer(spark.sql(s"CALL sys.remove_orphan_files(table => 'T')"), Row(0) :: Nil)
+
+    val orphanFile2ModTime = fileIO.getFileStatus(orphanFile2).getModificationTime
+    val older_than1 = DateTimeUtils.formatLocalDateTime(
+      DateTimeUtils.toLocalDateTime(
+        orphanFile2ModTime -
+          TimeUnit.SECONDS.toMillis(1)),
+      3)
+
+    checkAnswer(
+      spark.sql(
+        s"CALL sys.remove_orphan_files(table => 'T', older_than => '$older_than1', mode => 'diSTributed')"),
+      Row(1) :: Nil)
+
+    val older_than2 = DateTimeUtils.formatLocalDateTime(
+      DateTimeUtils.toLocalDateTime(System.currentTimeMillis()),
+      3)
+
+    checkAnswer(
+      spark.sql(
+        s"CALL sys.remove_orphan_files(table => 'T', older_than => '$older_than2', mode => 'local')"),
+      Row(1) :: Nil)
+
+    checkAnswer(spark.sql(s"CALL sys.remove_orphan_files(table => 'T')"), Row(0) :: Nil)
+  }
+
 }

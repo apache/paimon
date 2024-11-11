@@ -71,7 +71,7 @@ public class TagManager {
     public TagManager(FileIO fileIO, Path tablePath, String branch) {
         this.fileIO = fileIO;
         this.tablePath = tablePath;
-        this.branch = StringUtils.isNullOrWhitespaceOnly(branch) ? DEFAULT_MAIN_BRANCH : branch;
+        this.branch = BranchManager.normalizeBranch(branch);
     }
 
     public TagManager copyWithBranch(String branchName) {
@@ -97,13 +97,26 @@ public class TagManager {
 
     /** Create a tag from given snapshot and save it in the storage. */
     public void createTag(
+            Snapshot snapshot, String tagName, Duration timeRetained, List<TagCallback> callbacks) {
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name '%s' is blank.", tagName);
+        checkArgument(!tagExists(tagName), "Tag name '%s' already exists.", tagName);
+        createOrReplaceTag(snapshot, tagName, timeRetained, callbacks);
+    }
+
+    /** Replace a tag from given snapshot and save it in the storage. */
+    public void replaceTag(Snapshot snapshot, String tagName, Duration timeRetained) {
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name '%s' is blank.", tagName);
+        checkArgument(tagExists(tagName), "Tag name '%s' does not exist.", tagName);
+        createOrReplaceTag(snapshot, tagName, timeRetained, null);
+    }
+
+    public void createOrReplaceTag(
             Snapshot snapshot,
             String tagName,
             @Nullable Duration timeRetained,
-            List<TagCallback> callbacks) {
-        checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name '%s' is blank.", tagName);
-
+            @Nullable List<TagCallback> callbacks) {
         // When timeRetained is not defined, please do not write the tagCreatorTime field,
         // as this will cause older versions (<= 0.7) of readers to be unable to read this
         // tag.
@@ -117,15 +130,7 @@ public class TagManager {
         Path tagPath = tagPath(tagName);
 
         try {
-            if (tagExists(tagName)) {
-                Snapshot tagged = taggedSnapshot(tagName);
-                Preconditions.checkArgument(
-                        tagged.id() == snapshot.id(), "Tag name '%s' already exists.", tagName);
-                // update tag metadata into for the same snapshot of the same tag name.
-                fileIO.overwriteFileUtf8(tagPath, content);
-            } else {
-                fileIO.writeFile(tagPath, content, false);
-            }
+            fileIO.overwriteFileUtf8(tagPath, content);
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
@@ -135,12 +140,32 @@ public class TagManager {
                     e);
         }
 
-        try {
-            callbacks.forEach(callback -> callback.notifyCreation(tagName));
-        } finally {
-            for (TagCallback tagCallback : callbacks) {
-                IOUtils.closeQuietly(tagCallback);
+        if (callbacks != null) {
+            try {
+                callbacks.forEach(callback -> callback.notifyCreation(tagName));
+            } finally {
+                for (TagCallback tagCallback : callbacks) {
+                    IOUtils.closeQuietly(tagCallback);
+                }
             }
+        }
+    }
+
+    public void renameTag(String tagName, String targetTagName) {
+        try {
+            if (!tagExists(tagName)) {
+                throw new RuntimeException(
+                        String.format("The specified tag name [%s] does not exist.", tagName));
+            }
+            if (tagExists(targetTagName)) {
+                throw new RuntimeException(
+                        String.format(
+                                "The specified target tag name [%s] existed, please set a  non-existent tag name.",
+                                targetTagName));
+            }
+            fileIO.rename(tagPath(tagName), tagPath(targetTagName));
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -170,7 +195,10 @@ public class TagManager {
             List<TagCallback> callbacks) {
         checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name '%s' is blank.", tagName);
-        checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
+        if (!tagExists(tagName)) {
+            LOG.warn("Tag '{}' doesn't exist.", tagName);
+            return;
+        }
 
         Snapshot taggedSnapshot = taggedSnapshot(tagName);
         List<Snapshot> taggedSnapshots;

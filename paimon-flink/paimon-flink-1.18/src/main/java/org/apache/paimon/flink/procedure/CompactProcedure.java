@@ -44,6 +44,9 @@ import java.util.Map;
  *  CALL sys.compact('tableId', 'pt1=A,pt2=a;pt1=B,pt2=b')
  *
  *  -- compact a table with sorting
+ *  CALL sys.compact('tableId', 'ORDER/ZORDER', 'col1,col2')
+ *
+ *  -- compact specific partitions with sorting
  *  CALL sys.compact('tableId', 'partitions', 'ORDER/ZORDER', 'col1,col2', 'sink.parallelism=6')
  *
  * </code></pre>
@@ -59,6 +62,15 @@ public class CompactProcedure extends ProcedureBase {
     public String[] call(ProcedureContext procedureContext, String tableId, String partitions)
             throws Exception {
         return call(procedureContext, tableId, partitions, "", "", "", "");
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext,
+            String tableId,
+            String orderStrategy,
+            String orderByColumns)
+            throws Exception {
+        return call(procedureContext, tableId, "", orderStrategy, orderByColumns, "", "");
     }
 
     public String[] call(

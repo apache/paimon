@@ -19,10 +19,13 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.utils.SnapshotNotExistException;
 
+import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
@@ -53,30 +56,22 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     public void testAQEWithWriteManifest() {
         batchSql("ALTER TABLE T SET ('write-manifest-cache' = '1 mb')");
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
-        assertThatThrownBy(() -> batchSql("INSERT INTO T SELECT a, b, c FROM T GROUP BY a,b,c"))
-                .hasMessageContaining(
-                        "Paimon Sink with [Write Manifest Cache] does not support Flink's Adaptive Parallelism mode.");
-
-        // work fine
-        batchSql(
-                "INSERT INTO T /*+ OPTIONS('sink.parallelism'='1') */ SELECT a, b, c FROM T GROUP BY a,b,c");
-
-        // work fine too
-        batchSql("ALTER TABLE T SET ('write-manifest-cache' = '0 b')");
         batchSql("INSERT INTO T SELECT a, b, c FROM T GROUP BY a,b,c");
+        assertThat(batchSql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111),
+                        Row.of(2, 22, 222),
+                        Row.of(1, 11, 111),
+                        Row.of(2, 22, 222));
     }
 
     @Test
     public void testAQEWithDynamicBucket() {
         batchSql("CREATE TABLE IF NOT EXISTS D_T (a INT PRIMARY KEY NOT ENFORCED, b INT, c INT)");
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
-        assertThatThrownBy(() -> batchSql("INSERT INTO D_T SELECT a, b, c FROM T GROUP BY a,b,c"))
-                .hasMessageContaining(
-                        "Paimon Sink with [Dynamic Bucket Mode] does not support Flink's Adaptive Parallelism mode.");
-
-        // work fine
-        batchSql(
-                "INSERT INTO D_T /*+ OPTIONS('sink.parallelism'='1') */ SELECT a, b, c FROM T GROUP BY a,b,c");
+        batchSql("INSERT INTO D_T SELECT a, b, c FROM T GROUP BY a,b,c");
+        assertThat(batchSql("SELECT * FROM D_T"))
+                .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
     }
 
     @Test
@@ -117,8 +112,8 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         assertThatThrownBy(() -> batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='0') */"))
                 .satisfies(
                         anyCauseMatches(
-                                IllegalArgumentException.class,
-                                "The specified scan snapshotId 0 is out of available snapshotId range [1, 4]."));
+                                SnapshotNotExistException.class,
+                                "Specified parameter scan.snapshot-id = 0 is not exist, you can set it in range from 1 to 4."));
 
         assertThatThrownBy(
                         () ->
@@ -126,8 +121,8 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                                         "SELECT * FROM T /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id'='0') */"))
                 .satisfies(
                         anyCauseMatches(
-                                IllegalArgumentException.class,
-                                "The specified scan snapshotId 0 is out of available snapshotId range [1, 4]."));
+                                SnapshotNotExistException.class,
+                                "Specified parameter scan.snapshot-id = 0 is not exist, you can set it in range from 1 to 4."));
 
         assertThat(
                         batchSql(
@@ -535,5 +530,62 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                                 DateTimeUtils.formatTimestamp(
                                         DateTimeUtils.toInternal(timestamp, 0), 0)))
                 .containsExactlyInAnyOrder(Row.of(1, "a"), Row.of(2, "b"));
+    }
+
+    @Test
+    public void testCountStarAppend() {
+        sql("CREATE TABLE count_append (f0 INT, f1 STRING)");
+        sql("INSERT INTO count_append VALUES (1, 'a'), (2, 'b')");
+
+        String sql = "SELECT COUNT(*) FROM count_append";
+        assertThat(sql(sql)).containsOnly(Row.of(2L));
+        validateCount1PushDown(sql);
+    }
+
+    @Test
+    public void testCountStarPartAppend() {
+        sql("CREATE TABLE count_part_append (f0 INT, f1 STRING, dt STRING) PARTITIONED BY (dt)");
+        sql("INSERT INTO count_part_append VALUES (1, 'a', '1'), (1, 'a', '1'), (2, 'b', '2')");
+        String sql = "SELECT COUNT(*) FROM count_part_append WHERE dt = '1'";
+
+        assertThat(sql(sql)).containsOnly(Row.of(2L));
+        validateCount1PushDown(sql);
+    }
+
+    @Test
+    public void testCountStarAppendWithDv() {
+        sql(
+                "CREATE TABLE count_append_dv (f0 INT, f1 STRING) WITH ('deletion-vectors.enabled' = 'true')");
+        sql("INSERT INTO count_append_dv VALUES (1, 'a'), (2, 'b')");
+
+        String sql = "SELECT COUNT(*) FROM count_append_dv";
+        assertThat(sql(sql)).containsOnly(Row.of(2L));
+        validateCount1NotPushDown(sql);
+    }
+
+    @Test
+    public void testCountStarPK() {
+        sql("CREATE TABLE count_pk (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING)");
+        sql("INSERT INTO count_pk VALUES (1, 'a'), (2, 'b')");
+
+        String sql = "SELECT COUNT(*) FROM count_pk";
+        assertThat(sql(sql)).containsOnly(Row.of(2L));
+        validateCount1NotPushDown(sql);
+    }
+
+    private void validateCount1PushDown(String sql) {
+        Transformation<?> transformation = AbstractTestBase.translate(tEnv, sql);
+        while (!transformation.getInputs().isEmpty()) {
+            transformation = transformation.getInputs().get(0);
+        }
+        assertThat(transformation.getDescription()).contains("Count1AggFunction");
+    }
+
+    private void validateCount1NotPushDown(String sql) {
+        Transformation<?> transformation = AbstractTestBase.translate(tEnv, sql);
+        while (!transformation.getInputs().isEmpty()) {
+            transformation = transformation.getInputs().get(0);
+        }
+        assertThat(transformation.getDescription()).doesNotContain("Count1AggFunction");
     }
 }

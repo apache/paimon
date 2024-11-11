@@ -20,7 +20,7 @@ package org.apache.paimon.options;
 
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.TextElement;
-import org.apache.paimon.table.TableType;
+import org.apache.paimon.table.CatalogTableType;
 
 import java.time.Duration;
 
@@ -48,10 +48,10 @@ public class CatalogOptions {
                     .noDefaultValue()
                     .withDescription("Uri of metastore server.");
 
-    public static final ConfigOption<TableType> TABLE_TYPE =
+    public static final ConfigOption<CatalogTableType> TABLE_TYPE =
             ConfigOptions.key("table.type")
-                    .enumType(TableType.class)
-                    .defaultValue(TableType.MANAGED)
+                    .enumType(CatalogTableType.class)
+                    .defaultValue(CatalogTableType.MANAGED)
                     .withDescription("Type of table.");
 
     public static final ConfigOption<Boolean> LOCK_ENABLED =
@@ -78,13 +78,6 @@ public class CatalogOptions {
                     .defaultValue(Duration.ofMinutes(8))
                     .withDescription("The maximum time to wait for acquiring the lock.");
 
-    public static final ConfigOption<Boolean> FS_ALLOW_HADOOP_FALLBACK =
-            key("fs.allow-hadoop-fallback")
-                    .booleanType()
-                    .defaultValue(true)
-                    .withDescription(
-                            "Allow to fallback to hadoop File IO when no file io found for the scheme.");
-
     public static final ConfigOption<Integer> CLIENT_POOL_SIZE =
             key("client-pool-size")
                     .intType()
@@ -101,9 +94,16 @@ public class CatalogOptions {
     public static final ConfigOption<Duration> CACHE_EXPIRATION_INTERVAL_MS =
             key("cache.expiration-interval")
                     .durationType()
-                    .defaultValue(Duration.ofSeconds(60))
+                    .defaultValue(Duration.ofMinutes(10))
                     .withDescription(
                             "Controls the duration for which databases and tables in the catalog are cached.");
+
+    public static final ConfigOption<Long> CACHE_PARTITION_MAX_NUM =
+            key("cache.partition.max-num")
+                    .longType()
+                    .defaultValue(0L)
+                    .withDescription(
+                            "Controls the max number for which partitions in the catalog are cached.");
 
     public static final ConfigOption<MemorySize> CACHE_MANIFEST_SMALL_FILE_MEMORY =
             key("cache.manifest.small-file-memory")
@@ -156,4 +156,13 @@ public class CatalogOptions {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Sync all table properties to hive metastore");
+
+    public static final ConfigOption<Boolean> FORMAT_TABLE_ENABLED =
+            ConfigOptions.key("format-table.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to support format tables, format table corresponds to a regular csv, parquet or orc table, allowing read and write operations. "
+                                    + "However, during these processes, it does not connect to the metastore; hence, newly added partitions will not be reflected in"
+                                    + " the metastore and need to be manually added as separate partition operations.");
 }

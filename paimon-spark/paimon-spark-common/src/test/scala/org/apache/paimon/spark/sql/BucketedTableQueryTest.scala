@@ -122,7 +122,11 @@ class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
       spark.sql(
         "CREATE TABLE t5 (id INT, c STRING) TBLPROPERTIES ('primary-key' = 'id', 'bucket'='10')")
       spark.sql("INSERT INTO t5 VALUES (1, 'x1')")
-      checkAnswerAndShuffleSorts("SELECT * FROM t1 JOIN t5 on t1.id = t5.id", 2, 2)
+      if (gteqSpark4_0) {
+        checkAnswerAndShuffleSorts("SELECT * FROM t1 JOIN t5 on t1.id = t5.id", 0, 0)
+      } else {
+        checkAnswerAndShuffleSorts("SELECT * FROM t1 JOIN t5 on t1.id = t5.id", 2, 2)
+      }
 
       // one more bucket keys
       spark.sql(
@@ -152,10 +156,10 @@ class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
       checkAnswerAndShuffleSorts("SELECT id, max(c) FROM t1 GROUP BY id", 0, 0)
       checkAnswerAndShuffleSorts("SELECT c, count(*) FROM t1 GROUP BY c", 1, 0)
       checkAnswerAndShuffleSorts("SELECT c, max(c) FROM t1 GROUP BY c", 1, 2)
-      checkAnswerAndShuffleSorts("select sum(c) OVER (PARTITION BY id ORDER BY c) from t1", 0, 1)
+      checkAnswerAndShuffleSorts("select max(c) OVER (PARTITION BY id ORDER BY c) from t1", 0, 1)
       // TODO: it is a Spark issue for `WindowExec` which would required partition-by + and order-by
       //   without do distinct..
-      checkAnswerAndShuffleSorts("select sum(c) OVER (PARTITION BY id ORDER BY id) from t1", 0, 1)
+      checkAnswerAndShuffleSorts("select max(c) OVER (PARTITION BY id ORDER BY id) from t1", 0, 1)
       checkAnswerAndShuffleSorts("select sum(id) OVER (PARTITION BY c ORDER BY id) from t1", 1, 1)
 
       withSQLConf("spark.sql.requireAllClusterKeysForDistribution" -> "false") {

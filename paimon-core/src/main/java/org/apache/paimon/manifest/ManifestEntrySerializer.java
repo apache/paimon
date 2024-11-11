@@ -103,4 +103,8 @@ public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestE
     public static Function<InternalRow, String> fileNameGetter() {
         return row -> row.getRow(5, DataFileMeta.SCHEMA.getFieldCount()).getString(0).toString();
     }
+
+    public static Function<InternalRow, Integer> levelGetter() {
+        return row -> row.getRow(5, DataFileMeta.SCHEMA.getFieldCount()).getInt(10);
+    }
 }

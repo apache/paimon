@@ -28,63 +28,58 @@ import static org.apache.paimon.data.Decimal.fromBigDecimal;
 /** product value aggregate a field of a row. */
 public class FieldProductAgg extends FieldAggregator {
 
-    public static final String NAME = "product";
+    private static final long serialVersionUID = 1L;
 
-    public FieldProductAgg(DataType dataType) {
-        super(dataType);
-    }
-
-    @Override
-    String name() {
-        return NAME;
+    public FieldProductAgg(String name, DataType dataType) {
+        super(name, dataType);
     }
 
     @Override
     public Object agg(Object accumulator, Object inputField) {
+        if (accumulator == null || inputField == null) {
+            return accumulator == null ? inputField : accumulator;
+        }
+
         Object product;
 
-        if (accumulator == null || inputField == null) {
-            product = (accumulator == null ? inputField : accumulator);
-        } else {
-            // ordered by type root definition
-            switch (fieldType.getTypeRoot()) {
-                case DECIMAL:
-                    Decimal mergeFieldDD = (Decimal) accumulator;
-                    Decimal inFieldDD = (Decimal) inputField;
-                    assert mergeFieldDD.scale() == inFieldDD.scale()
-                            : "Inconsistent scale of aggregate Decimal!";
-                    assert mergeFieldDD.precision() == inFieldDD.precision()
-                            : "Inconsistent precision of aggregate Decimal!";
-                    BigDecimal bigDecimal = mergeFieldDD.toBigDecimal();
-                    BigDecimal bigDecimal1 = inFieldDD.toBigDecimal();
-                    BigDecimal mul = bigDecimal.multiply(bigDecimal1);
-                    product = fromBigDecimal(mul, mergeFieldDD.precision(), mergeFieldDD.scale());
-                    break;
-                case TINYINT:
-                    product = (byte) ((byte) accumulator * (byte) inputField);
-                    break;
-                case SMALLINT:
-                    product = (short) ((short) accumulator * (short) inputField);
-                    break;
-                case INTEGER:
-                    product = (int) accumulator * (int) inputField;
-                    break;
-                case BIGINT:
-                    product = (long) accumulator * (long) inputField;
-                    break;
-                case FLOAT:
-                    product = (float) accumulator * (float) inputField;
-                    break;
-                case DOUBLE:
-                    product = (double) accumulator * (double) inputField;
-                    break;
-                default:
-                    String msg =
-                            String.format(
-                                    "type %s not support in %s",
-                                    fieldType.getTypeRoot().toString(), this.getClass().getName());
-                    throw new IllegalArgumentException(msg);
-            }
+        // ordered by type root definition
+        switch (fieldType.getTypeRoot()) {
+            case DECIMAL:
+                Decimal mergeFieldDD = (Decimal) accumulator;
+                Decimal inFieldDD = (Decimal) inputField;
+                assert mergeFieldDD.scale() == inFieldDD.scale()
+                        : "Inconsistent scale of aggregate Decimal!";
+                assert mergeFieldDD.precision() == inFieldDD.precision()
+                        : "Inconsistent precision of aggregate Decimal!";
+                BigDecimal bigDecimal = mergeFieldDD.toBigDecimal();
+                BigDecimal bigDecimal1 = inFieldDD.toBigDecimal();
+                BigDecimal mul = bigDecimal.multiply(bigDecimal1);
+                product = fromBigDecimal(mul, mergeFieldDD.precision(), mergeFieldDD.scale());
+                break;
+            case TINYINT:
+                product = (byte) ((byte) accumulator * (byte) inputField);
+                break;
+            case SMALLINT:
+                product = (short) ((short) accumulator * (short) inputField);
+                break;
+            case INTEGER:
+                product = (int) accumulator * (int) inputField;
+                break;
+            case BIGINT:
+                product = (long) accumulator * (long) inputField;
+                break;
+            case FLOAT:
+                product = (float) accumulator * (float) inputField;
+                break;
+            case DOUBLE:
+                product = (double) accumulator * (double) inputField;
+                break;
+            default:
+                String msg =
+                        String.format(
+                                "type %s not support in %s",
+                                fieldType.getTypeRoot().toString(), this.getClass().getName());
+                throw new IllegalArgumentException(msg);
         }
         return product;
     }

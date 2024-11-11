@@ -42,6 +42,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -56,7 +57,6 @@ import org.apache.paimon.table.source.snapshot.StartingContext;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
@@ -65,14 +65,12 @@ import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
-import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
-
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -85,8 +83,6 @@ import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 public class AuditLogTable implements DataTable, ReadonlyTable {
 
     public static final String AUDIT_LOG = "audit_log";
-
-    public static final String ROW_KIND = "rowkind";
 
     public static final PredicateReplaceVisitor PREDICATE_CONVERTER =
             p -> {
@@ -141,7 +137,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     @Override
     public RowType rowType() {
         List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, ROW_KIND, new VarCharType(VarCharType.MAX_LENGTH)));
+        fields.add(SpecialFields.ROW_KIND);
         fields.addAll(wrapped.rowType().getFields());
         return new RowType(fields);
     }
@@ -237,100 +233,100 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
     private class AuditLogDataReader implements SnapshotReader {
 
-        private final SnapshotReader snapshotReader;
+        private final SnapshotReader wrapped;
 
-        private AuditLogDataReader(SnapshotReader snapshotReader) {
-            this.snapshotReader = snapshotReader;
+        private AuditLogDataReader(SnapshotReader wrapped) {
+            this.wrapped = wrapped;
         }
 
         @Override
         public Integer parallelism() {
-            return snapshotReader.parallelism();
+            return wrapped.parallelism();
         }
 
         @Override
         public SnapshotManager snapshotManager() {
-            return snapshotReader.snapshotManager();
+            return wrapped.snapshotManager();
         }
 
         @Override
         public ManifestsReader manifestsReader() {
-            return snapshotReader.manifestsReader();
+            return wrapped.manifestsReader();
         }
 
         @Override
         public List<ManifestEntry> readManifest(ManifestFileMeta manifest) {
-            return snapshotReader.readManifest(manifest);
+            return wrapped.readManifest(manifest);
         }
 
         @Override
         public ConsumerManager consumerManager() {
-            return snapshotReader.consumerManager();
+            return wrapped.consumerManager();
         }
 
         @Override
         public SplitGenerator splitGenerator() {
-            return snapshotReader.splitGenerator();
+            return wrapped.splitGenerator();
         }
 
         @Override
         public FileStorePathFactory pathFactory() {
-            return snapshotReader.pathFactory();
+            return wrapped.pathFactory();
         }
 
         public SnapshotReader withSnapshot(long snapshotId) {
-            snapshotReader.withSnapshot(snapshotId);
+            wrapped.withSnapshot(snapshotId);
             return this;
         }
 
         public SnapshotReader withSnapshot(Snapshot snapshot) {
-            snapshotReader.withSnapshot(snapshot);
+            wrapped.withSnapshot(snapshot);
             return this;
         }
 
         public SnapshotReader withFilter(Predicate predicate) {
-            convert(predicate).ifPresent(snapshotReader::withFilter);
+            convert(predicate).ifPresent(wrapped::withFilter);
             return this;
         }
 
         @Override
         public SnapshotReader withPartitionFilter(Map<String, String> partitionSpec) {
-            snapshotReader.withPartitionFilter(partitionSpec);
+            wrapped.withPartitionFilter(partitionSpec);
             return this;
         }
 
         @Override
         public SnapshotReader withPartitionFilter(Predicate predicate) {
-            snapshotReader.withPartitionFilter(predicate);
+            wrapped.withPartitionFilter(predicate);
             return this;
         }
 
         @Override
         public SnapshotReader withPartitionFilter(List<BinaryRow> partitions) {
-            snapshotReader.withPartitionFilter(partitions);
+            wrapped.withPartitionFilter(partitions);
             return this;
         }
 
         @Override
         public SnapshotReader withMode(ScanMode scanMode) {
-            snapshotReader.withMode(scanMode);
+            wrapped.withMode(scanMode);
             return this;
         }
 
         @Override
         public SnapshotReader withLevelFilter(Filter<Integer> levelFilter) {
-            snapshotReader.withLevelFilter(levelFilter);
+            wrapped.withLevelFilter(levelFilter);
             return this;
         }
 
         @Override
         public SnapshotReader withManifestEntryFilter(Filter<ManifestEntry> filter) {
-            snapshotReader.withManifestEntryFilter(filter);
+            wrapped.withManifestEntryFilter(filter);
             return this;
         }
 
         public SnapshotReader withBucket(int bucket) {
-            snapshotReader.withBucket(bucket);
+            wrapped.withBucket(bucket);
             return this;
         }
 
@@ -342,56 +338,61 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
         @Override
         public SnapshotReader withBucketFilter(Filter<Integer> bucketFilter) {
-            snapshotReader.withBucketFilter(bucketFilter);
+            wrapped.withBucketFilter(bucketFilter);
             return this;
         }
 
         @Override
         public SnapshotReader withDataFileNameFilter(Filter<String> fileNameFilter) {
-            snapshotReader.withDataFileNameFilter(fileNameFilter);
+            wrapped.withDataFileNameFilter(fileNameFilter);
             return this;
         }
 
         @Override
         public SnapshotReader withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
-            snapshotReader.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
+            wrapped.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
             return this;
         }
 
         @Override
         public SnapshotReader withMetricRegistry(MetricRegistry registry) {
-            snapshotReader.withMetricRegistry(registry);
+            wrapped.withMetricRegistry(registry);
             return this;
         }
 
         @Override
         public Plan read() {
-            return snapshotReader.read();
+            return wrapped.read();
         }
 
         @Override
         public Plan readChanges() {
-            return snapshotReader.readChanges();
+            return wrapped.readChanges();
         }
 
         @Override
         public Plan readIncrementalDiff(Snapshot before) {
-            return snapshotReader.readIncrementalDiff(before);
+            return wrapped.readIncrementalDiff(before);
         }
 
         @Override
         public List<BinaryRow> partitions() {
-            return snapshotReader.partitions();
+            return wrapped.partitions();
         }
 
         @Override
         public List<PartitionEntry> partitionEntries() {
-            return snapshotReader.partitionEntries();
+            return wrapped.partitionEntries();
         }
 
         @Override
         public List<BucketEntry> bucketEntries() {
-            return snapshotReader.bucketEntries();
+            return wrapped.bucketEntries();
+        }
+
+        @Override
+        public Iterator<ManifestEntry> readFileIterator() {
+            return wrapped.readFileIterator();
         }
     }
 
@@ -560,31 +561,31 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
+        public InnerTableRead withReadType(RowType readType) {
             // data projection to push down to dataRead
-            List<int[]> dataProjection = new ArrayList<>();
-            // read projection to handle record returned by dataRead
-            List<Integer> readProjection = new ArrayList<>();
-            boolean rowKindAppeared = false;
-            for (int i = 0; i < projection.length; i++) {
-                int[] field = projection[i];
-                int topField = field[0];
-                if (topField == 0) {
-                    rowKindAppeared = true;
-                    readProjection.add(-1);
-                } else {
-                    int[] newField = Arrays.copyOf(field, field.length);
-                    newField[0] = newField[0] - 1;
-                    dataProjection.add(newField);
+            List<DataField> dataReadFields = new ArrayList<>();
 
+            // read projection to handle record returned by dataRead
+            List<DataField> fields = readType.getFields();
+            int[] readProjection = new int[fields.size()];
+
+            boolean rowKindAppeared = false;
+            for (int i = 0; i < fields.size(); i++) {
+                String fieldName = fields.get(i).name();
+                if (fieldName.equals(SpecialFields.ROW_KIND.name())) {
+                    rowKindAppeared = true;
+                    readProjection[i] = -1;
+                } else {
+                    dataReadFields.add(fields.get(i));
                     // There is no row kind field. Keep it as it is
                     // Row kind field has occurred, and the following fields are offset by 1
                     // position
-                    readProjection.add(rowKindAppeared ? i - 1 : i);
+                    readProjection[i] = rowKindAppeared ? i - 1 : i;
                 }
             }
-            this.readProjection = Ints.toArray(readProjection);
-            dataRead.withProjection(dataProjection.toArray(new int[0][]));
+
+            this.readProjection = readProjection;
+            dataRead.withReadType(new RowType(readType.isNullable(), dataReadFields));
             return this;
         }
 

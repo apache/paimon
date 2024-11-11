@@ -26,12 +26,8 @@ under the License.
 
 # Flink API
 
-{{< hint warning >}}
-We do not recommend using programming API. Paimon is designed for SQL first, unless you are a professional Flink developer, even if you do, it can be very difficult.
-
-We strongly recommend that you use Flink SQL or Spark SQL, or simply use SQL APIs in programs.
-
-The following documents are not detailed and are for reference only.
+{{< hint info >}}
+If possible, recommend using Flink SQL or Spark SQL, or simply use SQL APIs in programs.
 {{< /hint >}}
 
 ## Dependency

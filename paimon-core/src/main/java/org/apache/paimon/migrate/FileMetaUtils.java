@@ -109,9 +109,9 @@ public class FileMetaUtils {
                             table.rowType().getFieldNames());
 
             SimpleStatsExtractor simpleStatsExtractor =
-                    FileFormat.getFileFormat(
-                                    ((FileStoreTable) table).coreOptions().toConfiguration(),
-                                    format)
+                    FileFormat.fromIdentifier(
+                                    format,
+                                    ((FileStoreTable) table).coreOptions().toConfiguration())
                             .createStatsExtractor(table.rowType(), factories)
                             .orElseThrow(
                                     () ->
@@ -156,7 +156,7 @@ public class FileMetaUtils {
 
         Pair<SimpleColStats[], SimpleStatsExtractor.FileInfo> fileInfo =
                 simpleStatsExtractor.extractWithFileInfo(fileIO, path);
-        SimpleStats stats = statsArraySerializer.toBinary(fileInfo.getLeft());
+        SimpleStats stats = statsArraySerializer.toBinaryAllMode(fileInfo.getLeft());
 
         return DataFileMeta.forAppend(
                 fileName,
@@ -166,7 +166,10 @@ public class FileMetaUtils {
                 0,
                 0,
                 ((FileStoreTable) table).schema().id(),
-                FileSource.APPEND);
+                Collections.emptyList(),
+                null,
+                FileSource.APPEND,
+                null);
     }
 
     public static BinaryRow writePartitionValue(

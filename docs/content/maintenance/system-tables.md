@@ -1,6 +1,6 @@
 ---
 title: "System Tables"
-weight: 1
+weight: 2
 type: docs
 aliases:
 - /maintenance/system-tables.html
@@ -216,12 +216,12 @@ You can query the branches of the table.
 SELECT * FROM my_table$branches;
 
 /*
-+----------------------+---------------------------+--------------------------+-------------------------+
-|          branch_name |          created_from_tag |    created_from_snapshot |             create_time |
-+----------------------+---------------------------+--------------------------+-------------------------+
-|              branch1 |                    tag1   |                        2 | 2024-07-18 20:31:39.084 |
-|              branch2 |                    tag2   |                        5 | 2024-07-18 21:11:14.373 |
-+----------------------+---------------------------+--------------------------+-------------------------+
++----------------------+-------------------------+
+|          branch_name |             create_time |
++----------------------+-------------------------+
+|              branch1 | 2024-07-18 20:31:39.084 |
+|              branch2 | 2024-07-18 21:11:14.373 |
++----------------------+-------------------------+
 2 rows in set
 */
 ```
@@ -264,6 +264,28 @@ SELECT * FROM my_table$manifests;
 
 -- You can also query the manifest with specified snapshot
 SELECT * FROM my_table$manifests /*+ OPTIONS('scan.snapshot-id'='1') */;
+/*
++--------------------------------+-------------+------------------+-------------------+---------------+
+|                      file_name |   file_size |  num_added_files | num_deleted_files |     schema_id |
++--------------------------------+-------------+------------------+-------------------+---------------+
+| manifest-f4dcab43-ef6b-4713... |        12365|               40 |                 0 |             0 |
++--------------------------------+-------------+------------------+-------------------+---------------+
+1 rows in set
+*/
+
+- You can also query the manifest with specified tagName
+SELECT * FROM my_table$manifests /*+ OPTIONS('scan.tag-name'='tag1') */;
+/*
++--------------------------------+-------------+------------------+-------------------+---------------+
+|                      file_name |   file_size |  num_added_files | num_deleted_files |     schema_id |
++--------------------------------+-------------+------------------+-------------------+---------------+
+| manifest-f4dcab43-ef6b-4713... |        12365|               40 |                 0 |             0 |
++--------------------------------+-------------+------------------+-------------------+---------------+
+1 rows in set
+*/
+
+- You can also query the manifest with specified timestamp in unix milliseconds
+SELECT * FROM my_table$manifests /*+ OPTIONS('scan.timestamp-millis'='1678883047356') */;
 /*
 +--------------------------------+-------------+------------------+-------------------+---------------+
 |                      file_name |   file_size |  num_added_files | num_deleted_files |     schema_id |
@@ -365,6 +387,22 @@ SELECT * FROM sys.catalog_options;
 +-----------+---------------------------+
 | warehouse | hdfs:///path/to/warehouse |
 +-----------+---------------------------+
+1 rows in set
+*/
+```
+
+### Statistic Table
+You can query the statistic information through statistic table.
+
+```sql
+SELECT * FROM T$statistics;
+
+/*
++--------------+------------+-----------------------+------------------+----------+
+|  snapshot_id |  schema_id |     mergedRecordCount | mergedRecordSize |  colstat |
++--------------+------------+-----------------------+------------------+----------+
+|            2 |          0 |              2        |         2        |    {}    |
++--------------+------------+-----------------------+------------------+----------+
 1 rows in set
 */
 ```

@@ -28,16 +28,17 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.types.RowKind
 
-import org.apache.spark.sql.{Column, Dataset, Row, SparkSession}
+import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
-import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, BasePredicate, EqualTo, Expression, Literal, Or, UnsafeProjection}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, BasePredicate, Expression, Literal, UnsafeProjection}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.expressions.codegen.GeneratePredicate
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, lit, monotonically_increasing_id, sum}
+import org.apache.spark.sql.paimon.shims.ExpressionUtils.{column, convertToExpression}
 import org.apache.spark.sql.types.{ByteType, StructField, StructType}
 
 import scala.collection.mutable
@@ -152,12 +153,12 @@ case class MergeIntoPaimonTable(
       }
       if (hasUpdate(matchedActions)) {
         touchedFilePathsSet ++= findTouchedFiles(
-          targetDS.join(sourceDS, new Column(mergeCondition), "inner"),
+          targetDS.join(sourceDS, column(mergeCondition), "inner"),
           sparkSession)
       }
       if (hasUpdate(notMatchedBySourceActions)) {
         touchedFilePathsSet ++= findTouchedFiles(
-          targetDS.join(sourceDS, new Column(mergeCondition), "left_anti"),
+          targetDS.join(sourceDS, column(mergeCondition), "left_anti"),
           sparkSession)
       }
 
@@ -199,7 +200,7 @@ case class MergeIntoPaimonTable(
     val sourceDS = createDataset(sparkSession, sourceTable)
       .withColumn(SOURCE_ROW_COL, lit(true))
 
-    val joinedDS = sourceDS.join(targetDS, new Column(mergeCondition), "fullOuter")
+    val joinedDS = sourceDS.join(targetDS, column(mergeCondition), "fullOuter")
     val joinedPlan = joinedDS.queryExecution.analyzed
 
     def resolveOnJoinedPlan(exprs: Seq[Expression]): Seq[Expression] = {
@@ -207,8 +208,10 @@ case class MergeIntoPaimonTable(
     }
 
     val targetOutput = filteredTargetPlan.output
-    val targetRowNotMatched = resolveOnJoinedPlan(Seq(col(SOURCE_ROW_COL).isNull.expr)).head
-    val sourceRowNotMatched = resolveOnJoinedPlan(Seq(col(TARGET_ROW_COL).isNull.expr)).head
+    val targetRowNotMatched = resolveOnJoinedPlan(
+      Seq(convertToExpression(sparkSession, col(SOURCE_ROW_COL).isNull))).head
+    val sourceRowNotMatched = resolveOnJoinedPlan(
+      Seq(convertToExpression(sparkSession, col(TARGET_ROW_COL).isNull))).head
     val matchedExprs = matchedActions.map(_.condition.getOrElse(TrueLiteral))
     val notMatchedExprs = notMatchedActions.map(_.condition.getOrElse(TrueLiteral))
     val notMatchedBySourceExprs = notMatchedBySourceActions.map(_.condition.getOrElse(TrueLiteral))
@@ -243,7 +246,7 @@ case class MergeIntoPaimonTable(
     val outputFields = mutable.ArrayBuffer(tableSchema.fields: _*)
     outputFields += StructField(ROW_KIND_COL, ByteType)
     outputFields ++= metadataCols.map(_.toStructField)
-    val outputSchema = StructType(outputFields)
+    val outputSchema = StructType(outputFields.toSeq)
 
     val joinedRowEncoder = EncoderUtils.encode(joinedPlan.schema)
     val outputEncoder = EncoderUtils.encode(outputSchema).resolveAndBind()
@@ -272,7 +275,7 @@ case class MergeIntoPaimonTable(
         .withColumn(ROW_ID_COL, monotonically_increasing_id())
       val sourceDS = createDataset(sparkSession, sourceTable)
       val count = sourceDS
-        .join(targetDS, new Column(mergeCondition), "inner")
+        .join(targetDS, column(mergeCondition), "inner")
         .select(col(ROW_ID_COL), lit(1).as("one"))
         .groupBy(ROW_ID_COL)
         .agg(sum("one").as("count"))

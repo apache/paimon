@@ -22,6 +22,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.casting.CastFieldGetter;
+import org.apache.paimon.casting.CastedRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
@@ -29,7 +30,6 @@ import org.apache.paimon.predicate.PredicateReplaceVisitor;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
@@ -67,8 +67,6 @@ public class SchemaEvolutionUtil {
      * <p>We can get the index mapping [0, -1, 1], in which 0 is the index of table field 1->c in
      * data fields, -1 is the index of 6->b in data fields and 1 is the index of 3->a in data
      * fields.
-     *
-     * <p>/// TODO should support nest index mapping when nest schema evolution is supported.
      *
      * @param tableFields the fields of table
      * @param dataFields the fields of underlying data
@@ -217,14 +215,9 @@ public class SchemaEvolutionUtil {
             int[] dataProjection,
             List<DataField> dataKeyFields,
             List<DataField> dataValueFields) {
-        int maxKeyId =
-                Math.max(
-                        tableKeyFields.stream().mapToInt(DataField::id).max().orElse(0),
-                        dataKeyFields.stream().mapToInt(DataField::id).max().orElse(0));
         List<DataField> tableFields =
-                KeyValue.createKeyValueFields(tableKeyFields, tableValueFields, maxKeyId);
-        List<DataField> dataFields =
-                KeyValue.createKeyValueFields(dataKeyFields, dataValueFields, maxKeyId);
+                KeyValue.createKeyValueFields(tableKeyFields, tableValueFields);
+        List<DataField> dataFields = KeyValue.createKeyValueFields(dataKeyFields, dataValueFields);
         return createIndexCastMapping(tableProjection, tableFields, dataProjection, dataFields);
     }
 
@@ -356,56 +349,6 @@ public class SchemaEvolutionUtil {
     }
 
     /**
-     * Create converter mapping from table fields to underlying data fields. For example, the table
-     * and data fields are as follows
-     *
-     * <ul>
-     *   <li>table fields: 1->c INT, 6->b STRING, 3->a BIGINT
-     *   <li>data fields: 1->a BIGINT, 3->c DOUBLE
-     * </ul>
-     *
-     * <p>We can get the column types (1->a BIGINT), (3->c DOUBLE) from data fields for (1->c INT)
-     * and (3->a BIGINT) in table fields through index mapping [0, -1, 1], then compare the data
-     * type and create converter mapping.
-     *
-     * <p>/// TODO should support nest index mapping when nest schema evolution is supported.
-     *
-     * @param tableFields the fields of table
-     * @param dataFields the fields of underlying data
-     * @param indexMapping the index mapping from table fields to data fields
-     * @return the index mapping
-     */
-    @Nullable
-    public static CastExecutor<?, ?>[] createConvertMapping(
-            List<DataField> tableFields, List<DataField> dataFields, int[] indexMapping) {
-        CastExecutor<?, ?>[] converterMapping = new CastExecutor<?, ?>[tableFields.size()];
-        boolean castExist = false;
-        for (int i = 0; i < tableFields.size(); i++) {
-            int dataIndex = indexMapping == null ? i : indexMapping[i];
-            if (dataIndex < 0) {
-                converterMapping[i] = CastExecutors.identityCastExecutor();
-            } else {
-                DataField tableField = tableFields.get(i);
-                DataField dataField = dataFields.get(dataIndex);
-                if (dataField.type().equalsIgnoreNullable(tableField.type())) {
-                    converterMapping[i] = CastExecutors.identityCastExecutor();
-                } else {
-                    // TODO support column type evolution in nested type
-                    checkState(
-                            !tableField.type().is(DataTypeFamily.CONSTRUCTED),
-                            "Only support column type evolution in atomic data type.");
-                    converterMapping[i] =
-                            checkNotNull(
-                                    CastExecutors.resolve(dataField.type(), tableField.type()));
-                    castExist = true;
-                }
-            }
-        }
-
-        return castExist ? converterMapping : null;
-    }
-
-    /**
      * Create getter and casting mapping from table fields to underlying data fields with given
      * index mapping. For example, the table and data fields are as follows
      *
@@ -450,23 +393,57 @@ public class SchemaEvolutionUtil {
                     checkState(
                             !(tableField.type() instanceof MapType
                                     || dataField.type() instanceof ArrayType
-                                    || dataField.type() instanceof MultisetType
-                                    || dataField.type() instanceof RowType),
-                            "Only support column type evolution in atomic data type.");
+                                    || dataField.type() instanceof MultisetType),
+                            "Only support column type evolution in atomic and row data type.");
+
+                    CastExecutor<?, ?> castExecutor;
+                    if (tableField.type() instanceof RowType
+                            && dataField.type() instanceof RowType) {
+                        castExecutor =
+                                createRowCastExecutor(
+                                        (RowType) dataField.type(), (RowType) tableField.type());
+                    } else {
+                        castExecutor = CastExecutors.resolve(dataField.type(), tableField.type());
+                    }
+                    checkNotNull(
+                            castExecutor,
+                            "Cannot cast from type "
+                                    + dataField.type()
+                                    + " to type "
+                                    + tableField.type());
+
                     // Create getter with index i and projected row data will convert to underlying
                     // data
                     converterMapping[i] =
                             new CastFieldGetter(
                                     InternalRowUtils.createNullCheckingFieldGetter(
                                             dataField.type(), i),
-                                    checkNotNull(
-                                            CastExecutors.resolve(
-                                                    dataField.type(), tableField.type())));
+                                    castExecutor);
                     castExist = true;
                 }
             }
         }
 
         return castExist ? converterMapping : null;
+    }
+
+    private static CastExecutor<InternalRow, InternalRow> createRowCastExecutor(
+            RowType inputType, RowType targetType) {
+        int[] indexMapping = createIndexMapping(targetType.getFields(), inputType.getFields());
+        CastFieldGetter[] castFieldGetters =
+                createCastFieldGetterMapping(
+                        targetType.getFields(), inputType.getFields(), indexMapping);
+
+        ProjectedRow projectedRow = indexMapping == null ? null : ProjectedRow.from(indexMapping);
+        CastedRow castedRow = castFieldGetters == null ? null : CastedRow.from(castFieldGetters);
+        return value -> {
+            if (projectedRow != null) {
+                value = projectedRow.replaceRow(value);
+            }
+            if (castedRow != null) {
+                value = castedRow.replaceRow(value);
+            }
+            return value;
+        };
     }
 }

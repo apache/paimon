@@ -52,9 +52,6 @@ public class ScanMetrics {
     public static final String LAST_SKIPPED_BY_PARTITION_AND_STATS =
             "lastSkippedByPartitionAndStats";
 
-    public static final String LAST_SKIPPED_BY_BUCKET_AND_LEVEL_FILTER =
-            "lastSkippedByBucketAndLevelFilter";
-
     public static final String LAST_SKIPPED_BY_WHOLE_BUCKET_FILES_FILTER =
             "lastSkippedByWholeBucketFilesFilter";
 
@@ -72,9 +69,6 @@ public class ScanMetrics {
         metricGroup.gauge(
                 LAST_SKIPPED_BY_PARTITION_AND_STATS,
                 () -> latestScan == null ? 0L : latestScan.getSkippedByPartitionAndStats());
-        metricGroup.gauge(
-                LAST_SKIPPED_BY_BUCKET_AND_LEVEL_FILTER,
-                () -> latestScan == null ? 0L : latestScan.getSkippedByBucketAndLevelFilter());
         metricGroup.gauge(
                 LAST_SKIPPED_BY_WHOLE_BUCKET_FILES_FILTER,
                 () -> latestScan == null ? 0L : latestScan.getSkippedByWholeBucketFiles());

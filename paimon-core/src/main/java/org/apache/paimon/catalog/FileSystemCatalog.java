@@ -30,7 +30,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -70,16 +69,22 @@ public class FileSystemCatalog extends AbstractCatalog {
                     "Currently filesystem catalog can't store database properties, discard properties: {}",
                     properties);
         }
-        uncheck(() -> fileIO.mkdirs(newDatabasePath(name)));
+
+        Path databasePath = newDatabasePath(name);
+        if (!uncheck(() -> fileIO.mkdirs(databasePath))) {
+            throw new RuntimeException(
+                    String.format(
+                            "Create database location failed, " + "database: %s, location: %s",
+                            name, databasePath));
+        }
     }
 
     @Override
-    public Map<String, String> loadDatabasePropertiesImpl(String name)
-            throws DatabaseNotExistException {
+    public Database getDatabaseImpl(String name) throws DatabaseNotExistException {
         if (!uncheck(() -> fileIO.exists(newDatabasePath(name)))) {
             throw new DatabaseNotExistException(name);
         }
-        return Collections.emptyMap();
+        return Database.of(name);
     }
 
     @Override
@@ -90,16 +95,6 @@ public class FileSystemCatalog extends AbstractCatalog {
     @Override
     protected List<String> listTablesImpl(String databaseName) {
         return uncheck(() -> listTablesInFileSystem(newDatabasePath(databaseName)));
-    }
-
-    @Override
-    public boolean tableExists(Identifier identifier) {
-        if (isSystemTable(identifier)) {
-            return super.tableExists(identifier);
-        }
-
-        return tableExistsInFileSystem(
-                getTableLocation(identifier), identifier.getBranchNameOrDefault());
     }
 
     @Override

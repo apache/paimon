@@ -40,32 +40,35 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecute;
+import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
 
 /**
  * Local {@link OrphanFilesClean}, it will use thread pool to execute deletion.
  *
- * <p>Note that, this class is not used any more since each engine should implement its own
- * distributed one. See `FlinkOrphanFilesClean` and `SparkOrphanFilesClean`.
+ * <p>Note that, this class will be used when the orphan clean mode is local, else orphan clean will
+ * use distributed one. See `FlinkOrphanFilesClean` and `SparkOrphanFilesClean`.
  */
 public class LocalOrphanFilesClean extends OrphanFilesClean {
 
     private final ThreadPoolExecutor executor;
 
-    private static final int SHOW_LIMIT = 200;
-
     private final List<Path> deleteFiles;
+
+    private Set<String> candidateDeletes;
 
     public LocalOrphanFilesClean(FileStoreTable table) {
         this(table, System.currentTimeMillis() - TimeUnit.DAYS.toMillis(1));
@@ -92,6 +95,10 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
 
         // delete candidate files
         Map<String, Path> candidates = getCandidateDeletingFiles();
+        if (candidates.isEmpty()) {
+            return deleteFiles;
+        }
+        candidateDeletes = new HashSet<>(candidates.keySet());
 
         // find used files
         Set<String> usedFiles =
@@ -100,22 +107,61 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                         .collect(Collectors.toSet());
 
         // delete unused files
-        Set<String> deleted = new HashSet<>(candidates.keySet());
-        deleted.removeAll(usedFiles);
-        deleted.stream().map(candidates::get).forEach(fileCleaner);
-        deleteFiles.addAll(deleted.stream().map(candidates::get).collect(Collectors.toList()));
+        candidateDeletes.removeAll(usedFiles);
+        candidateDeletes.stream().map(candidates::get).forEach(fileCleaner);
+        deleteFiles.addAll(
+                candidateDeletes.stream().map(candidates::get).collect(Collectors.toList()));
+        candidateDeletes.clear();
 
         return deleteFiles;
     }
 
-    private List<String> getUsedFiles(String branch) {
-        List<String> usedFiles = new ArrayList<>();
+    private void collectWithoutDataFile(
+            String branch, Consumer<String> usedFileConsumer, Consumer<String> manifestConsumer)
+            throws IOException {
+        randomlyOnlyExecute(
+                executor,
+                snapshot -> {
+                    try {
+                        collectWithoutDataFile(
+                                branch, snapshot, usedFileConsumer, manifestConsumer);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                },
+                safelyGetAllSnapshots(branch));
+    }
+
+    private Set<String> getUsedFiles(String branch) {
+        Set<String> usedFiles = ConcurrentHashMap.newKeySet();
         ManifestFile manifestFile =
                 table.switchToBranch(branch).store().manifestFileFactory().create();
         try {
-            List<String> manifests = new ArrayList<>();
+            Set<String> manifests = ConcurrentHashMap.newKeySet();
             collectWithoutDataFile(branch, usedFiles::add, manifests::add);
-            usedFiles.addAll(retryReadingDataFiles(manifestFile, manifests));
+            randomlyOnlyExecute(
+                    executor,
+                    manifestName -> {
+                        try {
+                            retryReadingFiles(
+                                            () -> manifestFile.readWithIOException(manifestName),
+                                            Collections.<ManifestEntry>emptyList())
+                                    .stream()
+                                    .map(ManifestEntry::file)
+                                    .forEach(
+                                            f -> {
+                                                if (candidateDeletes.contains(f.fileName())) {
+                                                    usedFiles.add(f.fileName());
+                                                }
+                                                f.extraFiles().stream()
+                                                        .filter(candidateDeletes::contains)
+                                                        .forEach(usedFiles::add);
+                                            });
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    },
+                    manifests);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -139,39 +185,6 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         while (allPaths.hasNext()) {
             Path next = allPaths.next();
             result.put(next.getName(), next);
-        }
-        return result;
-    }
-
-    private List<String> retryReadingDataFiles(
-            ManifestFile manifestFile, List<String> manifestNames) throws IOException {
-        List<String> dataFiles = new ArrayList<>();
-        for (String manifestName : manifestNames) {
-            retryReadingFiles(
-                            () -> manifestFile.readWithIOException(manifestName),
-                            Collections.<ManifestEntry>emptyList())
-                    .stream()
-                    .map(ManifestEntry::file)
-                    .forEach(
-                            f -> {
-                                dataFiles.add(f.fileName());
-                                dataFiles.addAll(f.extraFiles());
-                            });
-        }
-        return dataFiles;
-    }
-
-    public static List<String> showDeletedFiles(List<Path> deleteFiles, int showLimit) {
-        int showSize = Math.min(deleteFiles.size(), showLimit);
-        List<String> result = new ArrayList<>();
-        if (deleteFiles.size() > showSize) {
-            result.add(
-                    String.format(
-                            "Total %s files, only %s lines are displayed.",
-                            deleteFiles.size(), showSize));
-        }
-        for (int i = 0; i < showSize; i++) {
-            result.add(deleteFiles.get(i).toUri().getPath());
         }
         return result;
     }
@@ -217,7 +230,23 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         return orphanFilesCleans;
     }
 
-    public static String[] executeOrphanFilesClean(List<LocalOrphanFilesClean> tableCleans) {
+    public static long executeDatabaseOrphanFiles(
+            Catalog catalog,
+            String databaseName,
+            @Nullable String tableName,
+            long olderThanMillis,
+            SerializableConsumer<Path> fileCleaner,
+            @Nullable Integer parallelism)
+            throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
+        List<LocalOrphanFilesClean> tableCleans =
+                createOrphanFilesCleans(
+                        catalog,
+                        databaseName,
+                        tableName,
+                        olderThanMillis,
+                        fileCleaner,
+                        parallelism);
+
         ExecutorService executorService =
                 Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
         List<Future<List<Path>>> tasks = new ArrayList<>();
@@ -238,6 +267,6 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         }
 
         executorService.shutdownNow();
-        return showDeletedFiles(cleanOrphanFiles, SHOW_LIMIT).toArray(new String[0]);
+        return cleanOrphanFiles.size();
     }
 }

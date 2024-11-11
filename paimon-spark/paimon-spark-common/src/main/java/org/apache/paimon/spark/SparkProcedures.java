@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.spark.procedure.CompactManifestProcedure;
 import org.apache.paimon.spark.procedure.CompactProcedure;
 import org.apache.paimon.spark.procedure.CreateBranchProcedure;
 import org.apache.paimon.spark.procedure.CreateTagFromTimestampProcedure;
@@ -26,16 +27,21 @@ import org.apache.paimon.spark.procedure.DeleteBranchProcedure;
 import org.apache.paimon.spark.procedure.DeleteTagProcedure;
 import org.apache.paimon.spark.procedure.ExpirePartitionsProcedure;
 import org.apache.paimon.spark.procedure.ExpireSnapshotsProcedure;
+import org.apache.paimon.spark.procedure.ExpireTagsProcedure;
 import org.apache.paimon.spark.procedure.FastForwardProcedure;
 import org.apache.paimon.spark.procedure.MarkPartitionDoneProcedure;
+import org.apache.paimon.spark.procedure.MigrateDatabaseProcedure;
 import org.apache.paimon.spark.procedure.MigrateFileProcedure;
 import org.apache.paimon.spark.procedure.MigrateTableProcedure;
 import org.apache.paimon.spark.procedure.Procedure;
 import org.apache.paimon.spark.procedure.ProcedureBuilder;
 import org.apache.paimon.spark.procedure.RemoveOrphanFilesProcedure;
+import org.apache.paimon.spark.procedure.RenameTagProcedure;
 import org.apache.paimon.spark.procedure.RepairProcedure;
+import org.apache.paimon.spark.procedure.ReplaceTagProcedure;
 import org.apache.paimon.spark.procedure.ResetConsumerProcedure;
 import org.apache.paimon.spark.procedure.RollbackProcedure;
+import org.apache.paimon.spark.procedure.RollbackToTimestampProcedure;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -59,13 +65,18 @@ public class SparkProcedures {
         ImmutableMap.Builder<String, Supplier<ProcedureBuilder>> procedureBuilders =
                 ImmutableMap.builder();
         procedureBuilders.put("rollback", RollbackProcedure::builder);
+        procedureBuilders.put("rollback_to_timestamp", RollbackToTimestampProcedure::builder);
         procedureBuilders.put("create_tag", CreateTagProcedure::builder);
+        procedureBuilders.put("replace_tag", ReplaceTagProcedure::builder);
+        procedureBuilders.put("rename_tag", RenameTagProcedure::builder);
         procedureBuilders.put(
                 "create_tag_from_timestamp", CreateTagFromTimestampProcedure::builder);
         procedureBuilders.put("delete_tag", DeleteTagProcedure::builder);
+        procedureBuilders.put("expire_tags", ExpireTagsProcedure::builder);
         procedureBuilders.put("create_branch", CreateBranchProcedure::builder);
         procedureBuilders.put("delete_branch", DeleteBranchProcedure::builder);
         procedureBuilders.put("compact", CompactProcedure::builder);
+        procedureBuilders.put("migrate_database", MigrateDatabaseProcedure::builder);
         procedureBuilders.put("migrate_table", MigrateTableProcedure::builder);
         procedureBuilders.put("migrate_file", MigrateFileProcedure::builder);
         procedureBuilders.put("remove_orphan_files", RemoveOrphanFilesProcedure::builder);
@@ -75,6 +86,7 @@ public class SparkProcedures {
         procedureBuilders.put("fast_forward", FastForwardProcedure::builder);
         procedureBuilders.put("reset_consumer", ResetConsumerProcedure::builder);
         procedureBuilders.put("mark_partition_done", MarkPartitionDoneProcedure::builder);
+        procedureBuilders.put("compact_manifest", CompactManifestProcedure::builder);
         return procedureBuilders.build();
     }
 }

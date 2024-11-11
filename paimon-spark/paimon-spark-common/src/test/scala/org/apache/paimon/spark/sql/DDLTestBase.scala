@@ -27,7 +27,7 @@ import org.apache.spark.SparkException
 import org.apache.spark.sql.Row
 import org.junit.jupiter.api.Assertions
 
-import java.sql.Timestamp
+import java.sql.{Date, Timestamp}
 import java.time.LocalDateTime
 
 abstract class DDLTestBase extends PaimonSparkTestBase {
@@ -154,9 +154,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
       val error = intercept[Exception] {
         spark.sql(s"CREATE TABLE parquet_tbl (id int) USING parquet")
       }.getMessage
-      assert(
-        error.contains(
-          "SparkCatalog can only create paimon table, but current provider is parquet"))
+      assert(error.contains("does not support format table"))
     }
   }
 
@@ -354,7 +352,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
           .column("ts", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE())
           .column("ts_ntz", DataTypes.TIMESTAMP())
           .build
-        catalog.createTable(identifier, schema, false)
+        paimonCatalog.createTable(identifier, schema, false)
         sql(
           s"INSERT INTO paimon_tbl VALUES (timestamp'2024-01-01 00:00:00', timestamp_ntz'2024-01-01 00:00:00')")
 
@@ -372,7 +370,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
         // Due to previous design, read timestamp ltz type with spark 3.3 and below will cause problems,
         // skip testing it
         if (gteqSpark3_4) {
-          val table = catalog.getTable(identifier)
+          val table = paimonCatalog.getTable(identifier)
           val builder = table.newReadBuilder.withProjection(Array[Int](0, 1))
           val splits = builder.newScan().plan().splits()
           builder.newRead
@@ -407,7 +405,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
           // Due to previous design, read timestamp ltz type with spark 3.3 and below will cause problems,
           // skip testing it
           if (gteqSpark3_4) {
-            val table = catalog.getTable(identifier)
+            val table = paimonCatalog.getTable(identifier)
             val builder = table.newReadBuilder.withProjection(Array[Int](0, 1))
             val splits = builder.newScan().plan().splits()
             builder.newRead
@@ -425,7 +423,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
         }
       }
     } finally {
-      catalog.dropTable(identifier, true)
+      paimonCatalog.dropTable(identifier, true)
     }
   }
 
@@ -496,5 +494,56 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
              |""".stripMargin)
     }.getMessage
     assert(error.contains("Unsupported partition transform"))
+  }
+
+  test("Fix partition column generate wrong partition spec") {
+    Seq(true, false).foreach {
+      legacyPartName =>
+        withTable("p_t") {
+          spark.sql(s"""
+                       |CREATE TABLE p_t (
+                       |    id BIGINT,
+                       |    c1 STRING
+                       |) using paimon
+                       |PARTITIONED BY (day binary)
+                       |tblproperties('partition.legacy-name'='$legacyPartName');
+                       |""".stripMargin)
+
+          if (legacyPartName) {
+            spark.sql("insert into table p_t values(1, 'a', cast('2021' as binary))")
+            intercept[Exception] {
+              spark.sql("SELECT * FROM p_t").collect()
+            }
+          } else {
+            spark.sql("insert into table p_t values(1, 'a', cast('2021' as binary))")
+            checkAnswer(spark.sql("SELECT * FROM p_t"), Row(1, "a", "2021".getBytes))
+            val path = spark.sql("SELECT __paimon_file_path FROM p_t").collect()
+            assert(path.length == 1)
+            assert(path.head.getString(0).contains("/day=2021/"))
+          }
+        }
+
+        withTable("p_t") {
+          spark.sql(s"""
+                       |CREATE TABLE p_t (
+                       |    id BIGINT,
+                       |    c1 STRING
+                       |) using paimon
+                       |PARTITIONED BY (day date)
+                       |tblproperties('partition.legacy-name'='$legacyPartName');
+                       |""".stripMargin)
+
+          spark.sql("insert into table p_t values(1, 'a', cast('2021-01-01' as date))")
+          checkAnswer(spark.sql("SELECT * FROM p_t"), Row(1, "a", Date.valueOf("2021-01-01")))
+
+          val path = spark.sql("SELECT __paimon_file_path FROM p_t").collect()
+          assert(path.length == 1)
+          if (legacyPartName) {
+            assert(path.head.getString(0).contains("/day=18628/"))
+          } else {
+            assert(path.head.getString(0).contains("/day=2021-01-01/"))
+          }
+        }
+    }
   }
 }

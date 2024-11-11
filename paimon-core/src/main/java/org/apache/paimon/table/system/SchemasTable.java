@@ -31,10 +31,12 @@ import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.GreaterOrEqual;
 import org.apache.paimon.predicate.GreaterThan;
+import org.apache.paimon.predicate.InPredicateVisitor;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.LessOrEqual;
 import org.apache.paimon.predicate.LessThan;
+import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
@@ -64,6 +66,7 @@ import javax.annotation.Nullable;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -199,10 +202,11 @@ public class SchemasTable implements ReadonlyTable {
     private class SchemasRead implements InnerTableRead {
 
         private final FileIO fileIO;
-        private int[][] projection;
+        private RowType readType;
 
         private Optional<Long> optionalFilterSchemaIdMax = Optional.empty();
         private Optional<Long> optionalFilterSchemaIdMin = Optional.empty();
+        private final List<Long> schemaIds = new ArrayList<>();
 
         public SchemasRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -222,6 +226,18 @@ public class SchemasTable implements ReadonlyTable {
                     for (Predicate leaf : children) {
                         handleLeafPredicate(leaf, leafName);
                     }
+                }
+
+                // optimize for IN filter
+                if ((compoundPredicate.function()) instanceof Or) {
+                    InPredicateVisitor.extractInElements(predicate, leafName)
+                            .ifPresent(
+                                    leafs ->
+                                            leafs.forEach(
+                                                    leaf ->
+                                                            schemaIds.add(
+                                                                    Long.parseLong(
+                                                                            leaf.toString()))));
                 }
             } else {
                 handleLeafPredicate(predicate, leafName);
@@ -260,8 +276,8 @@ public class SchemasTable implements ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            this.projection = projection;
+        public InnerTableRead withReadType(RowType readType) {
+            this.readType = readType;
             return this;
         }
 
@@ -279,13 +295,22 @@ public class SchemasTable implements ReadonlyTable {
             Path location = schemasSplit.location;
             SchemaManager manager = new SchemaManager(fileIO, location, branch);
 
-            Collection<TableSchema> tableSchemas =
-                    manager.listWithRange(optionalFilterSchemaIdMax, optionalFilterSchemaIdMin);
+            Collection<TableSchema> tableSchemas;
+            if (!schemaIds.isEmpty()) {
+                tableSchemas = manager.schemasWithId(schemaIds);
+            } else {
+                tableSchemas =
+                        manager.listWithRange(optionalFilterSchemaIdMax, optionalFilterSchemaIdMin);
+            }
+
             Iterator<InternalRow> rows = Iterators.transform(tableSchemas.iterator(), this::toRow);
-            if (projection != null) {
+            if (readType != null) {
                 rows =
                         Iterators.transform(
-                                rows, row -> ProjectedRow.from(projection).replaceRow(row));
+                                rows,
+                                row ->
+                                        ProjectedRow.from(readType, SchemasTable.TABLE_TYPE)
+                                                .replaceRow(row));
             }
             return new IteratorRecordReader<>(rows);
         }

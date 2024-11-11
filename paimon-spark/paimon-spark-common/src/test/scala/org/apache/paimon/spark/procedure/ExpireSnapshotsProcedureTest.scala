@@ -19,10 +19,14 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.utils.SnapshotManager
 
 import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
+import org.assertj.core.api.Assertions.{assertThat, assertThatIllegalArgumentException}
+
+import java.sql.Timestamp
 
 class ExpireSnapshotsProcedureTest extends PaimonSparkTestBase with StreamTest {
 
@@ -135,5 +139,30 @@ class ExpireSnapshotsProcedureTest extends PaimonSparkTestBase with StreamTest {
           }
       }
     }
+  }
+
+  test("Paimon Procedure: test parameter order_than with string type") {
+    sql(
+      "CREATE TABLE T (a INT, b STRING) " +
+        "TBLPROPERTIES ( 'num-sorted-run.compaction-trigger' = '999' )")
+    val table = loadTable("T")
+    val snapshotManager = table.snapshotManager
+
+    // generate 5 snapshot
+    for (i <- 1 to 5) {
+      sql(s"INSERT INTO T VALUES ($i, '$i')")
+    }
+    checkSnapshots(snapshotManager, 1, 5)
+
+    val timestamp = new Timestamp(snapshotManager.latestSnapshot().timeMillis)
+    spark.sql(
+      s"CALL paimon.sys.expire_snapshots(table => 'test.T', older_than => '${timestamp.toString}', max_deletes => 2)")
+    checkSnapshots(snapshotManager, 3, 5)
+  }
+
+  def checkSnapshots(sm: SnapshotManager, earliest: Int, latest: Int): Unit = {
+    assertThat(sm.snapshotCount).isEqualTo(latest - earliest + 1)
+    assertThat(sm.earliestSnapshotId).isEqualTo(earliest)
+    assertThat(sm.latestSnapshotId).isEqualTo(latest)
   }
 }

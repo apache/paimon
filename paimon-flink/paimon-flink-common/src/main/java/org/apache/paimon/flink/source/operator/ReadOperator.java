@@ -54,6 +54,9 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
     private transient IOManager ioManager;
 
     private transient FileStoreSourceReaderMetrics sourceReaderMetrics;
+    // we create our own gauge for currentEmitEventTimeLag, because this operator is not a FLIP-27
+    // source and Flink can't automatically calculate this metric
+    private transient long emitEventTimeLag = FileStoreSourceReaderMetrics.UNDEFINED;
     private transient Counter numRecordsIn;
 
     public ReadOperator(ReadBuilder readBuilder) {
@@ -65,19 +68,7 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
         super.open();
 
         this.sourceReaderMetrics = new FileStoreSourceReaderMetrics(getMetricGroup());
-        // we create our own gauge for currentEmitEventTimeLag, because this operator is not a
-        // FLIP-27 source and Flink can't automatically calculate this metric
-        getMetricGroup()
-                .gauge(
-                        MetricNames.CURRENT_EMIT_EVENT_TIME_LAG,
-                        () -> {
-                            long eventTime = sourceReaderMetrics.getLatestFileCreationTime();
-                            if (eventTime == FileStoreSourceReaderMetrics.UNDEFINED) {
-                                return FileStoreSourceReaderMetrics.UNDEFINED;
-                            } else {
-                                return System.currentTimeMillis() - eventTime;
-                            }
-                        });
+        getMetricGroup().gauge(MetricNames.CURRENT_EMIT_EVENT_TIME_LAG, () -> emitEventTimeLag);
         this.numRecordsIn =
                 InternalSourceReaderMetricGroup.wrap(getMetricGroup())
                         .getIOMetricGroup()
@@ -108,6 +99,8 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
         try (CloseableIterator<InternalRow> iterator =
                 read.createReader(split).toCloseableIterator()) {
             while (iterator.hasNext()) {
+                emitEventTimeLag = System.currentTimeMillis() - eventTime;
+
                 // each Split is already counted as one input record,
                 // so we don't need to count the first record
                 if (firstRecord) {

@@ -83,6 +83,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.CoreOptions.ChangelogProducer.FULL_COMPACTION;
@@ -106,6 +107,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final RowType keyType;
     private final RowType valueType;
     private final RowType partitionType;
+    private final String commitUser;
     @Nullable private final RecordLevelExpire recordLevelExpire;
     @Nullable private Cache<String, LookupFile> lookupFileCache;
 
@@ -131,10 +133,10 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             KeyValueFieldsExtractor extractor,
             String tableName) {
         super(
-                commitUser,
                 snapshotManager,
                 scan,
                 options,
+                partitionType,
                 indexFactory,
                 deletionVectorsMaintainerFactory,
                 tableName);
@@ -142,6 +144,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         this.partitionType = partitionType;
         this.keyType = keyType;
         this.valueType = valueType;
+        this.commitUser = commitUser;
+
         this.udsComparatorSupplier = udsComparatorSupplier;
         this.readerFactoryBuilder =
                 KeyValueFileReaderFactory.builder(
@@ -307,7 +311,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 lookupReaderFactory =
                         readerFactoryBuilder
                                 .copyWithoutProjection()
-                                .withValueProjection(new int[0][])
+                                .withReadValueType(RowType.of())
                                 .build(partition, bucket, dvFactory);
                 processor = new ContainsValueProcessor();
                 wrapperFactory = new FirstRowMergeFunctionWrapperFactory();
@@ -387,6 +391,11 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 lookupStoreFactory,
                 bfGenerator(options),
                 lookupFileCache);
+    }
+
+    @Override
+    protected Function<WriterContainer<KeyValue>, Boolean> createWriterCleanChecker() {
+        return createConflictAwareWriterCleanChecker(commitUser, snapshotManager);
     }
 
     @Override

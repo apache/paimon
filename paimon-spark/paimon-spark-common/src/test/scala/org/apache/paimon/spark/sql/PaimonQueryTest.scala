@@ -218,6 +218,156 @@ class PaimonQueryTest extends PaimonSparkTestBase {
       }
   }
 
+  test("Paimon Query: query nested cols") {
+    withPk.foreach {
+      hasPk =>
+        fileFormats.foreach {
+          fileFormat =>
+            bucketModes.foreach {
+              bucketMode =>
+                val key = if (hasPk) "primary-key" else "bucket-key"
+                val props = if (bucketMode != -1) {
+                  s", '$key'='name', 'bucket' = '$bucketMode' "
+                } else {
+                  ""
+                }
+                withTable("students") {
+                  sql(s"""
+                         |CREATE TABLE students (
+                         |  name STRING,
+                         |  course STRUCT<course_name: STRING, grade: DOUBLE>,
+                         |  teacher STRUCT<name: STRING, address: STRUCT<street: STRING, city: STRING>>,
+                         |  m MAP<STRING, STRUCT<s:STRING, i INT, d: DOUBLE>>,
+                         |  l ARRAY<STRUCT<s:STRING, i INT, d: DOUBLE>>,
+                         |  s STRUCT<s1: STRING, s2: MAP<STRING, STRUCT<s:STRING, i INT, a: ARRAY<STRUCT<s:STRING, i INT, d: DOUBLE>>>>>,
+                         |  m2 MAP<STRUCT<s:STRING, i INT, d: DOUBLE>, STRUCT<s:STRING, i INT, d: DOUBLE>>
+                         |) USING paimon
+                         |TBLPROPERTIES ('file.format'='$fileFormat' $props)
+                         |""".stripMargin)
+
+                  sql(s"""
+                         |INSERT INTO students VALUES (
+                         |  'Alice',
+                         |  STRUCT('Math', 85.0),
+                         |  STRUCT('John', STRUCT('Street 1', 'City 1')),
+                         |  MAP('k1', STRUCT('s1', 1, 1.0), 'k2', STRUCT('s11', 11, 11.0)),
+                         |  ARRAY(STRUCT('s1', 1, 1.0), STRUCT('s11', 11, 11.0)),
+                         |  STRUCT('a', MAP('k1', STRUCT('s1', 1, ARRAY(STRUCT('s1', 1, 1.0))), 'k3', STRUCT('s11', 11, ARRAY(STRUCT('s11', 11, 11.0))))),
+                         |  MAP(STRUCT('k1', 1, 1.0), STRUCT('s1', 1, 1.0), STRUCT('k2', 1, 1.0), STRUCT('s11', 11, 11.0)))
+                         |""".stripMargin)
+
+                  sql(
+                    s"""
+                       |INSERT INTO students VALUES (
+                       |  'Bob',
+                       |  STRUCT('Biology', 92.0),
+                       |  STRUCT('Jane', STRUCT('Street 2', 'City 2')),
+                       |  MAP('k2', STRUCT('s2', 2, 2.0)),
+                       |  ARRAY(STRUCT('s2', 2, 2.0), STRUCT('s22', 22, 22.0)),
+                       |  STRUCT('b', MAP('k2', STRUCT('s22', 22, ARRAY(STRUCT('s22', 22, 22.0))))),
+                       |  MAP(STRUCT('k2', 2, 2.0), STRUCT('s22', 22, 22.0)))
+                       |""".stripMargin)
+
+                  sql(s"""
+                         |INSERT INTO students VALUES (
+                         |  'Cathy',
+                         |  STRUCT('History', 95.0),
+                         |  STRUCT('Jane', STRUCT('Street 3', 'City 3')),
+                         |  MAP('k1', STRUCT('s3', 3, 3.0), 'k2', STRUCT('s33', 33, 33.0)),
+                         |  ARRAY(STRUCT('s3', 3, 3.0)),
+                         |  STRUCT('c', MAP('k1', STRUCT('s3', 3, ARRAY(STRUCT('s3', 3, 3.0))), 'k2', STRUCT('s33', 33, ARRAY(STRUCT('s33', 33, 33.0))))),
+                         |  MAP(STRUCT('k1', 3, 3.0), STRUCT('s3', 3, 3.0), STRUCT('k2', 3, 3.0), STRUCT('s33', 33, 33.0)))
+                         |""".stripMargin)
+
+                  // Since Spark 4.0, when `spark.sql.ansi.enabled` is `true` and `array[i]` does not exist, an exception
+                  // will be thrown instead of returning null. Here, just disabled it and return null for test.
+                  withSQLConf("spark.sql.ansi.enabled" -> "false") {
+                    checkAnswer(
+                      sql(s"""
+                             |SELECT
+                             |  course.grade, name, teacher.address, course.course_name,
+                             |  m['k1'].d, m['k1'].s,
+                             |  l[1].d, l[1].s,
+                             |  s.s2['k2'].a[0].i,
+                             |  map_keys(m2).i
+                             |FROM students ORDER BY name
+                             |""".stripMargin),
+                      Seq(
+                        Row(
+                          85.0,
+                          "Alice",
+                          Row("Street 1", "City 1"),
+                          "Math",
+                          1.0,
+                          "s1",
+                          11.0,
+                          "s11",
+                          null,
+                          Seq(1, 1)),
+                        Row(
+                          92.0,
+                          "Bob",
+                          Row("Street 2", "City 2"),
+                          "Biology",
+                          null,
+                          null,
+                          22.0,
+                          "s22",
+                          22,
+                          Seq(2)),
+                        Row(
+                          95.0,
+                          "Cathy",
+                          Row("Street 3", "City 3"),
+                          "History",
+                          3.0,
+                          "s3",
+                          null,
+                          null,
+                          33,
+                          Seq(3, 3))
+                      )
+                    )
+                  }
+                }
+            }
+        }
+    }
+  }
+
+  test("Paimon Query: query nested array cols") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            | id INT,
+            | array_array ARRAY<ARRAY<INT>>,
+            | array_map ARRAY<MAP<STRING, STRING>>,
+            | array_struct ARRAY<STRUCT<s1: INT, s2: STRING>>
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO t VALUES (
+            | 1,
+            | array(array(1, 3)),
+            | array(map('k1', 'v1'), map('k2', 'v2')),
+            | array(struct(1, 's1'), struct(2, 's2'))
+            |)
+            |""".stripMargin)
+
+      checkAnswer(
+        sql(s"""
+               |SELECT
+               |  array_array[0][1],
+               |  array_map[0]['k1'],
+               |  array_struct[1].s2
+               |FROM t
+               |""".stripMargin),
+        Row(3, "v1", "s2")
+      )
+    }
+  }
+
   private def getAllFiles(
       tableName: String,
       partitions: Seq[String],

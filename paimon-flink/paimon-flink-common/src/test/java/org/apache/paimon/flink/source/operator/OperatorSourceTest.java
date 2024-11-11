@@ -203,6 +203,7 @@ public class OperatorSourceTest {
                                         readerOperatorMetricGroup, "currentEmitEventTimeLag")
                                 .getValue())
                 .isEqualTo(-1L);
+
         harness.processElement(new StreamRecord<>(splits.get(0)));
         assertThat(
                         (Long)
@@ -211,13 +212,22 @@ public class OperatorSourceTest {
                                                 "currentFetchEventTimeLag")
                                         .getValue())
                 .isGreaterThan(0);
+        long emitEventTimeLag =
+                (Long)
+                        TestingMetricUtils.getGauge(
+                                        readerOperatorMetricGroup, "currentEmitEventTimeLag")
+                                .getValue();
+        assertThat(emitEventTimeLag).isGreaterThan(0);
+
+        // wait for a while and read metrics again, metrics should not change
+        Thread.sleep(100);
         assertThat(
                         (Long)
                                 TestingMetricUtils.getGauge(
                                                 readerOperatorMetricGroup,
                                                 "currentEmitEventTimeLag")
                                         .getValue())
-                .isGreaterThan(0);
+                .isEqualTo(emitEventTimeLag);
     }
 
     private <T> T testReadSplit(

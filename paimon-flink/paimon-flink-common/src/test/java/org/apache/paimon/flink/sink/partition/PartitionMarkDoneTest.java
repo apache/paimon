@@ -51,7 +51,7 @@ import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION;
-import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
+import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class PartitionMarkDoneTest extends TableTestBase {
@@ -86,7 +86,7 @@ class PartitionMarkDoneTest extends TableTestBase {
         Path location = catalog.getTableLocation(identifier);
         Path successFile = new Path(location, "a=0/_SUCCESS");
         PartitionMarkDone markDone =
-                PartitionMarkDone.create(false, false, new MockOperatorStateStore(), table);
+                PartitionMarkDone.create(false, false, new MockOperatorStateStore(), table).get();
 
         notifyCommits(markDone, true);
         assertThat(table.fileIO().exists(successFile)).isEqualTo(deletionVectors);

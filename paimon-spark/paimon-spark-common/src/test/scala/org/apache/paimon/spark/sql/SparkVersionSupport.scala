@@ -28,4 +28,6 @@ trait SparkVersionSupport {
   lazy val gteqSpark3_4: Boolean = sparkVersion >= "3.4"
 
   lazy val gteqSpark3_5: Boolean = sparkVersion >= "3.5"
+
+  lazy val gteqSpark4_0: Boolean = sparkVersion >= "4.0"
 }

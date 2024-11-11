@@ -47,8 +47,8 @@ import java.util.Locale
  * @param delegate
  *   The extension parser.
  */
-class PaimonSparkSqlExtensionsParser(delegate: ParserInterface)
-  extends ParserInterface
+class PaimonSparkSqlExtensionsParser(val delegate: ParserInterface)
+  extends org.apache.spark.sql.paimon.shims.ParserInterface
   with Logging {
 
   private lazy val substitutor = new VariableSubstitution()
@@ -57,7 +57,7 @@ class PaimonSparkSqlExtensionsParser(delegate: ParserInterface)
   /** Parses a string to a LogicalPlan. */
   override def parsePlan(sqlText: String): LogicalPlan = {
     val sqlTextAfterSubstitution = substitutor.substitute(sqlText)
-    if (isCommand(sqlTextAfterSubstitution)) {
+    if (isPaimonCommand(sqlTextAfterSubstitution)) {
       parse(sqlTextAfterSubstitution)(parser => astBuilder.visit(parser.singleStatement()))
         .asInstanceOf[LogicalPlan]
     } else {
@@ -93,7 +93,7 @@ class PaimonSparkSqlExtensionsParser(delegate: ParserInterface)
     delegate.parseMultipartIdentifier(sqlText)
 
   /** Returns whether SQL text is command. */
-  private def isCommand(sqlText: String): Boolean = {
+  private def isPaimonCommand(sqlText: String): Boolean = {
     val normalized = sqlText
       .toLowerCase(Locale.ROOT)
       .trim()
@@ -101,7 +101,16 @@ class PaimonSparkSqlExtensionsParser(delegate: ParserInterface)
       .replaceAll("\\s+", " ")
       .replaceAll("/\\*.*?\\*/", " ")
       .trim()
-    normalized.startsWith("call")
+    normalized.startsWith("call") || isTagRefDdl(normalized)
+  }
+
+  private def isTagRefDdl(normalized: String): Boolean = {
+    normalized.startsWith("show tags") ||
+    (normalized.startsWith("alter table") &&
+      (normalized.contains("create tag") ||
+        normalized.contains("replace tag") ||
+        normalized.contains("rename tag") ||
+        normalized.contains("delete tag")))
   }
 
   protected def parse[T](command: String)(toResult: PaimonSqlExtensionsParser => T): T = {

@@ -122,7 +122,7 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
         try {
             return readWithIOException(fileName, fileSize, loadFilter, readFilter);
         } catch (IOException e) {
-            throw new RuntimeException("Failed to read manifest list " + fileName, e);
+            throw new RuntimeException("Failed to read " + fileName, e);
         }
     }
 

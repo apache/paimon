@@ -44,6 +44,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -53,6 +54,7 @@ import java.util.Map;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SAMPLE_FACTOR;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.MIN_CLUSTERING_SAMPLE_FACTOR;
+import static org.apache.paimon.flink.sink.FlinkSink.isStreaming;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 import static org.apache.paimon.flink.sorter.TableSorter.OrderType.HILBERT;
 import static org.apache.paimon.flink.sorter.TableSorter.OrderType.ORDER;
@@ -75,7 +77,7 @@ public class FlinkSinkBuilder {
 
     private DataStream<RowData> input;
     @Nullable protected Map<String, String> overwritePartition;
-    @Nullable protected Integer parallelism;
+    @Nullable private Integer parallelism;
     @Nullable private TableSortInfo tableSortInfo;
 
     // ============== for extension ==============
@@ -101,9 +103,12 @@ public class FlinkSinkBuilder {
         DataFormatConverters.RowConverter converter =
                 new DataFormatConverters.RowConverter(fieldDataTypes);
         this.input =
-                input.map((MapFunction<Row, RowData>) converter::toInternal)
-                        .setParallelism(input.getParallelism())
-                        .returns(InternalTypeInfo.of(rowType));
+                input.transform(
+                                "Map",
+                                InternalTypeInfo.of(rowType),
+                                new StreamMapWithForwardingRecordAttributes<>(
+                                        (MapFunction<Row, RowData>) converter::toInternal))
+                        .setParallelism(input.getParallelism());
         return this;
     }
 
@@ -142,7 +147,7 @@ public class FlinkSinkBuilder {
             return this;
         }
         checkState(input != null, "The input stream should be specified earlier.");
-        if (FlinkSink.isStreaming(input) || !table.bucketMode().equals(BUCKET_UNAWARE)) {
+        if (isStreaming(input) || !table.bucketMode().equals(BUCKET_UNAWARE)) {
             LOG.warn(
                     "Clustering is enabled; however, it has been skipped as "
                             + "it only supports the bucket unaware table without primary keys and "
@@ -208,6 +213,7 @@ public class FlinkSinkBuilder {
 
     /** Build {@link DataStreamSink}. */
     public DataStreamSink<?> build() {
+        setParallelismIfAdaptiveConflict();
         input = trySortInput(input);
         DataStream<InternalRow> input = mapToInternalRow(this.input, table.rowType());
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
@@ -237,9 +243,12 @@ public class FlinkSinkBuilder {
 
     protected DataStream<InternalRow> mapToInternalRow(
             DataStream<RowData> input, org.apache.paimon.types.RowType rowType) {
-        return input.map((MapFunction<RowData, InternalRow>) FlinkRowWrapper::new)
-                .setParallelism(input.getParallelism())
-                .returns(org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(rowType));
+        return input.transform(
+                        "Map",
+                        org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(rowType),
+                        new StreamMapWithForwardingRecordAttributes<>(
+                                (MapFunction<RowData, InternalRow>) FlinkRowWrapper::new))
+                .setParallelism(input.getParallelism());
     }
 
     protected DataStreamSink<?> buildDynamicBucketSink(
@@ -281,5 +290,49 @@ public class FlinkSinkBuilder {
             return sorter.sort();
         }
         return input;
+    }
+
+    private void setParallelismIfAdaptiveConflict() {
+        try {
+            boolean parallelismUndefined = parallelism == null || parallelism == -1;
+            boolean isStreaming = isStreaming(input);
+            boolean isAdaptiveParallelismEnabled =
+                    AdaptiveParallelism.isEnabled(input.getExecutionEnvironment());
+            boolean writeMCacheEnabled = table.coreOptions().writeManifestCache().getBytes() > 0;
+            boolean hashDynamicMode = table.bucketMode() == BucketMode.HASH_DYNAMIC;
+            if (parallelismUndefined
+                    && !isStreaming
+                    && isAdaptiveParallelismEnabled
+                    && (writeMCacheEnabled || hashDynamicMode)) {
+                List<String> messages = new ArrayList<>();
+                if (writeMCacheEnabled) {
+                    messages.add("Write Manifest Cache");
+                }
+                if (hashDynamicMode) {
+                    messages.add("Dynamic Bucket Mode");
+                }
+
+                String parallelismSource;
+                if (input.getParallelism() > 0) {
+                    parallelismSource = "input parallelism";
+                    parallelism = input.getParallelism();
+                } else {
+                    parallelismSource = "AdaptiveBatchScheduler's default max parallelism";
+                    parallelism =
+                            AdaptiveParallelism.getDefaultMaxParallelism(
+                                    input.getExecutionEnvironment().getConfiguration(),
+                                    input.getExecutionConfig());
+                }
+                String msg =
+                        String.format(
+                                "Paimon Sink with %s does not support Flink's Adaptive Parallelism mode. "
+                                        + "Configuring sink parallelism to `%s` instead. You can also set Paimon "
+                                        + "`sink.parallelism` manually to override this configuration.",
+                                messages, parallelismSource);
+                LOG.warn(msg);
+            }
+        } catch (NoClassDefFoundError ignored) {
+            // before 1.17, there is no adaptive parallelism
+        }
     }
 }

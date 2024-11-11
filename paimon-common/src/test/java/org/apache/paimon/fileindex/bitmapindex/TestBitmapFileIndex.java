@@ -22,7 +22,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndex;
-import org.apache.paimon.fileindex.bitmap.BitmapIndexResultLazy;
+import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.IntType;
@@ -63,21 +63,21 @@ public class TestBitmapFileIndex {
         ByteArraySeekableStream seekableStream = new ByteArraySeekableStream(bytes);
         FileIndexReader reader = bitmapFileIndex.createReader(seekableStream, 0, bytes.length);
 
-        BitmapIndexResultLazy result1 =
-                (BitmapIndexResultLazy) reader.visitEqual(fieldRef, BinaryString.fromString("a"));
+        BitmapIndexResult result1 =
+                (BitmapIndexResult) reader.visitEqual(fieldRef, BinaryString.fromString("a"));
         assert result1.get().equals(RoaringBitmap32.bitmapOf(0, 4));
 
-        BitmapIndexResultLazy result2 =
-                (BitmapIndexResultLazy) reader.visitEqual(fieldRef, BinaryString.fromString("b"));
+        BitmapIndexResult result2 =
+                (BitmapIndexResult) reader.visitEqual(fieldRef, BinaryString.fromString("b"));
         assert result2.get().equals(RoaringBitmap32.bitmapOf(2));
 
-        BitmapIndexResultLazy result3 = (BitmapIndexResultLazy) reader.visitIsNull(fieldRef);
+        BitmapIndexResult result3 = (BitmapIndexResult) reader.visitIsNull(fieldRef);
         assert result3.get().equals(RoaringBitmap32.bitmapOf(1, 3));
 
-        BitmapIndexResultLazy result4 = (BitmapIndexResultLazy) result1.and(result2);
+        BitmapIndexResult result4 = (BitmapIndexResult) result1.and(result2);
         assert result4.get().equals(RoaringBitmap32.bitmapOf());
 
-        BitmapIndexResultLazy result5 = (BitmapIndexResultLazy) result1.or(result2);
+        BitmapIndexResult result5 = (BitmapIndexResult) result1.or(result2);
         assert result5.get().equals(RoaringBitmap32.bitmapOf(0, 2, 4));
     }
 
@@ -95,21 +95,21 @@ public class TestBitmapFileIndex {
         ByteArraySeekableStream seekableStream = new ByteArraySeekableStream(bytes);
         FileIndexReader reader = bitmapFileIndex.createReader(seekableStream, 0, bytes.length);
 
-        BitmapIndexResultLazy result1 = (BitmapIndexResultLazy) reader.visitEqual(fieldRef, 1);
+        BitmapIndexResult result1 = (BitmapIndexResult) reader.visitEqual(fieldRef, 1);
         assert result1.get().equals(RoaringBitmap32.bitmapOf(1));
 
-        BitmapIndexResultLazy result2 = (BitmapIndexResultLazy) reader.visitIsNull(fieldRef);
+        BitmapIndexResult result2 = (BitmapIndexResult) reader.visitIsNull(fieldRef);
         assert result2.get().equals(RoaringBitmap32.bitmapOf(2));
 
-        BitmapIndexResultLazy result3 = (BitmapIndexResultLazy) reader.visitIsNotNull(fieldRef);
+        BitmapIndexResult result3 = (BitmapIndexResult) reader.visitIsNotNull(fieldRef);
         assert result3.get().equals(RoaringBitmap32.bitmapOf(0, 1));
 
-        BitmapIndexResultLazy result4 =
-                (BitmapIndexResultLazy) reader.visitNotIn(fieldRef, Arrays.asList(1, 2));
+        BitmapIndexResult result4 =
+                (BitmapIndexResult) reader.visitNotIn(fieldRef, Arrays.asList(1, 2));
         assert result4.get().equals(RoaringBitmap32.bitmapOf(0, 2));
 
-        BitmapIndexResultLazy result5 =
-                (BitmapIndexResultLazy) reader.visitNotIn(fieldRef, Arrays.asList(1, 0));
+        BitmapIndexResult result5 =
+                (BitmapIndexResult) reader.visitNotIn(fieldRef, Arrays.asList(1, 0));
         assert result5.get().equals(RoaringBitmap32.bitmapOf(2));
     }
 
@@ -131,11 +131,11 @@ public class TestBitmapFileIndex {
         ByteArraySeekableStream seekableStream = new ByteArraySeekableStream(bytes);
         FileIndexReader reader = bitmapFileIndex.createReader(seekableStream, 0, bytes.length);
 
-        BitmapIndexResultLazy result1 = (BitmapIndexResultLazy) reader.visitEqual(fieldRef, 1);
+        BitmapIndexResult result1 = (BitmapIndexResult) reader.visitEqual(fieldRef, 1);
         assert result1.get().equals(RoaringBitmap32.bitmapOf(0, 2, 4));
 
         // test read singleton bitmap
-        BitmapIndexResultLazy result2 = (BitmapIndexResultLazy) reader.visitIsNull(fieldRef);
+        BitmapIndexResult result2 = (BitmapIndexResult) reader.visitIsNull(fieldRef);
         assert result2.get().equals(RoaringBitmap32.bitmapOf(6));
     }
 }

@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
+import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -51,6 +52,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.jdbc.JdbcCatalogLock.acquireTimeout;
 import static org.apache.paimon.jdbc.JdbcCatalogLock.checkMaxSleep;
@@ -155,22 +157,21 @@ public class JdbcCatalog extends AbstractCatalog {
                         row -> row.getString(JdbcUtils.DATABASE_NAME),
                         JdbcUtils.LIST_ALL_PROPERTY_DATABASES_SQL,
                         catalogKey));
-        return databases;
+        return databases.stream().distinct().collect(Collectors.toList());
     }
 
     @Override
-    protected Map<String, String> loadDatabasePropertiesImpl(String databaseName)
-            throws DatabaseNotExistException {
+    protected Database getDatabaseImpl(String databaseName) throws DatabaseNotExistException {
         if (!JdbcUtils.databaseExists(connections, catalogKey, databaseName)) {
             throw new DatabaseNotExistException(databaseName);
         }
-        Map<String, String> properties = Maps.newHashMap();
-        properties.putAll(fetchProperties(databaseName));
-        if (!properties.containsKey(DB_LOCATION_PROP)) {
-            properties.put(DB_LOCATION_PROP, newDatabasePath(databaseName).getName());
+        Map<String, String> options = Maps.newHashMap();
+        options.putAll(fetchProperties(databaseName));
+        if (!options.containsKey(DB_LOCATION_PROP)) {
+            options.put(DB_LOCATION_PROP, newDatabasePath(databaseName).getName());
         }
-        properties.remove(DATABASE_EXISTS_PROPERTY);
-        return ImmutableMap.copyOf(properties);
+        options.remove(DATABASE_EXISTS_PROPERTY);
+        return Database.of(databaseName, options, null);
     }
 
     @Override
@@ -348,9 +349,7 @@ public class JdbcCatalog extends AbstractCatalog {
 
     @Override
     public void close() throws Exception {
-        if (!connections.isClosed()) {
-            connections.close();
-        }
+        connections.close();
     }
 
     private SchemaManager getSchemaManager(Identifier identifier) {

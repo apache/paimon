@@ -57,6 +57,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -110,6 +111,19 @@ public abstract class TableTestBase {
         }
     }
 
+    protected void writeWithBucketAssigner(
+            Table table, Function<InternalRow, Integer> bucketAssigner, InternalRow... rows)
+            throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (InternalRow row : rows) {
+                write.write(row, bucketAssigner.apply(row));
+            }
+            commit.commit(write.prepareCommit());
+        }
+    }
+
     protected void write(Table table, InternalRow... rows) throws Exception {
         write(table, null, rows);
     }
@@ -127,10 +141,21 @@ public abstract class TableTestBase {
     }
 
     protected void compact(Table table, BinaryRow partition, int bucket) throws Exception {
+        compact(table, partition, bucket, null, true);
+    }
+
+    protected void compact(
+            Table table,
+            BinaryRow partition,
+            int bucket,
+            IOManager ioManager,
+            boolean fullCompaction)
+            throws Exception {
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit()) {
-            write.compact(partition, bucket, true);
+            write.withIOManager(ioManager);
+            write.compact(partition, bucket, fullCompaction);
             commit.commit(write.prepareCommit());
         }
     }

@@ -131,7 +131,7 @@ public class AppendOnlyTableCompactionTest {
         commit(messages);
         tableSchema = tableSchema.copy(singletonMap("target-file-size", "1 b"));
         recreate();
-        assertThat(compactionCoordinator.plan()).isEmpty();
+        assertThat(compactionCoordinator.filesIterator().next()).isNull();
     }
 
     @Test
@@ -143,7 +143,9 @@ public class AppendOnlyTableCompactionTest {
         for (int i = 90; i < 100; i++) {
             count += i;
             commit(writeCommit(i));
-            commit(doCompact(compactionCoordinator.run()));
+            List<UnawareAppendCompactionTask> tasks = compactionCoordinator.run();
+            assertThat(tasks).hasSizeGreaterThan(0);
+            commit(doCompact(tasks));
             // scan the file generated itself
             assertThat(compactionCoordinator.scan()).isTrue();
             assertThat(

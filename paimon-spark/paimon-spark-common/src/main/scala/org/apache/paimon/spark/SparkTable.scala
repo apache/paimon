@@ -21,7 +21,7 @@ package org.apache.paimon.spark
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.table.{DataTable, FileStoreTable, Table}
+import org.apache.paimon.table.{DataTable, FileStoreTable, KnownSplitsTable, Table}
 import org.apache.paimon.utils.StringUtils
 
 import org.apache.spark.sql.connector.catalog.{MetadataColumn, SupportsMetadataColumns, SupportsRead, SupportsWrite, TableCapability, TableCatalog}
@@ -91,7 +91,12 @@ case class SparkTable(table: Table)
   }
 
   override def newScanBuilder(options: CaseInsensitiveStringMap): ScanBuilder = {
-    new PaimonScanBuilder(table.copy(options.asCaseSensitiveMap))
+    table match {
+      case t: KnownSplitsTable =>
+        new PaimonSplitScanBuilder(t)
+      case _ =>
+        new PaimonScanBuilder(table.copy(options.asCaseSensitiveMap))
+    }
   }
 
   override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
@@ -101,5 +106,9 @@ case class SparkTable(table: Table)
       case _ =>
         throw new RuntimeException("Only FileStoreTable can be written.")
     }
+  }
+
+  override def toString: String = {
+    s"${table.getClass.getSimpleName}[${table.fullName()}]"
   }
 }

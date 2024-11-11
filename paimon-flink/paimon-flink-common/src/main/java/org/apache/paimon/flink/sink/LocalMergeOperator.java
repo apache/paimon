@@ -48,6 +48,8 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 import java.util.List;
 
+import static org.apache.paimon.table.PrimaryKeyTableUtils.addKeyNamePrefix;
+
 /**
  * {@link AbstractStreamOperator} which buffer input record and apply merge function when the buffer
  * is full. Mainly to resolve data skew on primary keys.
@@ -105,7 +107,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
                                     // partition fields.
                                     @Override
                                     public List<DataField> keyFields(TableSchema schema) {
-                                        return schema.primaryKeysFields();
+                                        return addKeyNamePrefix(schema.primaryKeysFields());
                                     }
 
                                     @Override

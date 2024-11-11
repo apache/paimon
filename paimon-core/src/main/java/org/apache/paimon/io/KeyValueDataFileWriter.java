@@ -23,6 +23,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleStatsExtractor;
@@ -32,6 +33,7 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
 import org.slf4j.Logger;
@@ -41,7 +43,11 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.function.Function;
+
+import static org.apache.paimon.io.DataFilePathFactory.dataFileToFileIndexPath;
 
 /**
  * A {@link StatsCollectingSingleFileWriter} to write data files containing {@link KeyValue}s. Also
@@ -64,6 +70,7 @@ public class KeyValueDataFileWriter
     private final SimpleStatsConverter valueStatsConverter;
     private final InternalRowSerializer keySerializer;
     private final FileSource fileSource;
+    @Nullable private final DataFileIndexWriter dataFileIndexWriter;
 
     private BinaryRow minKey = null;
     private InternalRow maxKey = null;
@@ -83,7 +90,8 @@ public class KeyValueDataFileWriter
             int level,
             String compression,
             CoreOptions options,
-            FileSource fileSource) {
+            FileSource fileSource,
+            FileIndexOptions fileIndexOptions) {
         super(
                 fileIO,
                 factory,
@@ -102,14 +110,21 @@ public class KeyValueDataFileWriter
         this.level = level;
 
         this.keyStatsConverter = new SimpleStatsConverter(keyType);
-        this.valueStatsConverter = new SimpleStatsConverter(valueType);
+        this.valueStatsConverter = new SimpleStatsConverter(valueType, options.statsDenseStore());
         this.keySerializer = new InternalRowSerializer(keyType);
         this.fileSource = fileSource;
+        this.dataFileIndexWriter =
+                DataFileIndexWriter.create(
+                        fileIO, dataFileToFileIndexPath(path), valueType, fileIndexOptions);
     }
 
     @Override
     public void write(KeyValue kv) throws IOException {
         super.write(kv);
+
+        if (dataFileIndexWriter != null) {
+            dataFileIndexWriter.write(kv.value());
+        }
 
         updateMinKey(kv);
         updateMaxKey(kv);
@@ -155,11 +170,18 @@ public class KeyValueDataFileWriter
         int numKeyFields = keyType.getFieldCount();
 
         SimpleColStats[] keyFieldStats = Arrays.copyOfRange(rowStats, 0, numKeyFields);
-        SimpleStats keyStats = keyStatsConverter.toBinary(keyFieldStats);
+        SimpleStats keyStats = keyStatsConverter.toBinaryAllMode(keyFieldStats);
 
         SimpleColStats[] valFieldStats =
                 Arrays.copyOfRange(rowStats, numKeyFields + 2, rowStats.length);
-        SimpleStats valueStats = valueStatsConverter.toBinary(valFieldStats);
+
+        Pair<List<String>, SimpleStats> valueStatsPair =
+                valueStatsConverter.toBinary(valFieldStats);
+
+        DataFileIndexWriter.FileIndexResult indexResult =
+                dataFileIndexWriter == null
+                        ? DataFileIndexWriter.EMPTY_RESULT
+                        : dataFileIndexWriter.result();
 
         return new DataFileMeta(
                 path.getName(),
@@ -168,14 +190,25 @@ public class KeyValueDataFileWriter
                 minKey,
                 keySerializer.toBinaryRow(maxKey).copy(),
                 keyStats,
-                valueStats,
+                valueStatsPair.getValue(),
                 minSeqNumber,
                 maxSeqNumber,
                 schemaId,
                 level,
+                indexResult.independentIndexFile() == null
+                        ? Collections.emptyList()
+                        : Collections.singletonList(indexResult.independentIndexFile()),
                 deleteRecordCount,
-                // TODO: enable file filter for primary key table (e.g. deletion table).
-                null,
-                fileSource);
+                indexResult.embeddedIndexBytes(),
+                fileSource,
+                valueStatsPair.getKey());
+    }
+
+    @Override
+    public void close() throws IOException {
+        if (dataFileIndexWriter != null) {
+            dataFileIndexWriter.close();
+        }
+        super.close();
     }
 }

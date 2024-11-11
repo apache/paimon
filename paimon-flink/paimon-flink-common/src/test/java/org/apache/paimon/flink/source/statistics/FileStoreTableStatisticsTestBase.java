@@ -18,13 +18,18 @@
 
 package org.apache.paimon.flink.source.statistics;
 
+import org.apache.paimon.FileStore;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.source.DataTableSource;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.stats.ColStats;
+import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
@@ -33,6 +38,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.VarCharType;
 
 import org.apache.flink.table.catalog.ObjectIdentifier;
+import org.apache.flink.table.plan.stats.ColumnStats;
 import org.apache.flink.table.plan.stats.TableStats;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,6 +46,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 /** Statistics tests for {@link FileStoreTable}. */
@@ -60,9 +68,66 @@ public abstract class FileStoreTableStatisticsTestBase {
     @Test
     public void testTableScanStatistics() throws Exception {
         FileStoreTable table = writeData();
+        Map<String, ColStats<?>> colStatsMap = new HashMap<>();
+        colStatsMap.put("pt", ColStats.newColStats(0, 2L, 1, 2, 0L, null, null));
+        colStatsMap.put("a", ColStats.newColStats(1, 9L, 10, 90, 0L, null, null));
+        colStatsMap.put("b", ColStats.newColStats(2, 7L, 100L, 900L, 2L, null, null));
+        colStatsMap.put(
+                "c",
+                ColStats.newColStats(
+                        3,
+                        7L,
+                        BinaryString.fromString("S1"),
+                        BinaryString.fromString("S8"),
+                        2L,
+                        null,
+                        null));
+
+        FileStore<?> fileStore = table.store();
+        FileStoreCommit fileStoreCommit = fileStore.newCommit(commitUser);
+        Snapshot latestSnapshot = fileStore.snapshotManager().latestSnapshot();
+        Statistics colStats =
+                new Statistics(
+                        latestSnapshot.id(), latestSnapshot.schemaId(), 9L, null, colStatsMap);
+        fileStoreCommit.commitStatistics(colStats, Long.MAX_VALUE);
+        fileStoreCommit.close();
         DataTableSource scanSource = new DataTableSource(identifier, table, false, null, null);
         Assertions.assertThat(scanSource.reportStatistics().getRowCount()).isEqualTo(9L);
-        // TODO validate column statistics
+        Map<String, ColumnStats> expectedColStats = new HashMap<>();
+        expectedColStats.put(
+                "pt",
+                ColumnStats.Builder.builder()
+                        .setNdv(2L)
+                        .setMin(1)
+                        .setMax(2)
+                        .setNullCount(0L)
+                        .build());
+        expectedColStats.put(
+                "a",
+                ColumnStats.Builder.builder()
+                        .setNdv(9L)
+                        .setMin(10)
+                        .setMax(90)
+                        .setNullCount(0L)
+                        .build());
+        expectedColStats.put(
+                "b",
+                ColumnStats.Builder.builder()
+                        .setNdv(7L)
+                        .setMin(100L)
+                        .setMax(900L)
+                        .setNullCount(2L)
+                        .build());
+        expectedColStats.put(
+                "c",
+                ColumnStats.Builder.builder()
+                        .setNdv(7L)
+                        .setMin(BinaryString.fromString("S1"))
+                        .setMax(BinaryString.fromString("S8"))
+                        .setNullCount(2L)
+                        .build());
+        Assertions.assertThat(scanSource.reportStatistics().getColumnStats())
+                .isEqualTo(expectedColStats);
     }
 
     @Test
@@ -87,9 +152,68 @@ public abstract class FileStoreTableStatisticsTestBase {
                         null,
                         null,
                         null,
-                        null);
+                        null,
+                        false);
         Assertions.assertThat(partitionFilterSource.reportStatistics().getRowCount()).isEqualTo(5L);
-        // TODO validate column statistics
+        Map<String, ColStats<?>> colStatsMap = new HashMap<>();
+        colStatsMap.put("pt", ColStats.newColStats(0, 1L, 1, 2, 0L, null, null));
+        colStatsMap.put("a", ColStats.newColStats(1, 5L, 10, 90, 0L, null, null));
+        colStatsMap.put("b", ColStats.newColStats(2, 3L, 100L, 900L, 2L, null, null));
+        colStatsMap.put(
+                "c",
+                ColStats.newColStats(
+                        3,
+                        3L,
+                        BinaryString.fromString("S1"),
+                        BinaryString.fromString("S7"),
+                        2L,
+                        null,
+                        null));
+
+        FileStore<?> fileStore = table.store();
+        FileStoreCommit fileStoreCommit = fileStore.newCommit(commitUser);
+        Snapshot latestSnapshot = fileStore.snapshotManager().latestSnapshot();
+        Statistics colStats =
+                new Statistics(
+                        latestSnapshot.id(), latestSnapshot.schemaId(), 9L, null, colStatsMap);
+        fileStoreCommit.commitStatistics(colStats, Long.MAX_VALUE);
+        fileStoreCommit.close();
+
+        Map<String, ColumnStats> expectedColStats = new HashMap<>();
+        expectedColStats.put(
+                "pt",
+                ColumnStats.Builder.builder()
+                        .setNdv(1L)
+                        .setMin(1)
+                        .setMax(2)
+                        .setNullCount(0L)
+                        .build());
+        expectedColStats.put(
+                "a",
+                ColumnStats.Builder.builder()
+                        .setNdv(5L)
+                        .setMin(10)
+                        .setMax(90)
+                        .setNullCount(0L)
+                        .build());
+        expectedColStats.put(
+                "b",
+                ColumnStats.Builder.builder()
+                        .setNdv(3L)
+                        .setMin(100L)
+                        .setMax(900L)
+                        .setNullCount(2L)
+                        .build());
+        expectedColStats.put(
+                "c",
+                ColumnStats.Builder.builder()
+                        .setNdv(3L)
+                        .setMin(BinaryString.fromString("S1"))
+                        .setMax(BinaryString.fromString("S7"))
+                        .setNullCount(2L)
+                        .build());
+        Assertions.assertThat(partitionFilterSource.reportStatistics().getColumnStats())
+                .isEqualTo(expectedColStats);
     }
 
     @Test
@@ -107,9 +231,68 @@ public abstract class FileStoreTableStatisticsTestBase {
                         null,
                         null,
                         null,
-                        null);
+                        null,
+                        false);
         Assertions.assertThat(keyFilterSource.reportStatistics().getRowCount()).isEqualTo(2L);
-        // TODO validate column statistics
+        Map<String, ColStats<?>> colStatsMap = new HashMap<>();
+        colStatsMap.put("pt", ColStats.newColStats(0, 1L, 2, 2, 0L, null, null));
+        colStatsMap.put("a", ColStats.newColStats(1, 1L, 50, 50, 0L, null, null));
+        colStatsMap.put("b", ColStats.newColStats(2, 1L, null, null, 1L, null, null));
+        colStatsMap.put(
+                "c",
+                ColStats.newColStats(
+                        3,
+                        1L,
+                        BinaryString.fromString("S5"),
+                        BinaryString.fromString("S5"),
+                        0L,
+                        null,
+                        null));
+
+        FileStore<?> fileStore = table.store();
+        FileStoreCommit fileStoreCommit = fileStore.newCommit(commitUser);
+        Snapshot latestSnapshot = fileStore.snapshotManager().latestSnapshot();
+        Statistics colStats =
+                new Statistics(
+                        latestSnapshot.id(), latestSnapshot.schemaId(), 9L, null, colStatsMap);
+        fileStoreCommit.commitStatistics(colStats, Long.MAX_VALUE);
+        fileStoreCommit.close();
+
+        Map<String, ColumnStats> expectedColStats = new HashMap<>();
+        expectedColStats.put(
+                "pt",
+                ColumnStats.Builder.builder()
+                        .setNdv(1L)
+                        .setMin(2)
+                        .setMax(2)
+                        .setNullCount(0L)
+                        .build());
+        expectedColStats.put(
+                "a",
+                ColumnStats.Builder.builder()
+                        .setNdv(1L)
+                        .setMin(50)
+                        .setMax(50)
+                        .setNullCount(0L)
+                        .build());
+        expectedColStats.put(
+                "b",
+                ColumnStats.Builder.builder()
+                        .setNdv(1L)
+                        .setMin(null)
+                        .setMax(null)
+                        .setNullCount(1L)
+                        .build());
+        expectedColStats.put(
+                "c",
+                ColumnStats.Builder.builder()
+                        .setNdv(1L)
+                        .setMin(BinaryString.fromString("S5"))
+                        .setMax(BinaryString.fromString("S5"))
+                        .setNullCount(0L)
+                        .build());
+        Assertions.assertThat(keyFilterSource.reportStatistics().getColumnStats())
+                .isEqualTo(expectedColStats);
     }
 
     @Test
@@ -127,9 +310,68 @@ public abstract class FileStoreTableStatisticsTestBase {
                         null,
                         null,
                         null,
-                        null);
+                        null,
+                        false);
         Assertions.assertThat(keyFilterSource.reportStatistics().getRowCount()).isEqualTo(4L);
-        // TODO validate column statistics
+        Map<String, ColStats<?>> colStatsMap = new HashMap<>();
+        colStatsMap.put("pt", ColStats.newColStats(0, 4L, 2, 2, 0L, null, null));
+        colStatsMap.put("a", ColStats.newColStats(1, 4L, 50, 50, 0L, null, null));
+        colStatsMap.put("b", ColStats.newColStats(2, 4L, null, null, 1L, null, null));
+        colStatsMap.put(
+                "c",
+                ColStats.newColStats(
+                        3,
+                        4L,
+                        BinaryString.fromString("S5"),
+                        BinaryString.fromString("S8"),
+                        0L,
+                        null,
+                        null));
+
+        FileStore<?> fileStore = table.store();
+        FileStoreCommit fileStoreCommit = fileStore.newCommit(commitUser);
+        Snapshot latestSnapshot = fileStore.snapshotManager().latestSnapshot();
+        Statistics colStats =
+                new Statistics(
+                        latestSnapshot.id(), latestSnapshot.schemaId(), 9L, null, colStatsMap);
+        fileStoreCommit.commitStatistics(colStats, Long.MAX_VALUE);
+        fileStoreCommit.close();
+
+        Map<String, ColumnStats> expectedColStats = new HashMap<>();
+        expectedColStats.put(
+                "pt",
+                ColumnStats.Builder.builder()
+                        .setNdv(4L)
+                        .setMin(2)
+                        .setMax(2)
+                        .setNullCount(0L)
+                        .build());
+        expectedColStats.put(
+                "a",
+                ColumnStats.Builder.builder()
+                        .setNdv(4L)
+                        .setMin(50)
+                        .setMax(50)
+                        .setNullCount(0L)
+                        .build());
+        expectedColStats.put(
+                "b",
+                ColumnStats.Builder.builder()
+                        .setNdv(4L)
+                        .setMin(null)
+                        .setMax(null)
+                        .setNullCount(1L)
+                        .build());
+        expectedColStats.put(
+                "c",
+                ColumnStats.Builder.builder()
+                        .setNdv(4L)
+                        .setMin(BinaryString.fromString("S5"))
+                        .setMax(BinaryString.fromString("S8"))
+                        .setNullCount(0L)
+                        .build());
+        Assertions.assertThat(keyFilterSource.reportStatistics().getColumnStats())
+                .isEqualTo(expectedColStats);
     }
 
     protected FileStoreTable writeData() throws Exception {

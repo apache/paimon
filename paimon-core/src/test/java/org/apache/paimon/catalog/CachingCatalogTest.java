@@ -20,8 +20,10 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -32,6 +34,8 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.FakeTicker;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
@@ -44,6 +48,7 @@ import java.io.FileNotFoundException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
@@ -51,6 +56,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static java.util.Collections.emptyList;
+import static java.util.Collections.singletonList;
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_MAX_MEMORY;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_MEMORY;
@@ -113,15 +120,15 @@ class CachingCatalogTest extends CatalogTestBase {
         Table table = catalog.getTable(tableIdent);
 
         // Ensure table is cached with full ttl remaining upon creation
-        assertThat(catalog.cache().asMap()).containsKey(tableIdent);
+        assertThat(catalog.tableCache().asMap()).containsKey(tableIdent);
         assertThat(catalog.remainingAgeFor(tableIdent)).isPresent().get().isEqualTo(EXPIRATION_TTL);
 
         ticker.advance(HALF_OF_EXPIRATION);
-        assertThat(catalog.cache().asMap()).containsKey(tableIdent);
+        assertThat(catalog.tableCache().asMap()).containsKey(tableIdent);
         assertThat(catalog.ageOf(tableIdent)).isPresent().get().isEqualTo(HALF_OF_EXPIRATION);
 
         ticker.advance(HALF_OF_EXPIRATION.plus(Duration.ofSeconds(10)));
-        assertThat(catalog.cache().asMap()).doesNotContainKey(tableIdent);
+        assertThat(catalog.tableCache().asMap()).doesNotContainKey(tableIdent);
         assertThat(catalog.getTable(tableIdent))
                 .as("CachingCatalog should return a new instance after expiration")
                 .isNotSameAs(table);
@@ -135,11 +142,11 @@ class CachingCatalogTest extends CatalogTestBase {
         Identifier tableIdent = new Identifier("db", "tbl");
         catalog.createTable(tableIdent, DEFAULT_TABLE_SCHEMA, false);
         catalog.getTable(tableIdent);
-        assertThat(catalog.cache().asMap()).containsKey(tableIdent);
+        assertThat(catalog.tableCache().asMap()).containsKey(tableIdent);
         assertThat(catalog.ageOf(tableIdent)).isPresent().get().isEqualTo(Duration.ZERO);
 
         ticker.advance(HALF_OF_EXPIRATION);
-        assertThat(catalog.cache().asMap()).containsKey(tableIdent);
+        assertThat(catalog.tableCache().asMap()).containsKey(tableIdent);
         assertThat(catalog.ageOf(tableIdent)).isPresent().get().isEqualTo(HALF_OF_EXPIRATION);
         assertThat(catalog.remainingAgeFor(tableIdent))
                 .isPresent()
@@ -148,7 +155,7 @@ class CachingCatalogTest extends CatalogTestBase {
 
         Duration oneMinute = Duration.ofMinutes(1L);
         ticker.advance(oneMinute);
-        assertThat(catalog.cache().asMap()).containsKey(tableIdent);
+        assertThat(catalog.tableCache().asMap()).containsKey(tableIdent);
         assertThat(catalog.ageOf(tableIdent))
                 .isPresent()
                 .get()
@@ -175,17 +182,17 @@ class CachingCatalogTest extends CatalogTestBase {
         Identifier tableIdent = new Identifier("db", "tbl");
         catalog.createTable(tableIdent, DEFAULT_TABLE_SCHEMA, false);
         Table table = catalog.getTable(tableIdent);
-        assertThat(catalog.cache().asMap()).containsKey(tableIdent);
+        assertThat(catalog.tableCache().asMap()).containsKey(tableIdent);
         assertThat(catalog.ageOf(tableIdent)).get().isEqualTo(Duration.ZERO);
 
         ticker.advance(HALF_OF_EXPIRATION);
-        assertThat(catalog.cache().asMap()).containsKey(tableIdent);
+        assertThat(catalog.tableCache().asMap()).containsKey(tableIdent);
         assertThat(catalog.ageOf(tableIdent)).get().isEqualTo(HALF_OF_EXPIRATION);
 
         for (Identifier sysTable : sysTables(tableIdent)) {
             catalog.getTable(sysTable);
         }
-        assertThat(catalog.cache().asMap()).containsKeys(sysTables(tableIdent));
+        assertThat(catalog.tableCache().asMap()).containsKeys(sysTables(tableIdent));
         assertThat(Arrays.stream(sysTables(tableIdent)).map(catalog::ageOf))
                 .isNotEmpty()
                 .allMatch(age -> age.isPresent() && age.get().equals(Duration.ZERO));
@@ -209,15 +216,40 @@ class CachingCatalogTest extends CatalogTestBase {
 
         // Move time forward so the data table drops.
         ticker.advance(HALF_OF_EXPIRATION);
-        assertThat(catalog.cache().asMap()).doesNotContainKey(tableIdent);
+        assertThat(catalog.tableCache().asMap()).doesNotContainKey(tableIdent);
 
         Arrays.stream(sysTables(tableIdent))
                 .forEach(
                         sysTable ->
-                                assertThat(catalog.cache().asMap())
+                                assertThat(catalog.tableCache().asMap())
                                         .as(
                                                 "When a data table expires, its sys tables should expire regardless of age")
                                         .doesNotContainKeys(sysTable));
+    }
+
+    @Test
+    public void testPartitionCache() throws Exception {
+        TestableCachingCatalog catalog =
+                new TestableCachingCatalog(this.catalog, EXPIRATION_TTL, ticker);
+
+        Identifier tableIdent = new Identifier("db", "tbl");
+        Schema schema =
+                new Schema(
+                        RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
+                        singletonList("f0"),
+                        emptyList(),
+                        Collections.emptyMap(),
+                        "");
+        catalog.createTable(tableIdent, schema, false);
+        List<PartitionEntry> partitionEntryList = catalog.listPartitions(tableIdent);
+        assertThat(catalog.partitionCache().asMap()).containsKey(tableIdent);
+        catalog.invalidateTable(tableIdent);
+        catalog.refreshPartitions(tableIdent);
+        assertThat(catalog.partitionCache().asMap()).containsKey(tableIdent);
+        List<PartitionEntry> partitionEntryListFromCache =
+                catalog.partitionCache().getIfPresent(tableIdent);
+        assertThat(partitionEntryListFromCache).isNotNull();
+        assertThat(partitionEntryListFromCache).containsAll(partitionEntryList);
     }
 
     @Test
@@ -233,7 +265,7 @@ class CachingCatalogTest extends CatalogTestBase {
             createdTables.add(tableIdent);
         }
 
-        Cache<Identifier, Table> cache = catalog.cache();
+        Cache<Identifier, Table> cache = catalog.tableCache();
         AtomicInteger cacheGetCount = new AtomicInteger(0);
         AtomicInteger cacheCleanupCount = new AtomicInteger(0);
         ExecutorService executor = Executors.newFixedThreadPool(numThreads);
@@ -288,10 +320,10 @@ class CachingCatalogTest extends CatalogTestBase {
         Identifier tableIdent = new Identifier("db", "tbl");
         catalog.createTable(tableIdent, DEFAULT_TABLE_SCHEMA, false);
         catalog.getTable(tableIdent);
-        assertThat(catalog.cache().asMap()).containsKey(tableIdent);
+        assertThat(catalog.tableCache().asMap()).containsKey(tableIdent);
         catalog.dropTable(tableIdent, false);
-        assertThat(catalog.cache().asMap()).doesNotContainKey(tableIdent);
-        assertThat(wrappedCatalog.cache().asMap()).doesNotContainKey(tableIdent);
+        assertThat(catalog.tableCache().asMap()).doesNotContainKey(tableIdent);
+        assertThat(wrappedCatalog.tableCache().asMap()).doesNotContainKey(tableIdent);
     }
 
     public static Identifier[] sysTables(Identifier tableIdent) {
@@ -313,7 +345,8 @@ class CachingCatalogTest extends CatalogTestBase {
                         this.catalog,
                         Duration.ofSeconds(10),
                         MemorySize.ofMebiBytes(1),
-                        manifestCacheThreshold);
+                        manifestCacheThreshold,
+                        0L);
         Identifier tableIdent = new Identifier("db", "tbl");
         catalog.dropTable(tableIdent, true);
         catalog.createTable(tableIdent, DEFAULT_TABLE_SCHEMA, false);

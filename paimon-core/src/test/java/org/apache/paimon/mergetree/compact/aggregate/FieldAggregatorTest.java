@@ -27,6 +27,25 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldBoolAndAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldBoolOrAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldCollectAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldFirstNonNullValueAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldFirstValueAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldHllSketchAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastNonNullValueAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastValueAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldListaggAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMaxAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMergeMapAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMinAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldNestedUpdateAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldProductAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldRoaringBitmap32AggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldRoaringBitmap64AggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldSumAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldThetaSketchAggFactory;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
@@ -67,14 +86,16 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldBoolAndAgg() {
-        FieldBoolAndAgg fieldBoolAndAgg = new FieldBoolAndAgg(new BooleanType());
+        FieldBoolAndAgg fieldBoolAndAgg =
+                new FieldBoolAndAggFactory().create(new BooleanType(), null, null);
         assertThat(fieldBoolAndAgg.agg(false, true)).isEqualTo(false);
         assertThat(fieldBoolAndAgg.agg(true, true)).isEqualTo(true);
     }
 
     @Test
     public void testFieldBoolOrAgg() {
-        FieldBoolOrAgg fieldBoolOrAgg = new FieldBoolOrAgg(new BooleanType());
+        FieldBoolOrAgg fieldBoolOrAgg =
+                new FieldBoolOrAggFactory().create(new BooleanType(), null, null);
         assertThat(fieldBoolOrAgg.agg(false, true)).isEqualTo(true);
         assertThat(fieldBoolOrAgg.agg(false, false)).isEqualTo(false);
     }
@@ -82,7 +103,7 @@ public class FieldAggregatorTest {
     @Test
     public void testFieldLastNonNullValueAgg() {
         FieldLastNonNullValueAgg fieldLastNonNullValueAgg =
-                new FieldLastNonNullValueAgg(new IntType());
+                new FieldLastNonNullValueAggFactory().create(new IntType(), null, null);
         Integer accumulator = null;
         Integer inputField = 1;
         assertThat(fieldLastNonNullValueAgg.agg(accumulator, inputField)).isEqualTo(1);
@@ -94,7 +115,8 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldLastValueAgg() {
-        FieldLastValueAgg fieldLastValueAgg = new FieldLastValueAgg(new IntType());
+        FieldLastValueAgg fieldLastValueAgg =
+                new FieldLastValueAggFactory().create(new IntType(), null, null);
         Integer accumulator = null;
         Integer inputField = 1;
         assertThat(fieldLastValueAgg.agg(accumulator, inputField)).isEqualTo(1);
@@ -106,7 +128,8 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldFirstValueAgg() {
-        FieldFirstValueAgg fieldFirstValueAgg = new FieldFirstValueAgg(new IntType());
+        FieldFirstValueAgg fieldFirstValueAgg =
+                new FieldFirstValueAggFactory().create(new IntType(), null, null);
         assertThat(fieldFirstValueAgg.agg(null, 1)).isEqualTo(1);
         assertThat(fieldFirstValueAgg.agg(1, 2)).isEqualTo(1);
 
@@ -117,7 +140,7 @@ public class FieldAggregatorTest {
     @Test
     public void testFieldFirstNonNullValueAgg() {
         FieldFirstNonNullValueAgg fieldFirstNonNullValueAgg =
-                new FieldFirstNonNullValueAgg(new IntType());
+                new FieldFirstNonNullValueAggFactory().create(new IntType(), null, null);
         assertThat(fieldFirstNonNullValueAgg.agg(null, null)).isNull();
         assertThat(fieldFirstNonNullValueAgg.agg(null, 1)).isEqualTo(1);
         assertThat(fieldFirstNonNullValueAgg.agg(1, 2)).isEqualTo(1);
@@ -129,8 +152,8 @@ public class FieldAggregatorTest {
     @Test
     public void testFieldListAggWithDefaultDelimiter() {
         FieldListaggAgg fieldListaggAgg =
-                new FieldListaggAgg(
-                        new VarCharType(), new CoreOptions(new HashMap<>()), "fieldName");
+                new FieldListaggAggFactory()
+                        .create(new VarCharType(), new CoreOptions(new HashMap<>()), "fieldName");
         BinaryString accumulator = BinaryString.fromString("user1");
         BinaryString inputField = BinaryString.fromString("user2");
         assertThat(fieldListaggAgg.agg(accumulator, inputField).toString())
@@ -140,11 +163,13 @@ public class FieldAggregatorTest {
     @Test
     public void testFieldListAggWithCustomDelimiter() {
         FieldListaggAgg fieldListaggAgg =
-                new FieldListaggAgg(
-                        new VarCharType(),
-                        CoreOptions.fromMap(
-                                ImmutableMap.of("fields.fieldName.list-agg-delimiter", "-")),
-                        "fieldName");
+                new FieldListaggAggFactory()
+                        .create(
+                                new VarCharType(),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of(
+                                                "fields.fieldName.list-agg-delimiter", "-")),
+                                "fieldName");
         BinaryString accumulator = BinaryString.fromString("user1");
         BinaryString inputField = BinaryString.fromString("user2");
         assertThat(fieldListaggAgg.agg(accumulator, inputField).toString())
@@ -153,7 +178,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldMaxAgg() {
-        FieldMaxAgg fieldMaxAgg = new FieldMaxAgg(new IntType());
+        FieldMaxAgg fieldMaxAgg = new FieldMaxAggFactory().create(new IntType(), null, null);
         Integer accumulator = 1;
         Integer inputField = 10;
         assertThat(fieldMaxAgg.agg(accumulator, inputField)).isEqualTo(10);
@@ -161,7 +186,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldMinAgg() {
-        FieldMinAgg fieldMinAgg = new FieldMinAgg(new IntType());
+        FieldMinAgg fieldMinAgg = new FieldMinAggFactory().create(new IntType(), null, null);
         Integer accumulator = 1;
         Integer inputField = 10;
         assertThat(fieldMinAgg.agg(accumulator, inputField)).isEqualTo(1);
@@ -169,7 +194,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumIntAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAgg(new IntType());
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new IntType(), null, null);
         assertThat(fieldSumAgg.agg(null, 10)).isEqualTo(10);
         assertThat(fieldSumAgg.agg(1, 10)).isEqualTo(11);
         assertThat(fieldSumAgg.retract(10, 5)).isEqualTo(5);
@@ -178,7 +203,8 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductIntAgg() {
-        FieldProductAgg fieldProductAgg = new FieldProductAgg(new IntType());
+        FieldProductAgg fieldProductAgg =
+                new FieldProductAggFactory().create(new IntType(), null, null);
         assertThat(fieldProductAgg.agg(null, 10)).isEqualTo(10);
         assertThat(fieldProductAgg.agg(1, 10)).isEqualTo(10);
         assertThat(fieldProductAgg.retract(10, 5)).isEqualTo(2);
@@ -187,7 +213,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumByteAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAgg(new TinyIntType());
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new TinyIntType(), null, null);
         assertThat(fieldSumAgg.agg(null, (byte) 10)).isEqualTo((byte) 10);
         assertThat(fieldSumAgg.agg((byte) 1, (byte) 10)).isEqualTo((byte) 11);
         assertThat(fieldSumAgg.retract((byte) 10, (byte) 5)).isEqualTo((byte) 5);
@@ -196,7 +222,8 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductByteAgg() {
-        FieldProductAgg fieldProductAgg = new FieldProductAgg(new TinyIntType());
+        FieldProductAgg fieldProductAgg =
+                new FieldProductAggFactory().create(new TinyIntType(), null, null);
         assertThat(fieldProductAgg.agg(null, (byte) 10)).isEqualTo((byte) 10);
         assertThat(fieldProductAgg.agg((byte) 1, (byte) 10)).isEqualTo((byte) 10);
         assertThat(fieldProductAgg.retract((byte) 10, (byte) 5)).isEqualTo((byte) 2);
@@ -205,7 +232,8 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductShortAgg() {
-        FieldProductAgg fieldProductAgg = new FieldProductAgg(new SmallIntType());
+        FieldProductAgg fieldProductAgg =
+                new FieldProductAggFactory().create(new SmallIntType(), null, null);
         assertThat(fieldProductAgg.agg(null, (short) 10)).isEqualTo((short) 10);
         assertThat(fieldProductAgg.agg((short) 1, (short) 10)).isEqualTo((short) 10);
         assertThat(fieldProductAgg.retract((short) 10, (short) 5)).isEqualTo((short) 2);
@@ -214,7 +242,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumShortAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAgg(new SmallIntType());
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new SmallIntType(), null, null);
         assertThat(fieldSumAgg.agg(null, (short) 10)).isEqualTo((short) 10);
         assertThat(fieldSumAgg.agg((short) 1, (short) 10)).isEqualTo((short) 11);
         assertThat(fieldSumAgg.retract((short) 10, (short) 5)).isEqualTo((short) 5);
@@ -223,7 +251,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumLongAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAgg(new BigIntType());
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new BigIntType(), null, null);
         assertThat(fieldSumAgg.agg(null, 10L)).isEqualTo(10L);
         assertThat(fieldSumAgg.agg(1L, 10L)).isEqualTo(11L);
         assertThat(fieldSumAgg.retract(10L, 5L)).isEqualTo(5L);
@@ -232,7 +260,8 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductLongAgg() {
-        FieldProductAgg fieldProductAgg = new FieldProductAgg(new BigIntType());
+        FieldProductAgg fieldProductAgg =
+                new FieldProductAggFactory().create(new BigIntType(), null, null);
         assertThat(fieldProductAgg.agg(null, 10L)).isEqualTo(10L);
         assertThat(fieldProductAgg.agg(1L, 10L)).isEqualTo(10L);
         assertThat(fieldProductAgg.retract(10L, 5L)).isEqualTo(2L);
@@ -241,7 +270,8 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductFloatAgg() {
-        FieldProductAgg fieldProductAgg = new FieldProductAgg(new FloatType());
+        FieldProductAgg fieldProductAgg =
+                new FieldProductAggFactory().create(new FloatType(), null, null);
         assertThat(fieldProductAgg.agg(null, (float) 10)).isEqualTo((float) 10);
         assertThat(fieldProductAgg.agg((float) 1, (float) 10)).isEqualTo((float) 10);
         assertThat(fieldProductAgg.retract((float) 10, (float) 5)).isEqualTo((float) 2);
@@ -250,7 +280,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumFloatAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAgg(new FloatType());
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new FloatType(), null, null);
         assertThat(fieldSumAgg.agg(null, (float) 10)).isEqualTo((float) 10);
         assertThat(fieldSumAgg.agg((float) 1, (float) 10)).isEqualTo((float) 11);
         assertThat(fieldSumAgg.retract((float) 10, (float) 5)).isEqualTo((float) 5);
@@ -259,7 +289,8 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductDoubleAgg() {
-        FieldProductAgg fieldProductAgg = new FieldProductAgg(new DoubleType());
+        FieldProductAgg fieldProductAgg =
+                new FieldProductAggFactory().create(new DoubleType(), null, null);
         assertThat(fieldProductAgg.agg(null, (double) 10)).isEqualTo((double) 10);
         assertThat(fieldProductAgg.agg((double) 1, (double) 10)).isEqualTo((double) 10);
         assertThat(fieldProductAgg.retract((double) 10, (double) 5)).isEqualTo((double) 2);
@@ -268,7 +299,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumDoubleAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAgg(new DoubleType());
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new DoubleType(), null, null);
         assertThat(fieldSumAgg.agg(null, (double) 10)).isEqualTo((double) 10);
         assertThat(fieldSumAgg.agg((double) 1, (double) 10)).isEqualTo((double) 11);
         assertThat(fieldSumAgg.retract((double) 10, (double) 5)).isEqualTo((double) 5);
@@ -277,7 +308,8 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductDecimalAgg() {
-        FieldProductAgg fieldProductAgg = new FieldProductAgg(new DecimalType());
+        FieldProductAgg fieldProductAgg =
+                new FieldProductAggFactory().create(new DecimalType(), null, null);
         assertThat(fieldProductAgg.agg(null, toDecimal(10))).isEqualTo(toDecimal(10));
         assertThat(fieldProductAgg.agg(toDecimal(1), toDecimal(10))).isEqualTo(toDecimal(10));
         assertThat(fieldProductAgg.retract(toDecimal(10), toDecimal(5))).isEqualTo(toDecimal(2));
@@ -286,7 +318,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumDecimalAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAgg(new DecimalType());
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new DecimalType(), null, null);
         assertThat(fieldSumAgg.agg(null, toDecimal(10))).isEqualTo(toDecimal(10));
         assertThat(fieldSumAgg.agg(toDecimal(1), toDecimal(10))).isEqualTo(toDecimal(11));
         assertThat(fieldSumAgg.retract(toDecimal(10), toDecimal(5))).isEqualTo(toDecimal(5));
@@ -307,6 +339,7 @@ public class FieldAggregatorTest {
                         DataTypes.FIELD(2, "v", DataTypes.STRING()));
         FieldNestedUpdateAgg agg =
                 new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
                         DataTypes.ARRAY(
                                 DataTypes.ROW(
                                         DataTypes.FIELD(0, "k0", DataTypes.INT()),
@@ -347,7 +380,10 @@ public class FieldAggregatorTest {
                         DataTypes.FIELD(1, "k1", DataTypes.INT()),
                         DataTypes.FIELD(2, "v", DataTypes.STRING()));
         FieldNestedUpdateAgg agg =
-                new FieldNestedUpdateAgg(DataTypes.ARRAY(elementRowType), Collections.emptyList());
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Collections.emptyList());
 
         InternalArray accumulator = null;
         InternalArray.ElementGetter elementGetter =
@@ -385,7 +421,13 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldCollectAggWithDistinct() {
-        FieldCollectAgg agg = new FieldCollectAgg(DataTypes.ARRAY(DataTypes.INT()), true);
+        FieldCollectAgg agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(DataTypes.INT()),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
 
         InternalArray result;
         InternalArray.ElementGetter elementGetter =
@@ -407,7 +449,13 @@ public class FieldAggregatorTest {
     @Test
     public void testFiledCollectAggWithRowType() {
         RowType rowType = RowType.of(DataTypes.INT(), DataTypes.STRING());
-        FieldCollectAgg agg = new FieldCollectAgg(DataTypes.ARRAY(rowType), true);
+        FieldCollectAgg agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(rowType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
 
         InternalArray result;
         InternalArray.ElementGetter elementGetter = InternalArray.createElementGetter(rowType);
@@ -438,7 +486,13 @@ public class FieldAggregatorTest {
     @Test
     public void testFiledCollectAggWithArrayType() {
         ArrayType arrayType = new ArrayType(DataTypes.INT());
-        FieldCollectAgg agg = new FieldCollectAgg(DataTypes.ARRAY(arrayType), true);
+        FieldCollectAgg agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(arrayType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
 
         InternalArray result;
         InternalArray.ElementGetter elementGetter = InternalArray.createElementGetter(arrayType);
@@ -469,7 +523,13 @@ public class FieldAggregatorTest {
     @Test
     public void testFiledCollectAggWithMapType() {
         MapType mapType = new MapType(DataTypes.INT(), DataTypes.STRING());
-        FieldCollectAgg agg = new FieldCollectAgg(DataTypes.ARRAY(mapType), true);
+        FieldCollectAgg agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(mapType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
 
         InternalArray result;
         InternalArray.ElementGetter elementGetter = InternalArray.createElementGetter(mapType);
@@ -497,7 +557,13 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldCollectAggWithoutDistinct() {
-        FieldCollectAgg agg = new FieldCollectAgg(DataTypes.ARRAY(DataTypes.INT()), false);
+        FieldCollectAgg agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(DataTypes.INT()),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "false")),
+                                "fieldName");
 
         InternalArray result;
         InternalArray.ElementGetter elementGetter =
@@ -522,7 +588,13 @@ public class FieldAggregatorTest {
         InternalArray.ElementGetter elementGetter;
 
         // primitive type
-        agg = new FieldCollectAgg(DataTypes.ARRAY(DataTypes.INT()), true);
+        agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(DataTypes.INT()),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
         elementGetter = InternalArray.createElementGetter(DataTypes.INT());
         InternalArray result =
                 (InternalArray)
@@ -533,7 +605,13 @@ public class FieldAggregatorTest {
 
         // row type
         RowType rowType = RowType.of(DataTypes.INT(), DataTypes.STRING());
-        agg = new FieldCollectAgg(DataTypes.ARRAY(rowType), true);
+        agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(rowType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
         elementGetter = InternalArray.createElementGetter(rowType);
 
         Object[] accElements =
@@ -556,7 +634,13 @@ public class FieldAggregatorTest {
 
         // array type
         ArrayType arrayType = new ArrayType(DataTypes.INT());
-        agg = new FieldCollectAgg(DataTypes.ARRAY(arrayType), true);
+        agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(arrayType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
         elementGetter = InternalArray.createElementGetter(arrayType);
 
         accElements =
@@ -578,7 +662,13 @@ public class FieldAggregatorTest {
 
         // map type
         MapType mapType = new MapType(DataTypes.INT(), DataTypes.STRING());
-        agg = new FieldCollectAgg(DataTypes.ARRAY(mapType), true);
+        agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(mapType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
         elementGetter = InternalArray.createElementGetter(mapType);
 
         accElements =
@@ -604,7 +694,13 @@ public class FieldAggregatorTest {
         InternalArray.ElementGetter elementGetter;
 
         // primitive type
-        agg = new FieldCollectAgg(DataTypes.ARRAY(DataTypes.INT()), true);
+        agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(DataTypes.INT()),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
         elementGetter = InternalArray.createElementGetter(DataTypes.INT());
         InternalArray result =
                 (InternalArray)
@@ -615,7 +711,13 @@ public class FieldAggregatorTest {
 
         // row type
         RowType rowType = RowType.of(DataTypes.INT(), DataTypes.STRING());
-        agg = new FieldCollectAgg(DataTypes.ARRAY(rowType), true);
+        agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(rowType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
         elementGetter = InternalArray.createElementGetter(rowType);
 
         Object[] accElements =
@@ -641,7 +743,13 @@ public class FieldAggregatorTest {
 
         // array type
         ArrayType arrayType = new ArrayType(DataTypes.INT());
-        agg = new FieldCollectAgg(DataTypes.ARRAY(arrayType), true);
+        agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(arrayType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
         elementGetter = InternalArray.createElementGetter(arrayType);
 
         accElements =
@@ -666,7 +774,13 @@ public class FieldAggregatorTest {
 
         // map type
         MapType mapType = new MapType(DataTypes.INT(), DataTypes.STRING());
-        agg = new FieldCollectAgg(DataTypes.ARRAY(mapType), true);
+        agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(mapType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
         elementGetter = InternalArray.createElementGetter(mapType);
 
         accElements =
@@ -691,7 +805,8 @@ public class FieldAggregatorTest {
     @Test
     public void testFieldMergeMapAgg() {
         FieldMergeMapAgg agg =
-                new FieldMergeMapAgg(DataTypes.MAP(DataTypes.INT(), DataTypes.STRING()));
+                new FieldMergeMapAggFactory()
+                        .create(DataTypes.MAP(DataTypes.INT(), DataTypes.STRING()), null, null);
 
         assertThat(agg.agg(null, null)).isNull();
 
@@ -710,7 +825,8 @@ public class FieldAggregatorTest {
     @Test
     public void testFieldMergeMapAggRetract() {
         FieldMergeMapAgg agg =
-                new FieldMergeMapAgg(DataTypes.MAP(DataTypes.INT(), DataTypes.STRING()));
+                new FieldMergeMapAggFactory()
+                        .create(DataTypes.MAP(DataTypes.INT(), DataTypes.STRING()), null, null);
         Object result =
                 agg.retract(
                         new GenericMap(toMap(1, "A", 2, "B", 3, "C")),
@@ -720,7 +836,8 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldThetaSketchAgg() {
-        FieldThetaSketchAgg agg = new FieldThetaSketchAgg(DataTypes.VARBINARY(20));
+        FieldThetaSketchAgg agg =
+                new FieldThetaSketchAggFactory().create(DataTypes.VARBINARY(20), null, null);
 
         byte[] inputVal = sketchOf(1);
         byte[] acc1 = sketchOf(2, 3);
@@ -743,7 +860,8 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldHllSketchAgg() {
-        FieldHllSketchAgg agg = new FieldHllSketchAgg(DataTypes.VARBINARY(20));
+        FieldHllSketchAgg agg =
+                new FieldHllSketchAggFactory().create(DataTypes.VARBINARY(20), null, null);
 
         byte[] inputVal = HllSketchUtil.sketchOf(1);
         byte[] acc1 = HllSketchUtil.sketchOf(2, 3);
@@ -766,7 +884,8 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldRoaringBitmap32Agg() {
-        FieldRoaringBitmap32Agg agg = new FieldRoaringBitmap32Agg(DataTypes.VARBINARY(20));
+        FieldRoaringBitmap32Agg agg =
+                new FieldRoaringBitmap32AggFactory().create(DataTypes.VARBINARY(20), null, null);
 
         byte[] inputVal = RoaringBitmap32.bitmapOf(1).serialize();
         byte[] acc1 = RoaringBitmap32.bitmapOf(2, 3).serialize();
@@ -789,7 +908,8 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldRoaringBitmap64Agg() throws IOException {
-        FieldRoaringBitmap64Agg agg = new FieldRoaringBitmap64Agg(DataTypes.VARBINARY(20));
+        FieldRoaringBitmap64Agg agg =
+                new FieldRoaringBitmap64AggFactory().create(DataTypes.VARBINARY(20), null, null);
 
         byte[] inputVal = RoaringBitmap64.bitmapOf(1L).serialize();
         byte[] acc1 = RoaringBitmap64.bitmapOf(2L, 3L).serialize();
@@ -808,6 +928,21 @@ public class FieldAggregatorTest {
 
         byte[] result4 = (byte[]) agg.agg(acc2, inputVal);
         assertThat(result4).isEqualTo(acc2);
+    }
+
+    @Test
+    public void testCustomAgg() throws IOException {
+        FieldAggregator fieldAggregator =
+                FieldAggregatorFactory.create(
+                        DataTypes.STRING(),
+                        "custom",
+                        false,
+                        false,
+                        CoreOptions.fromMap(new HashMap<>()),
+                        "custom");
+
+        Object agg = fieldAggregator.agg("test", "test");
+        assertThat(agg).isEqualTo("test");
     }
 
     private Map<Object, Object> toMap(Object... kvs) {

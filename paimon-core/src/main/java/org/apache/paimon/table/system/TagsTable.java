@@ -26,9 +26,12 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.InPredicateVisitor;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LeafPredicateExtractor;
+import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
@@ -59,11 +62,11 @@ import javax.annotation.Nullable;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeMap;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -74,10 +77,12 @@ public class TagsTable implements ReadonlyTable {
 
     public static final String TAGS = "tags";
 
+    private static final String TAG_NAME = "tag_name";
+
     public static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
-                            new DataField(0, "tag_name", SerializationUtils.newStringType(false)),
+                            new DataField(0, TAG_NAME, SerializationUtils.newStringType(false)),
                             new DataField(1, "snapshot_id", new BigIntType(false)),
                             new DataField(2, "schema_id", new BigIntType(false)),
                             new DataField(3, "commit_time", new TimestampType(false, 3)),
@@ -115,7 +120,7 @@ public class TagsTable implements ReadonlyTable {
 
     @Override
     public List<String> primaryKeys() {
-        return Collections.singletonList("tag_name");
+        return Collections.singletonList(TAG_NAME);
     }
 
     @Override
@@ -134,23 +139,20 @@ public class TagsTable implements ReadonlyTable {
     }
 
     private class TagsScan extends ReadOnceTableScan {
-        private @Nullable LeafPredicate tagName;
+        private @Nullable Predicate tagPredicate;
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
             if (predicate == null) {
                 return this;
             }
-            // TODO
-            Map<String, LeafPredicate> leafPredicates =
-                    predicate.visit(LeafPredicateExtractor.INSTANCE);
-            tagName = leafPredicates.get("tag_name");
+            tagPredicate = predicate;
             return this;
         }
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new TagsSplit(location, tagName));
+            return () -> Collections.singletonList(new TagsSplit(location, tagPredicate));
         }
     }
 
@@ -160,11 +162,11 @@ public class TagsTable implements ReadonlyTable {
 
         private final Path location;
 
-        private final @Nullable LeafPredicate tagName;
+        private final @Nullable Predicate tagPredicate;
 
-        private TagsSplit(Path location, @Nullable LeafPredicate tagName) {
+        private TagsSplit(Path location, @Nullable Predicate tagPredicate) {
             this.location = location;
-            this.tagName = tagName;
+            this.tagPredicate = tagPredicate;
         }
 
         @Override
@@ -176,7 +178,8 @@ public class TagsTable implements ReadonlyTable {
                 return false;
             }
             TagsSplit that = (TagsSplit) o;
-            return Objects.equals(location, that.location) && Objects.equals(tagName, that.tagName);
+            return Objects.equals(location, that.location)
+                    && Objects.equals(tagPredicate, that.tagPredicate);
         }
 
         @Override
@@ -188,7 +191,7 @@ public class TagsTable implements ReadonlyTable {
     private class TagsRead implements InnerTableRead {
 
         private final FileIO fileIO;
-        private int[][] projection;
+        private RowType readType;
 
         public TagsRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -201,8 +204,8 @@ public class TagsTable implements ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            this.projection = projection;
+        public InnerTableRead withReadType(RowType readType) {
+            this.readType = readType;
             return this;
         }
 
@@ -217,18 +220,44 @@ public class TagsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             Path location = ((TagsSplit) split).location;
-            LeafPredicate predicate = ((TagsSplit) split).tagName;
+            Predicate predicate = ((TagsSplit) split).tagPredicate;
             TagManager tagManager = new TagManager(fileIO, location, branch);
 
-            Map<String, Tag> nameToSnapshot = new LinkedHashMap<>();
-
-            if (predicate != null
-                    && predicate.function() instanceof Equal
-                    && predicate.literals().get(0) instanceof BinaryString) {
-                String equalValue = predicate.literals().get(0).toString();
-                if (tagManager.tagExists(equalValue)) {
-                    nameToSnapshot.put(equalValue, tagManager.tag(equalValue));
+            Map<String, Tag> nameToSnapshot = new TreeMap<>();
+            Map<String, Tag> predicateMap = new TreeMap<>();
+            if (predicate != null) {
+                if (predicate instanceof LeafPredicate
+                        && ((LeafPredicate) predicate).function() instanceof Equal
+                        && ((LeafPredicate) predicate).literals().get(0) instanceof BinaryString
+                        && predicate.visit(LeafPredicateExtractor.INSTANCE).get(TAG_NAME) != null) {
+                    String equalValue = ((LeafPredicate) predicate).literals().get(0).toString();
+                    if (tagManager.tagExists(equalValue)) {
+                        predicateMap.put(equalValue, tagManager.tag(equalValue));
+                    }
                 }
+
+                if (predicate instanceof CompoundPredicate) {
+                    CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
+                    // optimize for IN filter
+                    if ((compoundPredicate.function()) instanceof Or) {
+                        InPredicateVisitor.extractInElements(predicate, TAG_NAME)
+                                .ifPresent(
+                                        leafs ->
+                                                leafs.forEach(
+                                                        leaf -> {
+                                                            String leftName = leaf.toString();
+                                                            if (tagManager.tagExists(leftName)) {
+                                                                predicateMap.put(
+                                                                        leftName,
+                                                                        tagManager.tag(leftName));
+                                                            }
+                                                        }));
+                    }
+                }
+            }
+
+            if (!predicateMap.isEmpty()) {
+                nameToSnapshot.putAll(predicateMap);
             } else {
                 for (Pair<Tag, String> tag : tagManager.tagObjects()) {
                     nameToSnapshot.put(tag.getValue(), tag.getKey());
@@ -237,10 +266,13 @@ public class TagsTable implements ReadonlyTable {
 
             Iterator<InternalRow> rows =
                     Iterators.transform(nameToSnapshot.entrySet().iterator(), this::toRow);
-            if (projection != null) {
+            if (readType != null) {
                 rows =
                         Iterators.transform(
-                                rows, row -> ProjectedRow.from(projection).replaceRow(row));
+                                rows,
+                                row ->
+                                        ProjectedRow.from(readType, TagsTable.TABLE_TYPE)
+                                                .replaceRow(row));
             }
             return new IteratorRecordReader<>(rows);
         }

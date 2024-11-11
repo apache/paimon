@@ -36,8 +36,6 @@ import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.operators.StreamSource;
-import org.apache.flink.streaming.api.transformations.PartitionTransformation;
-import org.apache.flink.streaming.runtime.partitioner.RebalancePartitioner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -135,11 +133,7 @@ public class CombinedUnawareBatchSourceFunction
                             new MultiUnawareTablesReadOperator(catalogLoader, partitionIdleTime));
         }
 
-        PartitionTransformation<MultiTableUnawareAppendCompactionTask> transformation =
-                new PartitionTransformation<>(
-                        source.getTransformation(), new RebalancePartitioner<>());
-
-        return new DataStream<>(env, transformation);
+        return source;
     }
 
     private static Long getPartitionInfo(

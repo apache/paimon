@@ -333,6 +333,12 @@ under the License.
             <td>Define different file format for different level, you can add the conf like this: 'file.format.per.level' = '0:avro,3:parquet', if the file format for level is not provided, the default format which set by `file.format` will be used.</td>
         </tr>
         <tr>
+            <td><h5>file.suffix.include.compression</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to add file compression type in the file name of data file and changelog file.</td>
+        </tr>
+        <tr>
             <td><h5>force-lookup</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -472,10 +478,10 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Specify the merge engine for table with primary key.<br /><br />Possible values:<ul><li>"deduplicate": De-duplicate and keep the last row.</li><li>"partial-update": Partial update non-null fields.</li><li>"aggregation": Aggregate fields with same primary key.</li><li>"first-row": De-duplicate and keep the first row.</li></ul></td>
         </tr>
         <tr>
-            <td><h5>metadata.iceberg-compatible</h5></td>
+            <td><h5>metadata.stats-dense-store</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>When set to true, produce Iceberg metadata after a snapshot is committed, so that Iceberg readers can read Paimon's raw files.</td>
+            <td>Whether to store statistic densely in metadata (manifest files), which will significantly reduce the storage size of metadata when the none statistic mode is set.<br />Note, when this mode is enabled, the Paimon sdk in reading engine requires at least version 0.9.1 or 1.0.0 or higher.</td>
         </tr>
         <tr>
             <td><h5>metadata.stats-mode</h5></td>
@@ -552,6 +558,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>The default partition name in case the dynamic partition column value is null/empty string.</td>
         </tr>
         <tr>
+            <td><h5>partition.end-input-to-done</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether mark the done status to indicate that the data is ready when end input.</td>
+        </tr>
+        <tr>
             <td><h5>partition.expiration-check-interval</h5></td>
             <td style="word-wrap: break-word;">1 h</td>
             <td>Duration</td>
@@ -568,6 +580,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
             <td>The expiration interval of a partition. A partition will be expired if it‘s lifetime is over this value. Partition time is extracted from the partition value.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.legacy-name</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>The legacy partition name is using `toString` fpr all types. If false, using cast to string for all types.</td>
         </tr>
         <tr>
             <td><h5>partition.mark-done-action</h5></td>
@@ -609,13 +627,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>record-level.time-field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Time field for record level expire.</td>
-        </tr>
-        <tr>
-            <td><h5>record-level.time-field-type</h5></td>
-            <td style="word-wrap: break-word;">seconds-int</td>
-            <td><p>Enum</p></td>
-            <td>Time field type for record level expire, it can be seconds-int,seconds-long or millis-long.<br /><br />Possible values:<ul><li>"seconds-int": Timestamps in seconds with INT field type.</li><li>"seconds-long": Timestamps in seconds with BIGINT field type.</li><li>"millis-long": Timestamps in milliseconds with BIGINT field type.</li></ul></td>
+            <td>Time field for record level expire. It supports the following types: `timestamps in seconds with INT`,`timestamps in seconds with BIGINT`, `timestamps in milliseconds with BIGINT` or `timestamp`.</td>
         </tr>
         <tr>
             <td><h5>rowkind.field</h5></td>
@@ -700,6 +712,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>The field that generates the sequence number for primary key table, the sequence number determines which data is the most recent.</td>
+        </tr>
+        <tr>
+            <td><h5>sequence.field.sort-order</h5></td>
+            <td style="word-wrap: break-word;">ascending</td>
+            <td><p>Enum</p></td>
+            <td>Specify the order of sequence.field.<br /><br />Possible values:<ul><li>"ascending": specifies sequence.field sort order is ascending.</li><li>"descending": specifies sequence.field sort order is descending.</li></ul></td>
         </tr>
         <tr>
             <td><h5>sink.watermark-time-zone</h5></td>
@@ -881,6 +899,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">(none)</td>
             <td>MemorySize</td>
             <td>Target size of a file.<ul><li>primary key table: the default value is 128 MB.</li><li>append table: the default value is 256 MB.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>type</h5></td>
+            <td style="word-wrap: break-word;">table</td>
+            <td><p>Enum</p></td>
+            <td>Type of the table.<br /><br />Possible values:<ul><li>"table": Normal Paimon table.</li><li>"format-table": A file format table refers to a directory that contains multiple files of the same format.</li><li>"materialized-table": A materialized table.</li></ul></td>
         </tr>
         <tr>
             <td><h5>write-buffer-for-append</h5></td>

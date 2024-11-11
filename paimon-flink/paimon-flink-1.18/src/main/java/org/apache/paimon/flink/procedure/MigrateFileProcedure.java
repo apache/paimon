@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.TableMigrationUtils;
 import org.apache.paimon.migrate.Migrator;
@@ -88,7 +89,9 @@ public class MigrateFileProcedure extends ProcedureBase {
         Identifier sourceTableId = Identifier.fromString(sourceTablePath);
         Identifier targetTableId = Identifier.fromString(targetPaimonTablePath);
 
-        if (!(catalog.tableExists(targetTableId))) {
+        try {
+            catalog.getTable(targetTableId);
+        } catch (Catalog.TableNotExistException e) {
             throw new IllegalArgumentException(
                     "Target paimon table does not exist: " + targetPaimonTablePath);
         }

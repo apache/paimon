@@ -21,7 +21,6 @@ package org.apache.paimon.table.query;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.utils.Projection;
 
 import javax.annotation.Nullable;
 
@@ -31,11 +30,8 @@ import java.io.IOException;
 /** A query of Table to perform lookup. */
 public interface TableQuery extends Closeable {
 
-    default TableQuery withValueProjection(int[] projection) {
-        return withValueProjection(Projection.of(projection).toNestedIndexes());
-    }
-
-    TableQuery withValueProjection(int[][] projection);
+    // todo: replace it with withReadType
+    TableQuery withValueProjection(int[] projection);
 
     InternalRowSerializer createValueSerializer();
 

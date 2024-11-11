@@ -56,6 +56,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -372,6 +373,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public List<BucketEntry> bucketEntries() {
         return scan.readBucketEntries();
+    }
+
+    @Override
+    public Iterator<ManifestEntry> readFileIterator() {
+        return scan.readFileIterator();
     }
 
     @Override

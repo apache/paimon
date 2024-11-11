@@ -158,7 +158,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     fileIO.getFileSize(path),
                     numAddedFiles,
                     numDeletedFiles,
-                    partitionStatsSerializer.toBinary(partitionStatsCollector.extract()),
+                    partitionStatsSerializer.toBinaryAllMode(partitionStatsCollector.extract()),
                     numAddedFiles + numDeletedFiles > 0
                             ? schemaId
                             : schemaManager.latest().get().id());

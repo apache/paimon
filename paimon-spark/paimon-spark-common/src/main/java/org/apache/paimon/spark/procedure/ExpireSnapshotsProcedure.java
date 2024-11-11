@@ -20,6 +20,8 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.table.ExpireSnapshots;
+import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
@@ -29,10 +31,10 @@ import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
 import java.time.Duration;
+import java.util.TimeZone;
 
 import static org.apache.spark.sql.types.DataTypes.IntegerType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
-import static org.apache.spark.sql.types.DataTypes.TimestampType;
 
 /** A procedure to expire snapshots. */
 public class ExpireSnapshotsProcedure extends BaseProcedure {
@@ -42,7 +44,7 @@ public class ExpireSnapshotsProcedure extends BaseProcedure {
                 ProcedureParameter.required("table", StringType),
                 ProcedureParameter.optional("retain_max", IntegerType),
                 ProcedureParameter.optional("retain_min", IntegerType),
-                ProcedureParameter.optional("older_than", TimestampType),
+                ProcedureParameter.optional("older_than", StringType),
                 ProcedureParameter.optional("max_deletes", IntegerType)
             };
 
@@ -72,8 +74,9 @@ public class ExpireSnapshotsProcedure extends BaseProcedure {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         Integer retainMax = args.isNullAt(1) ? null : args.getInt(1);
         Integer retainMin = args.isNullAt(2) ? null : args.getInt(2);
-        Long olderThanMills = args.isNullAt(3) ? null : args.getLong(3) / 1000;
+        String olderThanStr = args.isNullAt(3) ? null : args.getString(3);
         Integer maxDeletes = args.isNullAt(4) ? null : args.getInt(4);
+
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
@@ -85,7 +88,11 @@ public class ExpireSnapshotsProcedure extends BaseProcedure {
                     if (retainMin != null) {
                         builder.snapshotRetainMin(retainMin);
                     }
-                    if (olderThanMills != null) {
+                    if (!StringUtils.isNullOrWhitespaceOnly(olderThanStr)) {
+                        long olderThanMills =
+                                DateTimeUtils.parseTimestampData(
+                                                olderThanStr, 3, TimeZone.getDefault())
+                                        .getMillisecond();
                         builder.snapshotTimeRetain(
                                 Duration.ofMillis(System.currentTimeMillis() - olderThanMills));
                     }

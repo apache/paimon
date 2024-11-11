@@ -22,11 +22,9 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
 
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalCause;
-
 import java.io.IOException;
+
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Cache manager to cache bytes to paged {@link MemorySegment}s. */
 public class CacheManager {
@@ -37,69 +35,67 @@ public class CacheManager {
      */
     public static final int REFRESH_COUNT = 10;
 
-    private final Cache<CacheKey, CacheValue> cache;
+    private final Cache cache;
 
     private int fileReadCount;
 
     public CacheManager(MemorySize maxMemorySize) {
-        this.cache =
-                Caffeine.newBuilder()
-                        .weigher(this::weigh)
-                        .maximumWeight(maxMemorySize.getBytes())
-                        .removalListener(this::onRemoval)
-                        .executor(Runnable::run)
-                        .build();
+        this(Cache.CacheType.GUAVA, maxMemorySize);
+    }
+
+    public CacheManager(Cache.CacheType cacheType, MemorySize maxMemorySize) {
+        this.cache = CacheBuilder.newBuilder(cacheType).maximumWeight(maxMemorySize).build();
         this.fileReadCount = 0;
     }
 
     @VisibleForTesting
-    public Cache<CacheKey, ?> cache() {
+    public Cache cache() {
         return cache;
     }
 
     public MemorySegment getPage(CacheKey key, CacheReader reader, CacheCallback callback) {
-        CacheValue value = cache.getIfPresent(key);
-        while (value == null || value.isClosed) {
-            try {
-                this.fileReadCount++;
-                value = new CacheValue(MemorySegment.wrap(reader.read(key)), callback);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            cache.put(key, value);
-        }
-        return value.segment;
+        Cache.CacheValue value =
+                cache.get(
+                        key,
+                        k -> {
+                            this.fileReadCount++;
+                            try {
+                                return new Cache.CacheValue(
+                                        MemorySegment.wrap(reader.read(key)), callback);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
+        return checkNotNull(value, String.format("Cache result for key(%s) is null", key)).segment;
     }
 
     public void invalidPage(CacheKey key) {
         cache.invalidate(key);
     }
 
-    private int weigh(CacheKey cacheKey, CacheValue cacheValue) {
-        return cacheValue.segment.size();
-    }
-
-    private void onRemoval(CacheKey key, CacheValue value, RemovalCause cause) {
-        if (value != null) {
-            value.isClosed = true;
-            value.callback.onRemoval(key);
-        }
-    }
-
     public int fileReadCount() {
         return fileReadCount;
     }
 
-    private static class CacheValue {
+    /** The container for the segment. */
+    public static class SegmentContainer {
 
         private final MemorySegment segment;
-        private final CacheCallback callback;
 
-        private boolean isClosed = false;
+        private int accessCount;
 
-        private CacheValue(MemorySegment segment, CacheCallback callback) {
+        public SegmentContainer(MemorySegment segment) {
             this.segment = segment;
-            this.callback = callback;
+            this.accessCount = 0;
+        }
+
+        public MemorySegment access() {
+            this.accessCount++;
+            return segment;
+        }
+
+        public int getAccessCount() {
+            return accessCount;
         }
     }
 }

@@ -58,7 +58,7 @@ object SparkDataFileMeta {
           file,
           dvFactory.create(file.fileName()))
     }
-  }
+  }.toSeq
 
   def convertToDataSplits(
       sparkDataFiles: Array[SparkDataFileMeta],
