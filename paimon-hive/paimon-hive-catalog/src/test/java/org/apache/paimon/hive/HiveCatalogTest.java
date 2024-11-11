@@ -273,7 +273,7 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testHiveClient() {
+    public void testListTablesLock() {
         try {
             String databaseName = "test_db";
             catalog.createDatabase(databaseName, false);
@@ -300,22 +300,28 @@ public class HiveCatalogTest extends CatalogTestBase {
             List<String> tables1 = new ArrayList<>();
             List<String> tables2 = new ArrayList<>();
 
-            Thread thread1 = new Thread(() -> {
-                System.out.println("First thread started at " + System.currentTimeMillis());
-                try {
-                    tables1.addAll(catalog.listTables(databaseName));
-                } catch (Catalog.DatabaseNotExistException e) {
-                    throw new RuntimeException(e);
-                }
-            });
-            Thread thread2 = new Thread(() -> {
-                System.out.println("Second thread started at " + System.currentTimeMillis());
-                try {
-                    tables2.addAll(catalog.listTables(databaseName));
-                } catch (Catalog.DatabaseNotExistException e) {
-                    throw new RuntimeException(e);
-                }
-            });
+            Thread thread1 =
+                    new Thread(
+                            () -> {
+                                System.out.println(
+                                        "First thread started at " + System.currentTimeMillis());
+                                try {
+                                    tables1.addAll(catalog.listTables(databaseName));
+                                } catch (Catalog.DatabaseNotExistException e) {
+                                    throw new RuntimeException(e);
+                                }
+                            });
+            Thread thread2 =
+                    new Thread(
+                            () -> {
+                                System.out.println(
+                                        "Second thread started at " + System.currentTimeMillis());
+                                try {
+                                    tables2.addAll(catalog.listTables(databaseName));
+                                } catch (Catalog.DatabaseNotExistException e) {
+                                    throw new RuntimeException(e);
+                                }
+                            });
 
             thread1.start();
             thread2.start();
@@ -339,7 +345,6 @@ public class HiveCatalogTest extends CatalogTestBase {
             assertThat(tables1).size().isEqualTo(100);
             assertThat(tables1).containsAll(tables2);
             assertThat(tables2).containsAll(tables1);
-
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
