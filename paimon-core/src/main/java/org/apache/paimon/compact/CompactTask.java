@@ -64,8 +64,7 @@ public abstract class CompactTask implements Callable<CompactResult> {
                                             .map(DataFileMeta::fileSize)
                                             .reduce(Long::sum)
                                             .orElse(0L));
-                            metricsReporter.reportDropDeletedRecordCount(
-                                    result.getDropDeletedRecordCount());
+                            reportDropDeletedRecordCount(result.getDropDeletedRecordCount());
                         }
                     },
                     LOG);
@@ -77,6 +76,12 @@ public abstract class CompactTask implements Callable<CompactResult> {
         } finally {
             MetricUtils.safeCall(this::stopTimer, LOG);
             MetricUtils.safeCall(this::decreaseCompactionsQueuedCount, LOG);
+        }
+    }
+
+    private void reportDropDeletedRecordCount(long dropDeletedRecordCount) {
+        if (metricsReporter != null) {
+            metricsReporter.reportDropDeletedRecordCount(dropDeletedRecordCount);
         }
     }
 

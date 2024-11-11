@@ -32,7 +32,7 @@ import java.io.IOException;
  */
 public class DropDeleteReader implements RecordReader<KeyValue> {
 
-    private long dropDeletedRecordCount = 0L;
+    private long dropDeleteRecordCount = 0L;
     private final RecordReader<KeyValue> reader;
 
     public DropDeleteReader(RecordReader<KeyValue> reader) {
@@ -59,7 +59,7 @@ public class DropDeleteReader implements RecordReader<KeyValue> {
                     if (kv.isAdd()) {
                         return kv;
                     }
-                    ++dropDeletedRecordCount;
+                    ++dropDeleteRecordCount;
                 }
             }
 
@@ -72,7 +72,7 @@ public class DropDeleteReader implements RecordReader<KeyValue> {
 
     @Override
     public long skippedRecordCount() {
-        return dropDeletedRecordCount;
+        return dropDeleteRecordCount;
     }
 
     @Override
