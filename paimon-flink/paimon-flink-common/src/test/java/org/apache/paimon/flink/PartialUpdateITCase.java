@@ -351,7 +351,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                         + "d INT,"
                         + "PRIMARY KEY (k, d) NOT ENFORCED) PARTITIONED BY (d) "
                         + " WITH ('merge-engine'='partial-update', "
-                        + "'local-merge-buffer-size'='1m'"
+                        + "'local-merge-buffer-size'='5m'"
                         + ");");
 
         sql("INSERT INTO T1 VALUES (1, CAST(NULL AS INT), 1), (2, 1, 1), (1, 2, 1)");
@@ -588,7 +588,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                         + " 'changelog-producer' = 'lookup'"
                         + ")");
         if (localMerge) {
-            sql("ALTER TABLE ignore_delete SET ('local-merge-buffer-size' = '256 kb')");
+            sql("ALTER TABLE ignore_delete SET ('local-merge-buffer-size' = '5m')");
         }
 
         sql("INSERT INTO ignore_delete VALUES (1, CAST (NULL AS STRING), 'apple')");
