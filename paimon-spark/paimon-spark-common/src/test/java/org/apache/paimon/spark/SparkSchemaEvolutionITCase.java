@@ -788,4 +788,33 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         "[4,[42,[402,null,4002],four]]",
                         "[5,[53,[503,500.03,5003],five]]");
     }
+
+    @ParameterizedTest()
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testRenameNestedColumn(String formatType) {
+        String tableName = "testRenameNestedColumnTable";
+        spark.sql(
+                "CREATE TABLE paimon.default."
+                        + tableName
+                        + " (k INT NOT NULL, v STRUCT<f1: INT, f2: STRUCT<f1: STRING, f2: INT>>) "
+                        + "TBLPROPERTIES ('file.format' = '"
+                        + formatType
+                        + "')");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, STRUCT(10, STRUCT('apple', 100))), (2, STRUCT(20, STRUCT('banana', 200)))");
+        assertThat(
+                        spark.sql("SELECT v.f2.f1, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder("[apple,1]", "[banana,2]");
+
+        spark.sql("ALTER TABLE paimon.default." + tableName + " RENAME COLUMN v.f2.f1 to f100");
+        assertThat(
+                        spark.sql("SELECT v.f2.f100, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder("[apple,1]", "[banana,2]");
+    }
 }

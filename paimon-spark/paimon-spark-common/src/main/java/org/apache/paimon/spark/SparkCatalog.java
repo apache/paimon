@@ -379,8 +379,7 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
                     move);
         } else if (change instanceof TableChange.RenameColumn) {
             TableChange.RenameColumn rename = (TableChange.RenameColumn) change;
-            validateAlterNestedField(rename.fieldNames());
-            return SchemaChange.renameColumn(rename.fieldNames()[0], rename.newName());
+            return SchemaChange.renameColumn(Arrays.asList(rename.fieldNames()), rename.newName());
         } else if (change instanceof TableChange.DeleteColumn) {
             TableChange.DeleteColumn delete = (TableChange.DeleteColumn) change;
             return SchemaChange.dropColumn(Arrays.asList(delete.fieldNames()));
