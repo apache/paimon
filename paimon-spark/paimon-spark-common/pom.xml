@@ -30,8 +30,8 @@ under the License.
 
     <packaging>jar</packaging>
 
-    <artifactId>paimon-spark-common</artifactId>
-    <name>Paimon : Spark : Common</name>
+    <artifactId>paimon-spark-common_${scala.binary.version}</artifactId>
+    <name>Paimon : Spark : Common : ${scala.binary.version}</name>
 
     <properties>
         <spark.version>${paimon-spark-common.spark.version}</spark.version>

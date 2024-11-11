@@ -38,7 +38,7 @@ under the License.
     <dependencies>
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-spark-common</artifactId>
+            <artifactId>paimon-spark-common_${scala.binary.version}</artifactId>
             <version>${project.version}</version>
         </dependency>
 
@@ -63,7 +63,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-spark-common</artifactId>
+            <artifactId>paimon-spark-common_${scala.binary.version}</artifactId>
             <version>${project.version}</version>
             <classifier>tests</classifier>
             <scope>test</scope>
@@ -126,7 +126,7 @@ under the License.
                             </filters>
                             <artifactSet>
                                 <includes combine.children="append">
-                                    <include>org.apache.paimon:paimon-spark-common</include>
+                                     <include>org.apache.paimon:paimon-spark-common_${scala.binary.version}</include>
                                 </includes>
                             </artifactSet>
                         </configuration>
