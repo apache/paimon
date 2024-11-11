@@ -32,6 +32,7 @@ import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.GreaterOrEqual;
 import org.apache.paimon.predicate.GreaterThan;
+import org.apache.paimon.predicate.InPredicateVisitor;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.LessOrEqual;
@@ -232,17 +233,14 @@ public class SnapshotsTable implements ReadonlyTable {
 
                 // optimize for IN filter
                 if ((compoundPredicate.function()) instanceof Or) {
-                    for (Predicate leaf : children) {
-                        if (leaf instanceof LeafPredicate
-                                && (((LeafPredicate) leaf).function() instanceof Equal)
-                                && leaf.visit(LeafPredicateExtractor.INSTANCE).get(leafName)
-                                        != null) {
-                            snapshotIds.add((Long) ((LeafPredicate) leaf).literals().get(0));
-                        } else {
-                            snapshotIds.clear();
-                            break;
-                        }
-                    }
+                    InPredicateVisitor.extractInElements(predicate, leafName)
+                            .ifPresent(
+                                    leafs ->
+                                            leafs.forEach(
+                                                    leaf ->
+                                                            snapshotIds.add(
+                                                                    Long.parseLong(
+                                                                            leaf.toString()))));
                 }
             } else {
                 handleLeafPredicate(predicate, leafName);

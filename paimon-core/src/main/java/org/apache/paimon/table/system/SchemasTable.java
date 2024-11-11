@@ -31,6 +31,7 @@ import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.GreaterOrEqual;
 import org.apache.paimon.predicate.GreaterThan;
+import org.apache.paimon.predicate.InPredicateVisitor;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.LessOrEqual;
@@ -229,18 +230,14 @@ public class SchemasTable implements ReadonlyTable {
 
                 // optimize for IN filter
                 if ((compoundPredicate.function()) instanceof Or) {
-                    List<Predicate> children = compoundPredicate.children();
-                    for (Predicate leaf : children) {
-                        if (leaf instanceof LeafPredicate
-                                && (((LeafPredicate) leaf).function() instanceof Equal)
-                                && leaf.visit(LeafPredicateExtractor.INSTANCE).get(leafName)
-                                        != null) {
-                            schemaIds.add((Long) ((LeafPredicate) leaf).literals().get(0));
-                        } else {
-                            schemaIds.clear();
-                            break;
-                        }
-                    }
+                    InPredicateVisitor.extractInElements(predicate, leafName)
+                            .ifPresent(
+                                    leafs ->
+                                            leafs.forEach(
+                                                    leaf ->
+                                                            schemaIds.add(
+                                                                    Long.parseLong(
+                                                                            leaf.toString()))));
                 }
             } else {
                 handleLeafPredicate(predicate, leafName);
