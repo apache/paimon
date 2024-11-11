@@ -52,6 +52,7 @@ import org.apache.spark.sql.execution.datasources.v2.V2SessionCatalog;
 import org.apache.spark.sql.internal.SQLConf;
 import org.apache.spark.sql.internal.SessionState;
 import org.apache.spark.sql.internal.StaticSQLConf;
+import org.apache.spark.sql.paimon.shims;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 import org.slf4j.Logger;
@@ -202,7 +203,7 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
             return sparkCatalog.createTable(ident, schema, partitions, properties);
         } else {
             // delegate to the session catalog
-            return asTableCatalog().createTable(ident, schema, partitions, properties);
+            return shims.createTable(asTableCatalog(), ident, schema, partitions, properties);
         }
     }
 

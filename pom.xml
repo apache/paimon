@@ -138,11 +138,13 @@ under the License.
             --add-opens=java.base/java.util=ALL-UNNAMED
             --add-opens=java.base/java.util.concurrent=ALL-UNNAMED
             --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED
+            --add-opens=java.base/jdk.internal.ref=ALL-UNNAMED
             --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
             --add-opens=java.base/sun.nio.cs=ALL-UNNAMED
             --add-opens=java.base/sun.security.action=ALL-UNNAMED
             --add-opens=java.base/sun.util.calendar=ALL-UNNAMED
             -Djdk.reflect.useDirectMethodHandle=false
+            -Dio.netty.tryReflectionSetAccessible=true
         </extraJavaTestArgs>
     </properties>
 
@@ -348,14 +350,50 @@ under the License.
         </profile>
 
         <profile>
-            <id>scala-2.13</id>
+            <id>spark3</id>
+            <modules>
+                <module>paimon-spark/paimon-spark3-common</module>
+                <module>paimon-spark/paimon-spark-3.5</module>
+                <module>paimon-spark/paimon-spark-3.4</module>
+                <module>paimon-spark/paimon-spark-3.3</module>
+                <module>paimon-spark/paimon-spark-3.2</module>
+            </modules>
             <properties>
+                <scala.binary.version>2.12</scala.binary.version>
+                <scala.version>${scala212.version}</scala.version>
+                <paimon-spark-common.spark.version>3.5.3</paimon-spark-common.spark.version>
+                <paimon-sparkx-common>paimon-spark3-common</paimon-sparkx-common>
+                <!-- todo: support the latest spark in paimon e2e test2 -->
+                <test.spark.main.version>3.3</test.spark.main.version>
+                <test.spark.version>3.3.0</test.spark.version>
+            </properties>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+                <property>
+                    <name>spark3</name>
+                </property>
+            </activation>
+        </profile>
+
+        <profile>
+            <id>spark4</id>
+            <modules>
+                <module>paimon-spark/paimon-spark4-common</module>
+                <module>paimon-spark/paimon-spark-4.0</module>
+            </modules>
+            <properties>
+                <target.java.version>17</target.java.version>
+                <antlr4.version>4.13.1</antlr4.version>
                 <scala.binary.version>2.13</scala.binary.version>
                 <scala.version>${scala213.version}</scala.version>
+                <paimon-spark-common.spark.version>4.0.0-preview2</paimon-spark-common.spark.version>
+                <paimon-sparkx-common>paimon-spark4-common</paimon-sparkx-common>
+                <test.spark.main.version>4.0</test.spark.main.version>
+                <test.spark.version>4.0.0-preview2</test.spark.version>
             </properties>
             <activation>
                 <property>
-                    <name>scala-2.13</name>
+                    <name>spark4</name>
                 </property>
             </activation>
         </profile>
@@ -514,7 +552,7 @@ under the License.
                         <!-- for junit5 -->
                         <junit.jupiter.extensions.autodetection.enabled>true</junit.jupiter.extensions.autodetection.enabled>
                     </systemPropertyVariables>
-                    <argLine>-Xms256m -Xmx2048m -Dmvn.forkNumber=${surefire.forkNumber} -XX:+UseG1GC</argLine>
+                    <argLine>-Xms256m -Xmx2048m -Dmvn.forkNumber=${surefire.forkNumber} -XX:+UseG1GC ${extraJavaTestArgs}</argLine>
                     <!-- By removing all default exclusions the nested classes get executed too -->
                     <excludes>
                         <exclude/>
@@ -553,7 +591,6 @@ under the License.
                     </execution>
                 </executions>
             </plugin>
-
 
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

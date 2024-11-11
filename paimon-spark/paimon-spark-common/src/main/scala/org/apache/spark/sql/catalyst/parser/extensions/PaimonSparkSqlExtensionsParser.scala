@@ -47,8 +47,8 @@ import java.util.Locale
  * @param delegate
  *   The extension parser.
  */
-class PaimonSparkSqlExtensionsParser(delegate: ParserInterface)
-  extends ParserInterface
+class PaimonSparkSqlExtensionsParser(val delegate: ParserInterface)
+  extends org.apache.spark.sql.paimon.shims.ParserInterface
   with Logging {
 
   private lazy val substitutor = new VariableSubstitution()

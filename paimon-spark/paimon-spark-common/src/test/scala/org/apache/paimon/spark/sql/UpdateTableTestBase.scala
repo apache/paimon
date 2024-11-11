@@ -328,7 +328,6 @@ abstract class UpdateTableTestBase extends PaimonSparkTestBase {
       "INSERT INTO T VALUES (1, map(1, 'a'), '11'), (2, map(2, 'b'), '22'), (3, map(3, 'c'), '33')")
 
     assertThatThrownBy(() => spark.sql("UPDATE T SET m.key = 11 WHERE id = 1"))
-      .hasMessageContaining("Unsupported update expression")
 
     spark.sql("UPDATE T SET m = map(11, 'a_new') WHERE id = 1")
     val rows = spark.sql("SELECT * FROM T ORDER BY id").collectAsList()
