@@ -528,6 +528,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>The number of sorted runs that trigger the stopping of writes, the default value is 'num-sorted-run.compaction-trigger' + 3.</td>
         </tr>
         <tr>
+            <td><h5>object-location</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The object location for object table.</td>
+        </tr>
+        <tr>
             <td><h5>page-size</h5></td>
             <td style="word-wrap: break-word;">64 kb</td>
             <td>MemorySize</td>
@@ -904,7 +910,7 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td><h5>type</h5></td>
             <td style="word-wrap: break-word;">table</td>
             <td><p>Enum</p></td>
-            <td>Type of the table.<br /><br />Possible values:<ul><li>"table": Normal Paimon table.</li><li>"format-table": A file format table refers to a directory that contains multiple files of the same format.</li><li>"materialized-table": A materialized table.</li></ul></td>
+            <td>Type of the table.<br /><br />Possible values:<ul><li>"table": Normal Paimon table.</li><li>"format-table": A file format table refers to a directory that contains multiple files of the same format.</li><li>"materialized-table": A materialized table combines normal Paimon table and materialized SQL.</li><li>"object-table": A object table combines normal Paimon table and object location.</li></ul></td>
         </tr>
         <tr>
             <td><h5>write-buffer-for-append</h5></td>
