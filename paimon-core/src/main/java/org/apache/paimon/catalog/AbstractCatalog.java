@@ -39,6 +39,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Preconditions;
 
@@ -200,7 +201,17 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public List<PartitionEntry> listPartitions(Identifier identifier)
             throws TableNotExistException {
-        return getTable(identifier).newReadBuilder().newScan().listPartitionEntries();
+        return listPartitions(identifier, null);
+    }
+
+    public List<PartitionEntry> listPartitions(
+            Identifier identifier, Map<String, String> partitionSpec)
+            throws TableNotExistException {
+        ReadBuilder readBuilder = getTable(identifier).newReadBuilder();
+        if (partitionSpec != null) {
+            readBuilder.withPartitionFilter(partitionSpec);
+        }
+        return readBuilder.newScan().listPartitionEntries();
     }
 
     protected abstract void createDatabaseImpl(String name, Map<String, String> properties);

@@ -255,6 +255,16 @@ public interface Catalog extends AutoCloseable {
     List<PartitionEntry> listPartitions(Identifier identifier) throws TableNotExistException;
 
     /**
+     * Get PartitionEntry of filtered partitions of the table.
+     *
+     * @param identifier path of the table to list partitions
+     * @param partitions – the partition to be filtered
+     * @throws TableNotExistException if the table does not exist
+     */
+    List<PartitionEntry> listPartitions(Identifier identifier, Map<String, String> partitions)
+            throws TableNotExistException;
+
+    /**
      * Modify an existing table from a {@link SchemaChange}.
      *
      * <p>NOTE: System tables can not be altered.

@@ -19,11 +19,20 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.FileSystemCatalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.TestableCachingCatalog;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.table.system.SinkTableLineageTable;
 import org.apache.paimon.table.system.SourceTableLineageTable;
 import org.apache.paimon.utils.BlockingIterator;
+import org.apache.paimon.utils.FakeTicker;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.table.catalog.CatalogPartition;
@@ -36,6 +45,8 @@ import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nonnull;
 
+import java.io.IOException;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -603,6 +614,49 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         result = sql("SHOW PARTITIONS PartitionTable partition (dt='2020-01-02', hh='11')");
         assertThat(result).containsExactlyInAnyOrder(Row.of("dt=2020-01-02/hh=11"));
+    }
+
+    @Test
+    void testShowPartitionsWithCachingCatalog() throws IOException {
+        String catalogName = "caching";
+        String warehouse = toWarehouse(path);
+        Options catalogOptions = new Options();
+        catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
+        CatalogContext catalogContext = CatalogContext.create(catalogOptions);
+        FileIO fileIO = FileIO.get(new Path(warehouse), catalogContext);
+        FileSystemCatalog catalog = new FileSystemCatalog(fileIO, new Path(toWarehouse(path)));
+        FakeTicker ticker = new FakeTicker();
+        TestableCachingCatalog testableCachingCatalog =
+                new TestableCachingCatalog(catalog, Duration.ofMinutes(5), ticker);
+        FlinkCatalog caching =
+                FlinkCatalogFactory.createCatalog(
+                        catalogName, testableCachingCatalog, catalogOptions);
+        tEnv.registerCatalog(catalogName, caching);
+        tEnv.useCatalog(catalogName);
+
+        tEnv.executeSql(
+                "CREATE TABLE PartitionTable (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING,\n"
+                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (dt, hh)");
+        sql("INSERT INTO PartitionTable select 1,1,'a','2020-01-01','10'");
+        sql("INSERT INTO PartitionTable select 2,2,'b','2020-01-02','11'");
+        sql("INSERT INTO PartitionTable select 3,3,'c','2020-01-03','11'");
+        List<Row> result = sql("SHOW PARTITIONS PartitionTable");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("dt=2020-01-01/hh=10"),
+                        Row.of("dt=2020-01-02/hh=11"),
+                        Row.of("dt=2020-01-03/hh=11"));
+
+        assertThat(testableCachingCatalog.partitionCache().asMap())
+                .containsKey(new Identifier("default", "PartitionTable"));
+        List<Row> result2 = sql("SHOW PARTITIONS PartitionTable");
+        assertThat(result).isEqualTo(result2);
     }
 
     @Test

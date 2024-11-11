@@ -171,6 +171,12 @@ public class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public List<PartitionEntry> listPartitions(
+            Identifier identifier, Map<String, String> partitions) throws TableNotExistException {
+        return wrapped.listPartitions(identifier, partitions);
+    }
+
+    @Override
     public void repairCatalog() {
         wrapped.repairCatalog();
     }

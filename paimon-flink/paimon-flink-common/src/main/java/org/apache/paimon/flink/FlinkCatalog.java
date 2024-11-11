@@ -36,7 +36,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
-import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Preconditions;
@@ -1160,15 +1159,18 @@ public class FlinkCatalog extends AbstractCatalog {
     private List<PartitionEntry> getPartitionEntries(
             Table table, ObjectPath tablePath, @Nullable CatalogPartitionSpec partitionSpec)
             throws TableNotPartitionedException {
-        if (table.partitionKeys() == null || table.partitionKeys().size() == 0) {
+        try {
+            if (table.partitionKeys() == null || table.partitionKeys().isEmpty()) {
+                throw new TableNotPartitionedException(getName(), tablePath);
+            }
+            if (partitionSpec != null && partitionSpec.getPartitionSpec() != null) {
+                return catalog.listPartitions(
+                        toIdentifier(tablePath), partitionSpec.getPartitionSpec());
+            }
+            return catalog.listPartitions(toIdentifier(tablePath));
+        } catch (Catalog.TableNotExistException | TableNotPartitionedException e) {
             throw new TableNotPartitionedException(getName(), tablePath);
         }
-
-        ReadBuilder readBuilder = table.newReadBuilder();
-        if (partitionSpec != null && partitionSpec.getPartitionSpec() != null) {
-            readBuilder.withPartitionFilter(partitionSpec.getPartitionSpec());
-        }
-        return readBuilder.newScan().listPartitionEntries();
     }
 
     private List<CatalogPartitionSpec> getPartitionSpecs(
