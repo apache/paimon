@@ -290,18 +290,11 @@ public class SchemaManager implements Serializable {
                     DataType dataType =
                             ReassignFieldId.reassign(addColumn.dataType(), highestFieldId);
 
-                    new NestedColumnModifier<Catalog.ColumnAlreadyExistException>(
-                            addColumn.fieldNames().toArray(new String[0])) {
+                    new NestedColumnModifier(addColumn.fieldNames().toArray(new String[0])) {
                         @Override
                         protected void updateLastColumn(List<DataField> newFields, String fieldName)
                                 throws Catalog.ColumnAlreadyExistException {
-                            for (DataField field : newFields) {
-                                if (field.name().equals(fieldName)) {
-                                    throw new Catalog.ColumnAlreadyExistException(
-                                            identifierFromPath(tableRoot.toString(), true, branch),
-                                            String.join(".", addColumn.fieldNames()));
-                                }
-                            }
+                            assertColumnNotExists(newFields, fieldName);
 
                             DataField dataField =
                                     new DataField(id, fieldName, dataType, addColumn.description());
@@ -327,34 +320,39 @@ public class SchemaManager implements Serializable {
                 } else if (change instanceof RenameColumn) {
                     RenameColumn rename = (RenameColumn) change;
                     renameColumnValidation(oldTableSchema, rename);
-                    if (newFields.stream().anyMatch(f -> f.name().equals(rename.newName()))) {
-                        throw new Catalog.ColumnAlreadyExistException(
-                                identifierFromPath(tableRoot.toString(), true, branch),
-                                rename.fieldName());
-                    }
+                    new NestedColumnModifier(rename.fieldNames().toArray(new String[0])) {
+                        @Override
+                        protected void updateLastColumn(List<DataField> newFields, String fieldName)
+                                throws Catalog.ColumnNotExistException,
+                                        Catalog.ColumnAlreadyExistException {
+                            assertColumnExists(newFields, fieldName);
+                            assertColumnNotExists(newFields, rename.newName());
+                            for (int i = 0; i < newFields.size(); i++) {
+                                DataField field = newFields.get(i);
+                                if (!field.name().equals(fieldName)) {
+                                    continue;
+                                }
 
-                    updateNestedColumn(
-                            newFields,
-                            new String[] {rename.fieldName()},
-                            (field) ->
-                                    new DataField(
-                                            field.id(),
-                                            rename.newName(),
-                                            field.type(),
-                                            field.description()));
+                                DataField newField =
+                                        new DataField(
+                                                field.id(),
+                                                rename.newName(),
+                                                field.type(),
+                                                field.description());
+                                newFields.set(i, newField);
+                                return;
+                            }
+                        }
+                    }.updateIntermediateColumn(newFields, 0);
                 } else if (change instanceof DropColumn) {
                     DropColumn drop = (DropColumn) change;
                     dropColumnValidation(oldTableSchema, drop);
-                    new NestedColumnModifier<Catalog.ColumnNotExistException>(
-                            drop.fieldNames().toArray(new String[0])) {
+                    new NestedColumnModifier(drop.fieldNames().toArray(new String[0])) {
                         @Override
                         protected void updateLastColumn(List<DataField> newFields, String fieldName)
                                 throws Catalog.ColumnNotExistException {
-                            if (!newFields.removeIf(f -> f.name().equals(fieldName))) {
-                                throw new Catalog.ColumnNotExistException(
-                                        identifierFromPath(tableRoot.toString(), true, branch),
-                                        String.join(".", drop.fieldNames()));
-                            }
+                            assertColumnExists(newFields, fieldName);
+                            newFields.removeIf(f -> f.name().equals(fieldName));
                             if (newFields.isEmpty()) {
                                 throw new IllegalArgumentException(
                                         "Cannot drop all fields in table");
@@ -438,7 +436,7 @@ public class SchemaManager implements Serializable {
                     new Schema(
                             newFields,
                             oldTableSchema.partitionKeys(),
-                            applyColumnRename(
+                            applyNotNestedColumnRename(
                                     oldTableSchema.primaryKeys(),
                                     Iterables.filter(changes, RenameColumn.class)),
                             applySchemaChanges(newOptions, changes),
@@ -553,7 +551,8 @@ public class SchemaManager implements Serializable {
         if (!StringUtils.isNullOrWhitespaceOnly(bucketKeysStr)) {
             List<String> bucketColumns = Arrays.asList(bucketKeysStr.split(","));
             List<String> newBucketColumns =
-                    applyColumnRename(bucketColumns, Iterables.filter(changes, RenameColumn.class));
+                    applyNotNestedColumnRename(
+                            bucketColumns, Iterables.filter(changes, RenameColumn.class));
             newOptions.put(BUCKET_KEY.key(), Joiner.on(',').join(newBucketColumns));
         }
 
@@ -561,9 +560,9 @@ public class SchemaManager implements Serializable {
         return newOptions;
     }
 
-    // Apply column rename changes to the list of column names, this will not change the order of
-    // the column names
-    private static List<String> applyColumnRename(
+    // Apply column rename changes on not nested columns to the list of column names, this will not
+    // change the order of the column names
+    private static List<String> applyNotNestedColumnRename(
             List<String> columns, Iterable<RenameColumn> renames) {
         if (Iterables.isEmpty(renames)) {
             return columns;
@@ -571,7 +570,9 @@ public class SchemaManager implements Serializable {
 
         Map<String, String> columnNames = Maps.newHashMap();
         for (RenameColumn renameColumn : renames) {
-            columnNames.put(renameColumn.fieldName(), renameColumn.newName());
+            if (renameColumn.fieldNames().size() == 1) {
+                columnNames.put(renameColumn.fieldNames().get(0), renameColumn.newName());
+            }
         }
 
         // The order of the column names will be preserved, as a non-parallel stream is used here.
@@ -594,14 +595,18 @@ public class SchemaManager implements Serializable {
     }
 
     private static void renameColumnValidation(TableSchema schema, RenameColumn change) {
-        String columnToRename = change.fieldName();
+        // partition keys can't be nested columns
+        if (change.fieldNames().size() > 1) {
+            return;
+        }
+        String columnToRename = change.fieldNames().get(0);
         if (schema.partitionKeys().contains(columnToRename)) {
             throw new UnsupportedOperationException(
                     String.format("Cannot rename partition column: [%s]", columnToRename));
         }
     }
 
-    private abstract class NestedColumnModifier<E extends Exception> {
+    private abstract class NestedColumnModifier {
 
         private final String[] updateFieldNames;
 
@@ -610,7 +615,7 @@ public class SchemaManager implements Serializable {
         }
 
         public void updateIntermediateColumn(List<DataField> newFields, int depth)
-                throws Catalog.ColumnNotExistException, E {
+                throws Catalog.ColumnNotExistException, Catalog.ColumnAlreadyExistException {
             if (depth == updateFieldNames.length - 1) {
                 updateLastColumn(newFields, updateFieldNames[depth]);
                 return;
@@ -643,15 +648,47 @@ public class SchemaManager implements Serializable {
         }
 
         protected abstract void updateLastColumn(List<DataField> newFields, String fieldName)
-                throws E;
+                throws Catalog.ColumnNotExistException, Catalog.ColumnAlreadyExistException;
+
+        protected void assertColumnExists(List<DataField> newFields, String fieldName)
+                throws Catalog.ColumnNotExistException {
+            for (DataField field : newFields) {
+                if (field.name().equals(fieldName)) {
+                    return;
+                }
+            }
+            throw new Catalog.ColumnNotExistException(
+                    identifierFromPath(tableRoot.toString(), true, branch),
+                    getLastFieldName(fieldName));
+        }
+
+        protected void assertColumnNotExists(List<DataField> newFields, String fieldName)
+                throws Catalog.ColumnAlreadyExistException {
+            for (DataField field : newFields) {
+                if (field.name().equals(fieldName)) {
+                    throw new Catalog.ColumnAlreadyExistException(
+                            identifierFromPath(tableRoot.toString(), true, branch),
+                            getLastFieldName(fieldName));
+                }
+            }
+        }
+
+        private String getLastFieldName(String fieldName) {
+            List<String> fieldNames = new ArrayList<>();
+            for (int i = 0; i + 1 < updateFieldNames.length; i++) {
+                fieldNames.add(updateFieldNames[i]);
+            }
+            fieldNames.add(fieldName);
+            return String.join(".", fieldNames);
+        }
     }
 
     private void updateNestedColumn(
             List<DataField> newFields,
             String[] updateFieldNames,
             Function<DataField, DataField> updateFunc)
-            throws Catalog.ColumnNotExistException {
-        new NestedColumnModifier<Catalog.ColumnNotExistException>(updateFieldNames) {
+            throws Catalog.ColumnNotExistException, Catalog.ColumnAlreadyExistException {
+        new NestedColumnModifier(updateFieldNames) {
             @Override
             protected void updateLastColumn(List<DataField> newFields, String fieldName)
                     throws Catalog.ColumnNotExistException {

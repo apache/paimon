@@ -606,4 +606,61 @@ public class SchemaManagerTest {
         assertThatCode(() -> manager.commitChanges(middleColumnNotExistDropColumn))
                 .hasMessageContaining("Column v.invalid does not exist");
     }
+
+    @Test
+    public void testRenameNestedColumns() throws Exception {
+        RowType innerType =
+                RowType.of(
+                        new DataField(4, "f1", DataTypes.INT()),
+                        new DataField(5, "f2", DataTypes.BIGINT()));
+        RowType middleType =
+                RowType.of(
+                        new DataField(2, "f1", DataTypes.STRING()),
+                        new DataField(3, "f2", innerType));
+        RowType outerType =
+                RowType.of(
+                        new DataField(0, "k", DataTypes.INT()), new DataField(1, "v", middleType));
+
+        Schema schema =
+                new Schema(
+                        outerType.getFields(),
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        manager.createTable(schema);
+
+        SchemaChange renameColumn =
+                SchemaChange.renameColumn(Arrays.asList("v", "f2", "f1"), "f100");
+        manager.commitChanges(renameColumn);
+
+        innerType =
+                RowType.of(
+                        new DataField(4, "f100", DataTypes.INT()),
+                        new DataField(5, "f2", DataTypes.BIGINT()));
+        middleType =
+                RowType.of(
+                        new DataField(2, "f1", DataTypes.STRING()),
+                        new DataField(3, "f2", innerType));
+        outerType =
+                RowType.of(
+                        new DataField(0, "k", DataTypes.INT()), new DataField(1, "v", middleType));
+        assertThat(manager.latest().get().logicalRowType()).isEqualTo(outerType);
+
+        SchemaChange middleColumnNotExistRenameColumn =
+                SchemaChange.renameColumn(Arrays.asList("v", "invalid", "f2"), "f200");
+        assertThatCode(() -> manager.commitChanges(middleColumnNotExistRenameColumn))
+                .hasMessageContaining("Column v.invalid does not exist");
+
+        SchemaChange lastColumnNotExistRenameColumn =
+                SchemaChange.renameColumn(Arrays.asList("v", "f2", "invalid"), "new_invalid");
+        assertThatCode(() -> manager.commitChanges(lastColumnNotExistRenameColumn))
+                .hasMessageContaining("Column v.f2.invalid does not exist");
+
+        SchemaChange newNameAlreadyExistRenameColumn =
+                SchemaChange.renameColumn(Arrays.asList("v", "f2", "f2"), "f100");
+        assertThatCode(() -> manager.commitChanges(newNameAlreadyExistRenameColumn))
+                .hasMessageContaining("Column v.f2.f100 already exists");
+    }
 }

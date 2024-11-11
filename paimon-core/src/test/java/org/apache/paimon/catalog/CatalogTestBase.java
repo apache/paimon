@@ -513,7 +513,9 @@ public abstract class CatalogTestBase {
         catalog.createTable(
                 identifier,
                 new Schema(
-                        Lists.newArrayList(new DataField(0, "col1", DataTypes.STRING())),
+                        Lists.newArrayList(
+                                new DataField(0, "col1", DataTypes.STRING()),
+                                new DataField(1, "col2", DataTypes.STRING())),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         Maps.newHashMap(),
@@ -525,7 +527,7 @@ public abstract class CatalogTestBase {
                 false);
         Table table = catalog.getTable(identifier);
 
-        assertThat(table.rowType().getFields()).hasSize(1);
+        assertThat(table.rowType().getFields()).hasSize(2);
         assertThat(table.rowType().getFieldIndex("col1")).isLessThan(0);
         assertThat(table.rowType().getFieldIndex("new_col1")).isEqualTo(0);
 
@@ -536,12 +538,12 @@ public abstract class CatalogTestBase {
                                 catalog.alterTable(
                                         identifier,
                                         Lists.newArrayList(
-                                                SchemaChange.renameColumn("col1", "new_col1")),
+                                                SchemaChange.renameColumn("col2", "new_col1")),
                                         false))
                 .satisfies(
                         anyCauseMatches(
                                 Catalog.ColumnAlreadyExistException.class,
-                                "Column col1 already exists in the test_db.test_table table."));
+                                "Column new_col1 already exists in the test_db.test_table table."));
 
         // Alter table renames a column throws ColumnNotExistException when column does not exist
         assertThatThrownBy(

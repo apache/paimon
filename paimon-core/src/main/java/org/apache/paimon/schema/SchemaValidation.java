@@ -515,7 +515,7 @@ public class SchemaValidation {
 
     private static void validateSequenceField(TableSchema schema, CoreOptions options) {
         List<String> sequenceField = options.sequenceField();
-        if (sequenceField.size() > 0) {
+        if (!sequenceField.isEmpty()) {
             Map<String, Integer> fieldCount =
                     sequenceField.stream()
                             .collect(Collectors.toMap(field -> field, field -> 1, Integer::sum));
@@ -596,12 +596,12 @@ public class SchemaValidation {
                                                                         == MAP
                                                                 || dataField.type().getTypeRoot()
                                                                         == ROW))
-                                .map(dataField -> dataField.name())
+                                .map(DataField::name)
                                 .collect(Collectors.toList());
-                if (nestedFields.size() > 0) {
+                if (!nestedFields.isEmpty()) {
                     throw new RuntimeException(
                             "nested type can not in bucket-key, in your table these key are "
-                                    + nestedFields.toString());
+                                    + nestedFields);
                 }
             }
         }

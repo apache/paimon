@@ -67,7 +67,11 @@ public interface SchemaChange extends Serializable {
     }
 
     static SchemaChange renameColumn(String fieldName, String newName) {
-        return new RenameColumn(fieldName, newName);
+        return new RenameColumn(Collections.singletonList(fieldName), newName);
+    }
+
+    static SchemaChange renameColumn(List<String> fieldNames, String newName) {
+        return new RenameColumn(fieldNames, newName);
     }
 
     static SchemaChange dropColumn(String fieldName) {
@@ -278,16 +282,16 @@ public interface SchemaChange extends Serializable {
 
         private static final long serialVersionUID = 1L;
 
-        private final String fieldName;
+        private final List<String> fieldNames;
         private final String newName;
 
-        private RenameColumn(String fieldName, String newName) {
-            this.fieldName = fieldName;
+        private RenameColumn(List<String> fieldNames, String newName) {
+            this.fieldNames = fieldNames;
             this.newName = newName;
         }
 
-        public String fieldName() {
-            return fieldName;
+        public List<String> fieldNames() {
+            return fieldNames;
         }
 
         public String newName() {
@@ -303,14 +307,14 @@ public interface SchemaChange extends Serializable {
                 return false;
             }
             RenameColumn that = (RenameColumn) o;
-            return Objects.equals(fieldName, that.fieldName)
+            return Objects.equals(fieldNames, that.fieldNames)
                     && Objects.equals(newName, that.newName);
         }
 
         @Override
         public int hashCode() {
             int result = Objects.hash(newName);
-            result = 31 * result + Objects.hashCode(fieldName);
+            result = 31 * result + Objects.hashCode(fieldNames);
             return result;
         }
     }
