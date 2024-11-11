@@ -100,40 +100,21 @@ public class DataTableBatchScan extends AbstractDataTableScan {
                 return result;
             }
 
-            // We first add the rawConvertible split to avoid merging, and if the row count
-            // is still less than limit number, then add split which is not rawConvertible.
-            splits.sort(
-                    (x, y) -> {
-                        if (x.rawConvertible() && y.rawConvertible()) {
-                            return 0;
-                        } else if (x.rawConvertible()) {
-                            return -1;
-                        } else {
-                            return 1;
-                        }
-                    });
-
-            // fast return if there is no rawConvertible split
-            if (!splits.get(0).rawConvertible()) {
-                return result;
-            }
-
             List<Split> limitedSplits = new ArrayList<>();
             for (DataSplit dataSplit : splits) {
-                long splitRowCount = getRowCountForSplit(dataSplit);
-                limitedSplits.add(dataSplit);
-                scannedRowCount += splitRowCount;
-                if (scannedRowCount >= pushDownLimit) {
-                    break;
+                if (dataSplit.rawConvertible()) {
+                    long splitRowCount = getRowCountForSplit(dataSplit);
+                    limitedSplits.add(dataSplit);
+                    scannedRowCount += splitRowCount;
+                    if (scannedRowCount >= pushDownLimit) {
+                        SnapshotReader.Plan newPlan =
+                                new PlanImpl(plan.watermark(), plan.snapshotId(), limitedSplits);
+                        return new ScannedResult(newPlan);
+                    }
                 }
             }
-
-            SnapshotReader.Plan newPlan =
-                    new PlanImpl(plan.watermark(), plan.snapshotId(), limitedSplits);
-            return new ScannedResult(newPlan);
-        } else {
-            return result;
         }
+        return result;
     }
 
     /**
