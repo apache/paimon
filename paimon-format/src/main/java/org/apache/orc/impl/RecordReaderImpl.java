@@ -19,7 +19,7 @@
 package org.apache.orc.impl;
 
 import org.apache.paimon.fileindex.FileIndexResult;
-import org.apache.paimon.fileindex.bitmap.BitmapIndexResultLazy;
+import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.commons.lang3.ArrayUtils;
@@ -1288,8 +1288,8 @@ public class RecordReaderImpl implements RecordReader {
             SearchArgument.TruthValue[] exceptionAnswer =
                     new SearchArgument.TruthValue[leafValues.length];
             RoaringBitmap32 bitmap = null;
-            if (fileIndexResult instanceof BitmapIndexResultLazy) {
-                bitmap = ((BitmapIndexResultLazy) fileIndexResult).get();
+            if (fileIndexResult instanceof BitmapIndexResult) {
+                bitmap = ((BitmapIndexResult) fileIndexResult).get();
             }
             for (int rowGroup = 0; rowGroup < result.length; ++rowGroup) {
                 for (int pred = 0; pred < leafValues.length; ++pred) {

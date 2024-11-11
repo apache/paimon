@@ -25,32 +25,31 @@ import org.apache.paimon.utils.RoaringBitmap32;
 import java.util.function.Supplier;
 
 /** bitmap file index result. */
-public class BitmapIndexResultLazy extends LazyField<RoaringBitmap32> implements FileIndexResult {
+public class BitmapIndexResult extends LazyField<RoaringBitmap32> implements FileIndexResult {
 
-    public BitmapIndexResultLazy(Supplier<RoaringBitmap32> supplier) {
+    public BitmapIndexResult(Supplier<RoaringBitmap32> supplier) {
         super(supplier);
     }
 
+    @Override
     public boolean remain() {
         return !get().isEmpty();
     }
 
+    @Override
     public FileIndexResult and(FileIndexResult fileIndexResult) {
-        if (fileIndexResult instanceof BitmapIndexResultLazy) {
-            return new BitmapIndexResultLazy(
-                    () ->
-                            RoaringBitmap32.and(
-                                    get(), ((BitmapIndexResultLazy) fileIndexResult).get()));
+        if (fileIndexResult instanceof BitmapIndexResult) {
+            return new BitmapIndexResult(
+                    () -> RoaringBitmap32.and(get(), ((BitmapIndexResult) fileIndexResult).get()));
         }
         return FileIndexResult.super.and(fileIndexResult);
     }
 
+    @Override
     public FileIndexResult or(FileIndexResult fileIndexResult) {
-        if (fileIndexResult instanceof BitmapIndexResultLazy) {
-            return new BitmapIndexResultLazy(
-                    () ->
-                            RoaringBitmap32.or(
-                                    get(), ((BitmapIndexResultLazy) fileIndexResult).get()));
+        if (fileIndexResult instanceof BitmapIndexResult) {
+            return new BitmapIndexResult(
+                    () -> RoaringBitmap32.or(get(), ((BitmapIndexResult) fileIndexResult).get()));
         }
         return FileIndexResult.super.and(fileIndexResult);
     }

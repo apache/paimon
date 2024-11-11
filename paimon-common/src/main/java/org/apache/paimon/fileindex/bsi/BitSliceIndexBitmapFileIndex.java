@@ -24,7 +24,7 @@ import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.FileIndexer;
-import org.apache.paimon.fileindex.bitmap.BitmapIndexResultLazy;
+import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
@@ -208,7 +208,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
 
         @Override
         public FileIndexResult visitIsNull(FieldRef fieldRef) {
-            return new BitmapIndexResultLazy(
+            return new BitmapIndexResult(
                     () -> {
                         RoaringBitmap32 bitmap =
                                 RoaringBitmap32.or(positive.isNotNull(), negative.isNotNull());
@@ -219,7 +219,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
 
         @Override
         public FileIndexResult visitIsNotNull(FieldRef fieldRef) {
-            return new BitmapIndexResultLazy(
+            return new BitmapIndexResult(
                     () -> RoaringBitmap32.or(positive.isNotNull(), negative.isNotNull()));
         }
 
@@ -235,7 +235,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
 
         @Override
         public FileIndexResult visitIn(FieldRef fieldRef, List<Object> literals) {
-            return new BitmapIndexResultLazy(
+            return new BitmapIndexResult(
                     () ->
                             literals.stream()
                                     .map(valueMapper)
@@ -254,7 +254,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
 
         @Override
         public FileIndexResult visitNotIn(FieldRef fieldRef, List<Object> literals) {
-            return new BitmapIndexResultLazy(
+            return new BitmapIndexResult(
                     () -> {
                         RoaringBitmap32 ebm =
                                 RoaringBitmap32.or(positive.isNotNull(), negative.isNotNull());
@@ -278,7 +278,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
 
         @Override
         public FileIndexResult visitLessThan(FieldRef fieldRef, Object literal) {
-            return new BitmapIndexResultLazy(
+            return new BitmapIndexResult(
                     () -> {
                         Long value = valueMapper.apply(literal);
                         if (value < 0) {
@@ -291,7 +291,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
 
         @Override
         public FileIndexResult visitLessOrEqual(FieldRef fieldRef, Object literal) {
-            return new BitmapIndexResultLazy(
+            return new BitmapIndexResult(
                     () -> {
                         Long value = valueMapper.apply(literal);
                         if (value < 0) {
@@ -304,7 +304,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
 
         @Override
         public FileIndexResult visitGreaterThan(FieldRef fieldRef, Object literal) {
-            return new BitmapIndexResultLazy(
+            return new BitmapIndexResult(
                     () -> {
                         Long value = valueMapper.apply(literal);
                         if (value < 0) {
@@ -318,7 +318,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
 
         @Override
         public FileIndexResult visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
-            return new BitmapIndexResultLazy(
+            return new BitmapIndexResult(
                     () -> {
                         Long value = valueMapper.apply(literal);
                         if (value < 0) {

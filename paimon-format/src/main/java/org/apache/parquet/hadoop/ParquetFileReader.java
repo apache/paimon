@@ -19,7 +19,7 @@
 package org.apache.parquet.hadoop;
 
 import org.apache.paimon.fileindex.FileIndexResult;
-import org.apache.paimon.fileindex.bitmap.BitmapIndexResultLazy;
+import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.format.parquet.ParquetInputFile;
 import org.apache.paimon.format.parquet.ParquetInputStream;
 import org.apache.paimon.fs.FileRange;
@@ -359,8 +359,8 @@ public class ParquetFileReader implements Closeable {
                 }
                 blocks = RowGroupFilter.filterRowGroups(levels, recordFilter, blocks, this);
             }
-            if (fileIndexResult instanceof BitmapIndexResultLazy) {
-                RoaringBitmap32 bitmap = ((BitmapIndexResultLazy) fileIndexResult).get();
+            if (fileIndexResult instanceof BitmapIndexResult) {
+                RoaringBitmap32 bitmap = ((BitmapIndexResult) fileIndexResult).get();
                 blocks =
                         blocks.stream()
                                 .filter(

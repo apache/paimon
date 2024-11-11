@@ -20,7 +20,7 @@ package org.apache.paimon.fileindex.bsi;
 
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexWriter;
-import org.apache.paimon.fileindex.bitmap.BitmapIndexResultLazy;
+import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.IntType;
@@ -52,61 +52,58 @@ public class BitSliceIndexBitmapFileIndexTest {
         FileIndexReader reader = bsiFileIndex.createReader(stream, 0, bytes.length);
 
         // test eq
-        assertThat(((BitmapIndexResultLazy) reader.visitEqual(fieldRef, 2)).get())
+        assertThat(((BitmapIndexResult) reader.visitEqual(fieldRef, 2)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(1, 7));
-        assertThat(((BitmapIndexResultLazy) reader.visitEqual(fieldRef, -2)).get())
+        assertThat(((BitmapIndexResult) reader.visitEqual(fieldRef, -2)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(3, 4));
-        assertThat(((BitmapIndexResultLazy) reader.visitEqual(fieldRef, 100)).get())
+        assertThat(((BitmapIndexResult) reader.visitEqual(fieldRef, 100)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf());
 
         // test neq
-        assertThat(((BitmapIndexResultLazy) reader.visitNotEqual(fieldRef, 2)).get())
+        assertThat(((BitmapIndexResult) reader.visitNotEqual(fieldRef, 2)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 3, 4, 5, 8, 9));
-        assertThat(((BitmapIndexResultLazy) reader.visitNotEqual(fieldRef, -2)).get())
+        assertThat(((BitmapIndexResult) reader.visitNotEqual(fieldRef, -2)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 5, 7, 8, 9));
-        assertThat(((BitmapIndexResultLazy) reader.visitNotEqual(fieldRef, 100)).get())
+        assertThat(((BitmapIndexResult) reader.visitNotEqual(fieldRef, 100)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 3, 4, 5, 7, 8, 9));
 
         // test in
-        assertThat(
-                        ((BitmapIndexResultLazy)
-                                        reader.visitIn(fieldRef, Arrays.asList(-1, 1, 2, 3)))
-                                .get())
+        assertThat(((BitmapIndexResult) reader.visitIn(fieldRef, Arrays.asList(-1, 1, 2, 3))).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 5, 7));
 
         // test not in
         assertThat(
-                        ((BitmapIndexResultLazy)
+                        ((BitmapIndexResult)
                                         reader.visitNotIn(fieldRef, Arrays.asList(-1, 1, 2, 3)))
                                 .get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(3, 4, 8, 9));
 
         // test null
-        assertThat(((BitmapIndexResultLazy) reader.visitIsNull(fieldRef)).get())
+        assertThat(((BitmapIndexResult) reader.visitIsNull(fieldRef)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(2, 6, 10));
 
         // test is not null
-        assertThat(((BitmapIndexResultLazy) reader.visitIsNotNull(fieldRef)).get())
+        assertThat(((BitmapIndexResult) reader.visitIsNotNull(fieldRef)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 3, 4, 5, 7, 8, 9));
 
         // test lt
-        assertThat(((BitmapIndexResultLazy) reader.visitLessThan(fieldRef, 2)).get())
+        assertThat(((BitmapIndexResult) reader.visitLessThan(fieldRef, 2)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 3, 4, 5, 8));
-        assertThat(((BitmapIndexResultLazy) reader.visitLessOrEqual(fieldRef, 2)).get())
+        assertThat(((BitmapIndexResult) reader.visitLessOrEqual(fieldRef, 2)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 3, 4, 5, 7, 8));
-        assertThat(((BitmapIndexResultLazy) reader.visitLessThan(fieldRef, -1)).get())
+        assertThat(((BitmapIndexResult) reader.visitLessThan(fieldRef, -1)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(3, 4));
-        assertThat(((BitmapIndexResultLazy) reader.visitLessOrEqual(fieldRef, -1)).get())
+        assertThat(((BitmapIndexResult) reader.visitLessOrEqual(fieldRef, -1)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(3, 4, 5));
 
         // test gt
-        assertThat(((BitmapIndexResultLazy) reader.visitGreaterThan(fieldRef, -2)).get())
+        assertThat(((BitmapIndexResult) reader.visitGreaterThan(fieldRef, -2)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 5, 7, 8, 9));
-        assertThat(((BitmapIndexResultLazy) reader.visitGreaterOrEqual(fieldRef, -2)).get())
+        assertThat(((BitmapIndexResult) reader.visitGreaterOrEqual(fieldRef, -2)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 3, 4, 5, 7, 8, 9));
-        assertThat(((BitmapIndexResultLazy) reader.visitGreaterThan(fieldRef, 2)).get())
+        assertThat(((BitmapIndexResult) reader.visitGreaterThan(fieldRef, 2)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(9));
-        assertThat(((BitmapIndexResultLazy) reader.visitGreaterOrEqual(fieldRef, 2)).get())
+        assertThat(((BitmapIndexResult) reader.visitGreaterOrEqual(fieldRef, 2)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(1, 7, 9));
     }
 
@@ -127,61 +124,58 @@ public class BitSliceIndexBitmapFileIndexTest {
         FileIndexReader reader = bsiFileIndex.createReader(stream, 0, bytes.length);
 
         // test eq
-        assertThat(((BitmapIndexResultLazy) reader.visitEqual(fieldRef, 0)).get())
+        assertThat(((BitmapIndexResult) reader.visitEqual(fieldRef, 0)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 7));
-        assertThat(((BitmapIndexResultLazy) reader.visitEqual(fieldRef, 1)).get())
+        assertThat(((BitmapIndexResult) reader.visitEqual(fieldRef, 1)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(1));
-        assertThat(((BitmapIndexResultLazy) reader.visitEqual(fieldRef, -1)).get())
+        assertThat(((BitmapIndexResult) reader.visitEqual(fieldRef, -1)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf());
 
         // test neq
-        assertThat(((BitmapIndexResultLazy) reader.visitNotEqual(fieldRef, 2)).get())
+        assertThat(((BitmapIndexResult) reader.visitNotEqual(fieldRef, 2)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 3, 4, 5, 6, 7));
-        assertThat(((BitmapIndexResultLazy) reader.visitNotEqual(fieldRef, -2)).get())
+        assertThat(((BitmapIndexResult) reader.visitNotEqual(fieldRef, -2)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 3, 4, 5, 6, 7));
-        assertThat(((BitmapIndexResultLazy) reader.visitNotEqual(fieldRef, 3)).get())
+        assertThat(((BitmapIndexResult) reader.visitNotEqual(fieldRef, 3)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 4, 5, 6, 7));
 
         // test in
-        assertThat(
-                        ((BitmapIndexResultLazy)
-                                        reader.visitIn(fieldRef, Arrays.asList(-1, 1, 2, 3)))
-                                .get())
+        assertThat(((BitmapIndexResult) reader.visitIn(fieldRef, Arrays.asList(-1, 1, 2, 3))).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(1, 3));
 
         // test not in
         assertThat(
-                        ((BitmapIndexResultLazy)
+                        ((BitmapIndexResult)
                                         reader.visitNotIn(fieldRef, Arrays.asList(-1, 1, 2, 3)))
                                 .get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 4, 5, 6, 7));
 
         // test null
-        assertThat(((BitmapIndexResultLazy) reader.visitIsNull(fieldRef)).get())
+        assertThat(((BitmapIndexResult) reader.visitIsNull(fieldRef)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(2, 8));
 
         // test is not null
-        assertThat(((BitmapIndexResultLazy) reader.visitIsNotNull(fieldRef)).get())
+        assertThat(((BitmapIndexResult) reader.visitIsNotNull(fieldRef)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 3, 4, 5, 6, 7));
 
         // test lt
-        assertThat(((BitmapIndexResultLazy) reader.visitLessThan(fieldRef, 3)).get())
+        assertThat(((BitmapIndexResult) reader.visitLessThan(fieldRef, 3)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 7));
-        assertThat(((BitmapIndexResultLazy) reader.visitLessOrEqual(fieldRef, 3)).get())
+        assertThat(((BitmapIndexResult) reader.visitLessOrEqual(fieldRef, 3)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 3, 7));
-        assertThat(((BitmapIndexResultLazy) reader.visitLessThan(fieldRef, -1)).get())
+        assertThat(((BitmapIndexResult) reader.visitLessThan(fieldRef, -1)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf());
-        assertThat(((BitmapIndexResultLazy) reader.visitLessOrEqual(fieldRef, -1)).get())
+        assertThat(((BitmapIndexResult) reader.visitLessOrEqual(fieldRef, -1)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf());
 
         // test gt
-        assertThat(((BitmapIndexResultLazy) reader.visitGreaterThan(fieldRef, -2)).get())
+        assertThat(((BitmapIndexResult) reader.visitGreaterThan(fieldRef, -2)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 3, 4, 5, 6, 7));
-        assertThat(((BitmapIndexResultLazy) reader.visitGreaterOrEqual(fieldRef, -2)).get())
+        assertThat(((BitmapIndexResult) reader.visitGreaterOrEqual(fieldRef, -2)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 3, 4, 5, 6, 7));
-        assertThat(((BitmapIndexResultLazy) reader.visitGreaterThan(fieldRef, 1)).get())
+        assertThat(((BitmapIndexResult) reader.visitGreaterThan(fieldRef, 1)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(3, 4, 5, 6));
-        assertThat(((BitmapIndexResultLazy) reader.visitGreaterOrEqual(fieldRef, 1)).get())
+        assertThat(((BitmapIndexResult) reader.visitGreaterOrEqual(fieldRef, 1)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(1, 3, 4, 5, 6));
     }
 
@@ -202,59 +196,58 @@ public class BitSliceIndexBitmapFileIndexTest {
         FileIndexReader reader = bsiFileIndex.createReader(stream, 0, bytes.length);
 
         // test eq
-        assertThat(((BitmapIndexResultLazy) reader.visitEqual(fieldRef, 1)).get())
+        assertThat(((BitmapIndexResult) reader.visitEqual(fieldRef, 1)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf());
-        assertThat(((BitmapIndexResultLazy) reader.visitEqual(fieldRef, -2)).get())
+        assertThat(((BitmapIndexResult) reader.visitEqual(fieldRef, -2)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf());
-        assertThat(((BitmapIndexResultLazy) reader.visitEqual(fieldRef, -1)).get())
+        assertThat(((BitmapIndexResult) reader.visitEqual(fieldRef, -1)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(1, 7));
 
         // test neq
-        assertThat(((BitmapIndexResultLazy) reader.visitNotEqual(fieldRef, -2)).get())
+        assertThat(((BitmapIndexResult) reader.visitNotEqual(fieldRef, -2)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(1, 3, 4, 5, 6, 7));
-        assertThat(((BitmapIndexResultLazy) reader.visitNotEqual(fieldRef, -3)).get())
+        assertThat(((BitmapIndexResult) reader.visitNotEqual(fieldRef, -3)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(1, 4, 5, 6, 7));
 
         // test in
         assertThat(
-                        ((BitmapIndexResultLazy)
-                                        reader.visitIn(fieldRef, Arrays.asList(-1, -4, -2, 3)))
+                        ((BitmapIndexResult) reader.visitIn(fieldRef, Arrays.asList(-1, -4, -2, 3)))
                                 .get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(1, 4, 7));
 
         // test not in
         assertThat(
-                        ((BitmapIndexResultLazy)
+                        ((BitmapIndexResult)
                                         reader.visitNotIn(fieldRef, Arrays.asList(-1, -4, -2, 3)))
                                 .get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(3, 5, 6));
 
         // test null
-        assertThat(((BitmapIndexResultLazy) reader.visitIsNull(fieldRef)).get())
+        assertThat(((BitmapIndexResult) reader.visitIsNull(fieldRef)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 2, 8));
 
         // test is not null
-        assertThat(((BitmapIndexResultLazy) reader.visitIsNotNull(fieldRef)).get())
+        assertThat(((BitmapIndexResult) reader.visitIsNotNull(fieldRef)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(1, 3, 4, 5, 6, 7));
 
         // test lt
-        assertThat(((BitmapIndexResultLazy) reader.visitLessThan(fieldRef, -3)).get())
+        assertThat(((BitmapIndexResult) reader.visitLessThan(fieldRef, -3)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(4, 5, 6));
-        assertThat(((BitmapIndexResultLazy) reader.visitLessOrEqual(fieldRef, -3)).get())
+        assertThat(((BitmapIndexResult) reader.visitLessOrEqual(fieldRef, -3)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(3, 4, 5, 6));
-        assertThat(((BitmapIndexResultLazy) reader.visitLessThan(fieldRef, 1)).get())
+        assertThat(((BitmapIndexResult) reader.visitLessThan(fieldRef, 1)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(1, 3, 4, 5, 6, 7));
-        assertThat(((BitmapIndexResultLazy) reader.visitLessOrEqual(fieldRef, 1)).get())
+        assertThat(((BitmapIndexResult) reader.visitLessOrEqual(fieldRef, 1)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(1, 3, 4, 5, 6, 7));
 
         // test gt
-        assertThat(((BitmapIndexResultLazy) reader.visitGreaterThan(fieldRef, -3)).get())
+        assertThat(((BitmapIndexResult) reader.visitGreaterThan(fieldRef, -3)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(1, 7));
-        assertThat(((BitmapIndexResultLazy) reader.visitGreaterOrEqual(fieldRef, -3)).get())
+        assertThat(((BitmapIndexResult) reader.visitGreaterOrEqual(fieldRef, -3)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(1, 3, 7));
-        assertThat(((BitmapIndexResultLazy) reader.visitGreaterThan(fieldRef, 1)).get())
+        assertThat(((BitmapIndexResult) reader.visitGreaterThan(fieldRef, 1)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf());
-        assertThat(((BitmapIndexResultLazy) reader.visitGreaterOrEqual(fieldRef, 1)).get())
+        assertThat(((BitmapIndexResult) reader.visitGreaterOrEqual(fieldRef, 1)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf());
     }
 }

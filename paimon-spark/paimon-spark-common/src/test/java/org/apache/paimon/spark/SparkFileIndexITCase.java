@@ -27,7 +27,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fileindex.FileIndexFormat;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexResult;
-import org.apache.paimon.fileindex.bitmap.BitmapIndexResultLazy;
+import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -115,9 +115,8 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                 fileIndexReader -> {
                     FileIndexResult fileIndexResult =
                             fileIndexReader.visitEqual(new FieldRef(0, "", new IntType()), 3);
-                    assert fileIndexResult instanceof BitmapIndexResultLazy;
-                    RoaringBitmap32 roaringBitmap32 =
-                            ((BitmapIndexResultLazy) fileIndexResult).get();
+                    assert fileIndexResult instanceof BitmapIndexResult;
+                    RoaringBitmap32 roaringBitmap32 = ((BitmapIndexResult) fileIndexResult).get();
                     assert roaringBitmap32.equals(RoaringBitmap32.bitmapOf(3));
                 });
     }
@@ -141,9 +140,8 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                     FileIndexResult fileIndexResult =
                             fileIndexReader.visitGreaterOrEqual(
                                     new FieldRef(0, "", new IntType()), 3);
-                    assertThat(fileIndexResult).isInstanceOf(BitmapIndexResultLazy.class);
-                    RoaringBitmap32 roaringBitmap32 =
-                            ((BitmapIndexResultLazy) fileIndexResult).get();
+                    assertThat(fileIndexResult).isInstanceOf(BitmapIndexResult.class);
+                    RoaringBitmap32 roaringBitmap32 = ((BitmapIndexResult) fileIndexResult).get();
                     assertThat(roaringBitmap32).isEqualTo(RoaringBitmap32.bitmapOf(3, 4, 5));
                 });
     }
