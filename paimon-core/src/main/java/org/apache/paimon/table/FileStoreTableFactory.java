@@ -35,6 +35,7 @@ import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Factory to create {@link FileStoreTable}. */
 public class FileStoreTableFactory {
@@ -129,10 +130,12 @@ public class FileStoreTableFactory {
         table = table.copy(dynamicOptions.toMap());
         CoreOptions options = table.coreOptions();
         if (options.type() == TableType.OBJECT_TABLE) {
+            String objectLocation = options.objectLocation();
+            checkNotNull(objectLocation, "Object location should not be null for object table.");
             table =
                     ObjectTable.builder()
                             .underlyingTable(table)
-                            .objectLocation(options.objectLocation())
+                            .objectLocation(objectLocation)
                             .build();
         }
         return table;

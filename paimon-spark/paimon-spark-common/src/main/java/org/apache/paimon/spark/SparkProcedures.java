@@ -35,6 +35,7 @@ import org.apache.paimon.spark.procedure.MigrateFileProcedure;
 import org.apache.paimon.spark.procedure.MigrateTableProcedure;
 import org.apache.paimon.spark.procedure.Procedure;
 import org.apache.paimon.spark.procedure.ProcedureBuilder;
+import org.apache.paimon.spark.procedure.RefreshObjectTableProcedure;
 import org.apache.paimon.spark.procedure.RemoveOrphanFilesProcedure;
 import org.apache.paimon.spark.procedure.RenameTagProcedure;
 import org.apache.paimon.spark.procedure.RepairProcedure;
@@ -87,6 +88,7 @@ public class SparkProcedures {
         procedureBuilders.put("reset_consumer", ResetConsumerProcedure::builder);
         procedureBuilders.put("mark_partition_done", MarkPartitionDoneProcedure::builder);
         procedureBuilders.put("compact_manifest", CompactManifestProcedure::builder);
+        procedureBuilders.put("refresh_object_table", RefreshObjectTableProcedure::builder);
         return procedureBuilders.build();
     }
 }

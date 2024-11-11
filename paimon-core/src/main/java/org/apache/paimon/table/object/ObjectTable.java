@@ -135,7 +135,7 @@ public interface ObjectTable extends FileStoreTable {
 
         @Override
         public TableCommitImpl newCommit(String commitUser) {
-            throw new UnsupportedOperationException("Object table does not support Write.");
+            throw new UnsupportedOperationException("Object table does not support Commit.");
         }
 
         @Override
