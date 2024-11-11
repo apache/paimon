@@ -23,13 +23,14 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
-import org.apache.paimon.io.FileIndexSkipper;
+import org.apache.paimon.io.FileIndexEvaluator;
 import org.apache.paimon.io.FileRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionUtils;
@@ -191,26 +192,30 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             BulkFormatMapping bulkFormatMapping,
             IOExceptionSupplier<DeletionVector> dvFactory)
             throws IOException {
+        FileIndexResult fileIndexResult = null;
         if (fileIndexReadEnabled) {
-            boolean skip =
-                    FileIndexSkipper.skip(
+            fileIndexResult =
+                    FileIndexEvaluator.evaluate(
                             fileIO,
                             bulkFormatMapping.getDataSchema(),
                             bulkFormatMapping.getDataFilters(),
                             dataFilePathFactory,
                             file);
-            if (skip) {
+            if (!fileIndexResult.remain()) {
                 return new EmptyRecordReader<>();
             }
         }
 
+        FormatReaderContext formatReaderContext =
+                new FormatReaderContext(
+                        fileIO,
+                        dataFilePathFactory.toPath(file.fileName()),
+                        file.fileSize(),
+                        fileIndexResult);
         FileRecordReader fileRecordReader =
                 new FileRecordReader(
                         bulkFormatMapping.getReaderFactory(),
-                        new FormatReaderContext(
-                                fileIO,
-                                dataFilePathFactory.toPath(file.fileName()),
-                                file.fileSize()),
+                        formatReaderContext,
                         bulkFormatMapping.getIndexMapping(),
                         bulkFormatMapping.getCastMapping(),
                         PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));

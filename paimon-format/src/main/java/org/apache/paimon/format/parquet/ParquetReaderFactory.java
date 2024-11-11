@@ -113,7 +113,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         ParquetFileReader reader =
                 new ParquetFileReader(
                         ParquetInputFile.fromPath(context.fileIO(), context.filePath()),
-                        builder.build());
+                        builder.build(),
+                        context.fileIndex());
         MessageType fileSchema = reader.getFileMetaData().getSchema();
         MessageType requestedSchema = clipParquetSchema(fileSchema);
         reader.setRequestedSchema(requestedSchema);

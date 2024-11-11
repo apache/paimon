@@ -19,6 +19,7 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.fileindex.FileIndexPredicate;
+import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -28,10 +29,10 @@ import java.io.IOException;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/** File index reader, do the filter in the constructor. */
-public class FileIndexSkipper {
+/** Evaluate file index result. */
+public class FileIndexEvaluator {
 
-    public static boolean skip(
+    public static FileIndexResult evaluate(
             FileIO fileIO,
             TableSchema dataSchema,
             List<Predicate> dataFilter,
@@ -55,14 +56,11 @@ public class FileIndexSkipper {
                                 dataFilePathFactory.toPath(indexFiles.get(0)),
                                 fileIO,
                                 dataSchema.logicalRowType())) {
-                    if (!predicate.testPredicate(
-                            PredicateBuilder.and(dataFilter.toArray(new Predicate[0])))) {
-                        return true;
-                    }
+                    return predicate.evaluate(
+                            PredicateBuilder.and(dataFilter.toArray(new Predicate[0])));
                 }
             }
         }
-
-        return false;
+        return FileIndexResult.REMAIN;
     }
 }
