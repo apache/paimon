@@ -319,7 +319,7 @@ public class SchemaManager implements Serializable {
                     }.updateIntermediateColumn(newFields, 0);
                 } else if (change instanceof RenameColumn) {
                     RenameColumn rename = (RenameColumn) change;
-                    renameColumnValidation(oldTableSchema, rename);
+                    assertNotUpdatingPrimaryKeys(oldTableSchema, rename.fieldNames(), "rename");
                     new NestedColumnModifier(rename.fieldNames().toArray(new String[0])) {
                         @Override
                         protected void updateLastColumn(List<DataField> newFields, String fieldName)
@@ -361,15 +361,10 @@ public class SchemaManager implements Serializable {
                     }.updateIntermediateColumn(newFields, 0);
                 } else if (change instanceof UpdateColumnType) {
                     UpdateColumnType update = (UpdateColumnType) change;
-                    if (oldTableSchema.partitionKeys().contains(update.fieldName())) {
-                        throw new IllegalArgumentException(
-                                String.format(
-                                        "Cannot update partition column [%s] type in the table[%s].",
-                                        update.fieldName(), tableRoot.getName()));
-                    }
+                    assertNotUpdatingPrimaryKeys(oldTableSchema, update.fieldNames(), "update");
                     updateNestedColumn(
                             newFields,
-                            new String[] {update.fieldName()},
+                            update.fieldNames().toArray(new String[0]),
                             (field) -> {
                                 DataType targetType = update.newDataType();
                                 if (update.keepNullability()) {
@@ -382,13 +377,6 @@ public class SchemaManager implements Serializable {
                                         String.format(
                                                 "Column type %s[%s] cannot be converted to %s without loosing information.",
                                                 field.name(), field.type(), targetType));
-                                AtomicInteger dummyId = new AtomicInteger(0);
-                                if (dummyId.get() != 0) {
-                                    throw new RuntimeException(
-                                            String.format(
-                                                    "Update column to nested row type '%s' is not supported.",
-                                                    targetType));
-                                }
                                 return new DataField(
                                         field.id(), field.name(), targetType, field.description());
                             });
@@ -594,15 +582,17 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    private static void renameColumnValidation(TableSchema schema, RenameColumn change) {
+    private static void assertNotUpdatingPrimaryKeys(
+            TableSchema schema, List<String> fieldNames, String operation) {
         // partition keys can't be nested columns
-        if (change.fieldNames().size() > 1) {
+        if (fieldNames.size() > 1) {
             return;
         }
-        String columnToRename = change.fieldNames().get(0);
+        String columnToRename = fieldNames.get(0);
         if (schema.partitionKeys().contains(columnToRename)) {
             throw new UnsupportedOperationException(
-                    String.format("Cannot rename partition column: [%s]", columnToRename));
+                    String.format(
+                            "Cannot " + operation + " partition column: [%s]", columnToRename));
         }
     }
 
