@@ -27,17 +27,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.predicate.And;
-import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.Equal;
-import org.apache.paimon.predicate.GreaterOrEqual;
-import org.apache.paimon.predicate.GreaterThan;
-import org.apache.paimon.predicate.InPredicateVisitor;
-import org.apache.paimon.predicate.LeafPredicate;
-import org.apache.paimon.predicate.LeafPredicateExtractor;
-import org.apache.paimon.predicate.LessOrEqual;
-import org.apache.paimon.predicate.LessThan;
-import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.*;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -231,11 +221,15 @@ public class SnapshotsTable implements ReadonlyTable {
                 }
 
                 // optimize for IN filter
-                Optional<List<Object>> leafs =
-                        InPredicateVisitor.extractInElements(predicate, leafName);
-                if (leafs.isPresent()) {
-                    leafs.get().stream()
-                            .forEach(leaf -> snapshotIds.add(Long.parseLong(leaf.toString())));
+                if ((compoundPredicate.function()) instanceof Or) {
+                    InPredicateVisitor.extractInElements(predicate, leafName)
+                            .ifPresent(
+                                    leafs ->
+                                            leafs.forEach(
+                                                    leaf ->
+                                                            snapshotIds.add(
+                                                                    Long.parseLong(
+                                                                            leaf.toString()))));
                 }
             } else {
                 handleLeafPredicate(predicate, leafName);

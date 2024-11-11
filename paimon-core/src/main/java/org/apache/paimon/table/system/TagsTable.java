@@ -240,19 +240,18 @@ public class TagsTable implements ReadonlyTable {
                     CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
                     // optimize for IN filter
                     if ((compoundPredicate.function()) instanceof Or) {
-                        Optional<List<Object>> leafs =
-                                InPredicateVisitor.extractInElements(predicate, TAG_NAME);
-                        if (leafs.isPresent()) {
-                            leafs.get().stream()
-                                    .forEach(
-                                            leaf -> {
-                                                if (tagManager.tagExists(leaf.toString())) {
-                                                    predicateMap.put(
-                                                            leaf.toString(),
-                                                            tagManager.tag(leaf.toString()));
-                                                }
-                                            });
-                        }
+                        InPredicateVisitor.extractInElements(predicate, TAG_NAME)
+                                .ifPresent(
+                                        leafs ->
+                                                leafs.forEach(
+                                                        leaf -> {
+                                                            String leftName = leaf.toString();
+                                                            if (tagManager.tagExists(leftName)) {
+                                                                predicateMap.put(
+                                                                        leftName,
+                                                                        tagManager.tag(leftName));
+                                                            }
+                                                        }));
                     }
                 }
             }

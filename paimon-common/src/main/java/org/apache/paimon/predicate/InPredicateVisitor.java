@@ -26,7 +26,7 @@ import java.util.Optional;
 public class InPredicateVisitor {
 
     /**
-     * Method for handling with CompoundPredicate.
+     * Method for handling with In CompoundPredicate
      *
      * @param predicate CompoundPredicate to traverse handle
      * @param leafName LeafPredicate name

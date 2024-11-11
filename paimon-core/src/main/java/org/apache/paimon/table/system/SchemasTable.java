@@ -230,12 +230,14 @@ public class SchemasTable implements ReadonlyTable {
 
                 // optimize for IN filter
                 if ((compoundPredicate.function()) instanceof Or) {
-                    Optional<List<Object>> leafs =
-                            InPredicateVisitor.extractInElements(predicate, leafName);
-                    if (leafs.isPresent()) {
-                        leafs.get().stream()
-                                .forEach(leaf -> schemaIds.add(Long.parseLong(leaf.toString())));
-                    }
+                    InPredicateVisitor.extractInElements(predicate, leafName)
+                            .ifPresent(
+                                    leafs ->
+                                            leafs.forEach(
+                                                    leaf ->
+                                                            schemaIds.add(
+                                                                    Long.parseLong(
+                                                                            leaf.toString()))));
                 }
             } else {
                 handleLeafPredicate(predicate, leafName);
