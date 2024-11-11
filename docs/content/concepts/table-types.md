@@ -46,6 +46,34 @@ sorting the primary key within each bucket, allowing streaming update and stream
 The definition of primary key is similar to that of standard SQL, as it ensures that there is only one data entry for
 the same primary key during batch queries.
 
+{{< tabs "primary-table" >}}
+{{< tab "Flink SQL" >}}
+
+```sql
+CREATE TABLE my_table (
+    a INT PRIMARY KEY NOT ENFORCED,
+    b STRING
+) WITH (
+    'bucket'='8'
+)
+```
+{{< /tab >}}
+
+{{< tab "Spark SQL" >}}
+
+```sql
+CREATE TABLE my_table (
+    a INT,
+    b STRING
+) TBLPROPERTIES (
+    'primary-key' = 'a',
+    'bucket' = '8'
+)
+```
+
+{{< /tab >}}
+{{< /tabs >}}
+
 ## Table w/o PK
 
 See [Paimon w/o Primary key]({{< ref "append-table/overview" >}}).
@@ -55,6 +83,13 @@ have the ability to directly receive changelogs. It cannot be directly updated w
 can only receive incoming data from append data.
 
 However, it also supports batch sql: DELETE, UPDATE, and MERGE-INTO.
+
+```sql
+CREATE TABLE my_table (
+    a INT,
+    b STRING
+)
+```
 
 ## View
 
@@ -82,10 +117,8 @@ Format Table is enabled by default, you can disable it by configuring Catalog op
 
 Currently only support `CSV`, `Parquet`, `ORC` formats.
 
-### CSV
-
-{{< tabs "format-table-csv" >}}
-{{< tab "Flink SQL" >}}
+{{< tabs "format-table" >}}
+{{< tab "Flink-CSV" >}}
 
 ```sql
 CREATE TABLE my_csv_table (
@@ -99,7 +132,7 @@ CREATE TABLE my_csv_table (
 ```
 {{< /tab >}}
 
-{{< tab "Spark SQL" >}}
+{{< tab "Spark-CSV" >}}
 
 ```sql
 CREATE TABLE my_csv_table (
@@ -109,14 +142,8 @@ CREATE TABLE my_csv_table (
 ```
 
 {{< /tab >}}
-{{< /tabs >}}
 
-Now, only support `'field-delimiter'` option.
-
-### Parquet & ORC
-
-{{< tabs "format-table-parquet" >}}
-{{< tab "Flink SQL" >}}
+{{< tab "Flink-Parquet" >}}
 
 ```sql
 CREATE TABLE my_parquet_table (
@@ -129,7 +156,7 @@ CREATE TABLE my_parquet_table (
 ```
 {{< /tab >}}
 
-{{< tab "Spark SQL" >}}
+{{< tab "Spark-Parquet" >}}
 
 ```sql
 CREATE TABLE my_parquet_table (
@@ -139,6 +166,7 @@ CREATE TABLE my_parquet_table (
 ```
 
 {{< /tab >}}
+
 {{< /tabs >}}
 
 ## Materialized Table
@@ -147,3 +175,19 @@ Materialized Table aimed at simplifying both batch and stream data pipelines, pr
 experience, see [Flink Materialized Table](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/materialized-table/overview/).
 
 Now only Flink SQL integrate to Materialized Table, we plan to support it in Spark SQL too.
+
+```sql
+CREATE MATERIALIZED TABLE continuous_users_shops
+PARTITIONED BY (ds)
+FRESHNESS = INTERVAL '30' SECOND
+AS SELECT
+  user_id,
+  ds,
+  SUM (payment_amount_cents) AS payed_buy_fee_sum,
+  SUM (1) AS PV
+FROM (
+  SELECT user_id, order_created_at AS ds, payment_amount_cents
+    FROM json_source
+  ) AS tmp
+GROUP BY user_id, ds;
+```
