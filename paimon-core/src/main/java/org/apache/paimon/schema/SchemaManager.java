@@ -674,11 +674,12 @@ public class SchemaManager implements Serializable {
         }
 
         private String getLastFieldName(String fieldName) {
-            return String.join(
-                            ".",
-                            Arrays.asList(updateFieldNames).subList(0, updateFieldNames.length - 1))
-                    + "."
-                    + fieldName;
+            List<String> fieldNames = new ArrayList<>();
+            for (int i = 0; i + 1 < updateFieldNames.length; i++) {
+                fieldNames.add(updateFieldNames[i]);
+            }
+            fieldNames.add(fieldName);
+            return String.join(".", fieldNames);
         }
     }
 
