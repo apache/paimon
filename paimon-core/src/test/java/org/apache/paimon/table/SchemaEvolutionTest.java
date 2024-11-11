@@ -353,7 +353,7 @@ public class SchemaEvolutionTest {
                 .hasMessage(
                         String.format(
                                 "Column %s already exists in the %s table.",
-                                "f0", identifier.getFullName()));
+                                "f1", identifier.getFullName()));
     }
 
     @Test
