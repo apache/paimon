@@ -187,7 +187,7 @@ schema = Schema(
     options={'bucket': '2'})
 ```
 
-### Create Tale
+### Create Table
 ```python
 schema = ...
 catalog.create_table(
