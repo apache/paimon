@@ -922,6 +922,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("256 mb"))
                     .withDescription("Max memory size for lookup cache.");
 
+    public static final ConfigOption<Double> LOOKUP_CACHE_HIGH_PRIO_POOL_RATIO =
+            key("lookup.cache.high-priority-pool-ratio")
+                    .doubleType()
+                    .defaultValue(0.25)
+                    .withDescription(
+                            "The fraction of cache memory that is reserved for high-priority data like index, filter.");
+
     public static final ConfigOption<Boolean> LOOKUP_CACHE_BLOOM_FILTER_ENABLED =
             key("lookup.cache.bloom.filter.enabled")
                     .booleanType()
@@ -1835,6 +1842,10 @@ public class CoreOptions implements Serializable {
 
     public MemorySize lookupCacheMaxMemory() {
         return options.get(LOOKUP_CACHE_MAX_MEMORY_SIZE);
+    }
+
+    public double lookupCacheHighPrioPoolRatio() {
+        return options.get(LOOKUP_CACHE_HIGH_PRIO_POOL_RATIO);
     }
 
     public long targetFileSize(boolean hasPrimaryKey) {
