@@ -141,27 +141,72 @@ class PaimonPushDownTest extends PaimonSparkTestBase {
     val scanBuilder = getScanBuilder()
     Assertions.assertTrue(scanBuilder.isInstanceOf[SupportsPushDownLimit])
 
+    // Case 1: All dataSplits is rawConvertible.
     val dataSplitsWithoutLimit = scanBuilder.build().asInstanceOf[PaimonScan].getOriginSplits
     Assertions.assertEquals(4, dataSplitsWithoutLimit.length)
+    // All dataSplits is rawConvertible.
+    dataSplitsWithoutLimit.foreach(
+      splits => {
+        Assertions.assertTrue(splits.asInstanceOf[DataSplit].rawConvertible())
+      })
 
-    // It still return false even it can push down limit.
+    // It still returns false even it can push down limit.
     Assertions.assertFalse(scanBuilder.asInstanceOf[SupportsPushDownLimit].pushLimit(1))
-
     val dataSplitsWithLimit = scanBuilder.build().asInstanceOf[PaimonScan].getOriginSplits
     Assertions.assertEquals(1, dataSplitsWithLimit.length)
-
     Assertions.assertEquals(1, spark.sql("SELECT * FROM T LIMIT 1").count())
 
-    spark.sql("UPDATE T SET b = 'x' WHERE a = 1")
+    Assertions.assertFalse(scanBuilder.asInstanceOf[SupportsPushDownLimit].pushLimit(2))
+    val dataSplitsWithLimit1 = scanBuilder.build().asInstanceOf[PaimonScan].getOriginSplits
+    Assertions.assertEquals(2, dataSplitsWithLimit1.length)
+    Assertions.assertEquals(2, spark.sql("SELECT * FROM T LIMIT 2").count())
 
+    // Case 2: Update 2 rawConvertible dataSplits to convert to nonRawConvertible.
+    spark.sql("INSERT INTO T VALUES (1, 'a2', '11'), (2, 'b2', '22')")
     val scanBuilder2 = getScanBuilder()
     val dataSplitsWithoutLimit2 = scanBuilder2.build().asInstanceOf[PaimonScan].getOriginSplits
     Assertions.assertEquals(4, dataSplitsWithoutLimit2.length)
+    // Now, we have 4 dataSplits, and 2 dataSplit is nonRawConvertible, 2 dataSplit is rawConvertible.
+    Assertions.assertEquals(
+      2,
+      dataSplitsWithoutLimit2
+        .filter(
+          split => {
+            split.asInstanceOf[DataSplit].rawConvertible()
+          })
+        .length)
 
+    // Return 2 dataSplits.
+    Assertions.assertFalse(scanBuilder2.asInstanceOf[SupportsPushDownLimit].pushLimit(2))
     val dataSplitsWithLimit2 = scanBuilder2.build().asInstanceOf[PaimonScan].getOriginSplits
-    Assertions.assertEquals(4, dataSplitsWithLimit2.length)
+    Assertions.assertEquals(2, dataSplitsWithLimit2.length)
+    Assertions.assertEquals(2, spark.sql("SELECT * FROM T LIMIT 2").count())
 
+    // 2 dataSplits cannot meet the limit requirement, so need to scan all dataSplits.
+    Assertions.assertFalse(scanBuilder2.asInstanceOf[SupportsPushDownLimit].pushLimit(3))
+    val dataSplitsWithLimit22 = scanBuilder2.build().asInstanceOf[PaimonScan].getOriginSplits
+    // Need to scan all dataSplits.
+    Assertions.assertEquals(4, dataSplitsWithLimit22.length)
+    Assertions.assertEquals(3, spark.sql("SELECT * FROM T LIMIT 3").count())
+
+    // Case 3: Update the remaining 2 rawConvertible dataSplits to make all dataSplits is nonRawConvertible.
+    spark.sql("INSERT INTO T VALUES (3, 'c', '11'), (4, 'd', '22')")
+    val scanBuilder3 = getScanBuilder()
+    val dataSplitsWithoutLimit3 = scanBuilder3.build().asInstanceOf[PaimonScan].getOriginSplits
+    Assertions.assertEquals(4, dataSplitsWithoutLimit3.length)
+
+    // All dataSplits is nonRawConvertible.
+    dataSplitsWithoutLimit3.foreach(
+      splits => {
+        Assertions.assertFalse(splits.asInstanceOf[DataSplit].rawConvertible())
+      })
+
+    Assertions.assertFalse(scanBuilder3.asInstanceOf[SupportsPushDownLimit].pushLimit(1))
+    val dataSplitsWithLimit3 = scanBuilder3.build().asInstanceOf[PaimonScan].getOriginSplits
+    // Need to scan all dataSplits.
+    Assertions.assertEquals(4, dataSplitsWithLimit3.length)
     Assertions.assertEquals(1, spark.sql("SELECT * FROM T LIMIT 1").count())
+
   }
 
   test("Paimon pushDown: runtime filter") {
