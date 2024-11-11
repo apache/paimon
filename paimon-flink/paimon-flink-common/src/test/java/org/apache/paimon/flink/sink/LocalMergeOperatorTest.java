@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.mergetree.localmerge.HashMapLocalMerger;
@@ -44,6 +43,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.function.Consumer;
 
+import static org.apache.paimon.CoreOptions.LOCAL_MERGE_BUFFER_SIZE;
 import static org.apache.paimon.CoreOptions.SEQUENCE_FIELD;
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.types.RowKind.DELETE;
@@ -57,15 +57,7 @@ class LocalMergeOperatorTest {
     public void testHashNormal() throws Exception {
         prepareHashOperator();
         List<String> result = new ArrayList<>();
-        operator.setOutput(
-                new TestOutput(
-                        row ->
-                                result.add(
-                                        row.getRowKind().shortString()
-                                                + ":"
-                                                + row.getString(0)
-                                                + "->"
-                                                + row.getInt(1))));
+        setOutput(result);
 
         // first test
         processElement("a", 1);
@@ -105,15 +97,7 @@ class LocalMergeOperatorTest {
         prepareHashOperator(options);
 
         List<String> result = new ArrayList<>();
-        operator.setOutput(
-                new TestOutput(
-                        row ->
-                                result.add(
-                                        row.getRowKind().shortString()
-                                                + ":"
-                                                + row.getString(0)
-                                                + "->"
-                                                + row.getInt(1))));
+        setOutput(result);
 
         processElement("a", 2);
         processElement("b", 1);
@@ -123,12 +107,34 @@ class LocalMergeOperatorTest {
         result.clear();
     }
 
+    @Test
+    public void testHashSpill() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(LOCAL_MERGE_BUFFER_SIZE.key(), "2 m");
+        prepareHashOperator(options);
+        List<String> result = new ArrayList<>();
+        setOutput(result);
+
+        Map<String, String> expected = new HashMap<>();
+        for (int i = 0; i < 30_000; i++) {
+            String key = i + "";
+            expected.put(key, "+I:" + key + "->" + i);
+            processElement(key, i);
+        }
+
+        operator.prepareSnapshotPreBarrier(0);
+        assertThat(result).containsExactlyInAnyOrderElementsOf(expected.values());
+        result.clear();
+    }
+
     private void prepareHashOperator() throws Exception {
         prepareHashOperator(new HashMap<>());
     }
 
     private void prepareHashOperator(Map<String, String> options) throws Exception {
-        options.put(CoreOptions.LOCAL_MERGE_BUFFER_SIZE.key(), "10 m");
+        if (!options.containsKey(LOCAL_MERGE_BUFFER_SIZE.key())) {
+            options.put(LOCAL_MERGE_BUFFER_SIZE.key(), "10 m");
+        }
         RowType rowType =
                 RowType.of(
                         DataTypes.STRING(),
@@ -148,6 +154,18 @@ class LocalMergeOperatorTest {
         operator = new LocalMergeOperator(schema);
         operator.open();
         assertThat(operator.merger()).isInstanceOf(HashMapLocalMerger.class);
+    }
+
+    private void setOutput(List<String> result) {
+        operator.setOutput(
+                new TestOutput(
+                        row ->
+                                result.add(
+                                        row.getRowKind().shortString()
+                                                + ":"
+                                                + row.getString(0)
+                                                + "->"
+                                                + row.getInt(1))));
     }
 
     private void processElement(String key, int value) throws Exception {
