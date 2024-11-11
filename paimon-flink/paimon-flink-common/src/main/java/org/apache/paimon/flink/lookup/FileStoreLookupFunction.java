@@ -272,7 +272,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         return createPartitionPredicate(rowType, partitionMap);
     }
 
-    private void reopen() {
+    private synchronized void reopen() {
         try {
             close();
             open();
@@ -282,7 +282,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     }
 
     @VisibleForTesting
-    void tryRefresh() throws Exception {
+    synchronized void tryRefresh() throws Exception {
         // 1. check if this time is in black list
         if (refreshBlacklist != null && !refreshBlacklist.canRefresh()) {
             return;
@@ -339,7 +339,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     }
 
     @Override
-    public void close() throws IOException {
+    public synchronized void close() throws IOException {
         if (lookupTable != null) {
             lookupTable.close();
             lookupTable = null;

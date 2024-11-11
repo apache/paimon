@@ -259,8 +259,9 @@ public abstract class FullCacheLookupTable implements LookupTable {
         }
     }
 
+    /** TODO remove synchronized and supports multiple thread to lookup. */
     @Override
-    public final List<InternalRow> get(InternalRow key) throws IOException {
+    public final synchronized List<InternalRow> get(InternalRow key) throws IOException {
         List<InternalRow> values;
         if (refreshAsync) {
             synchronized (lock) {
