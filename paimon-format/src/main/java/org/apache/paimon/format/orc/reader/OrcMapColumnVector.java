@@ -24,6 +24,7 @@ import org.apache.paimon.data.columnar.ColumnarMap;
 import org.apache.paimon.types.MapType;
 
 import org.apache.hadoop.hive.ql.exec.vector.MapColumnVector;
+import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 
 /** This column vector is used to adapt hive's MapColumnVector to Paimon's MapColumnVector. */
 public class OrcMapColumnVector extends AbstractOrcColumnVector
@@ -33,15 +34,18 @@ public class OrcMapColumnVector extends AbstractOrcColumnVector
     private final ColumnVector keyPaimonVector;
     private final ColumnVector valuePaimonVector;
 
-    public OrcMapColumnVector(MapColumnVector hiveVector, MapType type) {
-        super(hiveVector);
+    public OrcMapColumnVector(
+            MapColumnVector hiveVector, VectorizedRowBatch orcBatch, MapType type) {
+        super(hiveVector, orcBatch);
         this.hiveVector = hiveVector;
-        this.keyPaimonVector = createPaimonVector(hiveVector.keys, type.getKeyType());
-        this.valuePaimonVector = createPaimonVector(hiveVector.values, type.getValueType());
+        this.keyPaimonVector = createPaimonVector(hiveVector.keys, orcBatch, type.getKeyType());
+        this.valuePaimonVector =
+                createPaimonVector(hiveVector.values, orcBatch, type.getValueType());
     }
 
     @Override
     public InternalMap getMap(int i) {
+        i = rowMapper(i);
         long offset = hiveVector.offsets[i];
         long length = hiveVector.lengths[i];
         return new ColumnarMap(keyPaimonVector, valuePaimonVector, (int) offset, (int) length);
