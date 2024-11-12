@@ -273,8 +273,9 @@ public class OrcReaderFactory implements FormatReaderFactory {
             if (!conjunctPredicates.isEmpty()) {
                 // TODO fix it , if open this option,future deletion vectors would not work,
                 //  cased by getRowNumber would be changed .
-                options.useSelected(OrcConf.READER_USE_SELECTED.getBoolean(conf));
-                options.allowSARGToFilter(OrcConf.ALLOW_SARG_TO_FILTER.getBoolean(conf));
+                options.useSelected(OrcConf.READER_ONLY_USE_SELECTED.getBoolean(conf));
+                options.allowSARGToFilter(
+                        OrcConf.READER_ONLY_ALLOW_SARG_TO_FILTER.getBoolean(conf));
             }
             // configure filters
             if (!conjunctPredicates.isEmpty()) {
