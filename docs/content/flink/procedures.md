@@ -409,7 +409,7 @@ All available procedures are listed below.
       <td>expire_snapshots</td>
       <td>
          -- Use named argument<br/>
-         CALL [catalog.]sys.reset_consumer(<br/>
+         CALL [catalog.]sys.expire_snapshots(<br/>
             `table` => 'identifier', <br/>
             retain_max => 'retain_max', <br/>
             retain_min => 'retain_min', <br/>
