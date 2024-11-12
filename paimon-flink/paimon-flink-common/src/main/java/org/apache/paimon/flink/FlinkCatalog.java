@@ -37,6 +37,8 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Preconditions;
@@ -98,7 +100,6 @@ import org.apache.flink.table.descriptors.DescriptorProperties;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.factories.Factory;
 import org.apache.flink.table.procedures.Procedure;
-import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -110,11 +111,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -595,17 +598,12 @@ public class FlinkCatalog extends AbstractCatalog {
             if (!oldTableNonPhysicalColumnIndex.containsKey(
                     ((ModifyPhysicalColumnType) change).getOldColumn().getName())) {
                 ModifyPhysicalColumnType modify = (ModifyPhysicalColumnType) change;
-                LogicalType newColumnType = modify.getNewType().getLogicalType();
-                LogicalType oldColumnType = modify.getOldColumn().getDataType().getLogicalType();
-                if (newColumnType.isNullable() != oldColumnType.isNullable()) {
-                    schemaChanges.add(
-                            SchemaChange.updateColumnNullability(
-                                    modify.getNewColumn().getName(), newColumnType.isNullable()));
-                }
-                schemaChanges.add(
-                        SchemaChange.updateColumnType(
-                                modify.getOldColumn().getName(),
-                                LogicalTypeConversion.toDataType(newColumnType)));
+                generateNestedColumnUpdates(
+                        Collections.singletonList(modify.getOldColumn().getName()),
+                        LogicalTypeConversion.toDataType(
+                                modify.getOldColumn().getDataType().getLogicalType()),
+                        LogicalTypeConversion.toDataType(modify.getNewType().getLogicalType()),
+                        schemaChanges);
             }
             return schemaChanges;
         } else if (change instanceof ModifyColumnPosition) {
@@ -668,6 +666,104 @@ public class FlinkCatalog extends AbstractCatalog {
             return schemaChanges;
         }
         throw new UnsupportedOperationException("Change is not supported: " + change.getClass());
+    }
+
+    private void generateNestedColumnUpdates(
+            List<String> fieldNames,
+            org.apache.paimon.types.DataType oldType,
+            org.apache.paimon.types.DataType newType,
+            List<SchemaChange> schemaChanges) {
+        if (oldType.getTypeRoot() == DataTypeRoot.ROW) {
+            Preconditions.checkArgument(
+                    newType.getTypeRoot() == DataTypeRoot.ROW,
+                    "Column "
+                            + String.join(".", fieldNames)
+                            + " can only be updated to row type, and cannot be updated to "
+                            + newType
+                            + " type");
+            org.apache.paimon.types.RowType oldRowType = (org.apache.paimon.types.RowType) oldType;
+            org.apache.paimon.types.RowType newRowType = (org.apache.paimon.types.RowType) newType;
+
+            // check that existing fields have same order
+            Map<String, Integer> oldFieldOrders = new HashMap<>();
+            for (int i = 0; i < oldRowType.getFieldCount(); i++) {
+                oldFieldOrders.put(oldRowType.getFields().get(i).name(), i);
+            }
+            int lastIdx = -1;
+            String lastFieldName = "";
+            for (DataField newField : newRowType.getFields()) {
+                String name = newField.name();
+                if (oldFieldOrders.containsKey(name)) {
+                    int idx = oldFieldOrders.get(name);
+                    Preconditions.checkState(
+                            lastIdx < idx,
+                            "Order of existing fields in column %s must be kept the same. "
+                                    + "However, field %s and %s have changed their orders.",
+                            String.join(".", fieldNames),
+                            lastFieldName,
+                            name);
+                    lastIdx = idx;
+                    lastFieldName = name;
+                }
+            }
+
+            // drop fields
+            Set<String> newFieldNames = new HashSet<>(newRowType.getFieldNames());
+            for (String name : oldRowType.getFieldNames()) {
+                if (!newFieldNames.contains(name)) {
+                    List<String> dropColumnNames = new ArrayList<>(fieldNames);
+                    dropColumnNames.add(name);
+                    schemaChanges.add(
+                            SchemaChange.dropColumn(dropColumnNames.toArray(new String[0])));
+                }
+            }
+
+            for (int i = 0; i < newRowType.getFieldCount(); i++) {
+                DataField field = newRowType.getFields().get(i);
+                String name = field.name();
+                List<String> fullFieldNames = new ArrayList<>(fieldNames);
+                fullFieldNames.add(name);
+                if (!oldFieldOrders.containsKey(name)) {
+                    // add fields
+                    SchemaChange.Move move;
+                    if (i == 0) {
+                        move = SchemaChange.Move.first(name);
+                    } else {
+                        String lastName = newRowType.getFields().get(i - 1).name();
+                        move = SchemaChange.Move.after(name, lastName);
+                    }
+                    schemaChanges.add(
+                            SchemaChange.addColumn(
+                                    fullFieldNames.toArray(new String[0]),
+                                    field.type(),
+                                    field.description(),
+                                    move));
+                } else {
+                    // update existing fields
+                    DataField oldField = oldRowType.getFields().get(oldFieldOrders.get(name));
+                    if (!Objects.equals(oldField.description(), field.description())) {
+                        schemaChanges.add(
+                                SchemaChange.updateColumnComment(
+                                        fullFieldNames.toArray(new String[0]),
+                                        field.description()));
+                    }
+                    generateNestedColumnUpdates(
+                            fullFieldNames, oldField.type(), field.type(), schemaChanges);
+                }
+            }
+        } else {
+            if (!oldType.equalsIgnoreNullable(newType)) {
+                schemaChanges.add(
+                        SchemaChange.updateColumnType(
+                                fieldNames.toArray(new String[0]), newType, false));
+            }
+        }
+
+        if (oldType.isNullable() != newType.isNullable()) {
+            schemaChanges.add(
+                    SchemaChange.updateColumnNullability(
+                            fieldNames.toArray(new String[0]), newType.isNullable()));
+        }
     }
 
     /**

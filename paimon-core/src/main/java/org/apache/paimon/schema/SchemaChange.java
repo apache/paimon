@@ -25,8 +25,6 @@ import javax.annotation.Nullable;
 
 import java.io.Serializable;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
 import java.util.Objects;
 
 /**
@@ -54,46 +52,45 @@ public interface SchemaChange extends Serializable {
     }
 
     static SchemaChange addColumn(String fieldName, DataType dataType, String comment) {
-        return new AddColumn(Collections.singletonList(fieldName), dataType, comment, null);
+        return new AddColumn(new String[] {fieldName}, dataType, comment, null);
     }
 
     static SchemaChange addColumn(String fieldName, DataType dataType, String comment, Move move) {
-        return new AddColumn(Collections.singletonList(fieldName), dataType, comment, move);
+        return new AddColumn(new String[] {fieldName}, dataType, comment, move);
     }
 
     static SchemaChange addColumn(
-            List<String> fieldNames, DataType dataType, String comment, Move move) {
+            String[] fieldNames, DataType dataType, String comment, Move move) {
         return new AddColumn(fieldNames, dataType, comment, move);
     }
 
     static SchemaChange renameColumn(String fieldName, String newName) {
-        return new RenameColumn(Collections.singletonList(fieldName), newName);
+        return new RenameColumn(new String[] {fieldName}, newName);
     }
 
-    static SchemaChange renameColumn(List<String> fieldNames, String newName) {
+    static SchemaChange renameColumn(String[] fieldNames, String newName) {
         return new RenameColumn(fieldNames, newName);
     }
 
     static SchemaChange dropColumn(String fieldName) {
-        return new DropColumn(Collections.singletonList(fieldName));
+        return new DropColumn(new String[] {fieldName});
     }
 
-    static SchemaChange dropColumn(List<String> fieldNames) {
+    static SchemaChange dropColumn(String[] fieldNames) {
         return new DropColumn(fieldNames);
     }
 
     static SchemaChange updateColumnType(String fieldName, DataType newDataType) {
-        return new UpdateColumnType(Collections.singletonList(fieldName), newDataType, false);
+        return new UpdateColumnType(new String[] {fieldName}, newDataType, false);
     }
 
     static SchemaChange updateColumnType(
             String fieldName, DataType newDataType, boolean keepNullability) {
-        return new UpdateColumnType(
-                Collections.singletonList(fieldName), newDataType, keepNullability);
+        return new UpdateColumnType(new String[] {fieldName}, newDataType, keepNullability);
     }
 
     static SchemaChange updateColumnType(
-            List<String> fieldNames, DataType newDataType, boolean keepNullability) {
+            String[] fieldNames, DataType newDataType, boolean keepNullability) {
         return new UpdateColumnType(fieldNames, newDataType, keepNullability);
     }
 
@@ -228,20 +225,19 @@ public interface SchemaChange extends Serializable {
 
         private static final long serialVersionUID = 1L;
 
-        private final List<String> fieldNames;
+        private final String[] fieldNames;
         private final DataType dataType;
         private final String description;
         private final Move move;
 
-        private AddColumn(
-                List<String> fieldNames, DataType dataType, String description, Move move) {
+        private AddColumn(String[] fieldNames, DataType dataType, String description, Move move) {
             this.fieldNames = fieldNames;
             this.dataType = dataType;
             this.description = description;
             this.move = move;
         }
 
-        public List<String> fieldNames() {
+        public String[] fieldNames() {
             return fieldNames;
         }
 
@@ -268,7 +264,7 @@ public interface SchemaChange extends Serializable {
                 return false;
             }
             AddColumn addColumn = (AddColumn) o;
-            return Objects.equals(fieldNames, addColumn.fieldNames)
+            return Arrays.equals(fieldNames, addColumn.fieldNames)
                     && dataType.equals(addColumn.dataType)
                     && Objects.equals(description, addColumn.description)
                     && move.equals(addColumn.move);
@@ -288,15 +284,15 @@ public interface SchemaChange extends Serializable {
 
         private static final long serialVersionUID = 1L;
 
-        private final List<String> fieldNames;
+        private final String[] fieldNames;
         private final String newName;
 
-        private RenameColumn(List<String> fieldNames, String newName) {
+        private RenameColumn(String[] fieldNames, String newName) {
             this.fieldNames = fieldNames;
             this.newName = newName;
         }
 
-        public List<String> fieldNames() {
+        public String[] fieldNames() {
             return fieldNames;
         }
 
@@ -313,7 +309,7 @@ public interface SchemaChange extends Serializable {
                 return false;
             }
             RenameColumn that = (RenameColumn) o;
-            return Objects.equals(fieldNames, that.fieldNames)
+            return Arrays.equals(fieldNames, that.fieldNames)
                     && Objects.equals(newName, that.newName);
         }
 
@@ -330,13 +326,13 @@ public interface SchemaChange extends Serializable {
 
         private static final long serialVersionUID = 1L;
 
-        private final List<String> fieldNames;
+        private final String[] fieldNames;
 
-        private DropColumn(List<String> fieldNames) {
+        private DropColumn(String[] fieldNames) {
             this.fieldNames = fieldNames;
         }
 
-        public List<String> fieldNames() {
+        public String[] fieldNames() {
             return fieldNames;
         }
 
@@ -349,7 +345,7 @@ public interface SchemaChange extends Serializable {
                 return false;
             }
             DropColumn that = (DropColumn) o;
-            return Objects.equals(fieldNames, that.fieldNames);
+            return Arrays.equals(fieldNames, that.fieldNames);
         }
 
         @Override
@@ -363,19 +359,19 @@ public interface SchemaChange extends Serializable {
 
         private static final long serialVersionUID = 1L;
 
-        private final List<String> fieldNames;
+        private final String[] fieldNames;
         private final DataType newDataType;
         // If true, do not change the target field nullability
         private final boolean keepNullability;
 
         private UpdateColumnType(
-                List<String> fieldNames, DataType newDataType, boolean keepNullability) {
+                String[] fieldNames, DataType newDataType, boolean keepNullability) {
             this.fieldNames = fieldNames;
             this.newDataType = newDataType;
             this.keepNullability = keepNullability;
         }
 
-        public List<String> fieldNames() {
+        public String[] fieldNames() {
             return fieldNames;
         }
 
@@ -396,7 +392,7 @@ public interface SchemaChange extends Serializable {
                 return false;
             }
             UpdateColumnType that = (UpdateColumnType) o;
-            return Objects.equals(fieldNames, that.fieldNames)
+            return Arrays.equals(fieldNames, that.fieldNames)
                     && newDataType.equals(that.newDataType);
         }
 

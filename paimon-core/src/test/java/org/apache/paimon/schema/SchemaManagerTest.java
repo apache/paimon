@@ -555,7 +555,7 @@ public class SchemaManagerTest {
 
         SchemaChange addColumn =
                 SchemaChange.addColumn(
-                        Arrays.asList("v", "f2", "f3"),
+                        new String[] {"v", "f2", "f3"},
                         DataTypes.STRING(),
                         "",
                         SchemaChange.Move.after("f3", "f1"));
@@ -579,11 +579,11 @@ public class SchemaManagerTest {
                 .hasMessageContaining("Column v.f2.f3 already exists");
         SchemaChange middleColumnNotExistAddColumn =
                 SchemaChange.addColumn(
-                        Arrays.asList("v", "invalid", "f4"), DataTypes.STRING(), "", null);
+                        new String[] {"v", "invalid", "f4"}, DataTypes.STRING(), "", null);
         assertThatCode(() -> manager.commitChanges(middleColumnNotExistAddColumn))
                 .hasMessageContaining("Column v.invalid does not exist");
 
-        SchemaChange dropColumn = SchemaChange.dropColumn(Arrays.asList("v", "f2", "f1"));
+        SchemaChange dropColumn = SchemaChange.dropColumn(new String[] {"v", "f2", "f1"});
         manager.commitChanges(dropColumn);
 
         innerType =
@@ -602,7 +602,7 @@ public class SchemaManagerTest {
         assertThatCode(() -> manager.commitChanges(dropColumn))
                 .hasMessageContaining("Column v.f2.f1 does not exist");
         SchemaChange middleColumnNotExistDropColumn =
-                SchemaChange.dropColumn(Arrays.asList("v", "invalid", "f2"));
+                SchemaChange.dropColumn(new String[] {"v", "invalid", "f2"});
         assertThatCode(() -> manager.commitChanges(middleColumnNotExistDropColumn))
                 .hasMessageContaining("Column v.invalid does not exist");
     }
@@ -632,7 +632,7 @@ public class SchemaManagerTest {
         manager.createTable(schema);
 
         SchemaChange renameColumn =
-                SchemaChange.renameColumn(Arrays.asList("v", "f2", "f1"), "f100");
+                SchemaChange.renameColumn(new String[] {"v", "f2", "f1"}, "f100");
         manager.commitChanges(renameColumn);
 
         innerType =
@@ -649,17 +649,17 @@ public class SchemaManagerTest {
         assertThat(manager.latest().get().logicalRowType()).isEqualTo(outerType);
 
         SchemaChange middleColumnNotExistRenameColumn =
-                SchemaChange.renameColumn(Arrays.asList("v", "invalid", "f2"), "f200");
+                SchemaChange.renameColumn(new String[] {"v", "invalid", "f2"}, "f200");
         assertThatCode(() -> manager.commitChanges(middleColumnNotExistRenameColumn))
                 .hasMessageContaining("Column v.invalid does not exist");
 
         SchemaChange lastColumnNotExistRenameColumn =
-                SchemaChange.renameColumn(Arrays.asList("v", "f2", "invalid"), "new_invalid");
+                SchemaChange.renameColumn(new String[] {"v", "f2", "invalid"}, "new_invalid");
         assertThatCode(() -> manager.commitChanges(lastColumnNotExistRenameColumn))
                 .hasMessageContaining("Column v.f2.invalid does not exist");
 
         SchemaChange newNameAlreadyExistRenameColumn =
-                SchemaChange.renameColumn(Arrays.asList("v", "f2", "f2"), "f100");
+                SchemaChange.renameColumn(new String[] {"v", "f2", "f2"}, "f100");
         assertThatCode(() -> manager.commitChanges(newNameAlreadyExistRenameColumn))
                 .hasMessageContaining("Column v.f2.f100 already exists");
     }
@@ -690,7 +690,7 @@ public class SchemaManagerTest {
 
         SchemaChange updateColumnType =
                 SchemaChange.updateColumnType(
-                        Arrays.asList("v", "f2", "f1"), DataTypes.BIGINT(), true);
+                        new String[] {"v", "f2", "f1"}, DataTypes.BIGINT(), true);
         manager.commitChanges(updateColumnType);
 
         innerType =
@@ -708,7 +708,7 @@ public class SchemaManagerTest {
 
         SchemaChange middleColumnNotExistUpdateColumnType =
                 SchemaChange.updateColumnType(
-                        Arrays.asList("v", "invalid", "f1"), DataTypes.BIGINT(), true);
+                        new String[] {"v", "invalid", "f1"}, DataTypes.BIGINT(), true);
         assertThatCode(() -> manager.commitChanges(middleColumnNotExistUpdateColumnType))
                 .hasMessageContaining("Column v.invalid does not exist");
     }

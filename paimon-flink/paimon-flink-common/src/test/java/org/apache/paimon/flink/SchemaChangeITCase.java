@@ -25,6 +25,8 @@ import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -35,6 +37,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for schema changes. */
@@ -1015,7 +1018,6 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         sql("INSERT INTO T1 VALUES ('a', 'b', 'l')");
         sql("INSERT INTO T1 VALUES ('a', 'd', 'n')");
         sql("INSERT INTO T1 VALUES ('a', 'e', 'm')");
-        List<Row> sql = sql("select * from T1");
         assertThat(sql("select * from T1").toString()).isEqualTo("[+I[a, d, n]]");
 
         // test for get small record
@@ -1024,7 +1026,6 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         sql("INSERT INTO T2 VALUES ('a', 'b', 1)");
         sql("INSERT INTO T2 VALUES ('a', 'd', 3)");
         sql("INSERT INTO T2 VALUES ('a', 'e', 2)");
-        sql = sql("select * from T2");
         assertThat(sql("select * from T2").toString()).isEqualTo("[+I[a, b, 1]]");
 
         // test for get largest record
@@ -1033,7 +1034,6 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         sql("INSERT INTO T3 VALUES ('a', 'b', 1.0)");
         sql("INSERT INTO T3 VALUES ('a', 'd', 3.0)");
         sql("INSERT INTO T3 VALUES ('a', 'e', 2.0)");
-        sql = sql("select * from T3");
         assertThat(sql("select * from T3").toString()).isEqualTo("[+I[a, d, 3.0]]");
     }
 
@@ -1088,5 +1088,50 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                         anyCauseMatches(
                                 UnsupportedOperationException.class,
                                 "Cannot change bucket to -1."));
+    }
+
+    @ParameterizedTest()
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testUpdateNestedColumn(String formatType) {
+        sql(
+                "CREATE TABLE T "
+                        + "( k INT, v ROW(f1 INT, f2 ROW(f1 STRING, f2 INT NOT NULL)), PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( 'bucket' = '1', 'file.format' = '"
+                        + formatType
+                        + "' )");
+        sql(
+                "INSERT INTO T VALUES (1, ROW(10, ROW('apple', 100))), (2, ROW(20, ROW('banana', 200)))");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, Row.of(10, Row.of("apple", 100))),
+                        Row.of(2, Row.of(20, Row.of("banana", 200))));
+
+        sql("ALTER TABLE T MODIFY (v ROW(f1 BIGINT, f2 ROW(f3 DOUBLE, f2 INT), f3 STRING))");
+        sql(
+                "INSERT INTO T VALUES "
+                        + "(1, ROW(1000000000001, ROW(101.0, 101), 'cat')), "
+                        + "(3, ROW(3000000000001, ROW(301.0, CAST(NULL AS INT)), 'dog'))");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, Row.of(1000000000001L, Row.of(101.0, 101), "cat")),
+                        Row.of(2, Row.of(20L, Row.of(null, 200), null)),
+                        Row.of(3, Row.of(3000000000001L, Row.of(301.0, null), "dog")));
+
+        sql(
+                "ALTER TABLE T MODIFY (v ROW(f1 BIGINT, f2 ROW(f3 DOUBLE, f1 STRING, f2 INT), f3 STRING))");
+        sql(
+                "INSERT INTO T VALUES "
+                        + "(1, ROW(1000000000002, ROW(102.0, 'APPLE', 102), 'cat')), "
+                        + "(4, ROW(4000000000002, ROW(402.0, 'LEMON', 402), 'tiger'))");
+        assertThat(sql("SELECT k, v.f2.f1, v.f3 FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "APPLE", "cat"),
+                        Row.of(2, null, null),
+                        Row.of(3, null, "dog"),
+                        Row.of(4, "LEMON", "tiger"));
+
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY (v ROW(f1 BIGINT, f2 INT, f3 STRING))"))
+                .hasRootCauseMessage(
+                        "Column v.f2 can only be updated to row type, and cannot be updated to INT type");
     }
 }

@@ -290,7 +290,7 @@ public class SchemaManager implements Serializable {
                     DataType dataType =
                             ReassignFieldId.reassign(addColumn.dataType(), highestFieldId);
 
-                    new NestedColumnModifier(addColumn.fieldNames().toArray(new String[0])) {
+                    new NestedColumnModifier(addColumn.fieldNames()) {
                         @Override
                         protected void updateLastColumn(List<DataField> newFields, String fieldName)
                                 throws Catalog.ColumnAlreadyExistException {
@@ -320,7 +320,7 @@ public class SchemaManager implements Serializable {
                 } else if (change instanceof RenameColumn) {
                     RenameColumn rename = (RenameColumn) change;
                     assertNotUpdatingPrimaryKeys(oldTableSchema, rename.fieldNames(), "rename");
-                    new NestedColumnModifier(rename.fieldNames().toArray(new String[0])) {
+                    new NestedColumnModifier(rename.fieldNames()) {
                         @Override
                         protected void updateLastColumn(List<DataField> newFields, String fieldName)
                                 throws Catalog.ColumnNotExistException,
@@ -347,7 +347,7 @@ public class SchemaManager implements Serializable {
                 } else if (change instanceof DropColumn) {
                     DropColumn drop = (DropColumn) change;
                     dropColumnValidation(oldTableSchema, drop);
-                    new NestedColumnModifier(drop.fieldNames().toArray(new String[0])) {
+                    new NestedColumnModifier(drop.fieldNames()) {
                         @Override
                         protected void updateLastColumn(List<DataField> newFields, String fieldName)
                                 throws Catalog.ColumnNotExistException {
@@ -364,7 +364,7 @@ public class SchemaManager implements Serializable {
                     assertNotUpdatingPrimaryKeys(oldTableSchema, update.fieldNames(), "update");
                     updateNestedColumn(
                             newFields,
-                            update.fieldNames().toArray(new String[0]),
+                            update.fieldNames(),
                             (field) -> {
                                 DataType targetType = update.newDataType();
                                 if (update.keepNullability()) {
@@ -558,8 +558,8 @@ public class SchemaManager implements Serializable {
 
         Map<String, String> columnNames = Maps.newHashMap();
         for (RenameColumn renameColumn : renames) {
-            if (renameColumn.fieldNames().size() == 1) {
-                columnNames.put(renameColumn.fieldNames().get(0), renameColumn.newName());
+            if (renameColumn.fieldNames().length == 1) {
+                columnNames.put(renameColumn.fieldNames()[0], renameColumn.newName());
             }
         }
 
@@ -571,10 +571,10 @@ public class SchemaManager implements Serializable {
 
     private static void dropColumnValidation(TableSchema schema, DropColumn change) {
         // primary keys and partition keys can't be nested columns
-        if (change.fieldNames().size() > 1) {
+        if (change.fieldNames().length > 1) {
             return;
         }
-        String columnToDrop = change.fieldNames().get(0);
+        String columnToDrop = change.fieldNames()[0];
         if (schema.partitionKeys().contains(columnToDrop)
                 || schema.primaryKeys().contains(columnToDrop)) {
             throw new UnsupportedOperationException(
@@ -583,12 +583,12 @@ public class SchemaManager implements Serializable {
     }
 
     private static void assertNotUpdatingPrimaryKeys(
-            TableSchema schema, List<String> fieldNames, String operation) {
+            TableSchema schema, String[] fieldNames, String operation) {
         // partition keys can't be nested columns
-        if (fieldNames.size() > 1) {
+        if (fieldNames.length > 1) {
             return;
         }
-        String columnToRename = fieldNames.get(0);
+        String columnToRename = fieldNames[0];
         if (schema.partitionKeys().contains(columnToRename)) {
             throw new UnsupportedOperationException(
                     String.format(
