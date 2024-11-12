@@ -90,6 +90,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private ManifestCacheFilter manifestCacheFilter = null;
     private ScanMetrics scanMetrics = null;
+    private boolean dropStats;
 
     public AbstractFileStoreScan(
             ManifestsReader manifestsReader,
@@ -105,6 +106,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         this.manifestFileFactory = manifestFileFactory;
         this.tableSchemas = new ConcurrentHashMap<>();
         this.parallelism = parallelism;
+        this.dropStats = false;
     }
 
     @Override
@@ -215,6 +217,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         return this;
     }
 
+    @Override
+    public FileStoreScan dropStats() {
+        this.dropStats = true;
+        return this;
+    }
+
     @Nullable
     @Override
     public Integer parallelism() {
@@ -291,6 +299,11 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
             @Override
             public List<ManifestEntry> files() {
+                if (dropStats) {
+                    return files.stream()
+                            .map(ManifestEntry::copyWithoutStats)
+                            .collect(Collectors.toList());
+                }
                 return files;
             }
         };

@@ -121,6 +121,10 @@ public class ManifestEntry implements FileEntry {
                 file.embeddedIndex());
     }
 
+    public ManifestEntry copyWithoutStats() {
+        return new ManifestEntry(kind, partition, bucket, totalBuckets, file.copyWithoutStats());
+    }
+
     @Override
     public boolean equals(Object o) {
         if (!(o instanceof ManifestEntry)) {

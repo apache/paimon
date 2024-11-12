@@ -81,6 +81,8 @@ public interface FileStoreScan {
 
     FileStoreScan withMetrics(ScanMetrics metrics);
 
+    FileStoreScan dropStats();
+
     @Nullable
     Integer parallelism();
 

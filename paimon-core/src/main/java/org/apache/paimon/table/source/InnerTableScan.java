@@ -55,4 +55,9 @@ public interface InnerTableScan extends TableScan {
         // do nothing, should implement this if need
         return this;
     }
+
+    default InnerTableScan dropStats() {
+        // do nothing, should implement this if need
+        return this;
+    }
 }
