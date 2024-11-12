@@ -40,7 +40,6 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
-import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
@@ -242,8 +241,7 @@ public class SchemaManager implements Serializable {
 
     /** Update {@link SchemaChange}s. */
     public TableSchema commitChanges(List<SchemaChange> changes)
-            throws Catalog.TableNotExistException,
-                    Catalog.ColumnAlreadyExistException,
+            throws Catalog.TableNotExistException, Catalog.ColumnAlreadyExistException,
                     Catalog.ColumnNotExistException {
         SnapshotManager snapshotManager = new SnapshotManager(fileIO, tableRoot, branch);
         boolean hasSnapshots = (snapshotManager.latestSnapshotId() != null);
@@ -292,7 +290,7 @@ public class SchemaManager implements Serializable {
                     DataType dataType =
                             ReassignFieldId.reassign(addColumn.dataType(), highestFieldId);
 
-                    new NestedColumnModifier(addColumn.fieldNames().toArray(new String[0])) {
+                    new NestedColumnModifier(addColumn.fieldNames()) {
                         @Override
                         protected void updateLastColumn(List<DataField> newFields, String fieldName)
                                 throws Catalog.ColumnAlreadyExistException {
@@ -322,7 +320,7 @@ public class SchemaManager implements Serializable {
                 } else if (change instanceof RenameColumn) {
                     RenameColumn rename = (RenameColumn) change;
                     assertNotUpdatingPrimaryKeys(oldTableSchema, rename.fieldNames(), "rename");
-                    new NestedColumnModifier(rename.fieldNames().toArray(new String[0])) {
+                    new NestedColumnModifier(rename.fieldNames()) {
                         @Override
                         protected void updateLastColumn(List<DataField> newFields, String fieldName)
                                 throws Catalog.ColumnNotExistException,
@@ -349,7 +347,7 @@ public class SchemaManager implements Serializable {
                 } else if (change instanceof DropColumn) {
                     DropColumn drop = (DropColumn) change;
                     dropColumnValidation(oldTableSchema, drop);
-                    new NestedColumnModifier(drop.fieldNames().toArray(new String[0])) {
+                    new NestedColumnModifier(drop.fieldNames()) {
                         @Override
                         protected void updateLastColumn(List<DataField> newFields, String fieldName)
                                 throws Catalog.ColumnNotExistException {
@@ -366,14 +364,22 @@ public class SchemaManager implements Serializable {
                     assertNotUpdatingPrimaryKeys(oldTableSchema, update.fieldNames(), "update");
                     updateNestedColumn(
                             newFields,
-                            update.fieldNames().toArray(new String[0]),
-                            field ->
-                                    createNestedUpdateDataField(
-                                            field,
-                                            update.newDataType(),
-                                            update.keepNullability(),
-                                            highestFieldId,
-                                            String.join(".", update.fieldNames())));
+                            update.fieldNames(),
+                            (field) -> {
+                                DataType targetType = update.newDataType();
+                                if (update.keepNullability()) {
+                                    targetType = targetType.copy(field.type().isNullable());
+                                }
+                                checkState(
+                                        DataTypeCasts.supportsExplicitCast(field.type(), targetType)
+                                                && CastExecutors.resolve(field.type(), targetType)
+                                                        != null,
+                                        String.format(
+                                                "Column type %s[%s] cannot be converted to %s without loosing information.",
+                                                field.name(), field.type(), targetType));
+                                return new DataField(
+                                        field.id(), field.name(), targetType, field.description());
+                            });
                 } else if (change instanceof UpdateColumnNullability) {
                     UpdateColumnNullability update = (UpdateColumnNullability) change;
                     if (update.fieldNames().length == 1
@@ -552,8 +558,8 @@ public class SchemaManager implements Serializable {
 
         Map<String, String> columnNames = Maps.newHashMap();
         for (RenameColumn renameColumn : renames) {
-            if (renameColumn.fieldNames().size() == 1) {
-                columnNames.put(renameColumn.fieldNames().get(0), renameColumn.newName());
+            if (renameColumn.fieldNames().length == 1) {
+                columnNames.put(renameColumn.fieldNames()[0], renameColumn.newName());
             }
         }
 
@@ -565,10 +571,10 @@ public class SchemaManager implements Serializable {
 
     private static void dropColumnValidation(TableSchema schema, DropColumn change) {
         // primary keys and partition keys can't be nested columns
-        if (change.fieldNames().size() > 1) {
+        if (change.fieldNames().length > 1) {
             return;
         }
-        String columnToDrop = change.fieldNames().get(0);
+        String columnToDrop = change.fieldNames()[0];
         if (schema.partitionKeys().contains(columnToDrop)
                 || schema.primaryKeys().contains(columnToDrop)) {
             throw new UnsupportedOperationException(
@@ -577,68 +583,16 @@ public class SchemaManager implements Serializable {
     }
 
     private static void assertNotUpdatingPrimaryKeys(
-            TableSchema schema, List<String> fieldNames, String operation) {
+            TableSchema schema, String[] fieldNames, String operation) {
         // partition keys can't be nested columns
-        if (fieldNames.size() > 1) {
+        if (fieldNames.length > 1) {
             return;
         }
-        String columnToRename = fieldNames.get(0);
+        String columnToRename = fieldNames[0];
         if (schema.partitionKeys().contains(columnToRename)) {
             throw new UnsupportedOperationException(
                     String.format(
                             "Cannot " + operation + " partition column: [%s]", columnToRename));
-        }
-    }
-
-    private static DataField createNestedUpdateDataField(
-            DataField field,
-            DataType targetType,
-            boolean keepNullability,
-            AtomicInteger highestFieldId,
-            String fullFieldName) {
-        if (keepNullability) {
-            targetType = targetType.copy(field.type().isNullable());
-        }
-
-        DataType oldType = field.type();
-        if (oldType.getTypeRoot() == DataTypeRoot.ROW) {
-            checkState(
-                    targetType.getTypeRoot() == DataTypeRoot.ROW,
-                    "Column "
-                            + fullFieldName
-                            + " can only be updated to row type, and cannot be updated to "
-                            + targetType
-                            + " type");
-            RowType oldRowType = (RowType) oldType;
-            RowType targetRowType = (RowType) targetType;
-            Map<String, DataField> oldFields = new HashMap<>();
-            for (DataField oldField : oldRowType.getFields()) {
-                oldFields.put(oldField.name(), oldField);
-            }
-            List<DataField> newFields = new ArrayList<>();
-            for (DataField targetField : targetRowType.getFields()) {
-                if (oldFields.containsKey(targetField.name())) {
-                    newFields.add(
-                            createNestedUpdateDataField(
-                                    oldFields.get(targetField.name()),
-                                    targetField.type(),
-                                    keepNullability,
-                                    highestFieldId,
-                                    fullFieldName + "." + targetField.name()));
-                } else {
-                    newFields.add(targetField.newId(highestFieldId.incrementAndGet()));
-                }
-            }
-            return new DataField(
-                    field.id(), field.name(), new RowType(newFields), field.description());
-        } else {
-            checkState(
-                    DataTypeCasts.supportsExplicitCast(field.type(), targetType)
-                            && CastExecutors.resolve(field.type(), targetType) != null,
-                    String.format(
-                            "Column type %s[%s] cannot be converted to %s without loosing information.",
-                            field.name(), field.type(), targetType));
-            return new DataField(field.id(), field.name(), targetType, field.description());
         }
     }
 

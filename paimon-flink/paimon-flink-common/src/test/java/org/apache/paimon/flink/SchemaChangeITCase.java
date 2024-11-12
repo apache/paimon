@@ -38,6 +38,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for schema changes. */
@@ -1095,7 +1096,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     public void testUpdateNestedColumn(String formatType) {
         sql(
                 "CREATE TABLE T "
-                        + "( k INT, v ROW(f1 INT, f2 ROW(f1 STRING, f2 INT)), PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "( k INT, v ROW(f1 INT, f2 ROW(f1 STRING, f2 INT NOT NULL)), PRIMARY KEY (k) NOT ENFORCED ) "
                         + "WITH ( 'bucket' = '1', 'file.format' = '"
                         + formatType
                         + "' )");
@@ -1108,7 +1109,9 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
 
         sql("ALTER TABLE T MODIFY (v ROW(f1 BIGINT, f2 ROW(f3 DECIMAL(5, 2), f2 INT), f3 STRING))");
         sql(
-                "INSERT INTO T VALUES (1, ROW(1000000000001, ROW(100.01, 101), 'cat')), (3, ROW(3000000000001, ROW(300.01, 301), 'dog'))");
+                "INSERT INTO T VALUES "
+                        + "(1, ROW(1000000000001, ROW(100.01, 101), 'cat')), "
+                        + "(3, ROW(3000000000001, ROW(300.01, CAST(NULL AS INT)), 'dog'))");
         assertThat(sql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(
                         Row.of(
@@ -1122,7 +1125,24 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 3,
                                 Row.of(
                                         3000000000001L,
-                                        Row.of(BigDecimal.valueOf(30001, 2), 301),
+                                        Row.of(BigDecimal.valueOf(30001, 2), null),
                                         "dog")));
+
+        sql(
+                "ALTER TABLE T MODIFY (v ROW(f1 BIGINT, f2 ROW(f3 DECIMAL(5, 2), f1 STRING, f2 INT), f3 STRING))");
+        sql(
+                "INSERT INTO T VALUES "
+                        + "(1, ROW(1000000000002, ROW(100.02, 'APPLE', 102), 'cat')), "
+                        + "(4, ROW(4000000000002, ROW(400.02, 'LEMON', 402), 'tiger'))");
+        assertThat(sql("SELECT k, v.f2.f1, v.f3 FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "APPLE", "cat"),
+                        Row.of(2, null, null),
+                        Row.of(3, null, "dog"),
+                        Row.of(4, "LEMON", "tiger"));
+
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY (v ROW(f1 BIGINT, f2 INT, f3 STRING))"))
+                .hasRootCauseMessage(
+                        "Column v.f2 can only be updated to row type, and cannot be updated to INT type");
     }
 }

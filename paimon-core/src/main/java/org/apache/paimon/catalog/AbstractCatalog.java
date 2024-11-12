@@ -46,6 +46,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -536,7 +537,7 @@ public abstract class AbstractCatalog implements Catalog {
         for (SchemaChange change : changes) {
             if (change instanceof SchemaChange.AddColumn) {
                 SchemaChange.AddColumn addColumn = (SchemaChange.AddColumn) change;
-                fieldNames.addAll(addColumn.fieldNames());
+                fieldNames.addAll(Arrays.asList(addColumn.fieldNames()));
             } else if (change instanceof SchemaChange.RenameColumn) {
                 SchemaChange.RenameColumn rename = (SchemaChange.RenameColumn) change;
                 fieldNames.add(rename.newName());

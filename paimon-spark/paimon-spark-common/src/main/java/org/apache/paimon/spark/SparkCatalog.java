@@ -373,20 +373,20 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
             TableChange.AddColumn add = (TableChange.AddColumn) change;
             SchemaChange.Move move = getMove(add.position(), add.fieldNames());
             return SchemaChange.addColumn(
-                    Arrays.asList(add.fieldNames()),
+                    add.fieldNames(),
                     toPaimonType(add.dataType()).copy(add.isNullable()),
                     add.comment(),
                     move);
         } else if (change instanceof TableChange.RenameColumn) {
             TableChange.RenameColumn rename = (TableChange.RenameColumn) change;
-            return SchemaChange.renameColumn(Arrays.asList(rename.fieldNames()), rename.newName());
+            return SchemaChange.renameColumn(rename.fieldNames(), rename.newName());
         } else if (change instanceof TableChange.DeleteColumn) {
             TableChange.DeleteColumn delete = (TableChange.DeleteColumn) change;
-            return SchemaChange.dropColumn(Arrays.asList(delete.fieldNames()));
+            return SchemaChange.dropColumn(delete.fieldNames());
         } else if (change instanceof TableChange.UpdateColumnType) {
             TableChange.UpdateColumnType update = (TableChange.UpdateColumnType) change;
             return SchemaChange.updateColumnType(
-                    Arrays.asList(update.fieldNames()), toPaimonType(update.newDataType()), true);
+                    update.fieldNames(), toPaimonType(update.newDataType()), true);
         } else if (change instanceof TableChange.UpdateColumnNullability) {
             TableChange.UpdateColumnNullability update =
                     (TableChange.UpdateColumnNullability) change;
