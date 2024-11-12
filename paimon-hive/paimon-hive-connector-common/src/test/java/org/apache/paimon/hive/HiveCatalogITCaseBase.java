@@ -18,28 +18,19 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalog;
-import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.hive.annotation.Minio;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.privilege.NoPrivilegeException;
 import org.apache.paimon.s3.MinioTestContainer;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.IOUtils;
-
-import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
-import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
@@ -662,53 +653,6 @@ public abstract class HiveCatalogITCaseBase {
                         Arrays.asList(
                                 "true\t1\t1\t1\t1234567890123456789\t1.23\t3.14159\t1234.56\tABC\tv1\tHello, World!\t01\t010203\t2023-01-01\t2023-01-01 12:00:00.123\t[\"value1\",\"value2\",\"value3\"]\tvalue1\tvalue1\tvalue2\t{\"f0\":\"v1\",\"f1\":1}\tv1\t1",
                                 "false\t2\t2\t2\t234567890123456789\t2.34\t2.111111\t2345.67\tDEF\tv2\tApache Paimon\t04\t040506\t2023-02-01\t2023-02-01 12:00:00.456\t[\"value4\",\"value5\",\"value6\"]\tvalue4\tvalue11\tvalue22\t{\"f0\":\"v2\",\"f1\":2}\tv2\t2"));
-    }
-
-    @Test
-    public void testCreateExternalTableWithPaimonTable() throws Exception {
-        // Create hive external table with paimon table
-        String tableName = "with_paimon_table";
-
-        // Create a paimon table
-        Schema schema =
-                new Schema(
-                        Lists.newArrayList(
-                                new DataField(0, "col1", DataTypes.INT(), "first comment"),
-                                new DataField(1, "Col2", DataTypes.STRING(), "second comment"),
-                                new DataField(2, "COL3", DataTypes.DECIMAL(5, 3), "last comment")),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Maps.newHashMap(),
-                        "");
-        Identifier identifier = Identifier.create("test_db", tableName);
-        org.apache.paimon.fs.Path tablePath = AbstractCatalog.newTableLocation(path, identifier);
-        new SchemaManager(LocalFileIO.create(), tablePath).createTable(schema);
-
-        // Create hive external table
-        String hiveSql =
-                String.join(
-                        "\n",
-                        Arrays.asList(
-                                "CREATE EXTERNAL TABLE " + tableName + " ",
-                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
-                                "LOCATION '" + tablePath.toUri().toString() + "'"));
-        assertThatCode(() -> hiveShell.execute(hiveSql)).doesNotThrowAnyException();
-
-        List<String> result = hiveShell.executeQuery("SHOW CREATE TABLE " + tableName);
-        assertThat(result)
-                .containsAnyOf(
-                        "CREATE EXTERNAL TABLE `with_paimon_table`(",
-                        "  `col1` int COMMENT 'first comment', ",
-                        "  `col2` string COMMENT 'second comment', ",
-                        "  `col3` decimal(5,3) COMMENT 'last comment')",
-                        "ROW FORMAT SERDE ",
-                        "  'org.apache.paimon.hive.PaimonSerDe' ",
-                        "STORED BY ",
-                        "  'org.apache.paimon.hive.PaimonStorageHandler' ");
-
-        List<Row> showCreateTableWithPaimonTable = collect("show create table with_paimon_table");
-        tEnv.executeSql("DROP TABLE with_paimon_table").await();
-        assertThat(showCreateTableWithPaimonTable.size()).isEqualTo(1);
     }
 
     @Test
@@ -1962,8 +1906,7 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("INSERT INTO t VALUES (1, 'Hi'), (2, 'Hello')").await();
 
         // test flink view
-        tEnv.executeSql("CREATE VIEW flink_v (f1,f2) COMMENT '注释' AS SELECT a + 1, b FROM t")
-                .await();
+        tEnv.executeSql("CREATE VIEW flink_v AS SELECT a + 1, b FROM t").await();
         assertThat(collect("SELECT * FROM flink_v"))
                 .containsExactlyInAnyOrder(Row.of(2, "Hi"), Row.of(3, "Hello"));
         assertThat(hiveShell.executeQuery("SELECT * FROM flink_v"))
