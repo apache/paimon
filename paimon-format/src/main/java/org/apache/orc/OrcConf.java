@@ -305,21 +305,6 @@ public enum OrcConf {
                     + "must have the filter\n"
                     + "reapplied to avoid using unset values in the unselected rows.\n"
                     + "If unsure please leave this as false."),
-
-    READER_ONLY_ALLOW_SARG_TO_FILTER(
-            "orc.reader.sarg.to.filter",
-            "orc.reader.sarg.to.filter",
-            false,
-            "A boolean flag to determine if a SArg is allowed to become a filter, only for reader."),
-    READER_ONLY_USE_SELECTED(
-            "orc.reader.filter.use.selected",
-            "orc.reader.filter.use.selected",
-            false,
-            "A boolean flag to determine if the selected vector is supported by\n"
-                    + "the reading application, only for reader.  If false, the output of the ORC reader "
-                    + "must have the filter\n"
-                    + "reapplied to avoid using unset values in the unselected rows.\n"
-                    + "If unsure please leave this as false."),
     ALLOW_PLUGIN_FILTER(
             "orc.filter.plugin",
             "orc.filter.plugin",

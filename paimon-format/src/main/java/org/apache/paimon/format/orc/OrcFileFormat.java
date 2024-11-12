@@ -56,6 +56,7 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.types.DataTypeChecks.getFieldTypes;
 
 /** Orc {@link FileFormat}. */
@@ -69,6 +70,7 @@ public class OrcFileFormat extends FileFormat {
     private final org.apache.hadoop.conf.Configuration writerConf;
     private final int readBatchSize;
     private final int writeBatchSize;
+    private final boolean deletionVectorsEnabled;
 
     public OrcFileFormat(FormatContext formatContext) {
         super(IDENTIFIER);
@@ -79,6 +81,7 @@ public class OrcFileFormat extends FileFormat {
         this.orcProperties.forEach((k, v) -> writerConf.set(k.toString(), v.toString()));
         this.readBatchSize = formatContext.readBatchSize();
         this.writeBatchSize = formatContext.writeBatchSize();
+        this.deletionVectorsEnabled = formatContext.options().get(DELETION_VECTORS_ENABLED);
     }
 
     @VisibleForTesting
@@ -113,7 +116,8 @@ public class OrcFileFormat extends FileFormat {
                 readerConf,
                 (RowType) refineDataType(projectedRowType),
                 orcPredicates,
-                readBatchSize);
+                readBatchSize,
+                deletionVectorsEnabled);
     }
 
     @Override
