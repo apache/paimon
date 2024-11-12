@@ -52,7 +52,7 @@ public class CacheManagerBenchmark {
         CacheKey key2 = CacheKey.forPageIndex(new RandomAccessFile(file2, "r"), 0, 0);
 
         for (Cache.CacheType cacheType : Cache.CacheType.values()) {
-            CacheManager cacheManager = new CacheManager(cacheType, MemorySize.ofBytes(10));
+            CacheManager cacheManager = new CacheManager(cacheType, MemorySize.ofBytes(10), 0.1);
             benchmark.addCase(
                     String.format("cache-%s", cacheType.toString()),
                     5,

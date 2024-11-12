@@ -83,12 +83,18 @@ public interface SchemaChange extends Serializable {
     }
 
     static SchemaChange updateColumnType(String fieldName, DataType newDataType) {
-        return new UpdateColumnType(fieldName, newDataType, false);
+        return new UpdateColumnType(Collections.singletonList(fieldName), newDataType, false);
     }
 
     static SchemaChange updateColumnType(
             String fieldName, DataType newDataType, boolean keepNullability) {
-        return new UpdateColumnType(fieldName, newDataType, keepNullability);
+        return new UpdateColumnType(
+                Collections.singletonList(fieldName), newDataType, keepNullability);
+    }
+
+    static SchemaChange updateColumnType(
+            List<String> fieldNames, DataType newDataType, boolean keepNullability) {
+        return new UpdateColumnType(fieldNames, newDataType, keepNullability);
     }
 
     static SchemaChange updateColumnNullability(String fieldName, boolean newNullability) {
@@ -357,19 +363,20 @@ public interface SchemaChange extends Serializable {
 
         private static final long serialVersionUID = 1L;
 
-        private final String fieldName;
+        private final List<String> fieldNames;
         private final DataType newDataType;
         // If true, do not change the target field nullability
         private final boolean keepNullability;
 
-        private UpdateColumnType(String fieldName, DataType newDataType, boolean keepNullability) {
-            this.fieldName = fieldName;
+        private UpdateColumnType(
+                List<String> fieldNames, DataType newDataType, boolean keepNullability) {
+            this.fieldNames = fieldNames;
             this.newDataType = newDataType;
             this.keepNullability = keepNullability;
         }
 
-        public String fieldName() {
-            return fieldName;
+        public List<String> fieldNames() {
+            return fieldNames;
         }
 
         public DataType newDataType() {
@@ -389,14 +396,14 @@ public interface SchemaChange extends Serializable {
                 return false;
             }
             UpdateColumnType that = (UpdateColumnType) o;
-            return Objects.equals(fieldName, that.fieldName)
+            return Objects.equals(fieldNames, that.fieldNames)
                     && newDataType.equals(that.newDataType);
         }
 
         @Override
         public int hashCode() {
             int result = Objects.hash(newDataType);
-            result = 31 * result + Objects.hashCode(fieldName);
+            result = 31 * result + Objects.hashCode(fieldNames);
             return result;
         }
     }

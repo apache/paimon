@@ -675,8 +675,8 @@ public abstract class CatalogTestBase {
                                         false))
                 .satisfies(
                         anyCauseMatches(
-                                IllegalArgumentException.class,
-                                "Cannot update partition column [dt] type in the table"));
+                                UnsupportedOperationException.class,
+                                "Cannot update partition column: [dt]"));
     }
 
     @Test

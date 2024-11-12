@@ -168,6 +168,11 @@ public class InternalRowSerializer extends AbstractRowDataSerializer<InternalRow
     }
 
     @Override
+    public InternalRow createReuseInstance() {
+        return binarySerializer.createReuseInstance();
+    }
+
+    @Override
     public int serializeToPages(InternalRow row, AbstractPagedOutputView target)
             throws IOException {
         return binarySerializer.serializeToPages(toBinaryRow(row), target);

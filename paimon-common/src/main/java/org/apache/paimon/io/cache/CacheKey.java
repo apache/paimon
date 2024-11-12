@@ -24,13 +24,16 @@ import java.util.Objects;
 /** Key for cache manager. */
 public interface CacheKey {
 
-    static CacheKey forPosition(RandomAccessFile file, long position, int length) {
-        return new PositionCacheKey(file, position, length);
+    static CacheKey forPosition(RandomAccessFile file, long position, int length, boolean isIndex) {
+        return new PositionCacheKey(file, position, length, isIndex);
     }
 
     static CacheKey forPageIndex(RandomAccessFile file, int pageSize, int pageIndex) {
-        return new PageIndexCacheKey(file, pageSize, pageIndex);
+        return new PageIndexCacheKey(file, pageSize, pageIndex, false);
     }
+
+    /** @return Whether this cache key is for index cache. */
+    boolean isIndex();
 
     /** Key for file position and length. */
     class PositionCacheKey implements CacheKey {
@@ -38,11 +41,14 @@ public interface CacheKey {
         private final RandomAccessFile file;
         private final long position;
         private final int length;
+        private final boolean isIndex;
 
-        private PositionCacheKey(RandomAccessFile file, long position, int length) {
+        private PositionCacheKey(
+                RandomAccessFile file, long position, int length, boolean isIndex) {
             this.file = file;
             this.position = position;
             this.length = length;
+            this.isIndex = isIndex;
         }
 
         @Override
@@ -56,12 +62,18 @@ public interface CacheKey {
             PositionCacheKey that = (PositionCacheKey) o;
             return position == that.position
                     && length == that.length
+                    && isIndex == that.isIndex
                     && Objects.equals(file, that.file);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(file, position, length);
+            return Objects.hash(file, position, length, isIndex);
+        }
+
+        @Override
+        public boolean isIndex() {
+            return isIndex;
         }
     }
 
@@ -71,15 +83,23 @@ public interface CacheKey {
         private final RandomAccessFile file;
         private final int pageSize;
         private final int pageIndex;
+        private final boolean isIndex;
 
-        private PageIndexCacheKey(RandomAccessFile file, int pageSize, int pageIndex) {
+        private PageIndexCacheKey(
+                RandomAccessFile file, int pageSize, int pageIndex, boolean isIndex) {
             this.file = file;
             this.pageSize = pageSize;
             this.pageIndex = pageIndex;
+            this.isIndex = isIndex;
         }
 
         public int pageIndex() {
             return pageIndex;
+        }
+
+        @Override
+        public boolean isIndex() {
+            return isIndex;
         }
 
         @Override
@@ -93,12 +113,13 @@ public interface CacheKey {
             PageIndexCacheKey that = (PageIndexCacheKey) o;
             return pageSize == that.pageSize
                     && pageIndex == that.pageIndex
+                    && isIndex == that.isIndex
                     && Objects.equals(file, that.file);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(file, pageSize, pageIndex);
+            return Objects.hash(file, pageSize, pageIndex, isIndex);
         }
     }
 }
