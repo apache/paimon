@@ -18,7 +18,12 @@
 
 package org.apache.paimon.benchmark.metric.cpu;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.Reader;
 import java.math.BigInteger;
 import java.nio.charset.Charset;
 import java.util.HashMap;

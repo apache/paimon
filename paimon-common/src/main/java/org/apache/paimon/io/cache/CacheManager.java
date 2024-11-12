@@ -21,6 +21,10 @@ package org.apache.paimon.io.cache;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.utils.Preconditions;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 
@@ -29,31 +33,63 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 /** Cache manager to cache bytes to paged {@link MemorySegment}s. */
 public class CacheManager {
 
+    private static final Logger LOG = LoggerFactory.getLogger(CacheManager.class);
+
     /**
      * Refreshing the cache comes with some costs, so not every time we visit the CacheManager, but
      * every 10 visits, refresh the LRU strategy.
      */
     public static final int REFRESH_COUNT = 10;
 
-    private final Cache cache;
+    private final Cache dataCache;
+    private final Cache indexCache;
 
     private int fileReadCount;
 
+    @VisibleForTesting
     public CacheManager(MemorySize maxMemorySize) {
-        this(Cache.CacheType.GUAVA, maxMemorySize);
+        this(Cache.CacheType.GUAVA, maxMemorySize, 0);
     }
 
-    public CacheManager(Cache.CacheType cacheType, MemorySize maxMemorySize) {
-        this.cache = CacheBuilder.newBuilder(cacheType).maximumWeight(maxMemorySize).build();
+    public CacheManager(MemorySize dataMaxMemorySize, double highPriorityPoolRatio) {
+        this(Cache.CacheType.GUAVA, dataMaxMemorySize, highPriorityPoolRatio);
+    }
+
+    public CacheManager(
+            Cache.CacheType cacheType, MemorySize maxMemorySize, double highPriorityPoolRatio) {
+        Preconditions.checkArgument(
+                highPriorityPoolRatio >= 0 && highPriorityPoolRatio < 1,
+                "The high priority pool ratio should in the range [0, 1).");
+        MemorySize indexCacheSize =
+                MemorySize.ofBytes((long) (maxMemorySize.getBytes() * highPriorityPoolRatio));
+        MemorySize dataCacheSize =
+                MemorySize.ofBytes((long) (maxMemorySize.getBytes() * (1 - highPriorityPoolRatio)));
+        this.dataCache = CacheBuilder.newBuilder(cacheType).maximumWeight(dataCacheSize).build();
+        if (highPriorityPoolRatio == 0) {
+            this.indexCache = dataCache;
+        } else {
+            this.indexCache =
+                    CacheBuilder.newBuilder(cacheType).maximumWeight(indexCacheSize).build();
+        }
         this.fileReadCount = 0;
+        LOG.info(
+                "Initialize cache manager with data cache of {} and index cache of {}.",
+                dataCacheSize,
+                indexCacheSize);
     }
 
     @VisibleForTesting
-    public Cache cache() {
-        return cache;
+    public Cache dataCache() {
+        return dataCache;
+    }
+
+    @VisibleForTesting
+    public Cache indexCache() {
+        return indexCache;
     }
 
     public MemorySegment getPage(CacheKey key, CacheReader reader, CacheCallback callback) {
+        Cache cache = key.isIndex() ? indexCache : dataCache;
         Cache.CacheValue value =
                 cache.get(
                         key,
@@ -70,7 +106,11 @@ public class CacheManager {
     }
 
     public void invalidPage(CacheKey key) {
-        cache.invalidate(key);
+        if (key.isIndex()) {
+            indexCache.invalidate(key);
+        } else {
+            dataCache.invalidate(key);
+        }
     }
 
     public int fileReadCount() {

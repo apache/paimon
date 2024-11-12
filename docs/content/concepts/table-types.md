@@ -33,7 +33,8 @@ Paimon supports table types:
 3. view: metastore required, views in SQL are a kind of virtual table
 4. format-table: file format table refers to a directory that contains multiple files of the same format, where
    operations on this table allow for reading or writing to these files, compatible with Hive tables
-5. materialized-table: aimed at simplifying both batch and stream data pipelines, providing a consistent development
+5. object table: provides metadata indexes for unstructured data objects in the specified Object Storage storage directory.
+6. materialized-table: aimed at simplifying both batch and stream data pipelines, providing a consistent development
    experience, see [Flink Materialized Table](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/materialized-table/overview/)
 
 ## Table with PK
@@ -163,6 +164,71 @@ CREATE TABLE my_parquet_table (
     a INT,
     b STRING
 ) USING parquet
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
+## Object Table
+
+Object Table provides metadata indexes for unstructured data objects in the specified Object Storage storage directory.
+Object tables allow users to analyze unstructured data in Object Storage:
+
+1. Use Python API to manipulate these unstructured data, such as converting images to PDF format.
+2. Model functions can also be used to perform inference, and then the results of these operations can be concatenated
+   with other structured data in the Catalog.
+
+The object table is managed by Catalog and can also have access permissions and the ability to manage blood relations.
+
+{{< tabs "object-table" >}}
+
+{{< tab "Flink-SQL" >}}
+
+```sql
+-- Create Object Table
+
+CREATE TABLE `my_object_table` WITH (
+  'type' = 'object-table',
+  'object-location' = 'oss://my_bucket/my_location' 
+);
+
+-- Refresh Object Table
+
+CALL sys.refresh_object_table('mydb.my_object_table');
+
+-- Query Object Table
+
+SELECT * FROM `my_object_table`;
+
+-- Query Object Table with Time Travel
+
+SELECT * FROM `my_object_table` /*+ OPTIONS('scan.snapshot-id' = '1') */;
+```
+
+{{< /tab >}}
+
+{{< tab "Spark-SQL" >}}
+
+```sql
+-- Create Object Table
+
+CREATE TABLE `my_object_table` TBLPROPERTIES (
+  'type' = 'object-table',
+  'object-location' = 'oss://my_bucket/my_location' 
+);
+
+-- Refresh Object Table
+
+CALL sys.refresh_object_table('mydb.my_object_table');
+
+-- Query Object Table
+
+SELECT * FROM `my_object_table`;
+
+-- Query Object Table with Time Travel
+
+SELECT * FROM `my_object_table` VERSION AS OF 1;
 ```
 
 {{< /tab >}}

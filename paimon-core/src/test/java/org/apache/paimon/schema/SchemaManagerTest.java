@@ -663,4 +663,53 @@ public class SchemaManagerTest {
         assertThatCode(() -> manager.commitChanges(newNameAlreadyExistRenameColumn))
                 .hasMessageContaining("Column v.f2.f100 already exists");
     }
+
+    @Test
+    public void testUpdateNestedColumnType() throws Exception {
+        RowType innerType =
+                RowType.of(
+                        new DataField(4, "f1", DataTypes.INT()),
+                        new DataField(5, "f2", DataTypes.BIGINT()));
+        RowType middleType =
+                RowType.of(
+                        new DataField(2, "f1", DataTypes.STRING()),
+                        new DataField(3, "f2", innerType));
+        RowType outerType =
+                RowType.of(
+                        new DataField(0, "k", DataTypes.INT()), new DataField(1, "v", middleType));
+
+        Schema schema =
+                new Schema(
+                        outerType.getFields(),
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        manager.createTable(schema);
+
+        SchemaChange updateColumnType =
+                SchemaChange.updateColumnType(
+                        Arrays.asList("v", "f2", "f1"), DataTypes.BIGINT(), true);
+        manager.commitChanges(updateColumnType);
+
+        innerType =
+                RowType.of(
+                        new DataField(4, "f1", DataTypes.BIGINT()),
+                        new DataField(5, "f2", DataTypes.BIGINT()));
+        middleType =
+                RowType.of(
+                        new DataField(2, "f1", DataTypes.STRING()),
+                        new DataField(3, "f2", innerType));
+        outerType =
+                RowType.of(
+                        new DataField(0, "k", DataTypes.INT()), new DataField(1, "v", middleType));
+        assertThat(manager.latest().get().logicalRowType()).isEqualTo(outerType);
+
+        SchemaChange middleColumnNotExistUpdateColumnType =
+                SchemaChange.updateColumnType(
+                        Arrays.asList("v", "invalid", "f1"), DataTypes.BIGINT(), true);
+        assertThatCode(() -> manager.commitChanges(middleColumnNotExistUpdateColumnType))
+                .hasMessageContaining("Column v.invalid does not exist");
+    }
 }

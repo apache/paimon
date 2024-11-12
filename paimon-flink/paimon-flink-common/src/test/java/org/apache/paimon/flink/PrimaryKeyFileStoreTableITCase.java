@@ -72,7 +72,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         tableDefaultProperties = new HashMap<>();
         if (random.nextBoolean()) {
-            tableDefaultProperties.put(CoreOptions.LOCAL_MERGE_BUFFER_SIZE.key(), "256 kb");
+            tableDefaultProperties.put(CoreOptions.LOCAL_MERGE_BUFFER_SIZE.key(), "5m");
         }
     }
 
