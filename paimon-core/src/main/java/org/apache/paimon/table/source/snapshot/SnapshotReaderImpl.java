@@ -277,13 +277,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                             Math.abs(file.hashCode() % numberOfParallelSubtasks)
                                     == indexOfThisSubtask);
         } else {
-            List<Integer> buckets = new ArrayList<>();
-            for (int bucket = 0; bucket < numberOfParallelSubtasks; bucket++) {
-                if (bucket % numberOfParallelSubtasks == indexOfThisSubtask) {
-                    buckets.add(bucket);
-                }
-            }
-            withBuckets(buckets);
+            withBucketFilter(bucket -> bucket % numberOfParallelSubtasks == indexOfThisSubtask);
         }
         return this;
     }
