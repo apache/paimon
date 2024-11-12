@@ -1412,6 +1412,12 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to enable asynchronous IO writing when writing files.");
 
+    public static final ConfigOption<String> OBJECT_LOCATION =
+            key("object-location")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("The object location for object table.");
+
     @ExcludeFromDocumentation("Only used internally to support materialized table")
     public static final ConfigOption<String> MATERIALIZED_TABLE_DEFINITION_QUERY =
             key("materialized-table.definition-query")
@@ -1523,6 +1529,10 @@ public class CoreOptions implements Serializable {
         return new Path(options.get(PATH));
     }
 
+    public TableType type() {
+        return options.get(TYPE);
+    }
+
     public String formatType() {
         return normalizeFileFormat(options.get(FILE_FORMAT));
     }
@@ -1570,6 +1580,11 @@ public class CoreOptions implements Serializable {
     public static FileFormat createFileFormat(Options options, ConfigOption<String> formatOption) {
         String formatIdentifier = normalizeFileFormat(options.get(formatOption));
         return FileFormat.fromIdentifier(formatIdentifier, options);
+    }
+
+    public String objectLocation() {
+        checkArgument(type() == TableType.OBJECT_TABLE, "Only object table has object location!");
+        return options.get(OBJECT_LOCATION);
     }
 
     public Map<Integer, String> fileCompressionPerLevel() {

@@ -79,3 +79,4 @@ org.apache.paimon.flink.procedure.FastForwardProcedure
 org.apache.paimon.flink.procedure.MarkPartitionDoneProcedure
 org.apache.paimon.flink.procedure.CloneProcedure
 org.apache.paimon.flink.procedure.CompactManifestProcedure
+org.apache.paimon.flink.procedure.RefreshObjectTableProcedure
