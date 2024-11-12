@@ -242,7 +242,8 @@ public class SchemaManager implements Serializable {
 
     /** Update {@link SchemaChange}s. */
     public TableSchema commitChanges(List<SchemaChange> changes)
-            throws Catalog.TableNotExistException, Catalog.ColumnAlreadyExistException,
+            throws Catalog.TableNotExistException,
+                    Catalog.ColumnAlreadyExistException,
                     Catalog.ColumnNotExistException {
         SnapshotManager snapshotManager = new SnapshotManager(fileIO, tableRoot, branch);
         boolean hasSnapshots = (snapshotManager.latestSnapshotId() != null);
@@ -371,7 +372,8 @@ public class SchemaManager implements Serializable {
                                             field,
                                             update.newDataType(),
                                             update.keepNullability(),
-                                            highestFieldId));
+                                            highestFieldId,
+                                            String.join(".", update.fieldNames())));
                 } else if (change instanceof UpdateColumnNullability) {
                     UpdateColumnNullability update = (UpdateColumnNullability) change;
                     if (update.fieldNames().length == 1
@@ -592,7 +594,8 @@ public class SchemaManager implements Serializable {
             DataField field,
             DataType targetType,
             boolean keepNullability,
-            AtomicInteger highestFieldId) {
+            AtomicInteger highestFieldId,
+            String fullFieldName) {
         if (keepNullability) {
             targetType = targetType.copy(field.type().isNullable());
         }
@@ -601,8 +604,11 @@ public class SchemaManager implements Serializable {
         if (oldType.getTypeRoot() == DataTypeRoot.ROW) {
             checkState(
                     targetType.getTypeRoot() == DataTypeRoot.ROW,
-                    "Row type can only be updated to row type, and cannot be updated to "
-                            + targetType);
+                    "Column "
+                            + fullFieldName
+                            + " can only be updated to row type, and cannot be updated to "
+                            + targetType
+                            + " type");
             RowType oldRowType = (RowType) oldType;
             RowType targetRowType = (RowType) targetType;
             Map<String, DataField> oldFields = new HashMap<>();
@@ -617,7 +623,8 @@ public class SchemaManager implements Serializable {
                                     oldFields.get(targetField.name()),
                                     targetField.type(),
                                     keepNullability,
-                                    highestFieldId));
+                                    highestFieldId,
+                                    fullFieldName + "." + targetField.name()));
                 } else {
                     newFields.add(targetField.newId(highestFieldId.incrementAndGet()));
                 }

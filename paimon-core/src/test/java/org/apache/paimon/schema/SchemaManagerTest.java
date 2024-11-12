@@ -762,5 +762,16 @@ public class SchemaManagerTest {
                 RowType.of(
                         new DataField(0, "k", DataTypes.INT()), new DataField(1, "v", middleType));
         assertThat(manager.latest().get().logicalRowType()).isEqualTo(outerType);
+
+        SchemaChange invalidUpdate =
+                SchemaChange.updateColumnType(
+                        Collections.singletonList("v"),
+                        RowType.of(
+                                new DataType[] {DataTypes.BIGINT(), DataTypes.INT()},
+                                new String[] {"f1", "f2"}),
+                        true);
+        assertThatCode(() -> manager.commitChanges(invalidUpdate))
+                .hasMessageContaining(
+                        "Column v.f2 can only be updated to row type, and cannot be updated to INT type");
     }
 }
