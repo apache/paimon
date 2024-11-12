@@ -103,6 +103,10 @@ public class DataTypes {
         return new LocalZonedTimestampType(precision);
     }
 
+    public static LocalZonedTimestampType TIMESTAMP_LTZ_MILLIS() {
+        return new LocalZonedTimestampType(3);
+    }
+
     public static DecimalType DECIMAL(int precision, int scale) {
         return new DecimalType(precision, scale);
     }

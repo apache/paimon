@@ -38,8 +38,10 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
@@ -48,6 +50,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,7 +59,6 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.CoreOptions.createCommitUser;
-import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.options.CatalogOptions.ALLOW_UPPER_CASE;
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
@@ -284,11 +286,33 @@ public abstract class AbstractCatalog implements Catalog {
 
         copyTableDefaultOptions(schema.options());
 
-        if (Options.fromMap(schema.options()).get(TYPE) == FORMAT_TABLE) {
-            createFormatTable(identifier, schema);
-        } else {
-            createTableImpl(identifier, schema);
+        switch (Options.fromMap(schema.options()).get(TYPE)) {
+            case TABLE:
+            case MATERIALIZED_TABLE:
+                createTableImpl(identifier, schema);
+                break;
+            case OBJECT_TABLE:
+                createObjectTable(identifier, schema);
+                break;
+            case FORMAT_TABLE:
+                createFormatTable(identifier, schema);
+                break;
         }
+    }
+
+    private void createObjectTable(Identifier identifier, Schema schema) {
+        RowType rowType = schema.rowType();
+        checkArgument(
+                rowType.getFields().isEmpty()
+                        || new HashSet<>(ObjectTable.SCHEMA.getFields())
+                                .containsAll(rowType.getFields()),
+                "Schema of Object Table can be empty or %s, but is %s.",
+                ObjectTable.SCHEMA,
+                rowType);
+        checkArgument(
+                schema.options().containsKey(CoreOptions.OBJECT_LOCATION.key()),
+                "Object table should have object-location option.");
+        createTableImpl(identifier, schema.copy(ObjectTable.SCHEMA));
     }
 
     protected abstract void createTableImpl(Identifier identifier, Schema schema);

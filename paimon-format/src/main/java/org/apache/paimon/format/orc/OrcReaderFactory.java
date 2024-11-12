@@ -62,14 +62,11 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public class OrcReaderFactory implements FormatReaderFactory {
 
     protected final Configuration hadoopConfig;
-
     protected final TypeDescription schema;
-
-    private final RowType tableType;
-
+    protected final RowType tableType;
     protected final List<OrcFilters.Predicate> conjunctPredicates;
-
     protected final int batchSize;
+    protected final boolean deletionVectorsEnabled;
 
     /**
      * @param hadoopConfig the hadoop config for orc reader.
@@ -80,12 +77,14 @@ public class OrcReaderFactory implements FormatReaderFactory {
             final org.apache.hadoop.conf.Configuration hadoopConfig,
             final RowType readType,
             final List<OrcFilters.Predicate> conjunctPredicates,
-            final int batchSize) {
+            final int batchSize,
+            final boolean deletionVectorsEnabled) {
         this.hadoopConfig = checkNotNull(hadoopConfig);
         this.schema = toOrcType(readType);
         this.tableType = readType;
         this.conjunctPredicates = checkNotNull(conjunctPredicates);
         this.batchSize = batchSize;
+        this.deletionVectorsEnabled = deletionVectorsEnabled;
     }
 
     // ------------------------------------------------------------------------
@@ -108,7 +107,8 @@ public class OrcReaderFactory implements FormatReaderFactory {
                         context.filePath(),
                         0,
                         context.fileSize(),
-                        context.fileIndex());
+                        context.fileIndex(),
+                        deletionVectorsEnabled);
         return new OrcVectorizedReader(orcReader, poolOfBatches);
     }
 
@@ -258,7 +258,8 @@ public class OrcReaderFactory implements FormatReaderFactory {
             org.apache.paimon.fs.Path path,
             long splitStart,
             long splitLength,
-            FileIndexResult fileIndexResult)
+            FileIndexResult fileIndexResult,
+            boolean deletionVectorsEnabled)
             throws IOException {
         org.apache.orc.Reader orcReader = createReader(conf, fileIO, path, fileIndexResult);
         try {
@@ -275,12 +276,11 @@ public class OrcReaderFactory implements FormatReaderFactory {
                             .skipCorruptRecords(OrcConf.SKIP_CORRUPT_DATA.getBoolean(conf))
                             .tolerateMissingSchema(
                                     OrcConf.TOLERATE_MISSING_SCHEMA.getBoolean(conf));
-            if (!conjunctPredicates.isEmpty()) {
-                // TODO fix it , if open this option,future deletion vectors would not work,
-                //  cased by getRowNumber would be changed .
-                options.useSelected(OrcConf.READER_ONLY_USE_SELECTED.getBoolean(conf));
-                options.allowSARGToFilter(
-                        OrcConf.READER_ONLY_ALLOW_SARG_TO_FILTER.getBoolean(conf));
+            if (!conjunctPredicates.isEmpty() && !deletionVectorsEnabled) {
+                // deletion vectors can not enable this feature, cased by getRowNumber would be
+                // changed.
+                options.useSelected(OrcConf.READER_USE_SELECTED.getBoolean(conf));
+                options.allowSARGToFilter(OrcConf.ALLOW_SARG_TO_FILTER.getBoolean(conf));
             }
             // configure filters
             if (!conjunctPredicates.isEmpty()) {

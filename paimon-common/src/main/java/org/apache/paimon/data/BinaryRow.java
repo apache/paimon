@@ -21,7 +21,11 @@ package org.apache.paimon.data;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.TimestampType;
 
 import javax.annotation.Nullable;
 
@@ -441,5 +445,33 @@ public final class BinaryRow extends BinarySection implements InternalRow, DataS
         }
         writer.complete();
         return row;
+    }
+
+    /**
+     * If it is a fixed-length field, we can call this BinaryRowData's setXX method for in-place
+     * updates. If it is variable-length field, can't use this method, because the underlying data
+     * is stored continuously.
+     */
+    public static boolean isInFixedLengthPart(DataType type) {
+        switch (type.getTypeRoot()) {
+            case BOOLEAN:
+            case TINYINT:
+            case SMALLINT:
+            case INTEGER:
+            case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
+            case BIGINT:
+            case FLOAT:
+            case DOUBLE:
+                return true;
+            case DECIMAL:
+                return Decimal.isCompact(((DecimalType) type).getPrecision());
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                return Timestamp.isCompact(((TimestampType) type).getPrecision());
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return Timestamp.isCompact(((LocalZonedTimestampType) type).getPrecision());
+            default:
+                return false;
+        }
     }
 }

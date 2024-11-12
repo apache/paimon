@@ -110,7 +110,8 @@ public class SortLookupStoreFactoryTest {
         assertThat(reader.lookup(toBytes(VALUE_COUNT + 1000))).isNull();
 
         reader.close();
-        assertThat(cacheManager.cache().asMap()).isEmpty();
+        assertThat(cacheManager.dataCache().asMap()).isEmpty();
+        assertThat(cacheManager.indexCache().asMap()).isEmpty();
     }
 
     @TestTemplate

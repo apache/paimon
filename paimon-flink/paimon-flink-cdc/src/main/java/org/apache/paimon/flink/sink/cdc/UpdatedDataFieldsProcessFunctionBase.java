@@ -100,6 +100,9 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
         } else if (schemaChange instanceof SchemaChange.UpdateColumnType) {
             SchemaChange.UpdateColumnType updateColumnType =
                     (SchemaChange.UpdateColumnType) schemaChange;
+            Preconditions.checkState(
+                    updateColumnType.fieldNames().size() == 1,
+                    "Paimon CDC currently does not support nested type schema evolution.");
             TableSchema schema =
                     schemaManager
                             .latest()
@@ -107,11 +110,11 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                                     () ->
                                             new RuntimeException(
                                                     "Table does not exist. This is unexpected."));
-            int idx = schema.fieldNames().indexOf(updateColumnType.fieldName());
+            int idx = schema.fieldNames().indexOf(updateColumnType.fieldNames().get(0));
             Preconditions.checkState(
                     idx >= 0,
                     "Field name "
-                            + updateColumnType.fieldName()
+                            + updateColumnType.fieldNames().get(0)
                             + " does not exist in table. This is unexpected.");
             DataType oldType = schema.fields().get(idx).type();
             DataType newType = updateColumnType.newDataType();
@@ -123,7 +126,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                     throw new UnsupportedOperationException(
                             String.format(
                                     "Cannot convert field %s from type %s to %s of Paimon table %s.",
-                                    updateColumnType.fieldName(),
+                                    updateColumnType.fieldNames().get(0),
                                     oldType,
                                     newType,
                                     identifier.getFullName()));

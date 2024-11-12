@@ -244,4 +244,98 @@ public interface InternalRow extends DataGetters {
         @Nullable
         Object getFieldOrNull(InternalRow row);
     }
+
+    /**
+     * Creates a {@link FieldSetter} for setting elements to a row from a row at the given position.
+     *
+     * @param fieldType the element type of the row
+     * @param fieldPos the element position of the row
+     */
+    static FieldSetter createFieldSetter(DataType fieldType, int fieldPos) {
+        final FieldSetter fieldSetter;
+        // ordered by type root definition
+        switch (fieldType.getTypeRoot()) {
+            case BOOLEAN:
+                fieldSetter = (from, to) -> to.setBoolean(fieldPos, from.getBoolean(fieldPos));
+                break;
+            case DECIMAL:
+                final int decimalPrecision = getPrecision(fieldType);
+                final int decimalScale = getScale(fieldType);
+                fieldSetter =
+                        (from, to) ->
+                                to.setDecimal(
+                                        fieldPos,
+                                        from.getDecimal(fieldPos, decimalPrecision, decimalScale),
+                                        decimalPrecision);
+                if (fieldType.isNullable() && !Decimal.isCompact(decimalPrecision)) {
+                    return (from, to) -> {
+                        if (from.isNullAt(fieldPos)) {
+                            to.setNullAt(fieldPos);
+                            to.setDecimal(fieldPos, null, decimalPrecision);
+                        } else {
+                            fieldSetter.setFieldFrom(from, to);
+                        }
+                    };
+                }
+                break;
+            case TINYINT:
+                fieldSetter = (from, to) -> to.setByte(fieldPos, from.getByte(fieldPos));
+                break;
+            case SMALLINT:
+                fieldSetter = (from, to) -> to.setShort(fieldPos, from.getShort(fieldPos));
+                break;
+            case INTEGER:
+            case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
+                fieldSetter = (from, to) -> to.setInt(fieldPos, from.getInt(fieldPos));
+                break;
+            case BIGINT:
+                fieldSetter = (from, to) -> to.setLong(fieldPos, from.getLong(fieldPos));
+                break;
+            case FLOAT:
+                fieldSetter = (from, to) -> to.setFloat(fieldPos, from.getFloat(fieldPos));
+                break;
+            case DOUBLE:
+                fieldSetter = (from, to) -> to.setDouble(fieldPos, from.getDouble(fieldPos));
+                break;
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                final int timestampPrecision = getPrecision(fieldType);
+                fieldSetter =
+                        (from, to) ->
+                                to.setTimestamp(
+                                        fieldPos,
+                                        from.getTimestamp(fieldPos, timestampPrecision),
+                                        timestampPrecision);
+                if (fieldType.isNullable() && !Timestamp.isCompact(timestampPrecision)) {
+                    return (from, to) -> {
+                        if (from.isNullAt(fieldPos)) {
+                            to.setNullAt(fieldPos);
+                            to.setTimestamp(fieldPos, null, timestampPrecision);
+                        } else {
+                            fieldSetter.setFieldFrom(from, to);
+                        }
+                    };
+                }
+                break;
+            default:
+                throw new IllegalArgumentException(
+                        String.format("type %s not support for setting", fieldType));
+        }
+        if (!fieldType.isNullable()) {
+            return fieldSetter;
+        }
+        return (from, to) -> {
+            if (from.isNullAt(fieldPos)) {
+                to.setNullAt(fieldPos);
+            } else {
+                fieldSetter.setFieldFrom(from, to);
+            }
+        };
+    }
+
+    /** Accessor for setting the field of a row during runtime. */
+    interface FieldSetter extends Serializable {
+        void setFieldFrom(DataGetters from, DataSetters to);
+    }
 }
