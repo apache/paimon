@@ -83,4 +83,68 @@ public class OrcFileFormatTest {
         dataFields.add(new DataField(index++, "decimal_type", DataTypes.DECIMAL(10, 3)));
         orc.validateDataFields(new RowType(dataFields));
     }
+
+    @Test
+    public void testCreateCost() {
+        double createConfCost = createConfigCost();
+        for (int i = 0; i < 1000; i++) {
+            create();
+        }
+        int fix_times = 10_000;
+        long start = System.nanoTime();
+        for (int i = 0; i < fix_times; i++) {
+            create();
+        }
+        double cost = ((double) (System.nanoTime() - start)) / 1000_000 / fix_times;
+        assertThat(cost * 500 < createConfCost);
+    }
+
+    @Test
+    public void testCreateCostWithRandomConfig() {
+        double createConfCost = createConfigCost();
+        for (int i = 0; i < 1000; i++) {
+            createRandomConfig();
+        }
+        int fix_times = 10_000;
+        long start = System.nanoTime();
+        for (int i = 0; i < fix_times; i++) {
+            createRandomConfig();
+        }
+        double cost = ((double) (System.nanoTime() - start)) / 1000_000 / fix_times;
+        assertThat(cost * 10 < createConfCost);
+    }
+
+    private double createConfigCost() {
+        for (int i = 0; i < 1000; i++) {
+            createConfig();
+        }
+        int fix_times = 10_000;
+        long start = System.nanoTime();
+        for (int i = 0; i < fix_times; i++) {
+            createConfig();
+        }
+        return ((double) (System.nanoTime() - start)) / 1000_000 / fix_times;
+    }
+
+    private void createConfig() {
+        org.apache.hadoop.conf.Configuration conf = new org.apache.hadoop.conf.Configuration();
+        conf.set("a", "a");
+    }
+
+    private void create() {
+        Options options = new Options();
+        options.setString("haha", "1");
+        options.setString("compress", "zlib");
+        OrcFileFormat orcFileFormat =
+                new OrcFileFormatFactory().create(new FormatContext(options, 1024));
+    }
+
+    private void createRandomConfig() {
+        Options options = new Options();
+        options.setString("haha", "1");
+        options.setString("compress", "zlib");
+        options.setString("a", Math.random() + "");
+        OrcFileFormat orcFileFormat =
+                new OrcFileFormatFactory().create(new FormatContext(options, 1024));
+    }
 }
