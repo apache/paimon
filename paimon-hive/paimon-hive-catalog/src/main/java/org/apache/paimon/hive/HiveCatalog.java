@@ -530,25 +530,13 @@ public class HiveCatalog extends AbstractCatalog {
         getDatabase(databaseName);
 
         try {
-            List<String> tables = clients.run(client -> client.getAllTables(databaseName));
-            List<String> views = new ArrayList<>();
-            for (String tableName : tables) {
-                Table table;
-                try {
-                    table = getHmsTable(Identifier.create(databaseName, tableName));
-                } catch (TableNotExistException e) {
-                    continue;
-                }
-                if (isView(table)) {
-                    views.add(tableName);
-                }
-            }
-            return views;
+            return clients.run(
+                    client -> client.getTables(databaseName, "*", TableType.VIRTUAL_VIEW));
         } catch (TException e) {
-            throw new RuntimeException("Failed to list all tables in database " + databaseName, e);
+            throw new RuntimeException("Failed to list views in database " + databaseName, e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted in call to listTables " + databaseName, e);
+            throw new RuntimeException("Interrupted in call to getTables " + databaseName, e);
         }
     }
 
@@ -570,20 +558,7 @@ public class HiveCatalog extends AbstractCatalog {
         } catch (ViewNotExistException ignored) {
         }
 
-        try {
-            String fromDB = fromView.getDatabaseName();
-            String fromViewName = fromView.getTableName();
-            Table table = clients.run(client -> client.getTable(fromDB, fromViewName));
-            table.setDbName(toView.getDatabaseName());
-            table.setTableName(toView.getTableName());
-            clients.execute(client -> client.alter_table(fromDB, fromViewName, table));
-        } catch (TException e) {
-            throw new RuntimeException("Failed to rename view " + fromView.getFullName(), e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException(
-                    "Interrupted in call to rename view " + fromView.getFullName(), e);
-        }
+        renameHiveTable(fromView, toView);
     }
 
     @Override
@@ -779,12 +754,7 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     protected void renameTableImpl(Identifier fromTable, Identifier toTable) {
         try {
-            String fromDB = fromTable.getDatabaseName();
-            String fromTableName = fromTable.getTableName();
-            Table table = clients.run(client -> client.getTable(fromDB, fromTableName));
-            table.setDbName(toTable.getDatabaseName());
-            table.setTableName(toTable.getTableName());
-            clients.execute(client -> client.alter_table(fromDB, fromTableName, table));
+            Table table = renameHiveTable(fromTable, toTable);
 
             Path fromPath = getTableLocation(fromTable);
             if (!new SchemaManager(fileIO, fromPath).listAllIds().isEmpty()) {
@@ -808,6 +778,24 @@ public class HiveCatalog extends AbstractCatalog {
                                 client.alter_table(
                                         toTable.getDatabaseName(), toTable.getTableName(), table));
             }
+        } catch (TException e) {
+            throw new RuntimeException("Failed to rename table " + fromTable.getFullName(), e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted in call to renameTable", e);
+        }
+    }
+
+    private Table renameHiveTable(Identifier fromTable, Identifier toTable) {
+        try {
+            String fromDB = fromTable.getDatabaseName();
+            String fromTableName = fromTable.getTableName();
+            Table table = clients.run(client -> client.getTable(fromDB, fromTableName));
+            table.setDbName(toTable.getDatabaseName());
+            table.setTableName(toTable.getTableName());
+            clients.execute(client -> client.alter_table(fromDB, fromTableName, table));
+
+            return table;
         } catch (TException e) {
             throw new RuntimeException("Failed to rename table " + fromTable.getFullName(), e);
         } catch (InterruptedException e) {
@@ -865,7 +853,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public void repairCatalog() {
-        List<String> databases = null;
+        List<String> databases;
         try {
             databases = listDatabasesInFileSystem(new Path(warehouse));
         } catch (IOException e) {
@@ -1002,8 +990,8 @@ public class HiveCatalog extends AbstractCatalog {
         }
     }
 
-    private static boolean isView(Table table) {
-        return TableType.valueOf(table.getTableType()) == TableType.VIRTUAL_VIEW;
+    public static boolean isView(Table table) {
+        return table != null && TableType.VIRTUAL_VIEW.name().equals(table.getTableType());
     }
 
     private Table newHmsTable(
