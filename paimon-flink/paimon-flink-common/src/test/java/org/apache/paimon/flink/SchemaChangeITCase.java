@@ -28,7 +28,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.math.BigDecimal;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
@@ -1107,33 +1106,23 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                         Row.of(1, Row.of(10, Row.of("apple", 100))),
                         Row.of(2, Row.of(20, Row.of("banana", 200))));
 
-        sql("ALTER TABLE T MODIFY (v ROW(f1 BIGINT, f2 ROW(f3 DECIMAL(5, 2), f2 INT), f3 STRING))");
+        sql("ALTER TABLE T MODIFY (v ROW(f1 BIGINT, f2 ROW(f3 DOUBLE, f2 INT), f3 STRING))");
         sql(
                 "INSERT INTO T VALUES "
-                        + "(1, ROW(1000000000001, ROW(100.01, 101), 'cat')), "
-                        + "(3, ROW(3000000000001, ROW(300.01, CAST(NULL AS INT)), 'dog'))");
+                        + "(1, ROW(1000000000001, ROW(101.0, 101), 'cat')), "
+                        + "(3, ROW(3000000000001, ROW(301.0, CAST(NULL AS INT)), 'dog'))");
         assertThat(sql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(
-                        Row.of(
-                                1,
-                                Row.of(
-                                        1000000000001L,
-                                        Row.of(BigDecimal.valueOf(10001, 2), 101),
-                                        "cat")),
+                        Row.of(1, Row.of(1000000000001L, Row.of(101.0, 101), "cat")),
                         Row.of(2, Row.of(20L, Row.of(null, 200), null)),
-                        Row.of(
-                                3,
-                                Row.of(
-                                        3000000000001L,
-                                        Row.of(BigDecimal.valueOf(30001, 2), null),
-                                        "dog")));
+                        Row.of(3, Row.of(3000000000001L, Row.of(301.0, null), "dog")));
 
         sql(
-                "ALTER TABLE T MODIFY (v ROW(f1 BIGINT, f2 ROW(f3 DECIMAL(5, 2), f1 STRING, f2 INT), f3 STRING))");
+                "ALTER TABLE T MODIFY (v ROW(f1 BIGINT, f2 ROW(f3 DOUBLE, f1 STRING, f2 INT), f3 STRING))");
         sql(
                 "INSERT INTO T VALUES "
-                        + "(1, ROW(1000000000002, ROW(100.02, 'APPLE', 102), 'cat')), "
-                        + "(4, ROW(4000000000002, ROW(400.02, 'LEMON', 402), 'tiger'))");
+                        + "(1, ROW(1000000000002, ROW(102.0, 'APPLE', 102), 'cat')), "
+                        + "(4, ROW(4000000000002, ROW(402.0, 'LEMON', 402), 'tiger'))");
         assertThat(sql("SELECT k, v.f2.f1, v.f3 FROM T"))
                 .containsExactlyInAnyOrder(
                         Row.of(1, "APPLE", "cat"),
