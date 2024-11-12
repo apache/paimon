@@ -27,6 +27,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.hadoop.SerializableConfiguration;
 import org.apache.paimon.utils.FunctionWithException;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ReflectionUtils;
 
 import org.apache.hadoop.fs.FSDataInputStream;
@@ -39,6 +40,9 @@ import java.io.OutputStreamWriter;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
+import java.net.URI;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** Hadoop {@link FileIO}. */
@@ -47,6 +51,8 @@ public class HadoopFileIO implements FileIO {
     private static final long serialVersionUID = 1L;
 
     protected SerializableConfiguration hadoopConf;
+
+    protected transient volatile Map<Pair<String, String>, FileSystem> fsMap;
 
     @VisibleForTesting
     public void setFileSystem(Path path, FileSystem fs) throws IOException {
@@ -143,7 +149,26 @@ public class HadoopFileIO implements FileIO {
             org.apache.hadoop.fs.Path path,
             FunctionWithException<org.apache.hadoop.fs.Path, FileSystem, IOException> creator)
             throws IOException {
-        return creator.apply(path);
+        if (fsMap == null) {
+            synchronized (this) {
+                if (fsMap == null) {
+                    fsMap = new ConcurrentHashMap<>();
+                }
+            }
+        }
+
+        Map<Pair<String, String>, FileSystem> map = fsMap;
+
+        URI uri = path.toUri();
+        String scheme = uri.getScheme();
+        String authority = uri.getAuthority();
+        Pair<String, String> key = Pair.of(scheme, authority);
+        FileSystem fs = map.get(key);
+        if (fs == null) {
+            fs = creator.apply(path);
+            map.put(key, fs);
+        }
+        return fs;
     }
 
     protected FileSystem createFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
