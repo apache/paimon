@@ -25,7 +25,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 
-import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.SerDeInfo;
 import org.apache.hadoop.hive.metastore.api.Table;
@@ -38,12 +37,13 @@ import java.util.Map;
 
 import static org.apache.hadoop.hive.serde.serdeConstants.FIELD_DELIM;
 import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
+import static org.apache.paimon.hive.HiveCatalog.isView;
 import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
 
 class HiveTableUtils {
 
     public static FormatTable convertToFormatTable(Table hiveTable) {
-        if (TableType.valueOf(hiveTable.getTableType()) == TableType.VIRTUAL_VIEW) {
+        if (isView(hiveTable)) {
             throw new UnsupportedOperationException("Hive view is not supported.");
         }
 
