@@ -33,6 +33,7 @@ import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.IntType;
@@ -711,5 +712,55 @@ public class SchemaManagerTest {
                         Arrays.asList("v", "invalid", "f1"), DataTypes.BIGINT(), true);
         assertThatCode(() -> manager.commitChanges(middleColumnNotExistUpdateColumnType))
                 .hasMessageContaining("Column v.invalid does not exist");
+    }
+
+    @Test
+    public void testUpdateRowType() throws Exception {
+        RowType innerType =
+                RowType.of(
+                        new DataField(4, "f1", DataTypes.STRING()),
+                        new DataField(5, "f2", DataTypes.INT()));
+        RowType middleType =
+                RowType.of(
+                        new DataField(2, "f1", DataTypes.INT()), new DataField(3, "f2", innerType));
+        RowType outerType =
+                RowType.of(
+                        new DataField(0, "k", DataTypes.INT()), new DataField(1, "v", middleType));
+
+        Schema schema =
+                new Schema(
+                        outerType.getFields(),
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        manager.createTable(schema);
+
+        RowType targetInnerType =
+                RowType.of(
+                        new DataType[] {DataTypes.DECIMAL(5, 2), DataTypes.INT()},
+                        new String[] {"f3", "f2"});
+        RowType targetMiddleType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), targetInnerType},
+                        new String[] {"f1", "f2"});
+        SchemaChange updateColumnType =
+                SchemaChange.updateColumnType(
+                        Collections.singletonList("v"), targetMiddleType, true);
+        manager.commitChanges(updateColumnType);
+
+        innerType =
+                RowType.of(
+                        new DataField(6, "f3", DataTypes.DECIMAL(5, 2)),
+                        new DataField(5, "f2", DataTypes.INT()));
+        middleType =
+                RowType.of(
+                        new DataField(2, "f1", DataTypes.BIGINT()),
+                        new DataField(3, "f2", innerType));
+        outerType =
+                RowType.of(
+                        new DataField(0, "k", DataTypes.INT()), new DataField(1, "v", middleType));
+        assertThat(manager.latest().get().logicalRowType()).isEqualTo(outerType);
     }
 }

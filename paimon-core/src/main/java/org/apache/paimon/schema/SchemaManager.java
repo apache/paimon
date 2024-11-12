@@ -40,6 +40,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
@@ -365,21 +366,12 @@ public class SchemaManager implements Serializable {
                     updateNestedColumn(
                             newFields,
                             update.fieldNames().toArray(new String[0]),
-                            (field) -> {
-                                DataType targetType = update.newDataType();
-                                if (update.keepNullability()) {
-                                    targetType = targetType.copy(field.type().isNullable());
-                                }
-                                checkState(
-                                        DataTypeCasts.supportsExplicitCast(field.type(), targetType)
-                                                && CastExecutors.resolve(field.type(), targetType)
-                                                        != null,
-                                        String.format(
-                                                "Column type %s[%s] cannot be converted to %s without loosing information.",
-                                                field.name(), field.type(), targetType));
-                                return new DataField(
-                                        field.id(), field.name(), targetType, field.description());
-                            });
+                            field ->
+                                    createNestedUpdateDataField(
+                                            field,
+                                            update.newDataType(),
+                                            update.keepNullability(),
+                                            highestFieldId));
                 } else if (change instanceof UpdateColumnNullability) {
                     UpdateColumnNullability update = (UpdateColumnNullability) change;
                     if (update.fieldNames().length == 1
@@ -593,6 +585,53 @@ public class SchemaManager implements Serializable {
             throw new UnsupportedOperationException(
                     String.format(
                             "Cannot " + operation + " partition column: [%s]", columnToRename));
+        }
+    }
+
+    private static DataField createNestedUpdateDataField(
+            DataField field,
+            DataType targetType,
+            boolean keepNullability,
+            AtomicInteger highestFieldId) {
+        if (keepNullability) {
+            targetType = targetType.copy(field.type().isNullable());
+        }
+
+        DataType oldType = field.type();
+        if (oldType.getTypeRoot() == DataTypeRoot.ROW) {
+            checkState(
+                    targetType.getTypeRoot() == DataTypeRoot.ROW,
+                    "Row type can only be updated to row type, and cannot be updated to "
+                            + targetType);
+            RowType oldRowType = (RowType) oldType;
+            RowType targetRowType = (RowType) targetType;
+            Map<String, DataField> oldFields = new HashMap<>();
+            for (DataField oldField : oldRowType.getFields()) {
+                oldFields.put(oldField.name(), oldField);
+            }
+            List<DataField> newFields = new ArrayList<>();
+            for (DataField targetField : targetRowType.getFields()) {
+                if (oldFields.containsKey(targetField.name())) {
+                    newFields.add(
+                            createNestedUpdateDataField(
+                                    oldFields.get(targetField.name()),
+                                    targetField.type(),
+                                    keepNullability,
+                                    highestFieldId));
+                } else {
+                    newFields.add(targetField.newId(highestFieldId.incrementAndGet()));
+                }
+            }
+            return new DataField(
+                    field.id(), field.name(), new RowType(newFields), field.description());
+        } else {
+            checkState(
+                    DataTypeCasts.supportsExplicitCast(field.type(), targetType)
+                            && CastExecutors.resolve(field.type(), targetType) != null,
+                    String.format(
+                            "Column type %s[%s] cannot be converted to %s without loosing information.",
+                            field.name(), field.type(), targetType));
+            return new DataField(field.id(), field.name(), targetType, field.description());
         }
     }
 
