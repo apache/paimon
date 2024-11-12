@@ -24,6 +24,8 @@ import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fileindex.FileIndexResult;
+import org.apache.paimon.fileindex.bitmap.ApplyBitmapIndexRecordReader;
+import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.format.FormatReaderContext;
@@ -212,13 +214,19 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         dataFilePathFactory.toPath(file.fileName()),
                         file.fileSize(),
                         fileIndexResult);
-        FileRecordReader fileRecordReader =
+        RecordReader<InternalRow> fileRecordReader =
                 new FileRecordReader(
                         bulkFormatMapping.getReaderFactory(),
                         formatReaderContext,
                         bulkFormatMapping.getIndexMapping(),
                         bulkFormatMapping.getCastMapping(),
                         PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
+
+        if (fileIndexResult instanceof BitmapIndexResult) {
+            fileRecordReader =
+                    new ApplyBitmapIndexRecordReader(
+                            fileRecordReader, (BitmapIndexResult) fileIndexResult);
+        }
 
         DeletionVector deletionVector = dvFactory == null ? null : dvFactory.get();
         if (deletionVector != null && !deletionVector.isEmpty()) {
