@@ -90,12 +90,12 @@ public class OrcFileFormatTest {
         for (int i = 0; i < 1000; i++) {
             create();
         }
-        int fix_times = 10_000;
+        int times = 10_000;
         long start = System.nanoTime();
-        for (int i = 0; i < fix_times; i++) {
+        for (int i = 0; i < times; i++) {
             create();
         }
-        double cost = ((double) (System.nanoTime() - start)) / 1000_000 / fix_times;
+        double cost = ((double) (System.nanoTime() - start)) / 1000_000 / times;
         assertThat(cost * 500 < createConfCost);
     }
 
@@ -105,12 +105,12 @@ public class OrcFileFormatTest {
         for (int i = 0; i < 1000; i++) {
             createRandomConfig();
         }
-        int fix_times = 10_000;
+        int times = 10_000;
         long start = System.nanoTime();
-        for (int i = 0; i < fix_times; i++) {
+        for (int i = 0; i < times; i++) {
             createRandomConfig();
         }
-        double cost = ((double) (System.nanoTime() - start)) / 1000_000 / fix_times;
+        double cost = ((double) (System.nanoTime() - start)) / 1000_000 / times;
         assertThat(cost * 10 < createConfCost);
     }
 
@@ -118,12 +118,12 @@ public class OrcFileFormatTest {
         for (int i = 0; i < 1000; i++) {
             createConfig();
         }
-        int fix_times = 10_000;
+        int times = 10_000;
         long start = System.nanoTime();
-        for (int i = 0; i < fix_times; i++) {
+        for (int i = 0; i < times; i++) {
             createConfig();
         }
-        return ((double) (System.nanoTime() - start)) / 1000_000 / fix_times;
+        return ((double) (System.nanoTime() - start)) / 1000_000 / times;
     }
 
     private void createConfig() {
