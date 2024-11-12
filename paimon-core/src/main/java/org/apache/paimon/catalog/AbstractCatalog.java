@@ -433,7 +433,7 @@ public abstract class AbstractCatalog implements Catalog {
                         tableMeta.uuid,
                         Lock.factory(
                                 lockFactory().orElse(null), lockContext().orElse(null), identifier),
-                        metastoreClientFactory(identifier, tableSchema).orElse(null),
+                        metastoreClientFactory(identifier, tableMeta.schema).orElse(null),
                         lineageMetaFactory));
     }
 

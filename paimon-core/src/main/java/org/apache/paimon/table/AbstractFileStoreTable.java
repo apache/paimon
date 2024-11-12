@@ -172,7 +172,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         if (catalogEnvironment.uuid() != null) {
             return catalogEnvironment.uuid();
         }
-        return fullName();
+        long earliestCreationTime = schemaManager().earliestCreationTime();
+        return fullName() + "." + earliestCreationTime;
     }
 
     @Override

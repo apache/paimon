@@ -412,6 +412,18 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
+    protected TableMeta getDataTableMeta(Identifier identifier) throws TableNotExistException {
+        return getDataTableMeta(identifier, getHmsTable(identifier));
+    }
+
+    private TableMeta getDataTableMeta(Identifier identifier, Table table)
+            throws TableNotExistException {
+        return new TableMeta(
+                getDataTableSchema(identifier, table),
+                identifier.getFullName() + "." + table.getCreateTime());
+    }
+
+    @Override
     public TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
         Table table = getHmsTable(identifier);
         return getDataTableSchema(identifier, table);
@@ -567,18 +579,19 @@ public class HiveCatalog extends AbstractCatalog {
         Preconditions.checkArgument(identifier.getSystemTableName() == null);
         Table table = getHmsTable(identifier);
         try {
-            TableSchema tableSchema = getDataTableSchema(identifier, table);
+            TableMeta tableMeta = getDataTableMeta(identifier, table);
             return FileStoreTableFactory.create(
                     fileIO,
                     getTableLocation(identifier, table),
-                    tableSchema,
+                    tableMeta.schema(),
                     new CatalogEnvironment(
                             identifier,
+                            tableMeta.uuid(),
                             Lock.factory(
                                     lockFactory().orElse(null),
                                     lockContext().orElse(null),
                                     identifier),
-                            metastoreClientFactory(identifier, tableSchema).orElse(null),
+                            metastoreClientFactory(identifier, tableMeta.schema()).orElse(null),
                             lineageMetaFactory));
         } catch (TableNotExistException ignore) {
         }
