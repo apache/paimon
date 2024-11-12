@@ -136,7 +136,7 @@ public class OrcFileFormatTest {
         options.setString("haha", "1");
         options.setString("compress", "zlib");
         OrcFileFormat orcFileFormat =
-                new OrcFileFormatFactory().create(new FormatContext(options, 1024));
+                new OrcFileFormatFactory().create(new FormatContext(options, 1024, 1024));
     }
 
     private void createRandomConfig() {
@@ -145,6 +145,6 @@ public class OrcFileFormatTest {
         options.setString("compress", "zlib");
         options.setString("a", Math.random() + "");
         OrcFileFormat orcFileFormat =
-                new OrcFileFormatFactory().create(new FormatContext(options, 1024));
+                new OrcFileFormatFactory().create(new FormatContext(options, 1024, 1024));
     }
 }
