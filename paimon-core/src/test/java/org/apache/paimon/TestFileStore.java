@@ -222,7 +222,8 @@ public class TestFileStore extends KeyValueFileStore {
                 null,
                 Collections.emptyList(),
                 (commit, committable) -> {
-                    logOffsets.forEach(committable::addLogOffset);
+                    logOffsets.forEach(
+                            (bucket, offset) -> committable.addLogOffset(bucket, offset, false));
                     commit.commit(committable, Collections.emptyMap());
                 });
     }
