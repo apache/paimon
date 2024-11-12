@@ -598,7 +598,7 @@ public class FlinkCatalog extends AbstractCatalog {
             if (!oldTableNonPhysicalColumnIndex.containsKey(
                     ((ModifyPhysicalColumnType) change).getOldColumn().getName())) {
                 ModifyPhysicalColumnType modify = (ModifyPhysicalColumnType) change;
-                generatedNestedColumnUpdates(
+                generateNestedColumnUpdates(
                         Collections.singletonList(modify.getOldColumn().getName()),
                         LogicalTypeConversion.toDataType(
                                 modify.getOldColumn().getDataType().getLogicalType()),
@@ -668,7 +668,7 @@ public class FlinkCatalog extends AbstractCatalog {
         throw new UnsupportedOperationException("Change is not supported: " + change.getClass());
     }
 
-    private void generatedNestedColumnUpdates(
+    private void generateNestedColumnUpdates(
             List<String> fieldNames,
             org.apache.paimon.types.DataType oldType,
             org.apache.paimon.types.DataType newType,
@@ -747,7 +747,7 @@ public class FlinkCatalog extends AbstractCatalog {
                                         fullFieldNames.toArray(new String[0]),
                                         field.description()));
                     }
-                    generatedNestedColumnUpdates(
+                    generateNestedColumnUpdates(
                             fullFieldNames, oldField.type(), field.type(), schemaChanges);
                 }
             }
