@@ -20,41 +20,35 @@ package org.apache.paimon.fileindex.bitmap;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.FileRecordIterator;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
 /** A {@link RecordReader} which apply {@link BitmapIndexResult} to filter record. */
-public class ApplyBitmapIndexRecordReader implements RecordReader<InternalRow> {
+public class ApplyBitmapIndexRecordReader implements FileRecordReader<InternalRow> {
 
-    private final RecordReader<InternalRow> reader;
+    private final FileRecordReader<InternalRow> reader;
 
     private final BitmapIndexResult fileIndexResult;
 
     public ApplyBitmapIndexRecordReader(
-            RecordReader<InternalRow> reader, BitmapIndexResult fileIndexResult) {
+            FileRecordReader<InternalRow> reader, BitmapIndexResult fileIndexResult) {
         this.reader = reader;
         this.fileIndexResult = fileIndexResult;
     }
 
     @Nullable
     @Override
-    public RecordIterator<InternalRow> readBatch() throws IOException {
-        RecordIterator<InternalRow> batch = reader.readBatch();
+    public FileRecordIterator<InternalRow> readBatch() throws IOException {
+        FileRecordIterator<InternalRow> batch = reader.readBatch();
         if (batch == null) {
             return null;
         }
 
-        checkArgument(
-                batch instanceof FileRecordIterator,
-                "There is a bug, RecordIterator in ApplyBitmapIndexRecordReader must be FileRecordIterator");
-
-        return new ApplyBitmapIndexFileRecordIterator(
-                (FileRecordIterator<InternalRow>) batch, fileIndexResult);
+        return new ApplyBitmapIndexFileRecordIterator(batch, fileIndexResult);
     }
 
     @Override

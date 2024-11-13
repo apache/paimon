@@ -22,7 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.IteratorResultIterator;
@@ -49,12 +49,12 @@ public class AvroBulkFormat implements FormatReaderFactory {
     }
 
     @Override
-    public RecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
+    public FileRecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
             throws IOException {
         return new AvroReader(context.fileIO(), context.filePath(), context.fileSize());
     }
 
-    private class AvroReader implements RecordReader<InternalRow> {
+    private class AvroReader implements FileRecordReader<InternalRow> {
 
         private final FileIO fileIO;
         private final DataFileReader<InternalRow> reader;
@@ -90,7 +90,7 @@ public class AvroBulkFormat implements FormatReaderFactory {
 
         @Nullable
         @Override
-        public RecordIterator<InternalRow> readBatch() throws IOException {
+        public IteratorResultIterator readBatch() throws IOException {
             Object ticket;
             try {
                 ticket = pool.pollEntry();

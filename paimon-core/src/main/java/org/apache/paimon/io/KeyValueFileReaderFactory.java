@@ -32,6 +32,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
@@ -109,7 +110,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         return createRecordReader(schemaId, fileName, level, true, null, fileSize);
     }
 
-    private RecordReader<KeyValue> createRecordReader(
+    private FileRecordReader<KeyValue> createRecordReader(
             long schemaId,
             String fileName,
             int level,
@@ -134,8 +135,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                         : formatSupplier.get();
         Path filePath = pathFactory.toPath(fileName);
 
-        RecordReader<InternalRow> fileRecordReader =
-                new FileRecordReader(
+        FileRecordReader<InternalRow> fileRecordReader =
+                new DataFileRecordReader(
                         bulkFormatMapping.getReaderFactory(),
                         orcPoolSize == null
                                 ? new FormatReaderContext(fileIO, filePath, fileSize)

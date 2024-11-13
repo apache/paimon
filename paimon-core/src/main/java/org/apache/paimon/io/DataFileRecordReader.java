@@ -25,7 +25,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.format.FormatReaderFactory;
-import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.reader.FileRecordIterator;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.ProjectedRow;
 
@@ -34,17 +35,35 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 
 /** Reads {@link InternalRow} from data files. */
-public class FileRecordReader implements RecordReader<InternalRow> {
+public class DataFileRecordReader implements FileRecordReader<InternalRow> {
 
-    private final RecordReader<InternalRow> reader;
+    private final FileRecordReader<InternalRow> reader;
     @Nullable private final int[] indexMapping;
     @Nullable private final PartitionInfo partitionInfo;
     @Nullable private final CastFieldGetter[] castMapping;
 
+    public DataFileRecordReader(
+            FormatReaderFactory readerFactory,
+            FormatReaderFactory.Context context,
+            @Nullable int[] indexMapping,
+            @Nullable CastFieldGetter[] castMapping,
+            @Nullable PartitionInfo partitionInfo)
+            throws IOException {
+        try {
+            this.reader = readerFactory.createReader(context);
+        } catch (Exception e) {
+            FileUtils.checkExists(context.fileIO(), context.filePath());
+            throw e;
+        }
+        this.indexMapping = indexMapping;
+        this.partitionInfo = partitionInfo;
+        this.castMapping = castMapping;
+    }
+
     @Nullable
     @Override
-    public RecordReader.RecordIterator<InternalRow> readBatch() throws IOException {
-        RecordIterator<InternalRow> iterator = reader.readBatch();
+    public FileRecordIterator<InternalRow> readBatch() throws IOException {
+        FileRecordIterator<InternalRow> iterator = reader.readBatch();
         if (iterator == null) {
             return null;
         }
@@ -69,24 +88,6 @@ public class FileRecordReader implements RecordReader<InternalRow> {
         }
 
         return iterator;
-    }
-
-    public FileRecordReader(
-            FormatReaderFactory readerFactory,
-            FormatReaderFactory.Context context,
-            @Nullable int[] indexMapping,
-            @Nullable CastFieldGetter[] castMapping,
-            @Nullable PartitionInfo partitionInfo)
-            throws IOException {
-        try {
-            this.reader = readerFactory.createReader(context);
-        } catch (Exception e) {
-            FileUtils.checkExists(context.fileIO(), context.filePath());
-            throw e;
-        }
-        this.indexMapping = indexMapping;
-        this.partitionInfo = partitionInfo;
-        this.castMapping = castMapping;
     }
 
     @Override
