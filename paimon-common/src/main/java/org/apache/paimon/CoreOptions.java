@@ -315,7 +315,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> SNAPSHOT_EXPIRE_LIMIT =
             key("snapshot.expire.limit")
                     .intType()
-                    .defaultValue(10)
+                    .defaultValue(50)
                     .withDescription(
                             "The maximum number of snapshots allowed to expire at a time.");
 
