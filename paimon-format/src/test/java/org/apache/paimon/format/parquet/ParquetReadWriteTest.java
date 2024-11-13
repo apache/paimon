@@ -97,6 +97,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT32;
+import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT64;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -489,11 +490,17 @@ public class ParquetReadWriteTest {
                         new DataField(0, "a", DataTypes.INT()),
                         new DataField(1, "b", DataTypes.ARRAY(DataTypes.STRING())),
                         new DataField(
-                                2, "c", DataTypes.MAP(DataTypes.INT(), new RowType(nestedFields))));
+                                2,
+                                "c",
+                                DataTypes.MAP(
+                                        DataTypes.INT(),
+                                        DataTypes.MAP(
+                                                DataTypes.BIGINT(), new RowType(nestedFields)))));
         RowType rowType = new RowType(fields);
 
         int baseId = 536870911;
-        Type mapValueType =
+        int depthLimit = 1 << 10;
+        Type innerMapValueType =
                 new GroupType(
                                 Type.Repetition.OPTIONAL,
                                 "value",
@@ -506,7 +513,17 @@ public class ParquetReadWriteTest {
                                         .as(LogicalTypeAnnotation.stringType())
                                         .named("v2")
                                         .withId(4))
-                        .withId(baseId - 2);
+                        .withId(baseId + depthLimit * 2 + 2);
+        Type outerMapValueType =
+                ConversionPatterns.mapType(
+                                Type.Repetition.OPTIONAL,
+                                "value",
+                                "key_value",
+                                Types.primitive(INT64, Type.Repetition.REQUIRED)
+                                        .named("key")
+                                        .withId(baseId - depthLimit * 2 - 2),
+                                innerMapValueType)
+                        .withId(baseId + depthLimit * 2 + 1);
         Type expected =
                 new MessageType(
                         "table",
@@ -519,7 +536,7 @@ public class ParquetReadWriteTest {
                                                         Type.Repetition.OPTIONAL)
                                                 .as(LogicalTypeAnnotation.stringType())
                                                 .named("element")
-                                                .withId(baseId + 1))
+                                                .withId(baseId + depthLimit + 1))
                                 .withId(1),
                         ConversionPatterns.mapType(
                                         Type.Repetition.OPTIONAL,
@@ -527,8 +544,8 @@ public class ParquetReadWriteTest {
                                         "key_value",
                                         Types.primitive(INT32, Type.Repetition.REQUIRED)
                                                 .named("key")
-                                                .withId(baseId + 2),
-                                        mapValueType)
+                                                .withId(baseId - depthLimit * 2 - 1),
+                                        outerMapValueType)
                                 .withId(2));
         Type actual = ParquetSchemaConverter.convertToParquetMessageType("table", rowType);
         assertThat(actual).isEqualTo(expected);

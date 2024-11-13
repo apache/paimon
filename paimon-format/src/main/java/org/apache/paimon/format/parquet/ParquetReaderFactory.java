@@ -88,8 +88,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     private final Options conf;
 
     private final RowType projectedType;
-    private final String[] projectedFields;
-    private final DataType[] projectedTypes;
+    private final String[] projectedColumnNames;
+    private final DataField[] projectedFields;
     private final int batchSize;
     private final FilterCompat.Filter filter;
     private final Set<Integer> unknownFieldsIndices = new HashSet<>();
@@ -98,14 +98,15 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             Options conf, RowType projectedType, int batchSize, FilterCompat.Filter filter) {
         this.conf = conf;
         this.projectedType = projectedType;
-        this.projectedFields = projectedType.getFieldNames().toArray(new String[0]);
-        this.projectedTypes = projectedType.getFieldTypes().toArray(new DataType[0]);
+        this.projectedColumnNames = projectedType.getFieldNames().toArray(new String[0]);
+        this.projectedFields = projectedType.getFields().toArray(new DataField[0]);
         this.batchSize = batchSize;
         this.filter = filter;
     }
 
     @Override
-    public ParquetReader createReader(FormatReaderFactory.Context context) throws IOException {
+    public RecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
+            throws IOException {
         ParquetReadOptions.Builder builder =
                 ParquetReadOptions.builder().withRange(0, context.fileSize());
         setReadOptions(builder);
@@ -154,20 +155,20 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
     /** Clips `parquetSchema` according to `fieldNames`. */
     private MessageType clipParquetSchema(GroupType parquetSchema) {
-        Type[] types = new Type[projectedFields.length];
-        for (int i = 0; i < projectedFields.length; ++i) {
-            String fieldName = projectedFields[i];
+        Type[] types = new Type[projectedColumnNames.length];
+        for (int i = 0; i < projectedColumnNames.length; ++i) {
+            String fieldName = projectedColumnNames[i];
             if (!parquetSchema.containsField(fieldName)) {
                 LOG.warn(
                         "{} does not exist in {}, will fill the field with null.",
                         fieldName,
                         parquetSchema);
                 types[i] =
-                        ParquetSchemaConverter.convertToParquetType(fieldName, projectedTypes[i]);
+                        ParquetSchemaConverter.convertToParquetType(fieldName, projectedFields[i]);
                 unknownFieldsIndices.add(i);
             } else {
                 Type parquetType = parquetSchema.getType(fieldName);
-                types[i] = clipParquetType(projectedTypes[i], parquetType);
+                types[i] = clipParquetType(projectedFields[i].type(), parquetType);
             }
         }
 
@@ -221,7 +222,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
     private void checkSchema(MessageType fileSchema, MessageType requestedSchema)
             throws IOException, UnsupportedOperationException {
-        if (projectedFields.length != requestedSchema.getFieldCount()) {
+        if (projectedColumnNames.length != requestedSchema.getFieldCount()) {
             throw new RuntimeException(
                     "The quality of field type is incompatible with the request schema!");
         }
@@ -269,13 +270,13 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     }
 
     private WritableColumnVector[] createWritableVectors(MessageType requestedSchema) {
-        WritableColumnVector[] columns = new WritableColumnVector[projectedTypes.length];
+        WritableColumnVector[] columns = new WritableColumnVector[projectedFields.length];
         List<Type> types = requestedSchema.getFields();
-        for (int i = 0; i < projectedTypes.length; i++) {
+        for (int i = 0; i < projectedFields.length; i++) {
             columns[i] =
                     createWritableColumnVector(
                             batchSize,
-                            projectedTypes[i],
+                            projectedFields[i].type(),
                             types.get(i),
                             requestedSchema.getColumns(),
                             0);
@@ -291,7 +292,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             WritableColumnVector[] writableVectors) {
         ColumnVector[] vectors = new ColumnVector[writableVectors.length];
         for (int i = 0; i < writableVectors.length; i++) {
-            switch (projectedTypes[i].getTypeRoot()) {
+            switch (projectedFields[i].type().getTypeRoot()) {
                 case DECIMAL:
                     vectors[i] = new ParquetDecimalVector(writableVectors[i]);
                     break;
@@ -417,7 +418,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 if (!unknownFieldsIndices.contains(i)) {
                     columnReaders[i] =
                             createColumnReader(
-                                    projectedTypes[i],
+                                    projectedFields[i].type(),
                                     types.get(i),
                                     requestedSchema.getColumns(),
                                     rowGroup,
