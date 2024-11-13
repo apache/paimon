@@ -19,6 +19,7 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.FormatTable.Format;
 import org.apache.paimon.types.DataType;
@@ -27,16 +28,27 @@ import org.apache.paimon.utils.Pair;
 
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.SerDeInfo;
+import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.hadoop.hive.serde.serdeConstants.FIELD_DELIM;
 import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
+import static org.apache.paimon.hive.HiveCatalog.INPUT_FORMAT_CLASS_NAME;
+import static org.apache.paimon.hive.HiveCatalog.OUTPUT_FORMAT_CLASS_NAME;
+import static org.apache.paimon.hive.HiveCatalog.PAIMON_TABLE_IDENTIFIER;
+import static org.apache.paimon.hive.HiveCatalog.SERDE_CLASS_NAME;
 import static org.apache.paimon.hive.HiveCatalog.isView;
 import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
 
@@ -83,6 +95,31 @@ class HiveTableUtils {
                 .build();
     }
 
+    /**
+     * Applies the specified file format to the given Hive table, updating the table's storage
+     * descriptor {@link StorageDescriptor} and serialization/deserialization info {@link SerDeInfo}
+     * based on the provided options.
+     */
+    public static void applyFileFormatToTable(
+            Table table, Options options, @Nullable FormatTable.Format fileFormat) {
+        HiveFormat hiveFormat = HiveFormat.convertFormat(fileFormat);
+
+        StorageDescriptor sd = table.getSd() != null ? table.getSd() : new StorageDescriptor();
+        sd.setInputFormat(hiveFormat.getInputFormat());
+        sd.setOutputFormat(hiveFormat.getOutputFormat());
+
+        SerDeInfo serDeInfo = sd.getSerdeInfo() != null ? sd.getSerdeInfo() : new SerDeInfo();
+        Map<String, String> serdeParameters = serDeInfo.getParameters();
+        if (serdeParameters == null) {
+            serDeInfo.setParameters(new HashMap<>());
+        }
+        serDeInfo.getParameters().putAll(hiveFormat.getSerdeParameters(options));
+        serDeInfo.setSerializationLib(hiveFormat.getSerializationLib());
+
+        sd.setSerdeInfo(serDeInfo);
+        table.setSd(sd);
+    }
+
     /** Get field names from field schemas. */
     private static List<String> getFieldNames(List<FieldSchema> fieldSchemas) {
         List<String> names = new ArrayList<>(fieldSchemas.size());
@@ -115,5 +152,90 @@ class HiveTableUtils {
         }
 
         return Pair.of(colNames, colTypes);
+    }
+
+    /**
+     * Enum representing various Hive file formats with their associated configuration details. Each
+     * enum constant corresponds to a specific file format (e.g., ORC, Parquet, CSV), providing the
+     * necessary classes for input format, output format, serialization library (SerDe), and
+     * optional SerDe parameters.
+     */
+    enum HiveFormat {
+        HIVE_PAIMON(
+                PAIMON_TABLE_IDENTIFIER,
+                INPUT_FORMAT_CLASS_NAME,
+                OUTPUT_FORMAT_CLASS_NAME,
+                SERDE_CLASS_NAME,
+                options -> null),
+        HIVE_ORC(
+                Format.ORC.name(),
+                "org.apache.hadoop.hive.ql.io.orc.OrcInputFormat",
+                "org.apache.hadoop.hive.ql.io.orc.OrcOutputFormat",
+                "org.apache.hadoop.hive.ql.io.orc.OrcSerde",
+                options -> Collections.singletonMap(FIELD_DELIM, options.get(FIELD_DELIMITER))),
+        HIVE_PARQUET(
+                Format.PARQUET.name(),
+                "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat",
+                "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat",
+                "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe",
+                options -> null),
+        HIVE_CSV(
+                Format.CSV.name(),
+                "org.apache.hadoop.mapred.TextInputFormat",
+                "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
+                "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe",
+                options -> null);
+
+        private final String format;
+        private final String inputFormat;
+        private final String outputFormat;
+        private final String serializationLib;
+        private final Function<Options, Map<String, String>> serdeParameters;
+
+        HiveFormat(
+                String format,
+                String inputFormat,
+                String outputFormat,
+                String serializationLib,
+                Function<Options, Map<String, String>> serdeParameters) {
+            this.format = format;
+            this.inputFormat = inputFormat;
+            this.outputFormat = outputFormat;
+            this.serializationLib = serializationLib;
+            this.serdeParameters = serdeParameters;
+        }
+
+        public String getFormat() {
+            return format;
+        }
+
+        public String getInputFormat() {
+            return inputFormat;
+        }
+
+        public String getOutputFormat() {
+            return outputFormat;
+        }
+
+        public String getSerializationLib() {
+            return serializationLib;
+        }
+
+        public Map<String, String> getSerdeParameters(Options options) {
+            Map<String, String> parameters = serdeParameters.apply(options);
+            return parameters != null ? parameters : Collections.emptyMap();
+        }
+
+        private static final Map<String, HiveFormat> FORMAT_MAP =
+                Arrays.stream(values())
+                        .collect(Collectors.toMap(HiveFormat::getFormat, Function.identity()));
+
+        /** Convert a given format to its corresponding HiveFormat enum. */
+        public static HiveFormat convertFormat(@Nullable FormatTable.Format format) {
+            if (format == null) {
+                return HIVE_PAIMON;
+            }
+            return FORMAT_MAP.getOrDefault(format.name(), HIVE_PAIMON);
+        }
     }
 }

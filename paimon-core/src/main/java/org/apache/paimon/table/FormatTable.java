@@ -34,12 +34,7 @@ import org.apache.paimon.utils.SimpleFileReader;
 import javax.annotation.Nullable;
 
 import java.time.Duration;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.OptionalLong;
+import java.util.*;
 
 /**
  * A file format table refers to a directory that contains multiple files of the same format, where
@@ -68,6 +63,19 @@ public interface FormatTable extends Table {
         ORC,
         PARQUET,
         CSV
+    }
+
+    /** Parses a file format string to a corresponding {@link Format} enum constant. */
+    static Format parseFormat(String fileFormat) {
+        try {
+            return Format.valueOf(fileFormat.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new UnsupportedOperationException(
+                    "Format table unsupported file format: "
+                            + fileFormat
+                            + ". Supported formats: "
+                            + Arrays.toString(Format.values()));
+        }
     }
 
     /** Create a new builder for {@link FormatTable}. */

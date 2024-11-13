@@ -51,7 +51,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORECONNECTURLKEY;
-import static org.apache.paimon.hive.HiveCatalog.PAIMON_TABLE_TYPE_VALUE;
+import static org.apache.paimon.hive.HiveCatalog.PAIMON_TABLE_IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalog.TABLE_TYPE_PROP;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -214,7 +214,7 @@ public class HiveCatalogTest extends CatalogTestBase {
             assertThat(tableProperties).containsEntry("comment", "this is a hive table");
             assertThat(tableProperties)
                     .containsEntry(
-                            TABLE_TYPE_PROP, PAIMON_TABLE_TYPE_VALUE.toUpperCase(Locale.ROOT));
+                            TABLE_TYPE_PROP, PAIMON_TABLE_IDENTIFIER.toUpperCase(Locale.ROOT));
         } catch (Exception e) {
             fail("Test failed due to exception: " + e.getMessage());
         }
