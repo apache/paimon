@@ -178,7 +178,7 @@ public class PartitionsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
 
-            List<PartitionEntry> partitions = fileStoreTable.newSnapshotReader().partitionEntries();
+            List<PartitionEntry> partitions = fileStoreTable.newScan().listPartitionEntries();
 
             RowDataToObjectArrayConverter converter =
                     new RowDataToObjectArrayConverter(
