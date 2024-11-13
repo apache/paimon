@@ -123,7 +123,7 @@ public class OrcFileFormat extends FileFormat {
     @Override
     public void validateDataFields(RowType rowType) {
         DataType refinedType = refineDataType(rowType);
-        OrcSplitReaderUtil.toOrcType(refinedType);
+        OrcSplitReaderUtil.convertToOrcSchema((RowType) refinedType);
     }
 
     /**
@@ -141,9 +141,9 @@ public class OrcFileFormat extends FileFormat {
         DataType refinedType = refineDataType(type);
         DataType[] orcTypes = getFieldTypes(refinedType).toArray(new DataType[0]);
 
-        TypeDescription typeDescription = OrcSplitReaderUtil.toOrcType(refinedType);
-        Vectorizer<InternalRow> vectorizer =
-                new RowDataVectorizer(typeDescription.toString(), orcTypes);
+        TypeDescription typeDescription =
+                OrcSplitReaderUtil.convertToOrcSchema((RowType) refinedType);
+        Vectorizer<InternalRow> vectorizer = new RowDataVectorizer(typeDescription, orcTypes);
 
         return new OrcWriterFactory(vectorizer, orcProperties, writerConf, writeBatchSize);
     }

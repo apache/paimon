@@ -24,7 +24,7 @@ import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 
-import static org.apache.paimon.format.orc.reader.OrcSplitReaderUtil.toOrcType;
+import static org.apache.paimon.format.orc.reader.OrcSplitReaderUtil.convertToOrcType;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link OrcSplitReaderUtil}. */
@@ -63,6 +63,6 @@ class OrcSplitReaderUtilTest {
     }
 
     private void test(String expected, DataType type) {
-        assertThat(toOrcType(type)).hasToString(expected);
+        assertThat(convertToOrcType(type, -1, -1)).hasToString(expected);
     }
 }

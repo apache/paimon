@@ -56,7 +56,7 @@ import java.io.IOException;
 import java.util.List;
 
 import static org.apache.paimon.format.orc.reader.AbstractOrcColumnVector.createPaimonVector;
-import static org.apache.paimon.format.orc.reader.OrcSplitReaderUtil.toOrcType;
+import static org.apache.paimon.format.orc.reader.OrcSplitReaderUtil.convertToOrcSchema;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** An ORC reader that produces a stream of {@link ColumnarRow} records. */
@@ -81,7 +81,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             final int batchSize,
             final boolean deletionVectorsEnabled) {
         this.hadoopConfig = checkNotNull(hadoopConfig);
-        this.schema = toOrcType(readType);
+        this.schema = convertToOrcSchema(readType);
         this.tableType = readType;
         this.conjunctPredicates = checkNotNull(conjunctPredicates);
         this.batchSize = batchSize;
