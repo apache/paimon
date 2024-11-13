@@ -172,7 +172,7 @@ class HiveTableUtils {
                 "org.apache.hadoop.hive.ql.io.orc.OrcInputFormat",
                 "org.apache.hadoop.hive.ql.io.orc.OrcOutputFormat",
                 "org.apache.hadoop.hive.ql.io.orc.OrcSerde",
-                options -> Collections.singletonMap(FIELD_DELIM, options.get(FIELD_DELIMITER))),
+                options -> null),
         HIVE_PARQUET(
                 Format.PARQUET.name(),
                 "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat",
@@ -184,7 +184,7 @@ class HiveTableUtils {
                 "org.apache.hadoop.mapred.TextInputFormat",
                 "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
                 "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe",
-                options -> null);
+                options -> Collections.singletonMap(FIELD_DELIM, options.get(FIELD_DELIMITER)));
 
         private final String format;
         private final String inputFormat;
