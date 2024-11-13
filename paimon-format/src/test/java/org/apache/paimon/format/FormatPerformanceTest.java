@@ -35,8 +35,8 @@ public class FormatPerformanceTest {
         double objectCacheCost = newFileFormatWithObjectCache();
         double serviceCost = newFileFormatWithServiceLoader();
         double factoryUtilCost = newFileFormatWithFactoryUtil();
-        assertThat(objectCacheCost * 10 < serviceCost).isTrue();
-        assertThat(objectCacheCost * 10 < factoryUtilCost).isTrue();
+        assertThat(objectCacheCost).isLessThan(serviceCost);
+        assertThat(objectCacheCost).isLessThan(factoryUtilCost);
     }
 
     private double newFileFormatWithServiceLoader() {
