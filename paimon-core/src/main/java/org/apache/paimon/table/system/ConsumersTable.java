@@ -74,17 +74,13 @@ public class ConsumersTable implements ReadonlyTable {
     private final Path location;
     private final String branch;
 
-    public ConsumersTable(FileStoreTable dataTable) {
-        this(
-                dataTable.fileIO(),
-                dataTable.location(),
-                CoreOptions.branch(dataTable.schema().options()));
-    }
+    private final FileStoreTable dataTable;
 
-    public ConsumersTable(FileIO fileIO, Path location, String branchName) {
-        this.fileIO = fileIO;
-        this.location = location;
-        this.branch = branchName;
+    public ConsumersTable(FileStoreTable dataTable) {
+        this.fileIO = dataTable.fileIO();
+        this.location = dataTable.location();
+        this.branch = CoreOptions.branch(dataTable.schema().options());
+        this.dataTable = dataTable;
     }
 
     @Override
@@ -114,7 +110,7 @@ public class ConsumersTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new ConsumersTable(fileIO, location, branch);
+        return new ConsumersTable(dataTable.copy(dynamicOptions));
     }
 
     private class ConsumersScan extends ReadOnceTableScan {

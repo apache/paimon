@@ -102,17 +102,13 @@ public class SchemasTable implements ReadonlyTable {
     private final Path location;
     private final String branch;
 
-    public SchemasTable(FileStoreTable dataTable) {
-        this(
-                dataTable.fileIO(),
-                dataTable.location(),
-                CoreOptions.branch(dataTable.schema().options()));
-    }
+    private final FileStoreTable dataTable;
 
-    public SchemasTable(FileIO fileIO, Path location, String branchName) {
-        this.fileIO = fileIO;
-        this.location = location;
-        this.branch = branchName;
+    public SchemasTable(FileStoreTable dataTable) {
+        this.fileIO = dataTable.fileIO();
+        this.location = dataTable.location();
+        this.branch = CoreOptions.branch(dataTable.schema().options());
+        this.dataTable = dataTable;
     }
 
     @Override
@@ -142,7 +138,7 @@ public class SchemasTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new SchemasTable(fileIO, location, branch);
+        return new SchemasTable(dataTable.copy(dynamicOptions));
     }
 
     private class SchemasScan extends ReadOnceTableScan {

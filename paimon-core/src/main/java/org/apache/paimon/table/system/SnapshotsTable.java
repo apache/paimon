@@ -116,19 +116,10 @@ public class SnapshotsTable implements ReadonlyTable {
     private final FileStoreTable dataTable;
 
     public SnapshotsTable(FileStoreTable dataTable) {
-        this(
-                dataTable.fileIO(),
-                dataTable.location(),
-                dataTable,
-                CoreOptions.branch(dataTable.schema().options()));
-    }
-
-    public SnapshotsTable(
-            FileIO fileIO, Path location, FileStoreTable dataTable, String branchName) {
-        this.fileIO = fileIO;
-        this.location = location;
+        this.fileIO = dataTable.fileIO();
+        this.location = dataTable.location();
+        this.branch = CoreOptions.branch(dataTable.schema().options());
         this.dataTable = dataTable;
-        this.branch = branchName;
     }
 
     @Override
@@ -158,7 +149,7 @@ public class SnapshotsTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new SnapshotsTable(fileIO, location, dataTable.copy(dynamicOptions), branch);
+        return new SnapshotsTable(dataTable.copy(dynamicOptions));
     }
 
     private class SnapshotsScan extends ReadOnceTableScan {
