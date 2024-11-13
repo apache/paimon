@@ -259,7 +259,9 @@ public class FlinkSourceBuilder {
         if (conf.contains(CoreOptions.CONSUMER_ID)
                 && !conf.contains(CoreOptions.CONSUMER_EXPIRATION_TIME)) {
             throw new IllegalArgumentException(
-                    "consumer.expiration-time should be specified when using consumer-id.");
+                    "You need to configure 'consumer.expiration-time' (ALTER TABLE) and restart your write job for it"
+                            + " to take effect, when you need consumer-id feature. This is to prevent consumers from leaving"
+                            + " too many snapshots that could pose a risk to the file system.");
         }
 
         if (sourceBounded) {
