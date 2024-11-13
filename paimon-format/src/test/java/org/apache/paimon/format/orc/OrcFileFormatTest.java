@@ -96,7 +96,7 @@ public class OrcFileFormatTest {
             create();
         }
         double cost = ((double) (System.nanoTime() - start)) / 1000_000 / times;
-        assertThat(cost * 500 < createConfCost);
+        assertThat(cost * 500 < createConfCost).isTrue();
     }
 
     @Test
@@ -111,7 +111,7 @@ public class OrcFileFormatTest {
             createRandomConfig();
         }
         double cost = ((double) (System.nanoTime() - start)) / 1000_000 / times;
-        assertThat(cost * 10 < createConfCost);
+        assertThat(cost * 10 < createConfCost).isTrue();
     }
 
     private double createConfigCost() {
