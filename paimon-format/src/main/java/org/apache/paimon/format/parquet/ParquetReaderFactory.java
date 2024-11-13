@@ -31,8 +31,7 @@ import org.apache.paimon.format.parquet.reader.ParquetTimestampVector;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.reader.RecordReader.RecordIterator;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -307,7 +306,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         return new VectorizedColumnBatch(vectors);
     }
 
-    private class ParquetReader implements RecordReader<InternalRow> {
+    private class ParquetReader implements FileRecordReader<InternalRow> {
 
         private ParquetFileReader reader;
 
@@ -360,7 +359,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
         @Nullable
         @Override
-        public RecordIterator<InternalRow> readBatch() throws IOException {
+        public ColumnarRowIterator readBatch() throws IOException {
             final ParquetReaderBatch batch = getCachedEntry();
 
             if (!nextBatch(batch)) {
@@ -488,7 +487,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             recycler.recycle(this);
         }
 
-        public RecordIterator<InternalRow> convertAndGetIterator(long rowNumber) {
+        public ColumnarRowIterator convertAndGetIterator(long rowNumber) {
             result.reset(rowNumber);
             return result;
         }

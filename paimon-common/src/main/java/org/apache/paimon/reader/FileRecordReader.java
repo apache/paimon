@@ -16,31 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format;
+package org.apache.paimon.reader;
 
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.fileindex.FileIndexResult;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.reader.FileRecordReader;
-import org.apache.paimon.reader.RecordReader;
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 
-/** A factory to create {@link RecordReader} for file. */
-public interface FormatReaderFactory {
+/** A {@link RecordReader} to support returning {@link FileRecordIterator}. */
+public interface FileRecordReader<T> extends RecordReader<T> {
 
-    FileRecordReader<InternalRow> createReader(Context context) throws IOException;
-
-    /** Context for creating reader. */
-    interface Context {
-
-        FileIO fileIO();
-
-        Path filePath();
-
-        long fileSize();
-
-        FileIndexResult fileIndex();
-    }
+    @Override
+    @Nullable
+    FileRecordIterator<T> readBatch() throws IOException;
 }
