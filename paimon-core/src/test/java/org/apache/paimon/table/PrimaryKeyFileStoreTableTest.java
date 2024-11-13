@@ -99,6 +99,7 @@ import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
+import static org.apache.paimon.CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD;
 import static org.apache.paimon.CoreOptions.LOOKUP_LOCAL_FILE_TYPE;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.MergeEngine;
@@ -860,6 +861,92 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                 toSplits(table.newSnapshotReader().withFilter(predicate).read().dataSplits());
 
         assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(1);
+    }
+
+    @Test
+    public void testDeletionVectorsWithBitmapFileIndexInFile() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(BUCKET, 1);
+                            conf.set(DELETION_VECTORS_ENABLED, true);
+                            conf.set(TARGET_FILE_SIZE, MemorySize.ofBytes(1));
+                            conf.set(FILE_INDEX_IN_MANIFEST_THRESHOLD, MemorySize.ofBytes(1));
+                            conf.set("file-index.bitmap.columns", "b");
+                        });
+
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 1, 300L));
+        write.write(rowData(1, 2, 400L));
+        write.write(rowData(1, 3, 100L));
+        write.write(rowData(1, 4, 100L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(rowData(1, 1, 100L));
+        write.write(rowData(1, 2, 100L));
+        write.write(rowData(1, 3, 300L));
+        write.write(rowData(1, 5, 100L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        write.write(rowData(1, 4, 200L));
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(2);
+        TableRead read = table.newRead().withFilter(builder.equal(2, 100L));
+        assertThat(getResult(read, splits, BATCH_ROW_TO_STRING))
+                .hasSameElementsAs(
+                        Arrays.asList(
+                                "1|1|100|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|2|100|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|5|100|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
+    public void testDeletionVectorsWithBitmapFileIndexInMeta() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(BUCKET, 1);
+                            conf.set(DELETION_VECTORS_ENABLED, true);
+                            conf.set(TARGET_FILE_SIZE, MemorySize.ofBytes(1));
+                            conf.set(FILE_INDEX_IN_MANIFEST_THRESHOLD, MemorySize.ofMebiBytes(1));
+                            conf.set("file-index.bitmap.columns", "b");
+                        });
+
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 1, 300L));
+        write.write(rowData(1, 2, 400L));
+        write.write(rowData(1, 3, 100L));
+        write.write(rowData(1, 4, 100L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(rowData(1, 1, 100L));
+        write.write(rowData(1, 2, 100L));
+        write.write(rowData(1, 3, 300L));
+        write.write(rowData(1, 5, 100L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        write.write(rowData(1, 4, 200L));
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(2);
+        TableRead read = table.newRead().withFilter(builder.equal(2, 100L));
+        assertThat(getResult(read, splits, BATCH_ROW_TO_STRING))
+                .hasSameElementsAs(
+                        Arrays.asList(
+                                "1|1|100|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|2|100|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|5|100|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     @Test

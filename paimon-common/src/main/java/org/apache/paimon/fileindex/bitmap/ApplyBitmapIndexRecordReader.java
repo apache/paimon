@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.deletionvectors;
+package org.apache.paimon.fileindex.bitmap;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.FileRecordIterator;
@@ -28,42 +28,33 @@ import java.io.IOException;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** A {@link RecordReader} which apply {@link DeletionVector} to filter record. */
-public class ApplyDeletionVectorReader implements RecordReader<InternalRow> {
+/** A {@link RecordReader} which apply {@link BitmapIndexResult} to filter record. */
+public class ApplyBitmapIndexRecordReader implements RecordReader<InternalRow> {
 
     private final RecordReader<InternalRow> reader;
 
-    private final DeletionVector deletionVector;
+    private final BitmapIndexResult fileIndexResult;
 
-    public ApplyDeletionVectorReader(
-            RecordReader<InternalRow> reader, DeletionVector deletionVector) {
+    public ApplyBitmapIndexRecordReader(
+            RecordReader<InternalRow> reader, BitmapIndexResult fileIndexResult) {
         this.reader = reader;
-        this.deletionVector = deletionVector;
-    }
-
-    public RecordReader<InternalRow> reader() {
-        return reader;
-    }
-
-    public DeletionVector deletionVector() {
-        return deletionVector;
+        this.fileIndexResult = fileIndexResult;
     }
 
     @Nullable
     @Override
     public RecordIterator<InternalRow> readBatch() throws IOException {
         RecordIterator<InternalRow> batch = reader.readBatch();
-
         if (batch == null) {
             return null;
         }
 
         checkArgument(
                 batch instanceof FileRecordIterator,
-                "There is a bug, RecordIterator in ApplyDeletionVectorReader must be FileRecordIterator");
+                "There is a bug, RecordIterator in ApplyBitmapIndexRecordReader must be FileRecordIterator");
 
-        return new ApplyDeletionFileRecordIterator(
-                (FileRecordIterator<InternalRow>) batch, deletionVector);
+        return new ApplyBitmapIndexFileRecordIterator(
+                (FileRecordIterator<InternalRow>) batch, fileIndexResult);
     }
 
     @Override
