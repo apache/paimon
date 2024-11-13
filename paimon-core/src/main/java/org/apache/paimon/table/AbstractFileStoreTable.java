@@ -168,6 +168,15 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public String uuid() {
+        if (catalogEnvironment.uuid() != null) {
+            return catalogEnvironment.uuid();
+        }
+        long earliestCreationTime = schemaManager().earliestCreationTime();
+        return fullName() + "." + earliestCreationTime;
+    }
+
+    @Override
     public Optional<Statistics> statistics() {
         Snapshot snapshot = TimeTravelUtil.resolveSnapshot(this);
         if (snapshot != null) {

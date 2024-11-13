@@ -424,16 +424,17 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
         Preconditions.checkArgument(identifier.getSystemTableName() == null);
-        TableSchema tableSchema = getDataTableSchema(identifier);
+        TableMeta tableMeta = getDataTableMeta(identifier);
         return FileStoreTableFactory.create(
                 fileIO,
                 getTableLocation(identifier),
-                tableSchema,
+                tableMeta.schema,
                 new CatalogEnvironment(
                         identifier,
+                        tableMeta.uuid,
                         Lock.factory(
                                 lockFactory().orElse(null), lockContext().orElse(null), identifier),
-                        metastoreClientFactory(identifier, tableSchema).orElse(null),
+                        metastoreClientFactory(identifier, tableMeta.schema).orElse(null),
                         lineageMetaFactory));
     }
 
@@ -473,6 +474,10 @@ public abstract class AbstractCatalog implements Catalog {
         } catch (DatabaseNotExistException e) {
             throw new RuntimeException("Database is deleted while listing", e);
         }
+    }
+
+    protected TableMeta getDataTableMeta(Identifier identifier) throws TableNotExistException {
+        return new TableMeta(getDataTableSchema(identifier), null);
     }
 
     protected abstract TableSchema getDataTableSchema(Identifier identifier)
@@ -626,5 +631,26 @@ public abstract class AbstractCatalog implements Catalog {
                                 return s;
                             }
                         });
+    }
+
+    /** Table metadata. */
+    protected static class TableMeta {
+
+        private final TableSchema schema;
+        @Nullable private final String uuid;
+
+        public TableMeta(TableSchema schema, @Nullable String uuid) {
+            this.schema = schema;
+            this.uuid = uuid;
+        }
+
+        public TableSchema schema() {
+            return schema;
+        }
+
+        @Nullable
+        public String uuid() {
+            return uuid;
+        }
     }
 }

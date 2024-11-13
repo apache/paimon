@@ -73,6 +73,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public String uuid() {
+        return wrapped.uuid();
+    }
+
+    @Override
     public SnapshotReader newSnapshotReader() {
         return wrapped.newSnapshotReader();
     }

@@ -78,6 +78,7 @@ import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Schema Manager to manage schema versions. */
@@ -118,6 +119,24 @@ public class SchemaManager implements Serializable {
             return listVersionedFiles(fileIO, schemaDirectory(), SCHEMA_PREFIX)
                     .reduce(Math::max)
                     .map(this::schema);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    public long earliestCreationTime() {
+        try {
+            long earliest = 0;
+            if (!schemaExists(0)) {
+                Optional<Long> min =
+                        listVersionedFiles(fileIO, schemaDirectory(), SCHEMA_PREFIX)
+                                .reduce(Math::min);
+                checkArgument(min.isPresent());
+                earliest = min.get();
+            }
+
+            Path schemaPath = toSchemaPath(earliest);
+            return fileIO.getFileStatus(schemaPath).getModificationTime();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
