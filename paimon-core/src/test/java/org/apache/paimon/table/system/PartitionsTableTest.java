@@ -94,19 +94,20 @@ public class PartitionsTableTest extends TableTestBase {
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
     }
 
-  @Test
-  public void testPartitionTimeTravel() throws Exception {
-    List<InternalRow> expectedRow = new ArrayList<>();
-    expectedRow.add(GenericRow.of(BinaryString.fromString("[1]"), 1L));
-    expectedRow.add(GenericRow.of(BinaryString.fromString("[3]"), 1L));
+    @Test
+    public void testPartitionTimeTravel() throws Exception {
+        List<InternalRow> expectedRow = new ArrayList<>();
+        expectedRow.add(GenericRow.of(BinaryString.fromString("[1]"), 1L));
+        expectedRow.add(GenericRow.of(BinaryString.fromString("[3]"), 1L));
 
-    // Only read partition and record count, record size may not stable.
-    List<InternalRow> result =
-        read(
-            partitionsTable.copy(Collections.singletonMap(CoreOptions.SCAN_VERSION.key(), "1")),
-            new int[][] {{0}, {1}});
-    assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
-  }
+        // Only read partition and record count, record size may not stable.
+        List<InternalRow> result =
+                read(
+                        partitionsTable.copy(
+                                Collections.singletonMap(CoreOptions.SCAN_VERSION.key(), "1")),
+                        new int[][] {{0}, {1}});
+        assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
+    }
 
     @Test
     public void testPartitionValue() throws Exception {
