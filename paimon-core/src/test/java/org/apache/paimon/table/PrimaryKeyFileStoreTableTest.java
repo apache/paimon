@@ -1236,7 +1236,21 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                             options.set("partial-update.remove-record-on-sequence-group", "seq2");
                         },
                         rowType);
+        FileStoreTable wrongTable =
+                createFileStoreTable(
+                        options -> {
+                            options.set("merge-engine", "partial-update");
+                            options.set("fields.seq1.sequence-group", "b");
+                            options.set("fields.seq2.sequence-group", "c,d");
+                            options.set("partial-update.remove-record-on-sequence-group", "b");
+                        },
+                        rowType);
         Function<InternalRow, String> rowToString = row -> internalRowToString(row, rowType);
+
+        assertThatThrownBy(() -> wrongTable.newWrite(""))
+                .hasMessageContaining(
+                        "field 'b' defined in 'partial-update.remove-record-on-sequence-group' option must be part of sequence groups");
+
         SnapshotReader snapshotReader = table.newSnapshotReader();
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite("");

@@ -291,7 +291,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
         private final String removeRecordOnSequenceGroup;
 
-        private final Set<Integer> sequenceGroupPartialDelete;
+        private Set<Integer> sequenceGroupPartialDelete;
 
         private Factory(Options options, RowType rowType, List<String> primaryKeys) {
             this.ignoreDelete = options.get(CoreOptions.IGNORE_DELETE);
@@ -303,6 +303,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
             List<String> fieldNames = rowType.getFieldNames();
             this.fieldSeqComparators = new HashMap<>();
+            Map<String, Integer> sequenceGroupMap = new HashMap<>();
             for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
                 String k = entry.getKey();
                 String v = entry.getValue();
@@ -341,13 +342,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                             fieldName -> {
                                 int index = fieldNames.indexOf(fieldName);
                                 fieldSeqComparators.put(index, userDefinedSeqComparator);
-                                if (removeRecordOnSequenceGroup != null
-                                        && Arrays.asList(
-                                                        removeRecordOnSequenceGroup.split(
-                                                                FIELDS_SEPARATOR))
-                                                .contains(fieldName)) {
-                                    sequenceGroupPartialDelete.add(index);
-                                }
+                                sequenceGroupMap.put(fieldName, index);
                             });
                 }
             }
@@ -370,6 +365,21 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     String.format(
                             "sequence group and %s have conflicting behavior so should not be enabled at the same time.",
                             PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE));
+
+            if (removeRecordOnSequenceGroup != null) {
+                String[] sequenceGroupArr = removeRecordOnSequenceGroup.split(FIELDS_SEPARATOR);
+                Preconditions.checkState(
+                        sequenceGroupMap.keySet().containsAll(Arrays.asList(sequenceGroupArr)),
+                        String.format(
+                                "field '%s' defined in '%s' option must be part of sequence groups",
+                                removeRecordOnSequenceGroup,
+                                PARTIAL_UPDATE_REMOVE_RECORD_ON_SEQUENCE_GROUP.key()));
+                sequenceGroupPartialDelete =
+                        Arrays.stream(sequenceGroupArr)
+                                .filter(sequenceGroupMap::containsKey)
+                                .map(sequenceGroupMap::get)
+                                .collect(Collectors.toSet());
+            }
         }
 
         @Override
