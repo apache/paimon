@@ -251,7 +251,8 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     public void testModifyColumnTypeBooleanAndNumeric() {
         // boolean To numeric and numeric To boolean
         sql("CREATE TABLE T (a BOOLEAN, b BOOLEAN, c TINYINT, d INT, e BIGINT, f DOUBLE)");
-        sql("INSERT INTO T VALUES(true, false, cast(0 as TINYINT), 1 , 123, 3.14)");
+        sql(
+                "INSERT INTO T VALUES(true, false, cast(0 as TINYINT), 1 , -9223372036854775808, 3.14)");
 
         sql("ALTER TABLE T MODIFY (a TINYINT, b INT, c BOOLEAN, d BOOLEAN, e BOOLEAN)");
         List<Row> result = sql("SHOW CREATE TABLE T");
