@@ -41,6 +41,7 @@ import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.table.system.AggregationFieldsTable.AGGREGATION_FIELDS;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
 import static org.apache.paimon.table.system.AuditLogTable.AUDIT_LOG;
+import static org.apache.paimon.table.system.BinlogTable.BINLOG;
 import static org.apache.paimon.table.system.BranchesTable.BRANCHES;
 import static org.apache.paimon.table.system.BucketsTable.BUCKETS;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
@@ -77,6 +78,7 @@ public class SystemTableLoader {
                     .put(READ_OPTIMIZED, ReadOptimizedTable::new)
                     .put(AGGREGATION_FIELDS, AggregationFieldsTable::new)
                     .put(STATISTICS, StatisticTable::new)
+                    .put(BINLOG, BinlogTable::new)
                     .build();
 
     public static final List<String> SYSTEM_TABLES = new ArrayList<>(SYSTEM_TABLE_LOADERS.keySet());
