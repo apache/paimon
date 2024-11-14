@@ -45,11 +45,11 @@ import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 /**
  * A {@link Table} for reading binlog of table. The binlog format is as below.
  *
- * <p>INSERT: [+I, [co1, null], [col2, null]]
+ * <p>INSERT: [+I, [co1], [col2]]
  *
  * <p>UPDATE: [+U, [co1_ub, col1_ua], [col2_ub, col2_ua]]
  *
- * <p>DELETE: [-D, [co1, null], [col2, null]]
+ * <p>DELETE: [-D, [co1], [col2]]
  */
 public class BinlogTable extends AuditLogTable {
 
