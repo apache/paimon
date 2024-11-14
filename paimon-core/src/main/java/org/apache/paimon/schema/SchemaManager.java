@@ -37,9 +37,11 @@ import org.apache.paimon.schema.SchemaChange.UpdateColumnPosition;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnType;
 import org.apache.paimon.schema.SchemaChange.UpdateComment;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
@@ -636,17 +638,17 @@ public class SchemaManager implements Serializable {
                     continue;
                 }
 
+                String fullFieldName =
+                        String.join(".", Arrays.asList(updateFieldNames).subList(0, depth + 1));
                 List<DataField> nestedFields =
-                        new ArrayList<>(
-                                ((org.apache.paimon.types.RowType) field.type()).getFields());
+                        new ArrayList<>(extractRowType(field.type(), fullFieldName).getFields());
                 updateIntermediateColumn(nestedFields, depth + 1);
                 newFields.set(
                         i,
                         new DataField(
                                 field.id(),
                                 field.name(),
-                                new org.apache.paimon.types.RowType(
-                                        field.type().isNullable(), nestedFields),
+                                wrapNewRowType(field.type(), nestedFields),
                                 field.description()));
                 return;
             }
@@ -654,6 +656,40 @@ public class SchemaManager implements Serializable {
             throw new Catalog.ColumnNotExistException(
                     identifierFromPath(tableRoot.toString(), true, branch),
                     String.join(".", Arrays.asList(updateFieldNames).subList(0, depth + 1)));
+        }
+
+        private RowType extractRowType(DataType type, String fullFieldName) {
+            switch (type.getTypeRoot()) {
+                case ROW:
+                    return (RowType) type;
+                case ARRAY:
+                    return extractRowType(((ArrayType) type).getElementType(), fullFieldName);
+                case MAP:
+                    return extractRowType(((MapType) type).getValueType(), fullFieldName);
+                default:
+                    throw new IllegalArgumentException(
+                            fullFieldName + " is not a structured type.");
+            }
+        }
+
+        private DataType wrapNewRowType(DataType type, List<DataField> nestedFields) {
+            switch (type.getTypeRoot()) {
+                case ROW:
+                    return new RowType(type.isNullable(), nestedFields);
+                case ARRAY:
+                    return new ArrayType(
+                            type.isNullable(),
+                            wrapNewRowType(((ArrayType) type).getElementType(), nestedFields));
+                case MAP:
+                    MapType mapType = (MapType) type;
+                    return new MapType(
+                            type.isNullable(),
+                            mapType.getKeyType(),
+                            wrapNewRowType(mapType.getValueType(), nestedFields));
+                default:
+                    throw new IllegalStateException(
+                            "Trying to wrap a row type in " + type + ". This is unexpected.");
+            }
         }
 
         protected abstract void updateLastColumn(List<DataField> newFields, String fieldName)

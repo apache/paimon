@@ -673,14 +673,13 @@ public class FlinkCatalog extends AbstractCatalog {
             org.apache.paimon.types.DataType oldType,
             org.apache.paimon.types.DataType newType,
             List<SchemaChange> schemaChanges) {
+        String joinedNames = String.join(".", fieldNames);
         if (oldType.getTypeRoot() == DataTypeRoot.ROW) {
             Preconditions.checkArgument(
                     newType.getTypeRoot() == DataTypeRoot.ROW,
-                    "Column "
-                            + String.join(".", fieldNames)
-                            + " can only be updated to row type, and cannot be updated to "
-                            + newType
-                            + " type");
+                    "Column %s can only be updated to row type, and cannot be updated to %s type",
+                    joinedNames,
+                    newType.getTypeRoot());
             org.apache.paimon.types.RowType oldRowType = (org.apache.paimon.types.RowType) oldType;
             org.apache.paimon.types.RowType newRowType = (org.apache.paimon.types.RowType) newType;
 
@@ -699,7 +698,7 @@ public class FlinkCatalog extends AbstractCatalog {
                             lastIdx < idx,
                             "Order of existing fields in column %s must be kept the same. "
                                     + "However, field %s and %s have changed their orders.",
-                            String.join(".", fieldNames),
+                            joinedNames,
                             lastFieldName,
                             name);
                     lastIdx = idx;
@@ -751,6 +750,36 @@ public class FlinkCatalog extends AbstractCatalog {
                             fullFieldNames, oldField.type(), field.type(), schemaChanges);
                 }
             }
+        } else if (oldType.getTypeRoot() == DataTypeRoot.ARRAY) {
+            Preconditions.checkArgument(
+                    newType.getTypeRoot() == DataTypeRoot.ARRAY,
+                    "Column %s can only be updated to array type, and cannot be updated to %s type",
+                    joinedNames,
+                    newType);
+            generateNestedColumnUpdates(
+                    fieldNames,
+                    ((org.apache.paimon.types.ArrayType) oldType).getElementType(),
+                    ((org.apache.paimon.types.ArrayType) newType).getElementType(),
+                    schemaChanges);
+        } else if (oldType.getTypeRoot() == DataTypeRoot.MAP) {
+            Preconditions.checkArgument(
+                    newType.getTypeRoot() == DataTypeRoot.MAP,
+                    "Column %s can only be updated to map type, and cannot be updated to %s type",
+                    joinedNames,
+                    newType);
+            org.apache.paimon.types.MapType oldMapType = (org.apache.paimon.types.MapType) oldType;
+            org.apache.paimon.types.MapType newMapType = (org.apache.paimon.types.MapType) newType;
+            Preconditions.checkArgument(
+                    oldMapType.getKeyType().equals(newMapType.getKeyType()),
+                    "Cannot update key type of column %s from %s type to %s type",
+                    joinedNames,
+                    oldMapType.getKeyType(),
+                    newMapType.getKeyType());
+            generateNestedColumnUpdates(
+                    fieldNames,
+                    oldMapType.getValueType(),
+                    newMapType.getValueType(),
+                    schemaChanges);
         } else {
             if (!oldType.equalsIgnoreNullable(newType)) {
                 schemaChanges.add(
