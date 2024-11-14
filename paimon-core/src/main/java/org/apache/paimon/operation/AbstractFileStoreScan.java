@@ -85,7 +85,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private Snapshot specifiedSnapshot = null;
     private Filter<Integer> bucketFilter = null;
-    private List<Integer> buckets;
+    private Collection<Integer> buckets;
     private BiFilter<Integer, Integer> totalAwareBucketFilter = null;
     private List<ManifestFileMeta> specifiedManifests = null;
     protected ScanMode scanMode = ScanMode.ALL;
@@ -138,7 +138,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
-    public FileStoreScan withBuckets(List<Integer> buckets) {
+    public FileStoreScan withBuckets(Collection<Integer> buckets) {
         this.bucketFilter = buckets::contains;
         this.buckets = buckets;
         return this;
@@ -444,7 +444,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
      *
      * <p>Implemented to {@link InternalRow} is for performance (No deserialization).
      */
-    private static List<Predicate> createPushDownFilter(List<Integer> buckets) {
+    private static List<Predicate> createPushDownFilter(Collection<Integer> buckets) {
         if (buckets == null || buckets.isEmpty()) {
             return null;
         }

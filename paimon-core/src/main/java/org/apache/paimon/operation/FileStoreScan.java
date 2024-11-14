@@ -38,6 +38,7 @@ import org.apache.paimon.utils.Filter;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -57,7 +58,7 @@ public interface FileStoreScan {
 
     FileStoreScan withBucket(int bucket);
 
-    FileStoreScan withBuckets(List<Integer> buckets);
+    FileStoreScan withBuckets(Collection<Integer> buckets);
 
     FileStoreScan withBucketFilter(Filter<Integer> bucketFilter);
 

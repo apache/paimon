@@ -19,8 +19,8 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
-import org.apache.paimon.fs.ObjectCacheManager;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
@@ -28,13 +28,11 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.ServiceLoader;
 
 /**
  * Factory class which creates reader and writer factories for specific file format.
@@ -42,9 +40,6 @@ import java.util.ServiceLoader;
  * <p>NOTE: This class must be thread safe.
  */
 public abstract class FileFormat {
-
-    private static final ObjectCacheManager<String, FileFormatFactory> formatFactoryCache =
-            ObjectCacheManager.newObjectCacheManager(Duration.ofDays(365), 1000);
 
     protected String formatIdentifier;
 
@@ -93,34 +88,12 @@ public abstract class FileFormat {
 
     /** Create a {@link FileFormat} from format identifier and format options. */
     public static FileFormat fromIdentifier(String identifier, FormatContext context) {
-        return fromIdentifier(identifier, context, FileFormat.class.getClassLoader())
-                .orElseThrow(
-                        () ->
-                                new RuntimeException(
-                                        String.format(
-                                                "Could not find a FileFormatFactory implementation class for %s format",
-                                                identifier)));
-    }
-
-    private static Optional<FileFormat> fromIdentifier(
-            String formatIdentifier, FormatContext context, ClassLoader classLoader) {
-
         FileFormatFactory fileFormatFactory =
-                formatFactoryCache.getIfPresent(formatIdentifier.toLowerCase());
-        if (fileFormatFactory != null) {
-            return Optional.of(fileFormatFactory.create(context));
-        }
-
-        ServiceLoader<FileFormatFactory> serviceLoader =
-                ServiceLoader.load(FileFormatFactory.class, classLoader);
-        for (FileFormatFactory factory : serviceLoader) {
-            formatFactoryCache.put(factory.identifier(), factory);
-            if (factory.identifier().equals(formatIdentifier.toLowerCase())) {
-                return Optional.of(factory.create(context));
-            }
-        }
-
-        return Optional.empty();
+                FactoryUtil.discoverFactory(
+                        FileFormatFactory.class.getClassLoader(),
+                        FileFormatFactory.class,
+                        identifier);
+        return fileFormatFactory.create(context);
     }
 
     protected Options getIdentifierPrefixOptions(Options options) {

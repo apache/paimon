@@ -235,7 +235,8 @@ public class KeyValueFileStoreScanTest {
         int wantedBucket1 = random.nextInt(NUM_BUCKETS);
         int wantedBucket2 = random.nextInt(NUM_BUCKETS);
         int wantedBucket3 = random.nextInt(NUM_BUCKETS);
-        List<Integer> buckets = Arrays.asList(wantedBucket1, wantedBucket2, wantedBucket3);
+        Set<Integer> buckets =
+                new HashSet<>(Arrays.asList(wantedBucket1, wantedBucket2, wantedBucket3));
 
         FileStoreScan scan = store.newScan();
         scan.withSnapshot(snapshot.id());

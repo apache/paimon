@@ -48,6 +48,7 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -80,7 +81,7 @@ public abstract class AbstractDataTableScan implements DataTableScan {
     }
 
     @Override
-    public AbstractDataTableScan withBuckets(List<Integer> buckets) {
+    public AbstractDataTableScan withBuckets(Collection<Integer> buckets) {
         snapshotReader.withBuckets(buckets);
         return this;
     }

@@ -69,6 +69,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
@@ -331,7 +332,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public SnapshotReader withBuckets(List<Integer> buckets) {
+        public SnapshotReader withBuckets(Collection<Integer> buckets) {
             wrapped.withBuckets(buckets);
             return this;
         }
