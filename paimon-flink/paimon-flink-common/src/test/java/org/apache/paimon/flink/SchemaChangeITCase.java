@@ -1134,7 +1134,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
 
         assertThatCode(() -> sql("ALTER TABLE T MODIFY (v ROW(f1 BIGINT, f2 INT, f3 STRING))"))
                 .hasRootCauseMessage(
-                        "Column v.f2 can only be updated to row type, and cannot be updated to INT type");
+                        "Column v.f2 can only be updated to row type, and cannot be updated to INTEGER type");
     }
 
     @ParameterizedTest()
