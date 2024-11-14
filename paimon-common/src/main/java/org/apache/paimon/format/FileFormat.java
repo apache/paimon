@@ -88,6 +88,9 @@ public abstract class FileFormat {
 
     /** Create a {@link FileFormat} from format identifier and format options. */
     public static FileFormat fromIdentifier(String identifier, FormatContext context) {
+        if (identifier != null) {
+            identifier = identifier.toLowerCase();
+        }
         FileFormatFactory fileFormatFactory =
                 FactoryUtil.discoverFactory(
                         FileFormatFactory.class.getClassLoader(),
