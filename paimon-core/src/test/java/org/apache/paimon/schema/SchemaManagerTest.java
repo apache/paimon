@@ -31,6 +31,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -690,7 +691,7 @@ public class SchemaManagerTest {
 
         SchemaChange updateColumnType =
                 SchemaChange.updateColumnType(
-                        new String[] {"v", "f2", "f1"}, DataTypes.BIGINT(), true);
+                        new String[] {"v", "f2", "f1"}, DataTypes.BIGINT(), false);
         manager.commitChanges(updateColumnType);
 
         innerType =
@@ -708,8 +709,53 @@ public class SchemaManagerTest {
 
         SchemaChange middleColumnNotExistUpdateColumnType =
                 SchemaChange.updateColumnType(
-                        new String[] {"v", "invalid", "f1"}, DataTypes.BIGINT(), true);
+                        new String[] {"v", "invalid", "f1"}, DataTypes.BIGINT(), false);
         assertThatCode(() -> manager.commitChanges(middleColumnNotExistUpdateColumnType))
                 .hasMessageContaining("Column v.invalid does not exist");
+    }
+
+    @Test
+    public void testUpdateRowTypeInArrayAndMap() throws Exception {
+        RowType innerType =
+                RowType.of(
+                        new DataField(2, "f1", DataTypes.INT()),
+                        new DataField(3, "f2", DataTypes.BIGINT()));
+        RowType outerType =
+                RowType.of(
+                        new DataField(0, "k", DataTypes.INT()),
+                        new DataField(
+                                1, "v", new ArrayType(new MapType(DataTypes.INT(), innerType))));
+
+        Schema schema =
+                new Schema(
+                        outerType.getFields(),
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        manager.createTable(schema);
+
+        SchemaChange addColumn =
+                SchemaChange.addColumn(
+                        new String[] {"v", "f3"},
+                        DataTypes.STRING(),
+                        null,
+                        SchemaChange.Move.first("f3"));
+        SchemaChange dropColumn = SchemaChange.dropColumn(new String[] {"v", "f2"});
+        SchemaChange updateColumnType =
+                SchemaChange.updateColumnType(new String[] {"v", "f1"}, DataTypes.BIGINT(), false);
+        manager.commitChanges(addColumn, dropColumn, updateColumnType);
+
+        innerType =
+                RowType.of(
+                        new DataField(4, "f3", DataTypes.STRING()),
+                        new DataField(2, "f1", DataTypes.BIGINT()));
+        outerType =
+                RowType.of(
+                        new DataField(0, "k", DataTypes.INT()),
+                        new DataField(
+                                1, "v", new ArrayType(new MapType(DataTypes.INT(), innerType))));
+        assertThat(manager.latest().get().logicalRowType()).isEqualTo(outerType);
     }
 }

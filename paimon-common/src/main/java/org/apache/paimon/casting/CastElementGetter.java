@@ -18,25 +18,24 @@
 
 package org.apache.paimon.casting;
 
-import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalArray;
 
-/**
- * Get field value from row with given pos and cast it according to specific {@link CastExecutor}.
- */
-public class CastFieldGetter {
+/** Get element from array and cast it according to specific {@link CastExecutor}. */
+public class CastElementGetter {
 
-    private final InternalRow.FieldGetter fieldGetter;
+    private final InternalArray.ElementGetter elementGetter;
     private final CastExecutor<Object, Object> castExecutor;
 
     @SuppressWarnings("unchecked")
-    public CastFieldGetter(InternalRow.FieldGetter fieldGetter, CastExecutor<?, ?> castExecutor) {
-        this.fieldGetter = fieldGetter;
+    public CastElementGetter(
+            InternalArray.ElementGetter elementGetter, CastExecutor<?, ?> castExecutor) {
+        this.elementGetter = elementGetter;
         this.castExecutor = (CastExecutor<Object, Object>) castExecutor;
     }
 
     @SuppressWarnings("unchecked")
-    public <V> V getFieldOrNull(InternalRow row) {
-        Object value = fieldGetter.getFieldOrNull(row);
+    public <V> V getElementOrNull(InternalArray array, int pos) {
+        Object value = elementGetter.getElementOrNull(array, pos);
         return value == null ? null : (V) castExecutor.cast(value);
     }
 }
