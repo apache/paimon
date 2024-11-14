@@ -408,10 +408,11 @@ SELECT * FROM T$statistics;
 ```
 ### Binlog Table
 
-You can streaming or batch query the binlog through binlog table. In this system table,
-the update before and update after will be packed in one row. 
+You can query the binlog through binlog table. In the binlog system table, the update before and update after will be packed in one row. 
 
-```
+```sql
+SELECT * FROM T$binlog;
+
 /*
 +------------------+----------------------+-----------------------+
 |     rowkind      |       column_0       |       column_1        |
