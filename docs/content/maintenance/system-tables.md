@@ -406,4 +406,23 @@ SELECT * FROM T$statistics;
 1 rows in set
 */
 ```
+### Binlog Table
+
+You can streaming or batch query the binlog through binlog table. In this system table,
+the update before and update after will be packed in one row. 
+
+```
+/*
++------------------+----------------------+-----------------------+
+|     rowkind      |       column_0       |       column_1        |
++------------------+----------------------+-----------------------+
+|        +I        |       [col_0]        |       [col_1]         |
++------------------+----------------------+-----------------------+
+|        +U        | [col_0_ub, col_0_ua] | [col_1_ub, col_1_ua]  |
++------------------+----------------------+-----------------------+
+|        -D        |       [col_0]        |       [col_1]         |
++------------------+----------------------+-----------------------+
+*/
+```
+
 
