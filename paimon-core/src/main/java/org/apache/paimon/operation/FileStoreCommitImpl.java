@@ -440,12 +440,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             // partition filter is built from static or dynamic partition according to properties
             PartitionPredicate partitionFilter = null;
             if (dynamicPartitionOverwrite) {
-                if (appendTableFiles.isEmpty()) {
+                List<ManifestEntry> appendTableAddedFiles =
+                        appendTableFiles.stream()
+                                .filter(f -> f.kind() == FileKind.ADD)
+                                .collect(Collectors.toList());
+                if (appendTableAddedFiles.isEmpty()) {
                     // in dynamic mode, if there is no changes to commit, no data will be deleted
                     skipOverwrite = true;
                 } else {
                     Set<BinaryRow> partitions =
-                            appendTableFiles.stream()
+                            appendTableAddedFiles.stream()
                                     .map(ManifestEntry::partition)
                                     .collect(Collectors.toSet());
                     partitionFilter = PartitionPredicate.fromMultiple(partitionType, partitions);

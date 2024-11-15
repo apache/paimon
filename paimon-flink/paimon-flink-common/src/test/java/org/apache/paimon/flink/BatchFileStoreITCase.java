@@ -84,6 +84,25 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         assertThat(batchSql("SELECT * FROM T")).isEmpty();
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testOverwritePartitionedTableEmpty(boolean dynamicPartitionOverwrite) {
+        batchSql("CREATE TABLE T2 (a INT, b INT, c INT) PARTITIONED BY (a) ");
+        batchSql("INSERT INTO T2 VALUES (1, 11, 111), (2, 22, 222)");
+        assertThat(batchSql("SELECT * FROM T2"))
+                .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
+        batchSql(
+                "INSERT OVERWRITE T2 /*+ OPTIONS('dynamic-partition-overwrite' = '%s') */"
+                        + " SELECT * FROM T2 WHERE 1 <> 1",
+                dynamicPartitionOverwrite);
+        if (dynamicPartitionOverwrite) {
+            assertThat(batchSql("SELECT * FROM T2"))
+                    .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
+        } else {
+            assertThat(batchSql("SELECT * FROM T2")).isEmpty();
+        }
+    }
+
     @Test
     public void testTimeTravelRead() throws Exception {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
