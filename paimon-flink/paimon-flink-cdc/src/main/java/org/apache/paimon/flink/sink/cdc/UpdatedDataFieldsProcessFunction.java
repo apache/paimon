@@ -23,11 +23,20 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
 
+import org.apache.commons.collections.CollectionUtils;
+import org.apache.flink.api.common.state.ListState;
+import org.apache.flink.api.common.state.ListStateDescriptor;
+import org.apache.flink.runtime.state.FunctionInitializationContext;
+import org.apache.flink.runtime.state.FunctionSnapshotContext;
+import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * A {@link ProcessFunction} to handle schema changes. New schema is represented by a list of {@link
@@ -37,25 +46,65 @@ import java.util.List;
  * be 1.
  */
 public class UpdatedDataFieldsProcessFunction
-        extends UpdatedDataFieldsProcessFunctionBase<List<DataField>, Void> {
+        extends UpdatedDataFieldsProcessFunctionBase<List<DataField>, Void>
+        implements CheckpointedFunction {
 
     private final SchemaManager schemaManager;
 
     private final Identifier identifier;
+
+    private ListState<DataField> latestSchemaListState;
+    private List<DataField> latestSchemaList;
 
     public UpdatedDataFieldsProcessFunction(
             SchemaManager schemaManager, Identifier identifier, Catalog.Loader catalogLoader) {
         super(catalogLoader);
         this.schemaManager = schemaManager;
         this.identifier = identifier;
+        this.latestSchemaList = new ArrayList<>();
     }
 
     @Override
     public void processElement(
             List<DataField> updatedDataFields, Context context, Collector<Void> collector)
             throws Exception {
-        for (SchemaChange schemaChange : extractSchemaChanges(schemaManager, updatedDataFields)) {
+        List<DataField> actualUpdatedDataFields =
+                updatedDataFields.stream()
+                        .filter(dataField -> !dataFieldContainIgnoreId(dataField))
+                        .collect(Collectors.toList());
+        if (CollectionUtils.isEmpty(actualUpdatedDataFields)) {
+            return;
+        }
+        for (SchemaChange schemaChange :
+                extractSchemaChanges(schemaManager, actualUpdatedDataFields)) {
             applySchemaChange(schemaManager, schemaChange, identifier);
         }
+        actualUpdatedDataFields.forEach(field -> latestSchemaList.add(field));
+    }
+
+    @Override
+    public void snapshotState(FunctionSnapshotContext functionSnapshotContext) throws Exception {
+        latestSchemaListState.clear();
+        latestSchemaListState.update(latestSchemaList);
+    }
+
+    @Override
+    public void initializeState(FunctionInitializationContext context) throws Exception {
+        latestSchemaListState =
+                context.getOperatorStateStore()
+                        .getListState(
+                                new ListStateDescriptor<>(
+                                        "latest-schema-list-state", DataField.class));
+        if (context.isRestored()) {
+            latestSchemaListState.get().forEach(dataField -> latestSchemaList.add(dataField));
+        } else {
+            RowType oldRowType = schemaManager.latest().get().logicalRowType();
+            oldRowType.getFields().forEach(dataField -> latestSchemaList.add(dataField));
+        }
+    }
+
+    private boolean dataFieldContainIgnoreId(DataField dataField) {
+        return latestSchemaList.stream()
+                .anyMatch(previous -> DataField.dataFieldEqualsIgnoreId(previous, dataField));
     }
 }
