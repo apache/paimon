@@ -440,9 +440,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     /**
-     * Read the corresponding entries based on the current required partition and bucket.
-     *
-     * <p>Implemented to {@link InternalRow} is for performance (No deserialization).
+     * Read the corresponding entries based on the current required bucket, but push down into file
+     * format .
      */
     private static List<Predicate> createPushDownFilter(Collection<Integer> buckets) {
         if (buckets == null || buckets.isEmpty()) {

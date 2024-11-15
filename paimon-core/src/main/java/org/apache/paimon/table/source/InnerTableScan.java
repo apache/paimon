@@ -54,7 +54,8 @@ public interface InnerTableScan extends TableScan {
     }
 
     default InnerTableScan withBuckets(Collection<Integer> buckets) {
-        throw new RuntimeException("not impl withBuckets for " + this.getClass().getName());
+        // return this is not safe for too many class not impl this method and withBucketFilter
+        return this;
     }
 
     default InnerTableScan withLevelFilter(Filter<Integer> levelFilter) {

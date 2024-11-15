@@ -34,6 +34,7 @@ import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
@@ -44,6 +45,7 @@ import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -263,6 +265,13 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         public Scan withBucketFilter(Filter<Integer> bucketFilter) {
             mainScan.withBucketFilter(bucketFilter);
             fallbackScan.withBucketFilter(bucketFilter);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withBuckets(Collection<Integer> buckets) {
+            mainScan.withBuckets(buckets);
+            fallbackScan.withBuckets(buckets);
             return this;
         }
 
