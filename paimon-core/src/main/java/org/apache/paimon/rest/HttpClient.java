@@ -18,10 +18,21 @@
 
 package org.apache.paimon.rest;
 
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import okhttp3.Dispatcher;
 import okhttp3.OkHttpClient;
 import retrofit2.Retrofit;
 
+import java.util.Arrays;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+
 import static java.util.Objects.requireNonNull;
+import static okhttp3.ConnectionSpec.CLEARTEXT;
+import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
+import static okhttp3.ConnectionSpec.MODERN_TLS;
 
 public class HttpClient implements RESTClient {
 
@@ -30,7 +41,12 @@ public class HttpClient implements RESTClient {
 
     public HttpClient(String endpoint) {
         // todo: support config
-        this.okHttpClient = HttpClientFactory.createOkHttpClient(1, 3_000, 3_000);
+        this.okHttpClient = createHttpClient(1, 3_000, 3_000);
+        this.endpoint = endpoint;
+    }
+
+    public HttpClient(OkHttpClient okHttpClient, String endpoint) {
+        this.okHttpClient = okHttpClient;
         this.endpoint = endpoint;
     }
 
@@ -46,5 +62,30 @@ public class HttpClient implements RESTClient {
                 .baseUrl(requireNonNull(baseUrl, "baseUrl").toString())
                 .validateEagerly(true)
                 .build();
+    }
+
+    private static OkHttpClient createHttpClient(
+            int threadPoolSize, long connectTimeoutMillis, long readTimeoutMillis) {
+        ExecutorService executorService =
+                new ThreadPoolExecutor(
+                        threadPoolSize,
+                        threadPoolSize,
+                        60,
+                        TimeUnit.SECONDS,
+                        new SynchronousQueue<>(),
+                        new ThreadFactoryBuilder()
+                                .setDaemon(true)
+                                .setNameFormat("rest catalog http client %d")
+                                .build());
+
+        OkHttpClient.Builder builder =
+                new OkHttpClient.Builder()
+                        .connectTimeout(connectTimeoutMillis, TimeUnit.MILLISECONDS)
+                        .readTimeout(readTimeoutMillis, TimeUnit.MILLISECONDS)
+                        .dispatcher(new Dispatcher(executorService))
+                        .retryOnConnectionFailure(true)
+                        .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT));
+
+        return builder.build();
     }
 }
