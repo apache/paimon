@@ -54,7 +54,7 @@ public class UpdatedDataFieldsProcessFunction
     private final Identifier identifier;
 
     private ListState<DataField> latestSchemaListState;
-    private List<DataField> latestSchemaList;
+    private final List<DataField> latestSchemaList;
 
     public UpdatedDataFieldsProcessFunction(
             SchemaManager schemaManager, Identifier identifier, Catalog.Loader catalogLoader) {
@@ -79,7 +79,7 @@ public class UpdatedDataFieldsProcessFunction
                 extractSchemaChanges(schemaManager, actualUpdatedDataFields)) {
             applySchemaChange(schemaManager, schemaChange, identifier);
         }
-        actualUpdatedDataFields.forEach(field -> latestSchemaList.add(field));
+        latestSchemaList.addAll(actualUpdatedDataFields);
     }
 
     @Override
@@ -96,10 +96,10 @@ public class UpdatedDataFieldsProcessFunction
                                 new ListStateDescriptor<>(
                                         "latest-schema-list-state", DataField.class));
         if (context.isRestored()) {
-            latestSchemaListState.get().forEach(dataField -> latestSchemaList.add(dataField));
+            latestSchemaListState.get().forEach(latestSchemaList::add);
         } else {
             RowType oldRowType = schemaManager.latest().get().logicalRowType();
-            oldRowType.getFields().forEach(dataField -> latestSchemaList.add(dataField));
+            latestSchemaList.addAll(oldRowType.getFields());
         }
     }
 
