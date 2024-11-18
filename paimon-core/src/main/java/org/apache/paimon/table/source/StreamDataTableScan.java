@@ -29,4 +29,10 @@ public interface StreamDataTableScan extends DataTableScan, StreamTableScan {
 
     /** Restore from checkpoint next snapshot id with scan kind. */
     void restore(@Nullable Long nextSnapshotId, boolean scanAllSnapshot);
+
+    @Override
+    default StreamDataTableScan dropStats() {
+        // do nothing, should implement this if need
+        return this;
+    }
 }
