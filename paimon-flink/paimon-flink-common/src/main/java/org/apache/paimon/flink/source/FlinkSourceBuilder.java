@@ -26,7 +26,7 @@ import org.apache.paimon.flink.Projection;
 import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.sink.FlinkSink;
 import org.apache.paimon.flink.source.align.AlignedContinuousFileStoreSource;
-import org.apache.paimon.flink.source.operator.MonitorFunction;
+import org.apache.paimon.flink.source.operator.MonitorSource;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -307,7 +307,7 @@ public class FlinkSourceBuilder {
                     "Cannot limit streaming source, please use batch execution mode.");
         }
         dataStream =
-                MonitorFunction.buildSource(
+                MonitorSource.buildSource(
                         env,
                         sourceName,
                         produceTypeInfo(),
