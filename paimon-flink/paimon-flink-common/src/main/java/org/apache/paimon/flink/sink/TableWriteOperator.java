@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.ProcessRecordAttributesUtil;
 import org.apache.paimon.flink.sink.StoreSinkWriteState.StateValueFilter;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.ChannelComputer;
@@ -58,14 +59,14 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
         super.initializeState(context);
 
         boolean containLogSystem = containLogSystem();
-        int numTasks = getRuntimeContext().getNumberOfParallelSubtasks();
+        int numTasks = RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext());
         StateValueFilter stateFilter =
                 (tableName, partition, bucket) -> {
                     int task =
                             containLogSystem
                                     ? ChannelComputer.select(bucket, numTasks)
                                     : ChannelComputer.select(partition, bucket, numTasks);
-                    return task == getRuntimeContext().getIndexOfThisSubtask();
+                    return task == RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext());
                 };
 
         state = createState(context, stateFilter);
