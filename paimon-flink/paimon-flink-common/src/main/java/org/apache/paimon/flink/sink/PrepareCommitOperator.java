@@ -27,7 +27,6 @@ import org.apache.flink.runtime.memory.MemoryManager;
 import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
-import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.Output;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
@@ -54,7 +53,6 @@ public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOpera
 
     public PrepareCommitOperator(Options options) {
         this.options = options;
-        setChainingStrategy(ChainingStrategy.ALWAYS);
     }
 
     @Override

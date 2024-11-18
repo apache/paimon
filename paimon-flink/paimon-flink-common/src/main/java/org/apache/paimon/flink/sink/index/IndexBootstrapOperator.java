@@ -27,7 +27,6 @@ import org.apache.paimon.utils.SerializableFunction;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
-import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
@@ -44,7 +43,6 @@ public class IndexBootstrapOperator<T> extends AbstractStreamOperator<Tuple2<Key
             IndexBootstrap bootstrap, SerializableFunction<InternalRow, T> converter) {
         this.bootstrap = bootstrap;
         this.converter = converter;
-        setChainingStrategy(ChainingStrategy.ALWAYS);
     }
 
     @Override

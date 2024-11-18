@@ -26,8 +26,8 @@ import org.apache.paimon.utils.ExecutorUtils;
 
 import org.apache.flink.api.common.operators.ProcessingTimeService.ProcessingTimeCallback;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
-import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.types.Either;
@@ -58,10 +58,12 @@ public class AppendBypassCoordinateOperator<CommitT>
     private transient LinkedBlockingQueue<UnawareAppendCompactionTask> compactTasks;
 
     public AppendBypassCoordinateOperator(
-            FileStoreTable table, ProcessingTimeService processingTimeService) {
+            StreamOperatorParameters<Either<CommitT, UnawareAppendCompactionTask>> parameters,
+            FileStoreTable table,
+            ProcessingTimeService processingTimeService) {
         this.table = table;
         this.processingTimeService = processingTimeService;
-        this.chainingStrategy = ChainingStrategy.HEAD;
+        setup(parameters.getContainingTask(), parameters.getStreamConfig(), parameters.getOutput());
     }
 
     @Override
