@@ -34,28 +34,13 @@ public class RestClientUtil {
             org.slf4j.LoggerFactory.getLogger(RestClientUtil.class);
     private static final ObjectMapper mapper = null;
 
-    public static <T> Response<T> getResponse(Call<T> call) {
-        long start = System.currentTimeMillis();
-        try {
-            return call.execute();
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to execute call " + call.request().url(), e);
-        } finally {
-            long cost = System.currentTimeMillis() - start;
-
-            if (log.isDebugEnabled()) {
-                log.debug("{} {}, cost:{}ms", call.request().method(), call.request().url(), cost);
-            }
-        }
-    }
-
-    public static <T> T getResponseBody(Call<T> call) {
+    public static <T> T getResponse(Call<T> call) {
         Request request = call.request();
         if (log.isDebugEnabled()) {
             log.debug("Begin: http call [{}]", request);
         }
 
-        Response<T> response = getResponse(call);
+        Response<T> response = getResponseUtil(call);
         T body = response.body();
 
         if (log.isDebugEnabled()) {
@@ -106,5 +91,20 @@ public class RestClientUtil {
             }
         }
         return body;
+    }
+
+    private static <T> Response<T> getResponseUtil(Call<T> call) {
+        long start = System.currentTimeMillis();
+        try {
+            return call.execute();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to execute call " + call.request().url(), e);
+        } finally {
+            long cost = System.currentTimeMillis() - start;
+
+            if (log.isDebugEnabled()) {
+                log.debug("{} {}, cost:{}ms", call.request().method(), call.request().url(), cost);
+            }
+        }
     }
 }
