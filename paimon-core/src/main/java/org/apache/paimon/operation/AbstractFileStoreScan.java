@@ -76,7 +76,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private final ConcurrentMap<Long, TableSchema> tableSchemas;
     private final SchemaManager schemaManager;
-    protected final TableSchema schema;
+    private final TableSchema schema;
 
     private Snapshot specifiedSnapshot = null;
     private Filter<Integer> bucketFilter = null;
@@ -351,14 +351,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         return readManifestEntries(readManifests().filteredManifests, true);
     }
 
-    protected boolean wholeBucketFilterEnabled() {
-        return false;
-    }
-
-    protected List<ManifestEntry> filterWholeBucketByStats(List<ManifestEntry> entries) {
-        return entries;
-    }
-
     private Iterator<ManifestEntry> readManifestEntries(
             List<ManifestFileMeta> manifests, boolean useSequential) {
         return scanMode == ScanMode.ALL
@@ -429,6 +421,14 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     /** Note: Keep this thread-safe. */
     protected abstract boolean filterByStats(ManifestEntry entry);
+
+    protected boolean wholeBucketFilterEnabled() {
+        return false;
+    }
+
+    protected List<ManifestEntry> filterWholeBucketByStats(List<ManifestEntry> entries) {
+        return entries;
+    }
 
     /** Note: Keep this thread-safe. */
     @Override
