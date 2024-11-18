@@ -175,6 +175,7 @@ public abstract class FlinkTableSource
                 List<PartitionEntry> partitionEntries =
                         table.newReadBuilder()
                                 .withFilter(predicate)
+                                .dropStats()
                                 .newScan()
                                 .listPartitionEntries();
                 long totalSize = 0;
@@ -188,7 +189,12 @@ public abstract class FlinkTableSource
                         new SplitStatistics((int) (totalSize / splitTargetSize + 1), rowCount);
             } else {
                 List<Split> splits =
-                        table.newReadBuilder().withFilter(predicate).newScan().plan().splits();
+                        table.newReadBuilder()
+                                .withFilter(predicate)
+                                .dropStats()
+                                .newScan()
+                                .plan()
+                                .splits();
                 splitStatistics =
                         new SplitStatistics(
                                 splits.size(), splits.stream().mapToLong(Split::rowCount).sum());

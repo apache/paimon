@@ -87,7 +87,7 @@ public class StaticFileStoreSource extends FlinkSource {
 
     private List<FileStoreSourceSplit> getSplits(SplitEnumeratorContext context) {
         FileStoreSourceSplitGenerator splitGenerator = new FileStoreSourceSplitGenerator();
-        TableScan scan = readBuilder.newScan();
+        TableScan scan = readBuilder.dropStats().newScan();
         // register scan metrics
         if (context.metricGroup() != null) {
             ((InnerTableScan) scan)

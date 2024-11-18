@@ -85,6 +85,8 @@ public interface SnapshotReader {
 
     SnapshotReader withDataFileNameFilter(Filter<String> fileNameFilter);
 
+    SnapshotReader dropStats();
+
     SnapshotReader withShard(int indexOfThisSubtask, int numberOfParallelSubtasks);
 
     SnapshotReader withMetricRegistry(MetricRegistry registry);

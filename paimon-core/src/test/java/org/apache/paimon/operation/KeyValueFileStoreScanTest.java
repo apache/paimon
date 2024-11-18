@@ -50,6 +50,7 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link KeyValueFileStoreScan}. */
@@ -272,6 +273,27 @@ public class KeyValueFileStoreScanTest {
         gen.sort(expectedKvs);
         Map<BinaryRow, BinaryRow> expected = store.toKvMap(expectedKvs);
         runTestExactMatch(scan, null, expected);
+    }
+
+    @Test
+    public void testDropStatsInPlan() throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        List<KeyValue> data = generateData(100, 0, (long) Math.abs(random.nextInt(1000)));
+        writeData(data, 0);
+        data = generateData(100, 1, (long) Math.abs(random.nextInt(1000)) + 1000);
+        writeData(data, 0);
+        data = generateData(100, 2, (long) Math.abs(random.nextInt(1000)) + 2000);
+        writeData(data, 0);
+        data = generateData(100, 3, (long) Math.abs(random.nextInt(1000)) + 3000);
+        Snapshot snapshot = writeData(data, 0);
+
+        KeyValueFileStoreScan scan = store.newScan();
+        scan.withSnapshot(snapshot.id()).dropStats();
+        List<ManifestEntry> files = scan.plan().files();
+
+        for (ManifestEntry manifestEntry : files) {
+            assertThat(manifestEntry.file().valueStats()).isEqualTo(EMPTY_STATS);
+        }
     }
 
     private void runTestExactMatch(
