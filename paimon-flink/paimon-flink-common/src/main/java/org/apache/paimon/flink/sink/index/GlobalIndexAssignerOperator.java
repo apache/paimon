@@ -22,6 +22,7 @@ import org.apache.paimon.crosspartition.GlobalIndexAssigner;
 import org.apache.paimon.crosspartition.KeyPartOrRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -59,8 +60,8 @@ public class GlobalIndexAssignerOperator
         assigner.open(
                 computeManagedMemory(this),
                 ioManager,
-                getRuntimeContext().getNumberOfParallelSubtasks(),
-                getRuntimeContext().getIndexOfThisSubtask(),
+                RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext()),
+                RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext()),
                 this::collect);
     }
 
