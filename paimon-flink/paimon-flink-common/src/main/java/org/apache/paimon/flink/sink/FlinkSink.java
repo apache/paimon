@@ -44,7 +44,7 @@ import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
+import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
@@ -318,7 +318,7 @@ public abstract class FlinkSink<T> implements Serializable {
         }
         configureGlobalCommitter(
                 committed, options.get(SINK_COMMITTER_CPU), options.get(SINK_COMMITTER_MEMORY));
-        return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
+        return committed.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
     public static void configureGlobalCommitter(

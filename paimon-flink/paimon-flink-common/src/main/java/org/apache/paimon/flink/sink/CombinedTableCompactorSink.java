@@ -32,7 +32,7 @@ import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
+import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.data.RowData;
 
@@ -164,7 +164,7 @@ public class CombinedTableCompactorSink implements Serializable {
         if (!options.get(SINK_COMMITTER_OPERATOR_CHAINING)) {
             committed = committed.startNewChain();
         }
-        return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
+        return committed.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
     // TODO:refactor FlinkSink to adopt this sink
