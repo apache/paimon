@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.requests.ConfigRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
@@ -36,7 +37,8 @@ import java.util.Map;
 public class RESTCatalog implements Catalog {
     private RESTClient client;
 
-    public RESTCatalog(String endpoint) {
+    public RESTCatalog(Options options) {
+        String endpoint = options.get(RESTCatalogOptions.ENDPOINT);
         this.client = new HttpClient(endpoint);
     }
 
