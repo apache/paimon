@@ -23,10 +23,9 @@ import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 
-import org.apache.flink.api.common.functions.OpenContext;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
-import org.apache.flink.streaming.api.functions.sink.SinkFunction;
+import org.apache.flink.api.connector.sink2.Sink;
+import org.apache.flink.api.connector.sink2.SinkWriter;
+import org.apache.flink.api.connector.sink2.WriterInitContext;
 
 import java.net.InetSocketAddress;
 import java.util.TreeMap;
@@ -34,57 +33,68 @@ import java.util.TreeMap;
 import static org.apache.paimon.service.ServiceManager.PRIMARY_KEY_LOOKUP;
 
 /** Operator for address server to register addresses to {@link ServiceManager}. */
-public class QueryAddressRegister extends RichSinkFunction<InternalRow> {
-
+public class QueryAddressRegister implements Sink<InternalRow> {
     private final ServiceManager serviceManager;
-
-    private transient int numberExecutors;
-    private transient TreeMap<Integer, InetSocketAddress> executors;
 
     public QueryAddressRegister(Table table) {
         this.serviceManager = ((FileStoreTable) table).store().newServiceManager();
     }
 
     /**
-     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
      */
-    public void open(OpenContext openContext) throws Exception {
-        open(new Configuration());
+    public SinkWriter<InternalRow> createWriter(InitContext context) {
+        return new QueryAddressRegisterSinkWriter(serviceManager);
     }
 
     /**
-     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
      */
-    public void open(Configuration parameters) throws Exception {
-        this.executors = new TreeMap<>();
+    public SinkWriter<InternalRow> createWriter(WriterInitContext context) {
+        return new QueryAddressRegisterSinkWriter(serviceManager);
     }
 
-    @Override
-    public void invoke(InternalRow row, SinkFunction.Context context) {
-        int numberExecutors = row.getInt(0);
-        if (this.numberExecutors != 0 && this.numberExecutors != numberExecutors) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Number Executors can not be changed! Old %s , New %s .",
-                            this.numberExecutors, numberExecutors));
+    private static class QueryAddressRegisterSinkWriter implements SinkWriter<InternalRow> {
+        private final ServiceManager serviceManager;
+
+        private final TreeMap<Integer, InetSocketAddress> executors;
+
+        private int numberExecutors;
+
+        private QueryAddressRegisterSinkWriter(ServiceManager serviceManager) {
+            this.serviceManager = serviceManager;
+            this.executors = new TreeMap<>();
         }
-        this.numberExecutors = numberExecutors;
 
-        int executorId = row.getInt(1);
-        String hostname = row.getString(2).toString();
-        int port = row.getInt(3);
+        @Override
+        public void write(InternalRow row, Context context) {
+            int numberExecutors = row.getInt(0);
+            if (this.numberExecutors != 0 && this.numberExecutors != numberExecutors) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Number Executors can not be changed! Old %s , New %s .",
+                                this.numberExecutors, numberExecutors));
+            }
+            this.numberExecutors = numberExecutors;
 
-        executors.put(executorId, new InetSocketAddress(hostname, port));
+            int executorId = row.getInt(1);
+            String hostname = row.getString(2).toString();
+            int port = row.getInt(3);
 
-        if (executors.size() == numberExecutors) {
-            serviceManager.resetService(
-                    PRIMARY_KEY_LOOKUP, executors.values().toArray(new InetSocketAddress[0]));
+            executors.put(executorId, new InetSocketAddress(hostname, port));
+
+            if (executors.size() == numberExecutors) {
+                serviceManager.resetService(
+                        PRIMARY_KEY_LOOKUP, executors.values().toArray(new InetSocketAddress[0]));
+            }
         }
-    }
 
-    @Override
-    public void close() throws Exception {
-        super.close();
-        serviceManager.deleteService(PRIMARY_KEY_LOOKUP);
+        @Override
+        public void flush(boolean endOfInput) {}
+
+        @Override
+        public void close() {
+            serviceManager.deleteService(PRIMARY_KEY_LOOKUP);
+        }
     }
 }
