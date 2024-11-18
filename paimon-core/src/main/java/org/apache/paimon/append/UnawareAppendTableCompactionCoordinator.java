@@ -387,6 +387,9 @@ public class UnawareAppendTableCompactionCoordinator {
             if (nextSnapshot == null) {
                 nextSnapshot = snapshotManager.latestSnapshotId();
                 if (nextSnapshot == null) {
+                    if (!streamingMode) {
+                        throw new EndOfScanException();
+                    }
                     return;
                 }
                 snapshotReader.withMode(ScanMode.ALL);
