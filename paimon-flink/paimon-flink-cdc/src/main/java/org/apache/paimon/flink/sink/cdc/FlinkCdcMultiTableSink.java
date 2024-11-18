@@ -21,7 +21,7 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.sink.CommittableStateManager;
 import org.apache.paimon.flink.sink.Committer;
-import org.apache.paimon.flink.sink.CommitterOperator;
+import org.apache.paimon.flink.sink.CommitterOperatorFactory;
 import org.apache.paimon.flink.sink.FlinkSink;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.flink.sink.MultiTableCommittable;
@@ -129,10 +129,9 @@ public class FlinkCdcMultiTableSink implements Serializable {
                         .transform(
                                 GLOBAL_COMMITTER_NAME,
                                 typeInfo,
-                                new CommitterOperator<>(
+                                new CommitterOperatorFactory<>(
                                         true,
                                         false,
-                                        commitChaining,
                                         commitUser,
                                         createCommitterFactory(),
                                         createCommittableStateManager()))

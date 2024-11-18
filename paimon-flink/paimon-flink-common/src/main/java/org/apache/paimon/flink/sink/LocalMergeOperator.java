@@ -45,7 +45,6 @@ import org.apache.paimon.utils.UserDefinedSeqComparator;
 
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
-import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.Output;
 import org.apache.flink.streaming.api.watermark.Watermark;
@@ -82,7 +81,6 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
                 "LocalMergeOperator currently only support tables with primary keys");
         this.schema = schema;
         this.ignoreDelete = CoreOptions.fromMap(schema.options()).ignoreDelete();
-        setChainingStrategy(ChainingStrategy.ALWAYS);
     }
 
     @Override

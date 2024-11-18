@@ -153,15 +153,17 @@ public class CombinedTableCompactorSink implements Serializable {
                         .transform(
                                 GLOBAL_COMMITTER_NAME,
                                 new MultiTableCommittableTypeInfo(),
-                                new CommitterOperator<>(
+                                new CommitterOperatorFactory<>(
                                         streamingCheckpointEnabled,
                                         false,
-                                        options.get(SINK_COMMITTER_OPERATOR_CHAINING),
                                         commitUser,
                                         createCommitterFactory(isStreaming),
                                         createCommittableStateManager(),
                                         options.get(END_INPUT_WATERMARK)))
                         .setParallelism(written.getParallelism());
+        if (!options.get(SINK_COMMITTER_OPERATOR_CHAINING)) {
+            committed = committed.startNewChain();
+        }
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 

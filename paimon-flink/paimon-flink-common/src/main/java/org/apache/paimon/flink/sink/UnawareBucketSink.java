@@ -74,11 +74,13 @@ public abstract class UnawareBucketSink<T> extends FlinkWriteSink<T> {
                                             new CommittableTypeInfo(),
                                             new CompactionTaskTypeInfo()),
                                     new AppendBypassCoordinateOperatorFactory<>(table))
+                            .startNewChain()
                             .forceNonParallel()
                             .transform(
                                     "Compact Worker: " + table.name(),
                                     new CommittableTypeInfo(),
                                     new AppendBypassCompactWorkerOperator(table, initialCommitUser))
+                            .startNewChain()
                             .setParallelism(written.getParallelism());
         }
 

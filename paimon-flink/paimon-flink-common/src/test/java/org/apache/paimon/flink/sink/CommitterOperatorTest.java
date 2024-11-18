@@ -51,10 +51,13 @@ import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.state.StateInitializationContext;
-import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.util.AbstractStreamOperatorTestHarness;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
+import org.apache.flink.util.Preconditions;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -259,7 +262,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         // 3. Check whether success
         List<String> actual = new ArrayList<>();
 
-        OneInputStreamOperator<Committable, Committable> operator =
+        OneInputStreamOperatorFactory<Committable, Committable> operator =
                 createCommitterOperator(
                         table,
                         initialCommitUser,
@@ -315,7 +318,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     public void testCommitInputEnd() throws Exception {
         FileStoreTable table = createFileStoreTable();
         String commitUser = UUID.randomUUID().toString();
-        OneInputStreamOperator<Committable, Committable> operator =
+        OneInputStreamOperatorFactory<Committable, Committable> operator =
                 createCommitterOperator(table, commitUser, new NoopCommittableStateManager());
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
                 createTestHarness(operator);
@@ -604,7 +607,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     public void testCommitMetrics() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
-        OneInputStreamOperator<Committable, Committable> operator =
+        OneInputStreamOperatorFactory<Committable, Committable> operator =
                 createCommitterOperator(
                         table,
                         null,
@@ -627,7 +630,9 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         testHarness.notifyOfCompletedCheckpoint(cpId);
 
         MetricGroup commitMetricGroup =
-                operator.getMetricGroup()
+                testHarness
+                        .getOneInputOperator()
+                        .getMetricGroup()
                         .addGroup("paimon")
                         .addGroup("table", table.name())
                         .addGroup("commit");
@@ -685,7 +690,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     public void testParallelism() throws Exception {
         FileStoreTable table = createFileStoreTable();
         String commitUser = UUID.randomUUID().toString();
-        OneInputStreamOperator<Committable, Committable> operator =
+        OneInputStreamOperatorFactory<Committable, Committable> operator =
                 createCommitterOperator(table, commitUser, new NoopCommittableStateManager());
         try (OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
                 createTestHarness(operator, 10, 10, 3)) {
@@ -700,7 +705,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
 
     protected OneInputStreamOperatorTestHarness<Committable, Committable>
             createRecoverableTestHarness(FileStoreTable table) throws Exception {
-        OneInputStreamOperator<Committable, Committable> operator =
+        OneInputStreamOperatorFactory<Committable, Committable> operator =
                 createCommitterOperator(
                         table,
                         null,
@@ -716,18 +721,18 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
 
     private OneInputStreamOperatorTestHarness<Committable, Committable> createLossyTestHarness(
             FileStoreTable table, String commitUser) throws Exception {
-        OneInputStreamOperator<Committable, Committable> operator =
+        OneInputStreamOperatorFactory<Committable, Committable> operator =
                 createCommitterOperator(table, commitUser, new NoopCommittableStateManager());
         return createTestHarness(operator);
     }
 
     private OneInputStreamOperatorTestHarness<Committable, Committable> createTestHarness(
-            OneInputStreamOperator<Committable, Committable> operator) throws Exception {
+            OneInputStreamOperatorFactory<Committable, Committable> operator) throws Exception {
         return createTestHarness(operator, 1, 1, 0);
     }
 
     private OneInputStreamOperatorTestHarness<Committable, Committable> createTestHarness(
-            OneInputStreamOperator<Committable, Committable> operator,
+            OneInputStreamOperatorFactory<Committable, Committable> operator,
             int maxParallelism,
             int parallelism,
             int subTaskIndex)
@@ -736,22 +741,18 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                 new CommittableTypeInfo().createSerializer(new ExecutionConfig());
         OneInputStreamOperatorTestHarness<Committable, Committable> harness =
                 new OneInputStreamOperatorTestHarness<>(
-                        operator,
-                        maxParallelism,
-                        parallelism,
-                        subTaskIndex,
-                        serializer,
-                        new OperatorID());
+                        operator, maxParallelism, parallelism, subTaskIndex, new OperatorID());
+        harness.getStreamConfig().setupNetworkInputs(Preconditions.checkNotNull(serializer));
+        harness.getStreamConfig().serializeAllConfigs();
         harness.setup(serializer);
         return harness;
     }
 
-    protected OneInputStreamOperator<Committable, Committable> createCommitterOperator(
+    protected OneInputStreamOperatorFactory<Committable, Committable> createCommitterOperator(
             FileStoreTable table,
             String commitUser,
             CommittableStateManager<ManifestCommittable> committableStateManager) {
-        return new CommitterOperator<>(
-                true,
+        return new CommitterOperatorFactory<>(
                 true,
                 true,
                 commitUser == null ? initialCommitUser : commitUser,
@@ -765,13 +766,12 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                 committableStateManager);
     }
 
-    protected OneInputStreamOperator<Committable, Committable> createCommitterOperator(
+    protected OneInputStreamOperatorFactory<Committable, Committable> createCommitterOperator(
             FileStoreTable table,
             String commitUser,
             CommittableStateManager<ManifestCommittable> committableStateManager,
             ThrowingConsumer<StateInitializationContext, Exception> initializeFunction) {
-        return new CommitterOperator<Committable, ManifestCommittable>(
-                true,
+        return new CommitterOperatorFactory<Committable, ManifestCommittable>(
                 true,
                 true,
                 commitUser == null ? initialCommitUser : commitUser,
@@ -784,8 +784,24 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                 context),
                 committableStateManager) {
             @Override
-            public void initializeState(StateInitializationContext context) throws Exception {
-                initializeFunction.accept(context);
+            @SuppressWarnings("unchecked")
+            public <T extends StreamOperator<Committable>> T createStreamOperator(
+                    StreamOperatorParameters<Committable> parameters) {
+                return (T)
+                        new CommitterOperator<Committable, ManifestCommittable>(
+                                parameters,
+                                streamingCheckpointEnabled,
+                                forceSingleParallelism,
+                                initialCommitUser,
+                                committerFactory,
+                                committableStateManager,
+                                endInputWatermark) {
+                            @Override
+                            public void initializeState(StateInitializationContext context)
+                                    throws Exception {
+                                initializeFunction.accept(context);
+                            }
+                        };
             }
         };
     }
