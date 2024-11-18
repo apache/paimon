@@ -18,35 +18,43 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaUtils;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.Table;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.system.FilesTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.junit.Before;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.List;
 
 /** Used to test schema evolution related logic. */
-public class SchemaEvolutionTest {
+public class SchemaEvolutionTest extends TableTestBase {
 
     private static List<List<DataField>> prepareData() {
         List<DataField> upField1 =
@@ -167,29 +175,43 @@ public class SchemaEvolutionTest {
         return Arrays.asList(upField1, upField2, upField3, upField4, upField5);
     }
 
-    private final String warehouse = "/tmp/paimon/";
-    private final String database = "test_db";
-    private final String tableName = "test_tb";
+    private FileStoreTable table;
+    private FileStoreScan scan;
+    private FilesTable filesTable;
+    private SnapshotManager snapshotManager;
+    private String tableName = "MyTable";
 
-    @Before
-    public void createTable() throws Exception {
-        Schema.Builder schemaBuilder = Schema.newBuilder();
-        schemaBuilder.primaryKey("f0", "f1");
-        schemaBuilder.partitionKeys("f1");
-        schemaBuilder.column("f0", DataTypes.STRING());
-        schemaBuilder.column("f1", DataTypes.INT());
-        Schema schema = schemaBuilder.build();
-        Identifier identifier = Identifier.create(database, tableName);
-        try {
-            CatalogContext context = CatalogContext.create(new Path(warehouse));
-            Catalog catalog = CatalogFactory.createCatalog(context);
-            catalog.createDatabase(database, true);
-            catalog.createTable(identifier, schema, true);
-        } catch (Catalog.TableAlreadyExistException e) {
-            // do something
-        } catch (Catalog.DatabaseNotExistException e) {
-            // do something
-        }
+    @BeforeEach
+    public void before() throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, tableName));
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("pt1", DataTypes.INT())
+                        .column("pt2", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .partitionKeys("pt1", "pt2")
+                        .primaryKey("pk", "pt1", "pt2")
+                        .option(CoreOptions.CHANGELOG_PRODUCER.key(), "input")
+                        .option(CoreOptions.BUCKET.key(), "2")
+                        .option(CoreOptions.SEQUENCE_FIELD.key(), "col1")
+                        .build();
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(new SchemaManager(fileIO, tablePath), schema);
+        table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+        scan = table.store().newScan();
+
+        Identifier filesTableId =
+                identifier(tableName + Catalog.SYSTEM_TABLE_SPLITTER + FilesTable.FILES);
+        filesTable = (FilesTable) catalog.getTable(filesTableId);
+        snapshotManager = new SnapshotManager(fileIO, tablePath);
+
+        // snapshot 1: append
+        write(table, GenericRow.of(1, 1, 10, 1), GenericRow.of(1, 2, 20, 5));
+
+        // snapshot 2: append
+        write(table, GenericRow.of(2, 1, 10, 3), GenericRow.of(2, 2, 20, 4));
     }
 
     @Test
@@ -197,15 +219,13 @@ public class SchemaEvolutionTest {
         final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         DataStream<List<DataField>> upDataFieldStream = env.fromCollection(prepareData());
         Options options = new Options();
-        options.set("warehouse", warehouse);
+        options.set("warehouse", tempPath.toString());
         final Catalog.Loader catalogLoader = () -> FlinkCatalogFactory.createPaimonCatalog(options);
         Identifier identifier = Identifier.create(database, tableName);
-        Table table = catalogLoader.load().getTable(identifier);
-        FileStoreTable dataTable = (FileStoreTable) table;
         upDataFieldStream
                 .process(
                         new UpdatedDataFieldsProcessFunction(
-                                new SchemaManager(dataTable.fileIO(), dataTable.location()),
+                                new SchemaManager(table.fileIO(), table.location()),
                                 identifier,
                                 catalogLoader))
                 .name("Schema Evolution");
