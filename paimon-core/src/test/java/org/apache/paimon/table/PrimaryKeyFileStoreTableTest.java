@@ -121,17 +121,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Tests for {@link PrimaryKeyFileStoreTable}. */
 public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
-    protected static final RowType COMPATIBILITY_ROW_TYPE =
-            RowType.of(
-                    new DataType[] {
-                        DataTypes.INT(),
-                        DataTypes.INT(),
-                        DataTypes.BIGINT(),
-                        DataTypes.BINARY(1),
-                        DataTypes.VARBINARY(1)
-                    },
-                    new String[] {"pt", "a", "b", "c", "d"});
-
     protected static final Function<InternalRow, String> COMPATIBILITY_BATCH_ROW_TO_STRING =
             rowData ->
                     rowData.getInt(0)
@@ -143,12 +132,6 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                             + new String(rowData.getBinary(3))
                             + "|"
                             + new String(rowData.getBinary(4));
-
-    protected static final Function<InternalRow, String> COMPATIBILITY_CHANGELOG_ROW_TO_STRING =
-            rowData ->
-                    rowData.getRowKind().shortString()
-                            + " "
-                            + COMPATIBILITY_BATCH_ROW_TO_STRING.apply(rowData);
 
     @Test
     public void testMultipleWriters() throws Exception {

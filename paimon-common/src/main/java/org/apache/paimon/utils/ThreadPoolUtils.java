@@ -110,7 +110,9 @@ public class ThreadPoolUtils {
                                 if (stack.isEmpty()) {
                                     return;
                                 }
-                                activeList = randomlyExecute(executor, processor, stack.poll());
+                                activeList =
+                                        randomlyExecuteSequentialReturn(
+                                                executor, processor, stack.poll());
                             }
                         }
                     }
@@ -132,7 +134,7 @@ public class ThreadPoolUtils {
         awaitAllFutures(futures);
     }
 
-    public static <U, T> Iterator<T> randomlyExecute(
+    public static <U, T> Iterator<T> randomlyExecuteSequentialReturn(
             ExecutorService executor, Function<U, List<T>> processor, Collection<U> input) {
         List<Future<List<T>>> futures = new ArrayList<>(input.size());
         ClassLoader cl = Thread.currentThread().getContextClassLoader();

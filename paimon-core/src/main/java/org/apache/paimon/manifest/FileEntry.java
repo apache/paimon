@@ -28,15 +28,17 @@ import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
 import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
 
 /** Entry representing a file. */
@@ -214,7 +216,11 @@ public interface FileEntry {
         return readDeletedEntries(
                 m ->
                         manifestFile.read(
-                                m.fileName(), m.fileSize(), Filter.alwaysTrue(), deletedFilter()),
+                                m.fileName(),
+                                m.fileSize(),
+                                Filter.alwaysTrue(),
+                                deletedFilter(),
+                                Filter.alwaysTrue()),
                 manifestFiles,
                 manifestReadParallelism);
     }
@@ -234,11 +240,11 @@ public interface FileEntry {
                                 .filter(e -> e.kind() == FileKind.DELETE)
                                 .map(FileEntry::identifier)
                                 .collect(Collectors.toList());
-        Iterable<Identifier> identifiers =
-                sequentialBatchedExecute(processor, manifestFiles, manifestReadParallelism);
-        Set<Identifier> result = new HashSet<>();
-        for (Identifier identifier : identifiers) {
-            result.add(identifier);
+        Iterator<Identifier> identifiers =
+                randomlyExecuteSequentialReturn(processor, manifestFiles, manifestReadParallelism);
+        Set<Identifier> result = ConcurrentHashMap.newKeySet();
+        while (identifiers.hasNext()) {
+            result.add(identifiers.next());
         }
         return result;
     }
@@ -246,5 +252,10 @@ public interface FileEntry {
     static Filter<InternalRow> deletedFilter() {
         Function<InternalRow, FileKind> getter = ManifestEntrySerializer.kindGetter();
         return row -> getter.apply(row) == FileKind.DELETE;
+    }
+
+    static Filter<InternalRow> addFilter() {
+        Function<InternalRow, FileKind> getter = ManifestEntrySerializer.kindGetter();
+        return row -> getter.apply(row) == FileKind.ADD;
     }
 }

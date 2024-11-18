@@ -66,11 +66,12 @@ public class ObjectsCache<K, V> {
             K key,
             @Nullable Long fileSize,
             Filter<InternalRow> loadFilter,
-            Filter<InternalRow> readFilter)
+            Filter<InternalRow> readFilter,
+            Filter<V> readVFilter)
             throws IOException {
         Segments segments = cache.getIfPresents(key);
         if (segments != null) {
-            return readFromSegments(segments, readFilter);
+            return readFromSegments(segments, readFilter, readVFilter);
         } else {
             if (fileSize == null) {
                 fileSize = fileSizeFunction.apply(key);
@@ -78,15 +79,16 @@ public class ObjectsCache<K, V> {
             if (fileSize <= cache.maxElementSize()) {
                 segments = readSegments(key, fileSize, loadFilter);
                 cache.put(key, segments);
-                return readFromSegments(segments, readFilter);
+                return readFromSegments(segments, readFilter, readVFilter);
             } else {
                 return readFromIterator(
-                        reader.apply(key, fileSize), projectedSerializer, readFilter);
+                        reader.apply(key, fileSize), projectedSerializer, readFilter, readVFilter);
             }
         }
     }
 
-    private List<V> readFromSegments(Segments segments, Filter<InternalRow> readFilter)
+    private List<V> readFromSegments(
+            Segments segments, Filter<InternalRow> readFilter, Filter<V> readVFilter)
             throws IOException {
         InternalRowSerializer formatSerializer = this.formatSerializer.get();
         List<V> entries = new ArrayList<>();
@@ -98,7 +100,10 @@ public class ObjectsCache<K, V> {
             try {
                 formatSerializer.mapFromPages(binaryRow, view);
                 if (readFilter.test(binaryRow)) {
-                    entries.add(projectedSerializer.fromRow(binaryRow));
+                    V v = projectedSerializer.fromRow(binaryRow);
+                    if (readVFilter.test(v)) {
+                        entries.add(v);
+                    }
                 }
             } catch (EOFException e) {
                 return entries;

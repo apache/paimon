@@ -51,7 +51,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         this.hasNext = true;
         this.defaultValueAssigner = defaultValueAssigner;
         if (pkTable && (options.deletionVectorsEnabled() || options.mergeEngine() == FIRST_ROW)) {
-            snapshotReader.withLevelFilter(level -> level > 0);
+            snapshotReader.withLevelFilter(level -> level > 0).enableValueFilter();
         }
     }
 

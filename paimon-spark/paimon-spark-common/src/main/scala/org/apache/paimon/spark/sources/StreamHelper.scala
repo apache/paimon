@@ -44,7 +44,7 @@ private[spark] trait StreamHelper {
 
   var lastTriggerMillis: Long
 
-  private lazy val streamScan: StreamDataTableScan = table.newStreamScan()
+  private lazy val streamScan: StreamDataTableScan = table.newStreamScan().dropStats()
 
   private lazy val partitionSchema: StructType =
     SparkTypeUtils.fromPaimonRowType(TypeUtils.project(table.rowType(), table.partitionKeys()))

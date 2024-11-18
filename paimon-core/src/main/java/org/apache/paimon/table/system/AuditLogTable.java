@@ -320,6 +320,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader enableValueFilter() {
+            wrapped.enableValueFilter();
+            return this;
+        }
+
+        @Override
         public SnapshotReader withManifestEntryFilter(Filter<ManifestEntry> filter) {
             wrapped.withManifestEntryFilter(filter);
             return this;
