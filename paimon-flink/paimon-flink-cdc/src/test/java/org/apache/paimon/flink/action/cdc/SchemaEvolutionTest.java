@@ -30,7 +30,12 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.types.*;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.VarCharType;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -40,6 +45,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import java.util.List;
 
+/** Used to test schema evolution related logic. */
 public class SchemaEvolutionTest {
 
     private static List<List<DataField>> prepareData() {
@@ -158,7 +164,7 @@ public class SchemaEvolutionTest {
                         new DataField(18, "col_18", new VarCharType(), "Someone's desc."),
                         new DataField(19, "col_19", new VarCharType(), "Someone's desc."),
                         new DataField(20, "col_20", new VarCharType(), "Someone's desc."));
-        return Arrays.asList(upField1, upField3, upField3, upField4, upField5);
+        return Arrays.asList(upField1, upField2, upField3, upField4, upField5);
     }
 
     private final String warehouse = "/tmp/paimon/";
