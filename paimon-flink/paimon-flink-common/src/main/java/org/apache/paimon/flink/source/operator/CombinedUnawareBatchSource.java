@@ -25,18 +25,20 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.compact.MultiTableScanBase;
 import org.apache.paimon.flink.compact.MultiUnawareBucketTableScan;
 import org.apache.paimon.flink.sink.MultiTableCompactionTaskTypeInfo;
+import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
+import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 
-import org.apache.flink.api.common.functions.OpenContext;
-import org.apache.flink.api.connector.source.Boundedness;
-import org.apache.flink.configuration.Configuration;
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.connector.source.ReaderOutput;
+import org.apache.flink.api.connector.source.SourceReader;
+import org.apache.flink.api.connector.source.SourceReaderContext;
+import org.apache.flink.core.io.InputStatus;
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.operators.StreamSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,14 +57,12 @@ import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.IS_E
  * It is responsible for the batch compactor source of the table with unaware bucket in combined
  * mode.
  */
-public class CombinedUnawareBatchSourceFunction
-        extends CombinedCompactorSourceFunction<MultiTableUnawareAppendCompactionTask> {
+public class CombinedUnawareBatchSource
+        extends CombinedCompactorSource<MultiTableUnawareAppendCompactionTask> {
 
-    private static final Logger LOGGER =
-            LoggerFactory.getLogger(CombinedUnawareBatchSourceFunction.class);
-    private transient MultiTableScanBase<MultiTableUnawareAppendCompactionTask> tableScan;
+    private static final Logger LOGGER = LoggerFactory.getLogger(CombinedUnawareBatchSource.class);
 
-    public CombinedUnawareBatchSourceFunction(
+    public CombinedUnawareBatchSource(
             Catalog.Loader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
@@ -70,34 +70,34 @@ public class CombinedUnawareBatchSourceFunction
         super(catalogLoader, includingPattern, excludingPattern, databasePattern, false);
     }
 
-    /**
-     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
-     */
-    public void open(OpenContext openContext) throws Exception {
-        open(new Configuration());
-    }
-
-    /**
-     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
-     */
-    public void open(Configuration parameters) throws Exception {
-        super.open(parameters);
-        tableScan =
-                new MultiUnawareBucketTableScan(
-                        catalogLoader,
-                        includingPattern,
-                        excludingPattern,
-                        databasePattern,
-                        isStreaming,
-                        isRunning);
-    }
-
     @Override
-    void scanTable() throws Exception {
-        if (isRunning.get()) {
-            MultiTableScanBase.ScanResult scanResult = tableScan.scanTable(ctx);
+    public SourceReader<MultiTableUnawareAppendCompactionTask, SimpleSourceSplit> createReader(
+            SourceReaderContext sourceReaderContext) throws Exception {
+        return new Reader();
+    }
+
+    private class Reader
+            extends AbstractNonCoordinatedSourceReader<MultiTableUnawareAppendCompactionTask> {
+        private transient MultiTableScanBase<MultiTableUnawareAppendCompactionTask> tableScan;
+
+        @Override
+        public void start() {
+            super.start();
+            tableScan =
+                    new MultiUnawareBucketTableScan(
+                            catalogLoader,
+                            includingPattern,
+                            excludingPattern,
+                            databasePattern,
+                            isStreaming);
+        }
+
+        @Override
+        public InputStatus pollNext(
+                ReaderOutput<MultiTableUnawareAppendCompactionTask> readerOutput) throws Exception {
+            MultiTableScanBase.ScanResult scanResult = tableScan.scanTable(readerOutput);
             if (scanResult == FINISHED) {
-                return;
+                return InputStatus.END_OF_INPUT;
             }
             if (scanResult == IS_EMPTY) {
                 // Currently, in the combined mode, there are two scan tasks for the table of two
@@ -105,6 +105,15 @@ public class CombinedUnawareBatchSourceFunction
                 // There will be a situation that there is only one task compaction , therefore this
                 // should not be thrown exception here.
                 LOGGER.info("No file were collected for the table of unaware-bucket");
+            }
+            return InputStatus.END_OF_INPUT;
+        }
+
+        @Override
+        public void close() throws Exception {
+            super.close();
+            if (tableScan != null) {
+                tableScan.close();
             }
         }
     }
@@ -117,22 +126,18 @@ public class CombinedUnawareBatchSourceFunction
             Pattern excludingPattern,
             Pattern databasePattern,
             @Nullable Duration partitionIdleTime) {
-        CombinedUnawareBatchSourceFunction function =
-                new CombinedUnawareBatchSourceFunction(
+        CombinedUnawareBatchSource combinedUnawareBatchSource =
+                new CombinedUnawareBatchSource(
                         catalogLoader, includingPattern, excludingPattern, databasePattern);
-        StreamSource<MultiTableUnawareAppendCompactionTask, CombinedUnawareBatchSourceFunction>
-                sourceOperator = new StreamSource<>(function);
         MultiTableCompactionTaskTypeInfo compactionTaskTypeInfo =
                 new MultiTableCompactionTaskTypeInfo();
 
         SingleOutputStreamOperator<MultiTableUnawareAppendCompactionTask> source =
-                new DataStreamSource<>(
-                                env,
-                                compactionTaskTypeInfo,
-                                sourceOperator,
-                                false,
+                env.fromSource(
+                                combinedUnawareBatchSource,
+                                WatermarkStrategy.noWatermarks(),
                                 name,
-                                Boundedness.BOUNDED)
+                                compactionTaskTypeInfo)
                         .forceNonParallel();
 
         if (partitionIdleTime != null) {
@@ -176,13 +181,5 @@ public class CombinedUnawareBatchSourceFunction
             }
         }
         return partitionInfo.get(partition);
-    }
-
-    @Override
-    public void close() throws Exception {
-        super.close();
-        if (tableScan != null) {
-            tableScan.close();
-        }
     }
 }

@@ -29,7 +29,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
 /**
@@ -46,15 +45,8 @@ public class MultiUnawareBucketTableScan
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,
-            boolean isStreaming,
-            AtomicBoolean isRunning) {
-        super(
-                catalogLoader,
-                includingPattern,
-                excludingPattern,
-                databasePattern,
-                isStreaming,
-                isRunning);
+            boolean isStreaming) {
+        super(catalogLoader, includingPattern, excludingPattern, databasePattern, isStreaming);
         tablesMap = new HashMap<>();
     }
 

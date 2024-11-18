@@ -36,6 +36,7 @@ import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.FailingFileIO;
 
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.dag.Transformation;
@@ -450,7 +451,12 @@ public class FileStoreITCase extends AbstractTestBase {
             throw new UnsupportedOperationException();
         }
         DataStreamSource<RowData> source =
-                env.addSource(new FiniteTestSource<>(src, true), InternalTypeInfo.of(TABLE_TYPE));
+                env.fromSource(
+                        new FiniteTestSource<>(src, true),
+                        WatermarkStrategy.noWatermarks(),
+                        "FiniteTestSource",
+                        InternalTypeInfo.of(TABLE_TYPE));
+        source.forceNonParallel();
         new FlinkSinkBuilder(table).forRowData(source).build();
         env.execute();
         assertThat(iterator.collect(expected.length)).containsExactlyInAnyOrder(expected);
@@ -521,9 +527,13 @@ public class FileStoreITCase extends AbstractTestBase {
             StreamExecutionEnvironment env, boolean isBatch) {
         return isBatch
                 ? env.fromCollection(SOURCE_DATA, InternalTypeInfo.of(TABLE_TYPE))
-                : env.addSource(
-                        new FiniteTestSource<>(SOURCE_DATA, false),
-                        InternalTypeInfo.of(TABLE_TYPE));
+                : (DataStreamSource<RowData>)
+                        env.fromSource(
+                                        new FiniteTestSource<>(SOURCE_DATA, false),
+                                        WatermarkStrategy.noWatermarks(),
+                                        "FiniteTestSource",
+                                        InternalTypeInfo.of(TABLE_TYPE))
+                                .forceNonParallel();
     }
 
     public static List<Row> executeAndCollect(DataStream<RowData> source) throws Exception {
