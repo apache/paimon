@@ -24,6 +24,8 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.rest.requests.ConfigRequest;
+import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
@@ -32,6 +34,12 @@ import java.util.List;
 import java.util.Map;
 
 public class RESTCatalog implements Catalog {
+    private RESTClient client;
+
+    public RESTCatalog(String endpoint) {
+        this.client = new HttpClient(endpoint);
+    }
+
     @Override
     public String warehouse() {
         throw new UnsupportedOperationException();
@@ -39,7 +47,10 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public Map<String, String> options() {
-        throw new UnsupportedOperationException();
+        ConfigResponse response =
+                RestClientUtil.getResponse(client.getClient().getConfig(new ConfigRequest()))
+                        .body();
+        return response.getDefaults();
     }
 
     @Override
