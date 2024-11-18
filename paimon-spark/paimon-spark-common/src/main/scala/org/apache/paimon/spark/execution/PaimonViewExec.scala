@@ -48,6 +48,16 @@ case class CreatePaimonViewExec(
   override def output: Seq[Attribute] = Nil
 
   override protected def run(): Seq[InternalRow] = {
+    if (columnAliases.nonEmpty || columnComments.nonEmpty || queryColumnNames.nonEmpty) {
+      throw new UnsupportedOperationException(
+        "columnAliases, columnComments and queryColumnNames are not supported now")
+    }
+
+    // Note: for replace just drop then create ,this operation is non-atomic.
+    if (replace) {
+      catalog.dropView(ident, true)
+    }
+
     catalog.createView(
       ident,
       viewSchema,
@@ -55,6 +65,7 @@ case class CreatePaimonViewExec(
       comment.orNull,
       properties.asJava,
       allowExisting)
+
     Nil
   }
 

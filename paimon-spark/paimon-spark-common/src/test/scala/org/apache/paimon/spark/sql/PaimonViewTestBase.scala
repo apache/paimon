@@ -44,11 +44,19 @@ abstract class PaimonViewTestBase extends PaimonHiveTestBase {
                   sql("SELECT * FROM v1 WHERE id >= (SELECT max(id) FROM v1)"),
                   Seq(Row(2)))
 
+                // test drop view
                 sql("DROP VIEW IF EXISTS v1")
                 checkAnswer(sql("SHOW VIEWS"), Seq())
                 sql("CREATE VIEW v1 AS SELECT * FROM t WHERE id > 1")
                 checkAnswer(sql("SHOW VIEWS"), Seq(Row("test_db", "v1", false)))
                 checkAnswer(sql("SELECT * FROM v1"), Seq(Row(2)))
+
+                // test create or replace view
+                intercept[Exception] {
+                  sql("CREATE VIEW v1 AS SELECT * FROM t WHERE id < 2")
+                }
+                sql("CREATE OR REPLACE VIEW v1 AS SELECT * FROM t WHERE id < 2")
+                checkAnswer(sql("SELECT * FROM v1"), Seq(Row(1)))
               }
             }
           }
