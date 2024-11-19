@@ -415,7 +415,6 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
             String path = normalizedProperties.remove(TableCatalog.PROP_LOCATION);
             normalizedProperties.put(CoreOptions.PATH.key(), path);
         }
-
         String pkAsString = properties.get(PRIMARY_KEY_IDENTIFIER);
         List<String> primaryKeys =
                 pkAsString == null

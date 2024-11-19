@@ -18,8 +18,8 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;

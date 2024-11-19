@@ -190,8 +190,7 @@ public class SparkReadITCase extends SparkReadTestBase {
         spark.sql("INSERT INTO partitionedTable VALUES(1,'aaa','bbb')");
         spark.sql(
                 "CREATE TABLE partitionedTableAs PARTITIONED BY (a) AS SELECT * FROM partitionedTable");
-
-        String tablePath = new Path(warehousePath, "default.db/partitionedTableAs").toString();
+        Path tablePath = new Path(warehousePath, "default.db/partitionedTableAs");
         assertThat(spark.sql("SHOW CREATE TABLE partitionedTableAs").collectAsList().toString())
                 .isEqualTo(
                         String.format(
@@ -221,8 +220,7 @@ public class SparkReadITCase extends SparkReadTestBase {
         spark.sql("INSERT INTO testTable VALUES(1,'a','b')");
         spark.sql(
                 "CREATE TABLE testTableAs TBLPROPERTIES ('file.format' = 'parquet') AS SELECT * FROM testTable");
-
-        String testTableAsPath = new Path(warehousePath, "default.db/testTableAs").toString();
+        tablePath = new Path(warehousePath, "default.db/testTableAs");
         assertThat(spark.sql("SHOW CREATE TABLE testTableAs").collectAsList().toString())
                 .isEqualTo(
                         String.format(
@@ -234,8 +232,8 @@ public class SparkReadITCase extends SparkReadTestBase {
                                         + "]]",
                                 showCreateString(
                                         "testTableAs", "a BIGINT", "b VARCHAR(10)", "c CHAR(10)"),
-                                testTableAsPath,
-                                testTableAsPath));
+                                tablePath,
+                                tablePath));
         List<Row> resultProp = spark.sql("SELECT * FROM testTableAs").collectAsList();
 
         assertThat(resultProp.stream().map(Row::toString))
@@ -253,8 +251,7 @@ public class SparkReadITCase extends SparkReadTestBase {
                         + "COMMENT 'table comment'");
         spark.sql("INSERT INTO t_pk VALUES(1,'aaa','bbb')");
         spark.sql("CREATE TABLE t_pk_as TBLPROPERTIES ('primary-key' = 'a') AS SELECT * FROM t_pk");
-
-        String tPkAsPath = new Path(warehousePath, "default.db/t_pk_as").toString();
+        tablePath = new Path(warehousePath, "default.db/t_pk_as");
         assertThat(spark.sql("SHOW CREATE TABLE t_pk_as").collectAsList().toString())
                 .isEqualTo(
                         String.format(
@@ -263,8 +260,8 @@ public class SparkReadITCase extends SparkReadTestBase {
                                         + "TBLPROPERTIES (\n  'path' = '%s',\n  'primary-key' = 'a')\n]]",
                                 showCreateString(
                                         "t_pk_as", "a BIGINT NOT NULL", "b STRING", "c STRING"),
-                                tPkAsPath,
-                                tPkAsPath));
+                                tablePath,
+                                tablePath));
         List<Row> resultPk = spark.sql("SELECT * FROM t_pk_as").collectAsList();
 
         assertThat(resultPk.stream().map(Row::toString)).containsExactlyInAnyOrder("[1,aaa,bbb]");
@@ -283,8 +280,7 @@ public class SparkReadITCase extends SparkReadTestBase {
         spark.sql("INSERT INTO t_all VALUES(1,2,'bbb','2020-01-01','12')");
         spark.sql(
                 "CREATE TABLE t_all_as PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 'dt,hh') AS SELECT * FROM t_all");
-
-        String tAllAsPath = new Path(warehousePath, "default.db/t_all_as").toString();
+        tablePath = new Path(warehousePath, "default.db/t_all_as");
         assertThat(spark.sql("SHOW CREATE TABLE t_all_as").collectAsList().toString())
                 .isEqualTo(
                         String.format(
@@ -302,8 +298,8 @@ public class SparkReadITCase extends SparkReadTestBase {
                                         "behavior STRING",
                                         "dt STRING NOT NULL",
                                         "hh STRING NOT NULL"),
-                                tAllAsPath,
-                                tAllAsPath));
+                                tablePath,
+                                tablePath));
         List<Row> resultAll = spark.sql("SELECT * FROM t_all_as").collectAsList();
         assertThat(resultAll.stream().map(Row::toString))
                 .containsExactlyInAnyOrder("[1,2,bbb,2020-01-01,12]");
@@ -380,8 +376,7 @@ public class SparkReadITCase extends SparkReadTestBase {
                         + "  'k1' = 'v1'\n"
                         + ")");
 
-        String tablePath = new Path(warehousePath, "default.db/tbl").toString();
-
+        Path tablePath = new Path(warehousePath, "default.db/tbl");
         assertThat(spark.sql("SHOW CREATE TABLE tbl").collectAsList().toString())
                 .isEqualTo(
                         String.format(
