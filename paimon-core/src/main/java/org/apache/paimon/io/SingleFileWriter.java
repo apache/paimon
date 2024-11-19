@@ -49,7 +49,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
     protected final Path path;
     private final Function<T, InternalRow> converter;
 
-    private final FormatWriter writer;
+    private FormatWriter writer;
     private PositionOutputStream out;
 
     private long recordCount;
@@ -144,7 +144,14 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
 
     @Override
     public void abort() {
-        IOUtils.closeQuietly(out);
+        if (writer != null) {
+            IOUtils.closeQuietly(writer);
+            writer = null;
+        }
+        if (out != null) {
+            IOUtils.closeQuietly(out);
+            out = null;
+        }
         fileIO.deleteQuietly(path);
     }
 
@@ -167,9 +174,15 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         }
 
         try {
-            writer.close();
-            out.flush();
-            out.close();
+            if (writer != null) {
+                writer.close();
+                writer = null;
+            }
+            if (out != null) {
+                out.flush();
+                out.close();
+                out = null;
+            }
         } catch (IOException e) {
             LOG.warn("Exception occurs when closing file {}. Cleaning up.", path, e);
             abort();

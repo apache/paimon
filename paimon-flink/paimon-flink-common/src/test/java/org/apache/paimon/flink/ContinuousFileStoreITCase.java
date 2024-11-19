@@ -28,6 +28,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.flink.table.api.StatementSet;
 import org.apache.flink.table.api.ValidationException;
+import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
@@ -43,6 +44,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -628,5 +630,30 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                                 "SELECT * FROM T3 /*+ OPTIONS('scan.snapshot-id'='%s') */", 4));
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("10", "11", "12"));
         iterator.close();
+    }
+
+    @Test
+    public void testAvroRetractNotNullField() {
+        List<Row> input =
+                Arrays.asList(
+                        Row.ofKind(RowKind.INSERT, 1, "A"), Row.ofKind(RowKind.DELETE, 1, "A"));
+        String id = TestValuesTableFactory.registerData(input);
+        sEnv.executeSql(
+                String.format(
+                        "CREATE TEMPORARY TABLE source (pk INT PRIMARY KEY NOT ENFORCED, a STRING) "
+                                + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s', "
+                                + "'changelog-mode' = 'I,D,UA,UB')",
+                        id));
+
+        sql(
+                "CREATE TABLE avro_sink (pk INT PRIMARY KEY NOT ENFORCED, a STRING NOT NULL) "
+                        + " WITH ('file.format' = 'avro', 'merge-engine' = 'aggregation')");
+
+        assertThatThrownBy(
+                        () -> sEnv.executeSql("INSERT INTO avro_sink select * from source").await())
+                .satisfies(
+                        anyCauseMatches(
+                                RuntimeException.class,
+                                "Caught NullPointerException, the possible reason is you have set following options together"));
     }
 }
