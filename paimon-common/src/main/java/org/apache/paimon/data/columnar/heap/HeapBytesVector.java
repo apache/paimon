@@ -66,6 +66,10 @@ public class HeapBytesVector extends AbstractHeapVector implements WritableBytes
         length = new int[size];
     }
 
+    public HeapBytesVector(int len, boolean[] isNull) {
+        super(len, isNull);
+    }
+
     @Override
     public void reset() {
         super.reset();

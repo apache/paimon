@@ -57,6 +57,7 @@ import org.slf4j.LoggerFactory;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.apache.parquet.column.ValuesType.DEFINITION_LEVEL;
@@ -168,7 +169,10 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
 
         int valueIndex = collectDataFromParquetPage(readNumber, valueList);
 
-        return fillColumnVector(valueIndex, valueList);
+        if (!valueList.isEmpty()) {
+            return fillColumnVector(valueIndex, valueList);
+        }
+        return fillColumnVectorWithNone(valueIndex);
     }
 
     private int collectDataFromParquetPage(int total, List<Object> valueList) throws IOException {
@@ -199,8 +203,8 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
 
                 if (!lastValue.shouldSkip && !needFilterSkip) {
                     valueList.add(lastValue.value);
-                    valueIndex++;
                 }
+                valueIndex++;
             } while (readValue() && (repetitionLevel != 0));
 
             if (pageRowId == readState.rowId) {
@@ -542,6 +546,53 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
                         return new ParquetDecimalVector(phlv, total);
                     default:
                         HeapBytesVector phbv = getHeapBytesVector(total, valueList);
+                        return new ParquetDecimalVector(phbv, total);
+                }
+            default:
+                throw new RuntimeException("Unsupported type in the list: " + type);
+        }
+    }
+
+    private WritableColumnVector fillColumnVectorWithNone(int total) {
+        boolean[] isNull = new boolean[total];
+        Arrays.fill(isNull, true);
+        switch (dataType.getTypeRoot()) {
+            case CHAR:
+            case VARCHAR:
+            case BINARY:
+            case VARBINARY:
+                return new HeapBytesVector(total, isNull);
+            case BOOLEAN:
+                return new HeapBooleanVector(total, isNull);
+            case TINYINT:
+                return new HeapByteVector(total, isNull);
+            case SMALLINT:
+                return new HeapShortVector(total, isNull);
+            case INTEGER:
+            case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
+                return new HeapIntVector(total, isNull);
+            case FLOAT:
+                return new HeapFloatVector(total, isNull);
+            case BIGINT:
+                return new HeapLongVector(total, isNull);
+            case DOUBLE:
+                return new HeapDoubleVector(total, isNull);
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return new HeapTimestampVector(total, isNull);
+            case DECIMAL:
+                PrimitiveType.PrimitiveTypeName primitiveTypeName =
+                        descriptor.getPrimitiveType().getPrimitiveTypeName();
+                switch (primitiveTypeName) {
+                    case INT32:
+                        HeapIntVector phiv = new HeapIntVector(total, isNull);
+                        return new ParquetDecimalVector(phiv, total);
+                    case INT64:
+                        HeapLongVector phlv = new HeapLongVector(total, isNull);
+                        return new ParquetDecimalVector(phlv, total);
+                    default:
+                        HeapBytesVector phbv = new HeapBytesVector(total, isNull);
                         return new ParquetDecimalVector(phbv, total);
                 }
             default:

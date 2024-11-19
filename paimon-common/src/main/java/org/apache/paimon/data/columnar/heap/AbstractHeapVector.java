@@ -20,6 +20,7 @@ package org.apache.paimon.data.columnar.heap;
 
 import org.apache.paimon.data.columnar.writable.AbstractWritableVector;
 import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.utils.Preconditions;
 
 import java.nio.ByteOrder;
 import java.util.Arrays;
@@ -52,6 +53,23 @@ public abstract class AbstractHeapVector extends AbstractWritableVector
     public AbstractHeapVector(int len) {
         isNull = new boolean[len];
         this.len = len;
+    }
+
+    // This will be called only when inner vectors don't have data.
+    public AbstractHeapVector(int len, boolean[] isNull) {
+        Preconditions.checkArgument(
+                len == isNull.length, "len should be equal to isNull's length.");
+
+        for (boolean element : isNull) {
+            if (!element) {
+                throw new UnsupportedOperationException(
+                        "This constructor can only be called when the vector is all null.");
+            }
+        }
+
+        this.len = len;
+        this.isNull = isNull;
+        this.noNulls = false;
     }
 
     /**

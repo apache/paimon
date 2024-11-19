@@ -141,7 +141,9 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
         boolean hasNull = false;
         for (int i = 0; i < len; i++) {
             for (WritableColumnVector child : finalChildrenVectors) {
-                isNull[i] = isNull[i] && child.isNullAt(i);
+                if (((ElementCountable) child).getLen() - 1 >= i) {
+                    isNull[i] = isNull[i] && child.isNullAt(i);
+                }
             }
             if (isNull[i]) {
                 hasNull = true;

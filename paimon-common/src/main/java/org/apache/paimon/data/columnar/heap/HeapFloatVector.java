@@ -44,6 +44,10 @@ public class HeapFloatVector extends AbstractHeapVector implements WritableFloat
         vector = new float[len];
     }
 
+    public HeapFloatVector(int len, boolean[] isNull) {
+        super(len, isNull);
+    }
+
     @Override
     public float getFloat(int i) {
         if (dictionary == null) {

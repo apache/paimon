@@ -28,13 +28,17 @@ public class HeapTimestampVector extends AbstractHeapVector implements WritableT
 
     private static final long serialVersionUID = 1L;
 
-    private final long[] milliseconds;
-    private final int[] nanoOfMilliseconds;
+    private long[] milliseconds;
+    private int[] nanoOfMilliseconds;
 
     public HeapTimestampVector(int len) {
         super(len);
         this.milliseconds = new long[len];
         this.nanoOfMilliseconds = new int[len];
+    }
+
+    public HeapTimestampVector(int len, boolean[] isNull) {
+        super(len, isNull);
     }
 
     @Override

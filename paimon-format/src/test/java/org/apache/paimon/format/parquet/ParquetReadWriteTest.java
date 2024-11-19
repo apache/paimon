@@ -61,6 +61,7 @@ import org.apache.parquet.filter2.predicate.ParquetFilters;
 import org.apache.parquet.hadoop.ParquetFileWriter;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.example.ExampleParquetWriter;
+import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
 import org.apache.parquet.schema.ConversionPatterns;
 import org.apache.parquet.schema.GroupType;
@@ -176,7 +177,11 @@ public class ParquetReadWriteTest {
                                                             new ArrayType(true, new IntType())))
                                             .field("c", new IntType())
                                             .build()),
-                            new IntType()));
+                            new IntType()),
+                    RowType.of(
+                            new ArrayType(RowType.of(new VarCharType(255))),
+                            RowType.of(new IntType()),
+                            new VarCharType(255)));
 
     @TempDir public File folder;
 
@@ -822,7 +827,8 @@ public class ParquetReadWriteTest {
                                                                 }),
                                                         i)
                                             }),
-                                    i)));
+                                    i),
+                            null));
         }
         return rows;
     }
@@ -834,11 +840,14 @@ public class ParquetReadWriteTest {
         MessageType schema =
                 ParquetSchemaConverter.convertToParquetMessageType(
                         "paimon-parquet", NESTED_ARRAY_MAP_TYPE);
+        String[] candidates = new String[] {"snappy", "zstd", "gzip"};
+        String compress = candidates[new Random().nextInt(3)];
         try (ParquetWriter<Group> writer =
                 ExampleParquetWriter.builder(
                                 HadoopOutputFile.fromPath(
                                         new org.apache.hadoop.fs.Path(path.toString()), conf))
                         .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
+                        .withCompressionCodec(CompressionCodecName.fromConf(compress))
                         .withConf(new Configuration())
                         .withType(schema)
                         .build()) {
@@ -1011,6 +1020,10 @@ public class ParquetReadWriteTest {
                     origin.getRow(5, 2).getArray(0).getRow(0, 2).getInt(1),
                     result.getRow(5, 2).getArray(0).getRow(0, 2).getInt(1));
             Assertions.assertEquals(origin.getRow(5, 2).getInt(1), result.getRow(5, 2).getInt(1));
+            Assertions.assertTrue(result.isNullAt(6));
+            Assertions.assertTrue(result.getRow(6, 2).isNullAt(0));
+            Assertions.assertTrue(result.getRow(6, 2).isNullAt(1));
+            Assertions.assertTrue(result.getRow(6, 2).isNullAt(2));
         }
         assertThat(iterator.hasNext()).isFalse();
         iterator.close();

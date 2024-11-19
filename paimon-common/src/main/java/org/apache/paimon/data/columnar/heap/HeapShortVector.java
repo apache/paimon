@@ -39,6 +39,10 @@ public class HeapShortVector extends AbstractHeapVector implements WritableShort
         vector = new short[len];
     }
 
+    public HeapShortVector(int len, boolean[] isNull) {
+        super(len, isNull);
+    }
+
     @Override
     public short getShort(int i) {
         if (dictionary == null) {

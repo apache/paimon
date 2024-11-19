@@ -39,6 +39,10 @@ public class HeapIntVector extends AbstractHeapVector implements WritableIntVect
         vector = new int[len];
     }
 
+    public HeapIntVector(int len, boolean[] isNull) {
+        super(len, isNull);
+    }
+
     @Override
     public int getInt(int i) {
         if (dictionary == null) {

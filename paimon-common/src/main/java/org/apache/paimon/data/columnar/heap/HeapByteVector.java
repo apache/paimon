@@ -39,6 +39,10 @@ public class HeapByteVector extends AbstractHeapVector implements WritableByteVe
         vector = new byte[len];
     }
 
+    public HeapByteVector(int len, boolean[] isNull) {
+        super(len, isNull);
+    }
+
     @Override
     public byte getByte(int i) {
         if (dictionary == null) {
