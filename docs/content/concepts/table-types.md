@@ -94,14 +94,43 @@ CREATE TABLE my_table (
 
 ## View
 
-View is supported when the metastore can support view, for example, hive metastore.
+View is supported when the metastore can support view, for example, hive metastore. If you don't have metastore, you
+can only use temporary View, which only exists in the current session. This chapter mainly describes persistent views.
 
 View will currently save the original SQL. If you need to use View across engines, you can write a cross engine
 SQL statement. For example:
 
+{{< tabs "view" >}}
+{{< tab "Flink SQL" >}}
+
 ```sql
-CREATE VIEW my_view AS SELECT a + 1, b FROM my_db.my_source;
+CREATE VIEW [IF NOT EXISTS] [catalog_name.][db_name.]view_name
+   [( columnName [, columnName ]* )] [COMMENT view_comment]
+AS query_expression;
+
+DROP VIEW  [IF EXISTS] [catalog_name.][db_name.]view_name;
+
+SHOW VIEWS;
+
+SHOW CREATE VIEW my_view;
 ```
+{{< /tab >}}
+
+{{< tab "Spark SQL" >}}
+
+```sql
+CREATE [OR REPLACE] VIEW [IF NOT EXISTS] [catalog_name.][db_name.]view_name
+   [( columnName [, columnName ]* )] [COMMENT view_comment]
+AS query_expression;
+
+DROP VIEW  [IF EXISTS] [catalog_name.][db_name.]view_name;
+
+SHOW VIEWS;
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
 
 ## Format Table
 
