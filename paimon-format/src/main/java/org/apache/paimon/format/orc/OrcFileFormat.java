@@ -28,7 +28,6 @@ import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.apache.paimon.format.orc.filter.OrcPredicateFunctionVisitor;
 import org.apache.paimon.format.orc.filter.OrcSimpleStatsExtractor;
-import org.apache.paimon.format.orc.reader.OrcSplitReaderUtil;
 import org.apache.paimon.format.orc.writer.RowDataVectorizer;
 import org.apache.paimon.format.orc.writer.Vectorizer;
 import org.apache.paimon.options.MemorySize;
@@ -123,7 +122,7 @@ public class OrcFileFormat extends FileFormat {
     @Override
     public void validateDataFields(RowType rowType) {
         DataType refinedType = refineDataType(rowType);
-        OrcSplitReaderUtil.toOrcType(refinedType);
+        OrcTypeUtil.convertToOrcSchema((RowType) refinedType);
     }
 
     /**
@@ -141,9 +140,8 @@ public class OrcFileFormat extends FileFormat {
         DataType refinedType = refineDataType(type);
         DataType[] orcTypes = getFieldTypes(refinedType).toArray(new DataType[0]);
 
-        TypeDescription typeDescription = OrcSplitReaderUtil.toOrcType(refinedType);
-        Vectorizer<InternalRow> vectorizer =
-                new RowDataVectorizer(typeDescription.toString(), orcTypes);
+        TypeDescription typeDescription = OrcTypeUtil.convertToOrcSchema((RowType) refinedType);
+        Vectorizer<InternalRow> vectorizer = new RowDataVectorizer(typeDescription, orcTypes);
 
         return new OrcWriterFactory(vectorizer, orcProperties, writerConf, writeBatchSize);
     }
