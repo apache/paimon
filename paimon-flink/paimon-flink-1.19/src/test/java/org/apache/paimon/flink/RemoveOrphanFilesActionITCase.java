@@ -16,7 +16,10 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action;
+package org.apache.paimon.flink;
 
-/** IT cases base for {@link RemoveOrphanFilesAction} in Flink Common. */
+import org.apache.paimon.flink.action.RemoveOrphanFilesAction;
+import org.apache.paimon.flink.action.RemoveOrphanFilesActionITCaseBase;
+
+/** IT cases base for {@link RemoveOrphanFilesAction} in Flink 1.19. */
 public class RemoveOrphanFilesActionITCase extends RemoveOrphanFilesActionITCaseBase {}
