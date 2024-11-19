@@ -69,6 +69,7 @@ under the License.
         <module>paimon-test-utils</module>
         <module>paimon-arrow</module>
         <module>tools/ci/paimon-ci-tools</module>
+        <module>paimon-open-api</module>
     </modules>
 
     <properties>

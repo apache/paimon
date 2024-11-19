@@ -20,7 +20,8 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.rest.responses.ErrorResponse;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+
 import okhttp3.HttpUrl;
 import okhttp3.Request;
 import okhttp3.ResponseBody;

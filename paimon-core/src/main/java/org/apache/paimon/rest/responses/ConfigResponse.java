@@ -35,4 +35,8 @@ public class ConfigResponse implements RESTResponse {
     public Map<String, String> getDefaults() {
         return defaults;
     }
+
+    public void setDefaults(Map<String, String> defaults) {
+        this.defaults = defaults;
+    }
 }

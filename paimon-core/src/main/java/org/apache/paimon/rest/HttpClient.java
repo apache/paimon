@@ -18,8 +18,9 @@
 
 package org.apache.paimon.rest;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.ThreadFactoryBuilder;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+
 import okhttp3.Dispatcher;
 import okhttp3.OkHttpClient;
 import retrofit2.Retrofit;
@@ -63,7 +64,7 @@ public class HttpClient implements RESTClient {
         return new Retrofit.Builder()
                 .client(requireNonNull(httpClient, "httpClient"))
                 .baseUrl(requireNonNull(baseUrl, "baseUrl").toString())
-                .addConverterFactory(JacksonConverterFactory.create(mapper))
+                .addConverterFactory(JacksonConverterFactory.create())
                 .validateEagerly(true)
                 .build();
     }

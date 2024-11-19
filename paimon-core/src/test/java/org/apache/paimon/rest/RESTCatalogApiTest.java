@@ -34,6 +34,7 @@ import java.io.IOException;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 
+/** REST catalog api test. */
 public class RESTCatalogApiTest {
     private MockWebServer mockWebServer;
     private RESTCatalogApi apiService;

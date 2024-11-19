@@ -16,20 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest;
+package org.apache.paimon.open.api;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.SerializationFeature;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
 
-/** REST object mapper. */
-public class RESTObjectMapper {
-    public static ObjectMapper create() {
-        ObjectMapper mapper = new ObjectMapper();
-        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-        mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
-        mapper.registerModule(new JavaTimeModule());
-        return mapper;
+/** OpenAPI application. */
+@SpringBootApplication
+public class OpenApiApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(OpenApiApplication.class, args);
     }
 }
