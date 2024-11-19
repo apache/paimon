@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 
+/** REST catalog factory. */
 public class RESTCatalogFactory implements CatalogFactory {
     public static final String IDENTIFIER = "rest";
 

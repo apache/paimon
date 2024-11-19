@@ -20,6 +20,7 @@ package org.apache.paimon.rest.responses;
 
 import java.util.List;
 
+/** Response for error. */
 public class ErrorResponse {
     List<String> errors;
 

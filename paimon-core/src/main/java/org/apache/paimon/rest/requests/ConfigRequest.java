@@ -20,4 +20,5 @@ package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.rest.RESTRequest;
 
+/** Request to get config. */
 public class ConfigRequest implements RESTRequest {}

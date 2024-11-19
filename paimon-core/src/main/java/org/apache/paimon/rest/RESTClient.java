@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest;
 
+/** REST client. */
 public interface RESTClient {
     RESTCatalogApi getClient();
 }

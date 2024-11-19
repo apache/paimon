@@ -18,10 +18,12 @@
 
 package org.apache.paimon.rest;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import okhttp3.Dispatcher;
 import okhttp3.OkHttpClient;
 import retrofit2.Retrofit;
+import retrofit2.converter.jackson.JacksonConverterFactory;
 
 import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
@@ -34,10 +36,12 @@ import static okhttp3.ConnectionSpec.CLEARTEXT;
 import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
 import static okhttp3.ConnectionSpec.MODERN_TLS;
 
+/** HTTP client for REST catalog. */
 public class HttpClient implements RESTClient {
 
     private final OkHttpClient okHttpClient;
     private final String endpoint;
+    private final ObjectMapper mapper = RESTObjectMapper.create();
 
     public HttpClient(String endpoint) {
         // todo: support config
@@ -52,14 +56,15 @@ public class HttpClient implements RESTClient {
 
     @Override
     public RESTCatalogApi getClient() {
-        return HttpClient.createAgentCallRetrofit(okHttpClient, endpoint)
-                .create(RESTCatalogApi.class);
+        return createAgentCallRetrofit(okHttpClient, endpoint).create(RESTCatalogApi.class);
     }
 
-    private static Retrofit createAgentCallRetrofit(OkHttpClient httpClient, String baseUrl) {
+    private Retrofit createAgentCallRetrofit(OkHttpClient httpClient, String baseUrl) {
         return new Retrofit.Builder()
                 .client(requireNonNull(httpClient, "httpClient"))
                 .baseUrl(requireNonNull(baseUrl, "baseUrl").toString())
+                // todo: need define mapper
+                .addConverterFactory(JacksonConverterFactory.create(mapper))
                 .validateEagerly(true)
                 .build();
     }

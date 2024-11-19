@@ -29,6 +29,7 @@ import retrofit2.Response;
 
 import java.io.IOException;
 
+/** REST client util. */
 public class RestClientUtil {
     private static final org.slf4j.Logger log =
             org.slf4j.LoggerFactory.getLogger(RestClientUtil.class);

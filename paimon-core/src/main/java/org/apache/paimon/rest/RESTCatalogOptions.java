@@ -21,6 +21,7 @@ package org.apache.paimon.rest;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 
+/** REST catalog options. */
 public class RESTCatalogOptions {
     public static final ConfigOption<String> ENDPOINT =
             ConfigOptions.key("endpoint")
