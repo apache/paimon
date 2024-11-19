@@ -438,7 +438,7 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         return tableSchemaInFileSystem(
-                getTableLocation(identifier, table), identifier.getBranchNameOrDefault())
+                        getTableLocation(identifier, table), identifier.getBranchNameOrDefault())
                 .orElseThrow(() -> new TableNotExistException(identifier));
     }
 
@@ -989,9 +989,9 @@ public class HiveCatalog extends AbstractCatalog {
     private boolean isPaimonTable(Identifier identifier, Table table) {
         return isPaimonTable(table)
                 && tableSchemaInFileSystem(
-                getTableLocation(identifier, table),
-                identifier.getBranchNameOrDefault())
-                .isPresent();
+                                getTableLocation(identifier, table),
+                                identifier.getBranchNameOrDefault())
+                        .isPresent();
     }
 
     private static boolean isPaimonTable(Table table) {
