@@ -43,7 +43,7 @@ public class AuthenticationInterceptor implements Interceptor {
             // Refresh the token here
             refreshToken = refreshTokenFromServer();
             requestBuilder = request.newBuilder().header("Authorization", "Bearer " + refreshToken);
-
+            response.close();
             response = chain.proceed(requestBuilder.build());
         }
         response =

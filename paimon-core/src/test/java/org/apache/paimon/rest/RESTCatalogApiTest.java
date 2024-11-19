@@ -32,6 +32,7 @@ import retrofit2.Response;
 import java.io.IOException;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
 
 public class RESTCatalogApiTest {
     private MockWebServer mockWebServer;
@@ -65,5 +66,27 @@ public class RESTCatalogApiTest {
         Headers headers = response.headers();
         assertEquals("b", data.getDefaults().get("a"));
         assertEquals("Bearer " + initToken, headers.get("Authorization"));
+    }
+
+    @Test
+    public void testNeedAuth() throws IOException {
+        String mockResponse = "{\"defaults\": {\"a\": \"b\"}}";
+        MockResponse mockResponseObj401 =
+                new MockResponse()
+                        .setBody(mockResponse)
+                        .setResponseCode(401)
+                        .addHeader("Content-Type", "application/json");
+        MockResponse mockResponseObj200 =
+                new MockResponse()
+                        .setBody(mockResponse)
+                        .addHeader("Content-Type", "application/json");
+        mockWebServer.enqueue(mockResponseObj401);
+        mockWebServer.enqueue(mockResponseObj200);
+        ConfigRequest request = new ConfigRequest();
+        Response<ConfigResponse> response = apiService.getConfig(request).execute();
+        ConfigResponse data = response.body();
+        Headers headers = response.headers();
+        assertEquals("b", data.getDefaults().get("a"));
+        assertNotEquals("Bearer " + initToken, headers.get("Authorization"));
     }
 }
