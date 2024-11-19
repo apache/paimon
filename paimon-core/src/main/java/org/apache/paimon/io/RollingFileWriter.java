@@ -78,7 +78,12 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
                 openCurrentWriter();
             }
 
-            currentWriter.write(row);
+            try {
+                currentWriter.write(row);
+            } catch (Throwable e) {
+                currentWriter = null;
+                throw e;
+            }
             recordCount += 1;
 
             if (rollingFile()) {
@@ -102,7 +107,12 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
                 openCurrentWriter();
             }
 
-            currentWriter.writeBundle(bundle);
+            try {
+                currentWriter.writeBundle(bundle);
+            } catch (Throwable e) {
+                currentWriter = null;
+                throw e;
+            }
             recordCount += bundle.rowCount();
 
             if (rollingFile()) {
