@@ -23,6 +23,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessin
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import okhttp3.Dispatcher;
+import okhttp3.Headers;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -64,11 +65,13 @@ public class HttpClient implements RESTClient {
             String path, RESTRequest body, Class<T> responseType, Map<String, String> headers) {
         try {
             RequestBody requestBody = buildRequestBody(body);
-            Request request = new Request.Builder().url(endpoint + path).post(requestBody).build();
-            try (Response response = okHttpClient.newCall(request).execute()) {
-                String responseBody = response.body().string();
-                return mapper.readValue(responseBody, responseType);
-            }
+            Request request =
+                    new Request.Builder()
+                            .url(endpoint + path)
+                            .post(requestBody)
+                            .headers(Headers.of(headers))
+                            .build();
+            return exec(request, responseType);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -78,6 +81,16 @@ public class HttpClient implements RESTClient {
     public void close() throws IOException {
         okHttpClient.dispatcher().cancelAll();
         okHttpClient.connectionPool().evictAll();
+    }
+
+    private <T extends RESTResponse> T exec(Request request, Class<T> responseType) {
+        try (Response response = okHttpClient.newCall(request).execute()) {
+            String responseBody = response.body().string();
+            return mapper.readValue(responseBody, responseType);
+            // todo: need handle exception
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private RequestBody buildRequestBody(RESTRequest body) throws JsonProcessingException {
