@@ -20,8 +20,11 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.orphan.FlinkOrphanFilesClean;
+import org.apache.paimon.operation.LocalOrphanFilesClean;
 
 import org.apache.flink.table.procedure.ProcedureContext;
+
+import java.util.Locale;
 
 import static org.apache.paimon.operation.OrphanFilesClean.createFileCleaner;
 import static org.apache.paimon.operation.OrphanFilesClean.olderThanMillis;
@@ -66,20 +69,57 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
             boolean dryRun,
             Integer parallelism)
             throws Exception {
+        return call(procedureContext, tableId, olderThan, dryRun, parallelism, null);
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext,
+            String tableId,
+            String olderThan,
+            boolean dryRun,
+            Integer parallelism,
+            String mode)
+            throws Exception {
         Identifier identifier = Identifier.fromString(tableId);
         String databaseName = identifier.getDatabaseName();
         String tableName = identifier.getObjectName();
-
-        long deleted =
-                FlinkOrphanFilesClean.executeDatabaseOrphanFiles(
-                        procedureContext.getExecutionEnvironment(),
-                        catalog,
-                        olderThanMillis(olderThan),
-                        createFileCleaner(catalog, dryRun),
-                        parallelism,
-                        databaseName,
-                        tableName);
-        return new String[] {String.valueOf(deleted)};
+        if (mode == null) {
+            mode = "DISTRIBUTED";
+        }
+        long deletedFiles;
+        try {
+            switch (mode.toUpperCase(Locale.ROOT)) {
+                case "DISTRIBUTED":
+                    deletedFiles =
+                            FlinkOrphanFilesClean.executeDatabaseOrphanFiles(
+                                    procedureContext.getExecutionEnvironment(),
+                                    catalog,
+                                    olderThanMillis(olderThan),
+                                    createFileCleaner(catalog, dryRun),
+                                    parallelism,
+                                    databaseName,
+                                    tableName);
+                    break;
+                case "LOCAL":
+                    deletedFiles =
+                            LocalOrphanFilesClean.executeDatabaseOrphanFiles(
+                                    catalog,
+                                    databaseName,
+                                    tableName,
+                                    olderThanMillis(olderThan),
+                                    createFileCleaner(catalog, dryRun),
+                                    parallelism);
+                    break;
+                default:
+                    throw new IllegalArgumentException(
+                            "Unknown mode: "
+                                    + mode
+                                    + ". Only 'DISTRIBUTED' and 'LOCAL' are supported.");
+            }
+            return new String[] {String.valueOf(deletedFiles)};
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
