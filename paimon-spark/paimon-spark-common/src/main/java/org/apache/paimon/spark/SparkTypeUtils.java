@@ -81,6 +81,10 @@ public class SparkTypeUtils {
         return type.accept(PaimonToSparkTypeVisitor.INSTANCE);
     }
 
+    public static org.apache.paimon.types.RowType toPaimonRowType(StructType type) {
+        return (RowType) toPaimonType(type);
+    }
+
     public static org.apache.paimon.types.DataType toPaimonType(DataType dataType) {
         return SparkToPaimonTypeVisitor.visit(dataType);
     }
