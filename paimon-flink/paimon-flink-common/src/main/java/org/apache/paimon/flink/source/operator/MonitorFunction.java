@@ -106,7 +106,7 @@ public class MonitorFunction extends RichSourceFunction<Split>
 
     @Override
     public void initializeState(FunctionInitializationContext context) throws Exception {
-        this.scan = readBuilder.dropStats().newStreamScan();
+        this.scan = readBuilder.newStreamScan();
 
         this.checkpointState =
                 context.getOperatorStateStore()

@@ -178,7 +178,7 @@ public class FlinkSourceBuilder {
         if (limit != null) {
             readBuilder.withLimit(limit.intValue());
         }
-        return readBuilder;
+        return readBuilder.dropStats();
     }
 
     private DataStream<RowData> buildStaticFileSource() {

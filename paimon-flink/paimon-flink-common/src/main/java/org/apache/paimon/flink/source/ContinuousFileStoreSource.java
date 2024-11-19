@@ -77,7 +77,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
             nextSnapshotId = checkpoint.currentSnapshotId();
             splits = checkpoint.splits();
         }
-        StreamTableScan scan = readBuilder.dropStats().newStreamScan();
+        StreamTableScan scan = readBuilder.newStreamScan();
         if (metricGroup(context) != null) {
             ((StreamDataTableScan) scan)
                     .withMetricsRegistry(new FlinkMetricRegistry(context.metricGroup()));
