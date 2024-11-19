@@ -19,20 +19,24 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.ThreadFactoryBuilder;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import okhttp3.Dispatcher;
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
-import retrofit2.Retrofit;
-import retrofit2.converter.jackson.JacksonConverterFactory;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 
+import java.io.IOException;
 import java.util.Arrays;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-import static java.util.Objects.requireNonNull;
 import static okhttp3.ConnectionSpec.CLEARTEXT;
 import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
 import static okhttp3.ConnectionSpec.MODERN_TLS;
@@ -56,17 +60,29 @@ public class HttpClient implements RESTClient {
     }
 
     @Override
-    public RESTCatalogApi getClient() {
-        return createAgentCallRetrofit(okHttpClient, endpoint).create(RESTCatalogApi.class);
+    public <T extends RESTResponse> T post(
+            String path, RESTRequest body, Class<T> responseType, Map<String, String> headers) {
+        try {
+            RequestBody requestBody = buildRequestBody(body);
+            Request request = new Request.Builder().url(endpoint + path).post(requestBody).build();
+            try (Response response = okHttpClient.newCall(request).execute()) {
+                String responseBody = response.body().string();
+                return mapper.readValue(responseBody, responseType);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
-    private Retrofit createAgentCallRetrofit(OkHttpClient httpClient, String baseUrl) {
-        return new Retrofit.Builder()
-                .client(requireNonNull(httpClient, "httpClient"))
-                .baseUrl(requireNonNull(baseUrl, "baseUrl").toString())
-                .addConverterFactory(JacksonConverterFactory.create())
-                .validateEagerly(true)
-                .build();
+    @Override
+    public void close() throws IOException {
+        okHttpClient.dispatcher().cancelAll();
+        okHttpClient.connectionPool().evictAll();
+    }
+
+    private RequestBody buildRequestBody(RESTRequest body) throws JsonProcessingException {
+        return RequestBody.create(
+                MediaType.parse("application/json"), mapper.writeValueAsString(body));
     }
 
     private static OkHttpClient createHttpClient(

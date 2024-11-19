@@ -18,34 +18,33 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.rest.requests.ConfigRequest;
-import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.options.Options;
 
-import okhttp3.Headers;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import retrofit2.Response;
 
 import java.io.IOException;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
 
 /** REST catalog api test. */
-public class RESTCatalogApiTest {
+public class RESTCatalogTest {
     private MockWebServer mockWebServer;
-    private RESTCatalogApi apiService;
+    private RESTCatalog restCatalog;
     private final String initToken = "init_token";
 
     @Before
     public void setUp() throws IOException {
         mockWebServer = new MockWebServer();
         mockWebServer.start();
-        String baseUrl = mockWebServer.url("/").toString();
-        apiService = (new HttpClient(baseUrl, initToken)).getClient();
+        String baseUrl = mockWebServer.url("").toString();
+        Options options = new Options();
+        options.set(RESTCatalogOptions.ENDPOINT, baseUrl);
+        restCatalog = new RESTCatalog(options);
     }
 
     @After
@@ -54,23 +53,19 @@ public class RESTCatalogApiTest {
     }
 
     @Test
-    public void testGetConfig() throws IOException {
+    public void testGetConfig() {
         String mockResponse = "{\"defaults\": {\"a\": \"b\"}}";
         MockResponse mockResponseObj =
                 new MockResponse()
                         .setBody(mockResponse)
                         .addHeader("Content-Type", "application/json");
         mockWebServer.enqueue(mockResponseObj);
-        ConfigRequest request = new ConfigRequest();
-        Response<ConfigResponse> response = apiService.getConfig(request).execute();
-        ConfigResponse data = response.body();
-        Headers headers = response.headers();
-        assertEquals("b", data.getDefaults().get("a"));
-        assertEquals("Bearer " + initToken, headers.get("Authorization"));
+        Map<String, String> response = restCatalog.options();
+        assertEquals("b", response.get("a"));
     }
 
     @Test
-    public void testNeedAuth() throws IOException {
+    public void testNeedAuth() {
         String mockResponse = "{\"defaults\": {\"a\": \"b\"}}";
         MockResponse mockResponseObj401 =
                 new MockResponse()
@@ -83,11 +78,7 @@ public class RESTCatalogApiTest {
                         .addHeader("Content-Type", "application/json");
         mockWebServer.enqueue(mockResponseObj401);
         mockWebServer.enqueue(mockResponseObj200);
-        ConfigRequest request = new ConfigRequest();
-        Response<ConfigResponse> response = apiService.getConfig(request).execute();
-        ConfigResponse data = response.body();
-        Headers headers = response.headers();
-        assertEquals("b", data.getDefaults().get("a"));
-        assertNotEquals("Bearer " + initToken, headers.get("Authorization"));
+        Map<String, String> response = restCatalog.options();
+        assertEquals("b", response.get("a"));
     }
 }

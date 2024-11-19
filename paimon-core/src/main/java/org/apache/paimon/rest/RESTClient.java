@@ -18,7 +18,20 @@
 
 package org.apache.paimon.rest;
 
+import java.io.Closeable;
+import java.util.Map;
+import java.util.function.Supplier;
+
 /** REST client. */
-public interface RESTClient {
-    RESTCatalogApi getClient();
+public interface RESTClient extends Closeable {
+    default <T extends RESTResponse> T post(
+            String path,
+            RESTRequest body,
+            Class<T> responseType,
+            Supplier<Map<String, String>> headers) {
+        return post(path, body, responseType, headers.get());
+    }
+
+    <T extends RESTResponse> T post(
+            String path, RESTRequest body, Class<T> responseType, Map<String, String> headers);
 }

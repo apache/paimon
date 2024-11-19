@@ -52,7 +52,7 @@ public class RESTCatalog implements Catalog {
     @Override
     public Map<String, String> options() {
         ConfigResponse response =
-                RestClientUtil.getResponse(client.getClient().getConfig(new ConfigRequest()));
+                client.post("config", new ConfigRequest(), ConfigResponse.class, () -> null);
         return response.getDefaults();
     }
 
