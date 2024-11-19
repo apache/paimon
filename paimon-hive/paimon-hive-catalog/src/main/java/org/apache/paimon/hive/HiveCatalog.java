@@ -55,10 +55,12 @@ import org.apache.paimon.view.ViewImpl;
 import org.apache.flink.table.hive.LegacyHiveClasses;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.hive.common.StatsSetupConst;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.api.Database;
+import org.apache.hadoop.hive.metastore.api.EnvironmentContext;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.SerDeInfo;
@@ -846,13 +848,18 @@ public class HiveCatalog extends AbstractCatalog {
         updateHmsTablePars(table, newSchema);
         Path location = getTableLocation(identifier, table);
         updateHmsTable(table, identifier, newSchema, newSchema.options().get("provider"), location);
+        EnvironmentContext environmentContext = new EnvironmentContext();
+        environmentContext.putToProperties(StatsSetupConst.CASCADE, "true");
+        environmentContext.putToProperties(
+                StatsSetupConst.DO_NOT_UPDATE_STATS,
+                options.getString(StatsSetupConst.DO_NOT_UPDATE_STATS, "false"));
         clients.execute(
                 client ->
-                        client.alter_table(
+                        client.alter_table_with_environmentContext(
                                 identifier.getDatabaseName(),
                                 identifier.getTableName(),
                                 table,
-                                true));
+                                environmentContext));
     }
 
     @Override
@@ -960,7 +967,7 @@ public class HiveCatalog extends AbstractCatalog {
         return warehouse;
     }
 
-    private Table getHmsTable(Identifier identifier) throws TableNotExistException {
+    public Table getHmsTable(Identifier identifier) throws TableNotExistException {
         try {
             return clients.run(
                     client ->
