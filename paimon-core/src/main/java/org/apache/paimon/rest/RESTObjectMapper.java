@@ -23,6 +23,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
+/** REST object mapper. */
 public class RESTObjectMapper {
     public static ObjectMapper create() {
         ObjectMapper mapper = new ObjectMapper();

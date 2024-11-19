@@ -61,7 +61,7 @@ public class RESTCatalogApiTest {
     }
 
     @Test
-    public void testGetData() throws IOException {
+    public void testGetConfig() throws IOException {
         String mockResponse = "{\"defaults\": {\"a\": \"b\"}}";
         MockResponse mockResponseObj =
                 new MockResponse()
