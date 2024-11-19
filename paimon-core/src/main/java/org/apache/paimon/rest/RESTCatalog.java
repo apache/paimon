@@ -25,6 +25,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.requests.ConfigRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -49,7 +50,8 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public Map<String, String> options() {
-        ConfigResponse response = RestClientUtil.getResponse(client.getClient().getConfig());
+        ConfigResponse response =
+                RestClientUtil.getResponse(client.getClient().getConfig(new ConfigRequest()));
         return response.getDefaults();
     }
 

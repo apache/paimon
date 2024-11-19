@@ -18,15 +18,17 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.rest.requests.ConfigRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
 
 import retrofit2.Call;
-import retrofit2.http.GET;
+import retrofit2.http.Body;
+import retrofit2.http.POST;
 
 /** REST catalog API. */
 public interface RESTCatalogApi {
     String BASE_AGENT_PATH = "/api/v1/{prefix}";
 
-    @GET(BASE_AGENT_PATH + "/config")
-    Call<ConfigResponse> getConfig();
+    @POST(BASE_AGENT_PATH + "/config")
+    Call<ConfigResponse> getConfig(@Body ConfigRequest request);
 }

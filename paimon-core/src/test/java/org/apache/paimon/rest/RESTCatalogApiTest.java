@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.rest.requests.ConfigRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
 
 import okhttp3.mockwebserver.MockResponse;
@@ -67,8 +68,8 @@ public class RESTCatalogApiTest {
                         .setBody(mockResponse)
                         .addHeader("Content-Type", "application/json");
         mockWebServer.enqueue(mockResponseObj);
-
-        Response<ConfigResponse> response = apiService.getConfig().execute();
+        ConfigRequest request = new ConfigRequest();
+        Response<ConfigResponse> response = apiService.getConfig(request).execute();
         ConfigResponse data = response.body();
 
         assertEquals(200, response.code());
