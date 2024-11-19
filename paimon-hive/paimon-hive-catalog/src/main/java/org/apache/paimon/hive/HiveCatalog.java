@@ -283,6 +283,8 @@ public class HiveCatalog extends AbstractCatalog {
                 (key, value) -> {
                     if (key.equals(COMMENT_PROP)) {
                         database.setDescription(value);
+                    } else if (key.equals(OWNER_PROP)) {
+                        database.setOwnerName(value);
                     } else if (key.equals(DB_LOCATION_PROP)) {
                         database.setLocationUri(value);
                     } else if (value != null) {
@@ -299,11 +301,14 @@ public class HiveCatalog extends AbstractCatalog {
         try {
             Database database = clients.run(client -> client.getDatabase(name));
             Map<String, String> options = new HashMap<>(database.getParameters());
-            if (database.getLocationUri() != null) {
-                options.put(DB_LOCATION_PROP, database.getLocationUri());
-            }
             if (database.getDescription() != null) {
                 options.put(COMMENT_PROP, database.getDescription());
+            }
+            if (database.getOwnerName() != null) {
+                options.put(OWNER_PROP, database.getOwnerName());
+            }
+            if (database.getLocationUri() != null) {
+                options.put(DB_LOCATION_PROP, database.getLocationUri());
             }
             return org.apache.paimon.catalog.Database.of(name, options, database.getDescription());
         } catch (NoSuchObjectException e) {

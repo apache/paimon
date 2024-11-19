@@ -189,6 +189,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
           val props = getDatabaseProps("paimon_db")
           Assertions.assertEquals(props("k1"), "v1")
           Assertions.assertEquals(props("k2"), "v2")
+          Assertions.assertTrue(getDatabaseOwner("paimon_db").nonEmpty)
         }
     }
   }
@@ -296,29 +297,23 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
     }
   }
 
-  def getDatabaseLocation(dbName: String): String = {
+  def getDatabaseProp(dbName: String, propertyName: String): String = {
     spark
-      .sql(s"DESC DATABASE $dbName")
-      .filter("info_name == 'Location'")
+      .sql(s"DESC DATABASE EXTENDED $dbName")
+      .filter(s"info_name == '$propertyName'")
       .head()
       .getAs[String]("info_value")
-      .split(":")(1)
   }
 
-  def getDatabaseComment(dbName: String): String = {
-    spark
-      .sql(s"DESC DATABASE $dbName")
-      .filter("info_name == 'Comment'")
-      .head()
-      .getAs[String]("info_value")
-  }
+  def getDatabaseLocation(dbName: String): String =
+    getDatabaseProp(dbName, "Location").split(":")(1)
+
+  def getDatabaseComment(dbName: String): String = getDatabaseProp(dbName, "Comment")
+
+  def getDatabaseOwner(dbName: String): String = getDatabaseProp(dbName, "Owner")
 
   def getDatabaseProps(dbName: String): Map[String, String] = {
-    val dbPropsStr = spark
-      .sql(s"DESC DATABASE EXTENDED $dbName")
-      .filter("info_name == 'Properties'")
-      .head()
-      .getAs[String]("info_value")
+    val dbPropsStr = getDatabaseProp(dbName, "Properties")
     val pattern = "\\(([^,]+),([^)]+)\\)".r
     pattern
       .findAllIn(dbPropsStr.drop(1).dropRight(1))
