@@ -55,8 +55,9 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.List;
 
+import static org.apache.paimon.format.orc.OrcTypeUtil.checkStructCompatible;
+import static org.apache.paimon.format.orc.OrcTypeUtil.convertToOrcSchema;
 import static org.apache.paimon.format.orc.reader.AbstractOrcColumnVector.createPaimonVector;
-import static org.apache.paimon.format.orc.reader.OrcSplitReaderUtil.convertToOrcSchema;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** An ORC reader that produces a stream of {@link ColumnarRow} records. */
@@ -262,6 +263,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             boolean deletionVectorsEnabled)
             throws IOException {
         org.apache.orc.Reader orcReader = createReader(conf, fileIO, path, fileIndexResult);
+        checkStructCompatible(schema, orcReader.getSchema());
         try {
             // get offset and length for the stripes that start in the split
             Pair<Long, Long> offsetAndLength =

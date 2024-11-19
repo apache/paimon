@@ -18,17 +18,23 @@
 
 package org.apache.paimon.format.orc;
 
-import org.apache.paimon.format.orc.reader.OrcSplitReaderUtil;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
+import org.apache.orc.TypeDescription;
 import org.junit.jupiter.api.Test;
 
-import static org.apache.paimon.format.orc.reader.OrcSplitReaderUtil.convertToOrcType;
-import static org.assertj.core.api.Assertions.assertThat;
+import java.util.concurrent.atomic.AtomicInteger;
 
-/** Test for {@link OrcSplitReaderUtil}. */
-class OrcSplitReaderUtilTest {
+import static org.apache.paimon.format.orc.OrcTypeUtil.checkStructCompatible;
+import static org.apache.paimon.format.orc.OrcTypeUtil.convertToOrcSchema;
+import static org.apache.paimon.format.orc.OrcTypeUtil.convertToOrcType;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatNoException;
+
+/** Test for {@link OrcTypeUtil}. */
+class OrcTypeUtilTest {
 
     @Test
     void testDataTypeToOrcType() {
@@ -64,5 +70,27 @@ class OrcSplitReaderUtilTest {
 
     private void test(String expected, DataType type) {
         assertThat(convertToOrcType(type, -1, -1)).hasToString(expected);
+    }
+
+    @Test
+    void testCheckFieldIdAttribute() {
+        RowType full =
+                RowType.builder()
+                        .field("a", DataTypes.INT())
+                        .field(
+                                "b",
+                                RowType.builder(true, new AtomicInteger(5))
+                                        .field("f0", DataTypes.STRING())
+                                        .field("f1", DataTypes.INT())
+                                        .build())
+                        .field("c", DataTypes.ARRAY(DataTypes.INT()))
+                        .field("d", DataTypes.MAP(DataTypes.INT(), DataTypes.STRING()))
+                        .build();
+        RowType projected = full.project("c", "b", "d");
+
+        TypeDescription required = convertToOrcSchema(projected);
+        TypeDescription orc = convertToOrcSchema(full);
+
+        assertThatNoException().isThrownBy(() -> checkStructCompatible(required, orc));
     }
 }
