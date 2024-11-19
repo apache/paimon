@@ -53,7 +53,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
-import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecute;
+import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecuteSequentialReturn;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
 
 /**
@@ -180,7 +180,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                                 .filter(this::oldEnough)
                                 .map(FileStatus::getPath)
                                 .collect(Collectors.toList());
-        Iterator<Path> allPaths = randomlyExecute(executor, processor, fileDirs);
+        Iterator<Path> allPaths = randomlyExecuteSequentialReturn(executor, processor, fileDirs);
         Map<String, Path> result = new HashMap<>();
         while (allPaths.hasNext()) {
             Path next = allPaths.next();
