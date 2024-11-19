@@ -43,9 +43,9 @@ public class HttpClient implements RESTClient {
     private final String endpoint;
     private final ObjectMapper mapper = RESTObjectMapper.create();
 
-    public HttpClient(String endpoint) {
+    public HttpClient(String endpoint, String initToken) {
         // todo: support config
-        this.okHttpClient = createHttpClient(1, 3_000, 3_000);
+        this.okHttpClient = createHttpClient(1, 3_000, 3_000, initToken);
         this.endpoint = endpoint;
     }
 
@@ -63,14 +63,16 @@ public class HttpClient implements RESTClient {
         return new Retrofit.Builder()
                 .client(requireNonNull(httpClient, "httpClient"))
                 .baseUrl(requireNonNull(baseUrl, "baseUrl").toString())
-                // todo: need define mapper
                 .addConverterFactory(JacksonConverterFactory.create(mapper))
                 .validateEagerly(true)
                 .build();
     }
 
     private static OkHttpClient createHttpClient(
-            int threadPoolSize, long connectTimeoutMillis, long readTimeoutMillis) {
+            int threadPoolSize,
+            long connectTimeoutMillis,
+            long readTimeoutMillis,
+            String initToken) {
         ExecutorService executorService =
                 new ThreadPoolExecutor(
                         threadPoolSize,
@@ -89,6 +91,7 @@ public class HttpClient implements RESTClient {
                         .readTimeout(readTimeoutMillis, TimeUnit.MILLISECONDS)
                         .dispatcher(new Dispatcher(executorService))
                         .retryOnConnectionFailure(true)
+                        .addInterceptor(new AuthenticationInterceptor(initToken))
                         .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT));
 
         return builder.build();

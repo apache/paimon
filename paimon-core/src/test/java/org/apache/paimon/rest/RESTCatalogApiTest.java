@@ -21,14 +21,13 @@ package org.apache.paimon.rest;
 import org.apache.paimon.rest.requests.ConfigRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
 
+import okhttp3.Headers;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import retrofit2.Response;
-import retrofit2.Retrofit;
-import retrofit2.converter.jackson.JacksonConverterFactory;
 
 import java.io.IOException;
 
@@ -37,22 +36,14 @@ import static org.junit.Assert.assertEquals;
 public class RESTCatalogApiTest {
     private MockWebServer mockWebServer;
     private RESTCatalogApi apiService;
+    private final String initToken = "init_token";
 
     @Before
     public void setUp() throws IOException {
         mockWebServer = new MockWebServer();
         mockWebServer.start();
-
         String baseUrl = mockWebServer.url("/").toString();
-
-        Retrofit retrofit =
-                new Retrofit.Builder()
-                        .baseUrl(baseUrl)
-                        .addConverterFactory(
-                                JacksonConverterFactory.create(RESTObjectMapper.create()))
-                        .build();
-
-        apiService = retrofit.create(RESTCatalogApi.class);
+        apiService = (new HttpClient(baseUrl, initToken)).getClient();
     }
 
     @After
@@ -71,8 +62,8 @@ public class RESTCatalogApiTest {
         ConfigRequest request = new ConfigRequest();
         Response<ConfigResponse> response = apiService.getConfig(request).execute();
         ConfigResponse data = response.body();
-
-        assertEquals(200, response.code());
+        Headers headers = response.headers();
         assertEquals("b", data.getDefaults().get("a"));
+        assertEquals("Bearer " + initToken, headers.get("Authorization"));
     }
 }

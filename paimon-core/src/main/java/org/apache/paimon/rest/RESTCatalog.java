@@ -40,7 +40,8 @@ public class RESTCatalog implements Catalog {
 
     public RESTCatalog(Options options) {
         String endpoint = options.get(RESTCatalogOptions.ENDPOINT);
-        this.client = new HttpClient(endpoint);
+        // todo: token need config
+        this.client = new HttpClient(endpoint, "init_token");
     }
 
     @Override

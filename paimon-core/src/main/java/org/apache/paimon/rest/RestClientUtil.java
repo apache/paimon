@@ -43,7 +43,6 @@ public class RestClientUtil {
 
         Response<T> response = getResponseUtil(call);
         T body = response.body();
-
         if (log.isDebugEnabled()) {
             log.debug(
                     "Http call success [{}], http code [{}]",
