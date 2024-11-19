@@ -539,15 +539,15 @@ public class SnapshotManager implements Serializable {
      * Try to get non snapshot files. If any error occurred, just ignore it and return an empty
      * result.
      */
-    public List<Path> tryGetNonSnapshotFiles(Predicate<FileStatus> fileStatusFilter) {
+    public List<Pair<Path, Long>> tryGetNonSnapshotFiles(Predicate<FileStatus> fileStatusFilter) {
         return listPathWithFilter(snapshotDirectory(), fileStatusFilter, nonSnapshotFileFilter());
     }
 
-    public List<Path> tryGetNonChangelogFiles(Predicate<FileStatus> fileStatusFilter) {
+    public List<Pair<Path, Long>> tryGetNonChangelogFiles(Predicate<FileStatus> fileStatusFilter) {
         return listPathWithFilter(changelogDirectory(), fileStatusFilter, nonChangelogFileFilter());
     }
 
-    private List<Path> listPathWithFilter(
+    private List<Pair<Path, Long>> listPathWithFilter(
             Path directory, Predicate<FileStatus> fileStatusFilter, Predicate<Path> fileFilter) {
         try {
             FileStatus[] statuses = fileIO.listStatus(directory);
@@ -557,8 +557,8 @@ public class SnapshotManager implements Serializable {
 
             return Arrays.stream(statuses)
                     .filter(fileStatusFilter)
-                    .map(FileStatus::getPath)
-                    .filter(fileFilter)
+                    .filter(status -> fileFilter.test(status.getPath()))
+                    .map(status -> Pair.of(status.getPath(), status.getLen()))
                     .collect(Collectors.toList());
         } catch (IOException ignored) {
             return Collections.emptyList();
