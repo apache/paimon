@@ -30,13 +30,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
-import org.apache.paimon.shade.guava30.com.google.common.base.Objects;
-
 import org.apache.orc.TypeDescription;
-
-import java.util.List;
-
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Util for orc types. */
 public class OrcTypeUtil {
@@ -149,60 +143,5 @@ public class OrcTypeUtil {
             default:
                 throw new UnsupportedOperationException("Unsupported type: " + type);
         }
-    }
-
-    public static void checkStructCompatible(
-            TypeDescription requiredStruct, TypeDescription orcStruct) {
-        List<String> requiredFields = requiredStruct.getFieldNames();
-        List<TypeDescription> requiredTypes = requiredStruct.getChildren();
-        List<String> orcFields = orcStruct.getFieldNames();
-        List<TypeDescription> orcTypes = orcStruct.getChildren();
-
-        for (int i = 0; i < requiredFields.size(); i++) {
-            String field = requiredFields.get(i);
-            int orcIndex = orcFields.indexOf(field);
-            checkArgument(orcIndex != -1, "Cannot find field %s in orc file meta.", field);
-            TypeDescription requiredType = requiredTypes.get(i);
-            TypeDescription orcType = orcTypes.get(orcIndex);
-            checkField(field, requiredType, orcType);
-        }
-    }
-
-    private static void checkField(
-            String fieldName, TypeDescription requiredType, TypeDescription orcType) {
-        checkFieldIdAttribute(fieldName, requiredType, orcType);
-        if (requiredType.getCategory().isPrimitive()) {
-            return;
-        }
-
-        // see TypeDescription#getPartialName
-        switch (requiredType.getCategory()) {
-            case LIST:
-                checkField(
-                        "_elem", requiredType.getChildren().get(0), orcType.getChildren().get(0));
-                return;
-            case MAP:
-                checkField("_key", requiredType.getChildren().get(0), orcType.getChildren().get(0));
-                checkField(
-                        "_value", requiredType.getChildren().get(1), orcType.getChildren().get(1));
-                return;
-            case STRUCT:
-                checkStructCompatible(requiredType, orcType);
-                return;
-            default:
-                throw new UnsupportedOperationException("Unsupported orc type: " + requiredType);
-        }
-    }
-
-    private static void checkFieldIdAttribute(
-            String fieldName, TypeDescription requiredType, TypeDescription orcType) {
-        String requiredId = requiredType.getAttributeValue(PAIMON_ORC_FIELD_ID_KEY);
-        String orcId = orcType.getAttributeValue(PAIMON_ORC_FIELD_ID_KEY);
-        checkArgument(
-                Objects.equal(requiredId, orcId),
-                "Field %s has different id: read type id is %s but orc type id is %s. This is unexpected.",
-                fieldName,
-                requiredId,
-                orcId);
     }
 }
