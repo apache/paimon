@@ -526,9 +526,6 @@ public class TestFileStore extends KeyValueFileStore {
                         .map(Path::toString)
                         .sorted()
                         .collect(Collectors.joining(",\n"));
-        if (!actualString.equals(expectedString)) {
-            System.out.println("");
-        }
         assertThat(actualString).isEqualTo(expectedString);
     }
 
