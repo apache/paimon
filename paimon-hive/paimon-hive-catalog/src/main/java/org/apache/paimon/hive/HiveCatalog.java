@@ -963,11 +963,12 @@ public class HiveCatalog extends AbstractCatalog {
                 }
             } catch (TableNotExistException e) {
                 // hive table does not exist.
-                Table finalNewTable =
-                        newTable == null
-                                ? createHiveTable(
-                                        identifier, tableSchema, location, usingExternalTable())
-                                : newTable;
+                if (newTable == null) {
+                    newTable =
+                            createHiveTable(
+                                    identifier, tableSchema, location, usingExternalTable());
+                }
+                Table finalNewTable = newTable;
                 clients.execute(client -> client.createTable(finalNewTable));
             }
 
