@@ -20,14 +20,11 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
-import okhttp3.Interceptor;
-
 /** HTTP client build parameter. */
 public class HttpClientBuildParameter {
     private final String endpoint;
     private final int connectTimeoutMillis;
     private final int readTimeoutMillis;
-    private final Interceptor interceptor;
     private final ObjectMapper mapper;
     private final int threadPoolSize;
 
@@ -35,13 +32,11 @@ public class HttpClientBuildParameter {
             String endpoint,
             int connectTimeoutMillis,
             int readTimeoutMillis,
-            Interceptor interceptor,
             ObjectMapper mapper,
             int threadPoolSize) {
         this.endpoint = endpoint;
         this.connectTimeoutMillis = connectTimeoutMillis;
         this.readTimeoutMillis = readTimeoutMillis;
-        this.interceptor = interceptor;
         this.mapper = mapper;
         this.threadPoolSize = threadPoolSize;
     }
@@ -56,10 +51,6 @@ public class HttpClientBuildParameter {
 
     public int getReadTimeoutMillis() {
         return readTimeoutMillis;
-    }
-
-    public Interceptor getInterceptor() {
-        return interceptor;
     }
 
     public ObjectMapper getMapper() {

@@ -137,7 +137,6 @@ public class HttpClient implements RESTClient {
                                 TimeUnit.MILLISECONDS)
                         .dispatcher(new Dispatcher(executorService))
                         .retryOnConnectionFailure(true)
-                        .addInterceptor(httpClientBuildParameter.getInterceptor())
                         .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT));
 
         return builder.build();

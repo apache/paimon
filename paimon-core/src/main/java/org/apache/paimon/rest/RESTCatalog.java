@@ -41,10 +41,11 @@ import java.util.Map;
 public class RESTCatalog implements Catalog {
     private RESTClient client;
     private final ObjectMapper objectMapper = RESTObjectMapper.create();
+    private String token;
 
     public RESTCatalog(Options options) {
         String endpoint = options.get(RESTCatalogOptions.ENDPOINT);
-        String token = options.get(RESTCatalogOptions.TOKEN);
+        token = options.get(RESTCatalogOptions.TOKEN);
         Integer connectTimeoutMillis = options.get(RESTCatalogOptions.CONNECT_TIMEOUT_MILLIS);
         Integer readTimeoutMillis = options.get(RESTCatalogOptions.READ_TIMEOUT_MILLIS);
         Integer threadPoolSize = options.get(RESTCatalogOptions.THREAD_POOL_SIZE);
@@ -53,7 +54,6 @@ public class RESTCatalog implements Catalog {
                         endpoint,
                         connectTimeoutMillis,
                         readTimeoutMillis,
-                        new AuthenticationInterceptor(token),
                         objectMapper,
                         threadPoolSize);
         this.client = new HttpClient(httpClientBuildParameter);
@@ -163,7 +163,9 @@ public class RESTCatalog implements Catalog {
     public void close() throws Exception {}
 
     private Map<String, String> headers() {
+        // todo: need refresh token
         Map<String, String> header = new HashMap<>();
+        header.put("Authorization", "Bearer " + token);
         return header;
     }
 }

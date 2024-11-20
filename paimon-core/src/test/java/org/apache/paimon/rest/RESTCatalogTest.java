@@ -65,22 +65,4 @@ public class RESTCatalogTest {
         Map<String, String> response = restCatalog.options();
         assertEquals("b", response.get("a"));
     }
-
-    @Test
-    public void testNeedAuth() {
-        String mockResponse = "{\"defaults\": {\"a\": \"b\"}}";
-        MockResponse mockResponseObj401 =
-                new MockResponse()
-                        .setBody(mockResponse)
-                        .setResponseCode(401)
-                        .addHeader("Content-Type", "application/json");
-        MockResponse mockResponseObj200 =
-                new MockResponse()
-                        .setBody(mockResponse)
-                        .addHeader("Content-Type", "application/json");
-        mockWebServer.enqueue(mockResponseObj401);
-        mockWebServer.enqueue(mockResponseObj200);
-        Map<String, String> response = restCatalog.options();
-        assertEquals("b", response.get("a"));
-    }
 }
