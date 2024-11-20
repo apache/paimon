@@ -26,10 +26,12 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.IndexIncrement;
+import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
@@ -38,7 +40,6 @@ import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreCommitImpl;
-import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.MemorySize;
@@ -561,29 +562,41 @@ public class TestFileStore extends KeyValueFileStore {
         return getFilesInUse(
                 snapshotId,
                 snapshotManager(),
-                newScan(),
                 fileIO,
                 pathFactory(),
-                manifestListFactory().create());
+                manifestListFactory().create(),
+                manifestFileFactory().create());
     }
 
     public static Set<Path> getFilesInUse(
             long snapshotId,
             SnapshotManager snapshotManager,
-            FileStoreScan scan,
             FileIO fileIO,
             FileStorePathFactory pathFactory,
-            ManifestList manifestList) {
+            ManifestList manifestList,
+            ManifestFile manifestFile) {
         Set<Path> result = new HashSet<>();
 
         if (snapshotManager.snapshotExists(snapshotId)) {
-            result.addAll(
+            Set<Path> files =
                     getSnapshotFileInUse(
-                            snapshotId, snapshotManager, scan, fileIO, pathFactory, manifestList));
+                            snapshotId,
+                            snapshotManager,
+                            fileIO,
+                            pathFactory,
+                            manifestList,
+                            manifestFile);
+            result.addAll(files);
         } else if (snapshotManager.longLivedChangelogExists(snapshotId)) {
-            result.addAll(
+            Set<Path> files =
                     getChangelogFileInUse(
-                            snapshotId, snapshotManager, scan, fileIO, pathFactory, manifestList));
+                            snapshotId,
+                            snapshotManager,
+                            fileIO,
+                            pathFactory,
+                            manifestList,
+                            manifestFile);
+            result.addAll(files);
         } else {
             throw new RuntimeException(
                     String.format("The snapshot %s does not exist.", snapshotId));
@@ -595,10 +608,10 @@ public class TestFileStore extends KeyValueFileStore {
     private static Set<Path> getSnapshotFileInUse(
             long snapshotId,
             SnapshotManager snapshotManager,
-            FileStoreScan scan,
             FileIO fileIO,
             FileStorePathFactory pathFactory,
-            ManifestList manifestList) {
+            ManifestList manifestList,
+            ManifestFile manifestFile) {
         Set<Path> result = new HashSet<>();
         SchemaManager schemaManager = new SchemaManager(fileIO, snapshotManager.tablePath());
         CoreOptions options = new CoreOptions(schemaManager.latest().get().options());
@@ -625,7 +638,11 @@ public class TestFileStore extends KeyValueFileStore {
         manifests.forEach(m -> result.add(pathFactory.toManifestFilePath(m.fileName())));
 
         // data file
-        List<ManifestEntry> entries = scan.withManifestList(manifests).plan().files();
+        List<ManifestEntry> entries =
+                manifests.stream()
+                        .flatMap(m -> manifestFile.read(m.fileName()).stream())
+                        .collect(Collectors.toList());
+        entries = new ArrayList<>(FileEntry.mergeEntries(entries));
         for (ManifestEntry entry : entries) {
             result.add(
                     new Path(
@@ -641,7 +658,9 @@ public class TestFileStore extends KeyValueFileStore {
         // use list.
         if (changelogDecoupled && !produceChangelog) {
             entries =
-                    scan.withManifestList(manifestList.readDeltaManifests(snapshot)).plan().files();
+                    manifestList.readDeltaManifests(snapshot).stream()
+                            .flatMap(m -> manifestFile.read(m.fileName()).stream())
+                            .collect(Collectors.toList());
             for (ManifestEntry entry : entries) {
                 // append delete file are delayed to delete
                 if (entry.kind() == FileKind.DELETE
@@ -661,15 +680,13 @@ public class TestFileStore extends KeyValueFileStore {
     private static Set<Path> getChangelogFileInUse(
             long changelogId,
             SnapshotManager snapshotManager,
-            FileStoreScan scan,
             FileIO fileIO,
             FileStorePathFactory pathFactory,
-            ManifestList manifestList) {
+            ManifestList manifestList,
+            ManifestFile manifestFile) {
         Set<Path> result = new HashSet<>();
         SchemaManager schemaManager = new SchemaManager(fileIO, snapshotManager.tablePath());
         CoreOptions options = new CoreOptions(schemaManager.latest().get().options());
-        boolean produceChangelog =
-                options.changelogProducer() != CoreOptions.ChangelogProducer.NONE;
 
         Path changelogPath = snapshotManager.longLivedChangelogPath(changelogId);
         Changelog changelog = Changelog.fromPath(fileIO, changelogPath);
@@ -677,35 +694,27 @@ public class TestFileStore extends KeyValueFileStore {
         // changelog file
         result.add(changelogPath);
 
-        // manifest lists
-        if (!produceChangelog) {
-            result.add(pathFactory.toManifestListPath(changelog.baseManifestList()));
-            result.add(pathFactory.toManifestListPath(changelog.deltaManifestList()));
-        }
-        if (changelog.changelogManifestList() != null) {
-            result.add(pathFactory.toManifestListPath(changelog.changelogManifestList()));
-        }
-
-        // manifests
-        List<ManifestFileMeta> manifests =
-                new ArrayList<>(manifestList.readChangelogManifests(changelog));
-        if (!produceChangelog) {
-            manifests.addAll(manifestList.readDataManifests(changelog));
-        }
-
-        manifests.forEach(m -> result.add(pathFactory.toManifestFilePath(m.fileName())));
-
         // data file
         // not all manifests contains useful data file
         // (1) produceChangelog = 'true': data file in changelog manifests
         // (2) produceChangelog = 'false': 'APPEND' data file in delta manifests
 
         // delta file
-        if (!produceChangelog) {
-            for (ManifestEntry entry :
-                    scan.withManifestList(manifestList.readDeltaManifests(changelog))
-                            .plan()
-                            .files()) {
+        if (options.changelogProducer() == CoreOptions.ChangelogProducer.NONE) {
+            // TODO why we need to keep base manifests?
+            result.add(pathFactory.toManifestListPath(changelog.baseManifestList()));
+            manifestList
+                    .readDataManifests(changelog)
+                    .forEach(m -> result.add(pathFactory.toManifestFilePath(m.fileName())));
+
+            result.add(pathFactory.toManifestListPath(changelog.deltaManifestList()));
+            List<ManifestFileMeta> manifests = manifestList.readDeltaManifests(changelog);
+            manifests.forEach(m -> result.add(pathFactory.toManifestFilePath(m.fileName())));
+            List<ManifestEntry> files =
+                    manifests.stream()
+                            .flatMap(m -> manifestFile.read(m.fileName()).stream())
+                            .collect(Collectors.toList());
+            for (ManifestEntry entry : files) {
                 if (entry.file().fileSource().orElse(FileSource.APPEND) == FileSource.APPEND) {
                     result.add(
                             new Path(
@@ -713,12 +722,15 @@ public class TestFileStore extends KeyValueFileStore {
                                     entry.file().fileName()));
                 }
             }
-        } else {
-            // changelog
-            for (ManifestEntry entry :
-                    scan.withManifestList(manifestList.readChangelogManifests(changelog))
-                            .plan()
-                            .files()) {
+        } else if (changelog.changelogManifestList() != null) {
+            result.add(pathFactory.toManifestListPath(changelog.changelogManifestList()));
+            List<ManifestFileMeta> manifests = manifestList.readChangelogManifests(changelog);
+            manifests.forEach(m -> result.add(pathFactory.toManifestFilePath(m.fileName())));
+            List<ManifestEntry> files =
+                    manifests.stream()
+                            .flatMap(m -> manifestFile.read(m.fileName()).stream())
+                            .collect(Collectors.toList());
+            for (ManifestEntry entry : files) {
                 result.add(
                         new Path(
                                 pathFactory.bucketPath(entry.partition(), entry.bucket()),

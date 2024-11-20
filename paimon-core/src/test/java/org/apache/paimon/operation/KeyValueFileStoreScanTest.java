@@ -26,8 +26,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
@@ -250,29 +248,6 @@ public class KeyValueFileStoreScanTest {
                                 .flatMap(Collection::stream)
                                 .collect(Collectors.toList()));
         runTestExactMatch(scan, wantedSnapshot, expected);
-    }
-
-    @Test
-    public void testWithManifestList() throws Exception {
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        int numCommits = random.nextInt(10) + 1;
-        for (int i = 0; i < numCommits; i++) {
-            List<KeyValue> data = generateData(random.nextInt(100) + 1);
-            writeData(data);
-        }
-
-        ManifestList manifestList = store.manifestListFactory().create();
-        long wantedSnapshotId = random.nextLong(snapshotManager.latestSnapshotId()) + 1;
-        Snapshot wantedSnapshot = snapshotManager.snapshot(wantedSnapshotId);
-        List<ManifestFileMeta> wantedManifests = manifestList.readDataManifests(wantedSnapshot);
-
-        FileStoreScan scan = store.newScan();
-        scan.withManifestList(wantedManifests);
-
-        List<KeyValue> expectedKvs = store.readKvsFromSnapshot(wantedSnapshotId);
-        gen.sort(expectedKvs);
-        Map<BinaryRow, BinaryRow> expected = store.toKvMap(expectedKvs);
-        runTestExactMatch(scan, null, expected);
     }
 
     @Test

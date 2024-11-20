@@ -67,8 +67,6 @@ public interface FileStoreScan {
 
     FileStoreScan withSnapshot(Snapshot snapshot);
 
-    FileStoreScan withManifestList(List<ManifestFileMeta> manifests);
-
     FileStoreScan withKind(ScanMode scanMode);
 
     FileStoreScan withLevelFilter(Filter<Integer> levelFilter);
