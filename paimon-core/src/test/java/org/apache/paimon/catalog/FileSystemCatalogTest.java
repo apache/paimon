@@ -62,7 +62,7 @@ public class FileSystemCatalogTest extends CatalogTestBase {
                         .primaryKey("Pk1", "pk2", "pk3")
                         .build();
 
-        // Create table throws Exception when table is system table
+        // Create table throws Exception if using uppercase when 'allow-upper-case' is false
         assertThatExceptionOfType(IllegalArgumentException.class)
                 .isThrownBy(() -> catalog.createTable(identifier, schema, false))
                 .withMessage("Field name [Pk1, Col1] cannot contain upper case in the catalog.");
