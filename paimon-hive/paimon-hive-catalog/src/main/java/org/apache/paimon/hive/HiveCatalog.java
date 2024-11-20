@@ -48,6 +48,7 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
@@ -209,10 +210,18 @@ public class HiveCatalog extends AbstractCatalog {
         return getTableLocation(identifier, table);
     }
 
-    private Path initialTableLocation(Map<String, String> tableOptions, Identifier identifier) {
-        return tableOptions.containsKey(CoreOptions.PATH.key())
-                ? new Path(tableOptions.get(CoreOptions.PATH.key()))
-                : getTableLocation(identifier, null);
+    private Pair<Path, Boolean> initialTableLocation(
+            Map<String, String> tableOptions, Identifier identifier) {
+        boolean externalTable;
+        Path location;
+        if (tableOptions.containsKey(CoreOptions.PATH.key())) {
+            externalTable = true;
+            location = new Path(tableOptions.get(CoreOptions.PATH.key()));
+        } else {
+            externalTable = usingExternalTable();
+            location = getTableLocation(identifier, null);
+        }
+        return Pair.of(location, externalTable);
     }
 
     private Path getTableLocation(Identifier identifier, @Nullable Table table) {
@@ -639,9 +648,9 @@ public class HiveCatalog extends AbstractCatalog {
                         options,
                         schema.comment());
         try {
-            Map<String, String> tableOptions = schema.options();
-            boolean externalTable = createExternalTable(tableOptions);
-            Path location = initialTableLocation(tableOptions, identifier);
+            Pair<Path, Boolean> pair = initialTableLocation(schema.options(), identifier);
+            Path location = pair.getLeft();
+            boolean externalTable = pair.getRight();
             Table hiveTable = createHiveFormatTable(identifier, newSchema, location, externalTable);
             clients.execute(client -> client.createTable(hiveTable));
         } catch (Exception e) {
@@ -650,10 +659,7 @@ public class HiveCatalog extends AbstractCatalog {
         }
     }
 
-    private boolean createExternalTable(Map<String, String> tableOptions) {
-        if (tableOptions.containsKey(CoreOptions.PATH.key())) {
-            return true;
-        }
+    private boolean usingExternalTable() {
         CatalogTableType tableType =
                 OptionsUtils.convertToEnum(
                         hiveConf.get(TABLE_TYPE.key(), CatalogTableType.MANAGED.toString()),
@@ -702,9 +708,9 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     protected void createTableImpl(Identifier identifier, Schema schema) {
-        Map<String, String> tableOptions = schema.options();
-        boolean externalTable = createExternalTable(tableOptions);
-        Path location = initialTableLocation(tableOptions, identifier);
+        Pair<Path, Boolean> pair = initialTableLocation(schema.options(), identifier);
+        Path location = pair.getLeft();
+        boolean externalTable = pair.getRight();
         TableSchema tableSchema;
         try {
             tableSchema = schemaManager(identifier, location).createTable(schema, externalTable);
@@ -957,7 +963,11 @@ public class HiveCatalog extends AbstractCatalog {
                 }
             } catch (TableNotExistException e) {
                 // hive table does not exist.
-                Table finalNewTable = newTable;
+                Table finalNewTable =
+                        newTable == null
+                                ? createHiveTable(
+                                        identifier, tableSchema, location, usingExternalTable())
+                                : newTable;
                 clients.execute(client -> client.createTable(finalNewTable));
             }
 
