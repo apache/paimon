@@ -18,7 +18,7 @@
 
 package org.apache.paimon.rest.exceptions;
 
-/** Exception thrown on HTTP 503 - service is unavailable */
+/** Exception thrown on HTTP 503 - service is unavailable. */
 public class ServiceUnavailableException extends RESTException {
     public ServiceUnavailableException(String message, Object... args) {
         super(String.format(message, args));

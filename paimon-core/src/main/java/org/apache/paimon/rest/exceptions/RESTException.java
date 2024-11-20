@@ -18,7 +18,7 @@
 
 package org.apache.paimon.rest.exceptions;
 
-/** Base class for REST client exceptions */
+/** Base class for REST client exceptions. */
 public class RESTException extends RuntimeException {
     public RESTException(String message, Object... args) {
         super(String.format(message, args));

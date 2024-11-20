@@ -18,7 +18,7 @@
 
 package org.apache.paimon.rest.exceptions;
 
-/** Exception thrown on HTTP 500 - Bad Request */
+/** Exception thrown on HTTP 500 - Bad Request. */
 public class ServiceFailureException extends RESTException {
     public ServiceFailureException(String message, Object... args) {
         super(String.format(message, args));

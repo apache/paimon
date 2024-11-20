@@ -22,4 +22,5 @@ import org.apache.paimon.rest.responses.ErrorResponse;
 
 import java.util.function.Consumer;
 
+/** Error handler for REST client. */
 public abstract class ErrorHandler implements Consumer<ErrorResponse> {}

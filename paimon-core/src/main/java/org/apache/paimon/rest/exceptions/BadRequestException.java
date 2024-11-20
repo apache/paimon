@@ -18,7 +18,7 @@
 
 package org.apache.paimon.rest.exceptions;
 
-/** Exception thrown on HTTP 400 - Bad Request */
+/** Exception thrown on HTTP 400 - Bad Request. */
 public class BadRequestException extends RESTException {
 
     public BadRequestException(String message, Object... args) {
