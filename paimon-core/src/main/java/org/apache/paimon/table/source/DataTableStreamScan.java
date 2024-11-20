@@ -194,16 +194,16 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                 return SnapshotNotExistPlan.INSTANCE;
             }
 
-            // first check changes of overwrite
-            if (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE
-                    && supportStreamingReadOverwrite) {
-                LOG.debug("Find overwrite snapshot id {}.", nextSnapshotId);
-                SnapshotReader.Plan overwritePlan =
-                        followUpScanner.getOverwriteChangesPlan(snapshot, snapshotReader);
-                currentWatermark = overwritePlan.watermark();
-                nextSnapshotId++;
-                return overwritePlan;
-            } else if (followUpScanner.shouldScanSnapshot(snapshot)) {
+            // first try to get overwrite changes
+            if (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE) {
+                SnapshotReader.Plan overwritePlan = tryGetOverwirtePlan(snapshot);
+                if (overwritePlan != null) {
+                    nextSnapshotId++;
+                    return overwritePlan;
+                }
+            }
+
+            if (followUpScanner.shouldScanSnapshot(snapshot)) {
                 LOG.debug("Find snapshot id {}.", nextSnapshotId);
                 SnapshotReader.Plan plan = followUpScanner.scan(snapshot, snapshotReader);
                 currentWatermark = plan.watermark();
@@ -226,6 +226,18 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
             return true;
         }
         return false;
+    }
+
+    @Nullable
+    protected SnapshotReader.Plan tryGetOverwirtePlan(Snapshot snapshot) {
+        if (supportStreamingReadOverwrite) {
+            LOG.debug("Find overwrite snapshot id {}.", nextSnapshotId);
+            SnapshotReader.Plan overwritePlan =
+                    followUpScanner.getOverwriteChangesPlan(snapshot, snapshotReader);
+            currentWatermark = overwritePlan.watermark();
+            return overwritePlan;
+        }
+        return null;
     }
 
     protected FollowUpScanner createFollowUpScanner() {

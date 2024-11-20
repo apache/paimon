@@ -30,6 +30,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.DimScanOverwriteException;
 import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
@@ -249,7 +250,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 rows.add(new FlinkRowData(matchedRow));
             }
             return rows;
-        } catch (OutOfRangeException e) {
+        } catch (OutOfRangeException | DimScanOverwriteException e) {
             reopen();
             return lookup(keyRow);
         } catch (Exception e) {
