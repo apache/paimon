@@ -43,7 +43,9 @@ public class OpenAPIConfig {
         server.setDescription("Server URL in Development environment");
 
         License mitLicense =
-                new License().name("MIT License").url("https://choosealicense.com/licenses/mit/");
+                new License()
+                        .name("Apache 2.0")
+                        .url("https://www.apache.org/licenses/LICENSE-2.0.html");
 
         Info info =
                 new Info()

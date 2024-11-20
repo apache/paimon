@@ -29,6 +29,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -59,7 +60,8 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema())})
     })
     @PostMapping("/config")
-    public ResponseEntity<ConfigResponse> getConfig(@RequestBody ConfigRequest request) {
+    public ResponseEntity<ConfigResponse> getConfig(
+            @PathVariable String prefix, @RequestBody ConfigRequest request) {
         try {
             Map<String, String> defaults = new HashMap<>();
             ConfigResponse response = new ConfigResponse(defaults);

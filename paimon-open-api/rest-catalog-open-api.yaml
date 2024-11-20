@@ -21,8 +21,8 @@ info:
   title: RESTCatalog API
   description: This API exposes endpoints to RESTCatalog.
   license:
-    name: MIT License
-    url: https://choosealicense.com/licenses/mit/
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
   version: '1.0'
 servers:
   - url: http://localhost:8080
@@ -34,6 +34,12 @@ paths:
         - config
       summary: Get Config
       operationId: getConfig
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         content:
           application/json:
