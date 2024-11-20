@@ -18,14 +18,20 @@
 
 package org.apache.paimon.flink.clone;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Iterables;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
@@ -37,6 +43,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Pick the files to be cloned of a table based on the input record. The record type it produce is
@@ -77,7 +84,7 @@ public class PickFilesForCloneOperator extends AbstractStreamOperator<CloneFileI
         FileStoreTable sourceTable = (FileStoreTable) sourceCatalog.getTable(sourceIdentifier);
         targetCatalog.createDatabase(targetIdentifier.getDatabaseName(), true);
         targetCatalog.createTable(
-                targetIdentifier, Schema.fromTableSchema(sourceTable.schema()), true);
+                targetIdentifier, newSchemaFromTableSchema(sourceTable.schema()), true);
 
         List<CloneFileInfo> result =
                 toCloneFileInfos(
@@ -93,6 +100,18 @@ public class PickFilesForCloneOperator extends AbstractStreamOperator<CloneFileI
         for (CloneFileInfo info : result) {
             output.collect(new StreamRecord<>(info));
         }
+    }
+
+    private static Schema newSchemaFromTableSchema(TableSchema tableSchema) {
+        return new Schema(
+                ImmutableList.copyOf(tableSchema.fields()),
+                ImmutableList.copyOf(tableSchema.partitionKeys()),
+                ImmutableList.copyOf(tableSchema.primaryKeys()),
+                ImmutableMap.copyOf(
+                        Iterables.filter(
+                                tableSchema.options().entrySet(),
+                                entry -> !Objects.equals(entry.getKey(), CoreOptions.PATH.key()))),
+                tableSchema.comment());
     }
 
     private List<CloneFileInfo> toCloneFileInfos(

@@ -190,17 +190,21 @@ public class SparkReadITCase extends SparkReadTestBase {
         spark.sql("INSERT INTO partitionedTable VALUES(1,'aaa','bbb')");
         spark.sql(
                 "CREATE TABLE partitionedTableAs PARTITIONED BY (a) AS SELECT * FROM partitionedTable");
+
+        String tablePath = new Path(warehousePath, "default.db/partitionedTableAs").toString();
         assertThat(spark.sql("SHOW CREATE TABLE partitionedTableAs").collectAsList().toString())
                 .isEqualTo(
                         String.format(
                                 "[[%s"
                                         + "PARTITIONED BY (a)\n"
+                                        + "LOCATION '%s'\n"
                                         + "TBLPROPERTIES (\n"
                                         + "  'path' = '%s')\n"
                                         + "]]",
                                 showCreateString(
                                         "partitionedTableAs", "a BIGINT", "b STRING", "c STRING"),
-                                new Path(warehousePath, "default.db/partitionedTableAs")));
+                                tablePath,
+                                tablePath));
         List<Row> resultPartition = spark.sql("SELECT * FROM partitionedTableAs").collectAsList();
         assertThat(resultPartition.stream().map(Row::toString))
                 .containsExactlyInAnyOrder("[1,aaa,bbb]");
@@ -217,17 +221,21 @@ public class SparkReadITCase extends SparkReadTestBase {
         spark.sql("INSERT INTO testTable VALUES(1,'a','b')");
         spark.sql(
                 "CREATE TABLE testTableAs TBLPROPERTIES ('file.format' = 'parquet') AS SELECT * FROM testTable");
+
+        String testTableAsPath = new Path(warehousePath, "default.db/testTableAs").toString();
         assertThat(spark.sql("SHOW CREATE TABLE testTableAs").collectAsList().toString())
                 .isEqualTo(
                         String.format(
                                 "[[%s"
+                                        + "LOCATION '%s'\n"
                                         + "TBLPROPERTIES (\n"
                                         + "  'file.format' = 'parquet',\n"
                                         + "  'path' = '%s')\n"
                                         + "]]",
                                 showCreateString(
                                         "testTableAs", "a BIGINT", "b VARCHAR(10)", "c CHAR(10)"),
-                                new Path(warehousePath, "default.db/testTableAs")));
+                                testTableAsPath,
+                                testTableAsPath));
         List<Row> resultProp = spark.sql("SELECT * FROM testTableAs").collectAsList();
 
         assertThat(resultProp.stream().map(Row::toString))
@@ -245,13 +253,18 @@ public class SparkReadITCase extends SparkReadTestBase {
                         + "COMMENT 'table comment'");
         spark.sql("INSERT INTO t_pk VALUES(1,'aaa','bbb')");
         spark.sql("CREATE TABLE t_pk_as TBLPROPERTIES ('primary-key' = 'a') AS SELECT * FROM t_pk");
+
+        String tPkAsPath = new Path(warehousePath, "default.db/t_pk_as").toString();
         assertThat(spark.sql("SHOW CREATE TABLE t_pk_as").collectAsList().toString())
                 .isEqualTo(
                         String.format(
-                                "[[%sTBLPROPERTIES (\n  'path' = '%s',\n  'primary-key' = 'a')\n]]",
+                                "[[%s"
+                                        + "LOCATION '%s'\n"
+                                        + "TBLPROPERTIES (\n  'path' = '%s',\n  'primary-key' = 'a')\n]]",
                                 showCreateString(
                                         "t_pk_as", "a BIGINT NOT NULL", "b STRING", "c STRING"),
-                                new Path(warehousePath, "default.db/t_pk_as")));
+                                tPkAsPath,
+                                tPkAsPath));
         List<Row> resultPk = spark.sql("SELECT * FROM t_pk_as").collectAsList();
 
         assertThat(resultPk.stream().map(Row::toString)).containsExactlyInAnyOrder("[1,aaa,bbb]");
@@ -270,11 +283,14 @@ public class SparkReadITCase extends SparkReadTestBase {
         spark.sql("INSERT INTO t_all VALUES(1,2,'bbb','2020-01-01','12')");
         spark.sql(
                 "CREATE TABLE t_all_as PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 'dt,hh') AS SELECT * FROM t_all");
+
+        String tAllAsPath = new Path(warehousePath, "default.db/t_all_as").toString();
         assertThat(spark.sql("SHOW CREATE TABLE t_all_as").collectAsList().toString())
                 .isEqualTo(
                         String.format(
                                 "[[%s"
                                         + "PARTITIONED BY (dt)\n"
+                                        + "LOCATION '%s'\n"
                                         + "TBLPROPERTIES (\n"
                                         + "  'path' = '%s',\n"
                                         + "  'primary-key' = 'dt,hh')\n"
@@ -286,7 +302,8 @@ public class SparkReadITCase extends SparkReadTestBase {
                                         "behavior STRING",
                                         "dt STRING NOT NULL",
                                         "hh STRING NOT NULL"),
-                                new Path(warehousePath, "default.db/t_all_as")));
+                                tAllAsPath,
+                                tAllAsPath));
         List<Row> resultAll = spark.sql("SELECT * FROM t_all_as").collectAsList();
         assertThat(resultAll.stream().map(Row::toString))
                 .containsExactlyInAnyOrder("[1,2,bbb,2020-01-01,12]");
@@ -363,12 +380,15 @@ public class SparkReadITCase extends SparkReadTestBase {
                         + "  'k1' = 'v1'\n"
                         + ")");
 
+        String tablePath = new Path(warehousePath, "default.db/tbl").toString();
+
         assertThat(spark.sql("SHOW CREATE TABLE tbl").collectAsList().toString())
                 .isEqualTo(
                         String.format(
                                 "[[%s"
                                         + "PARTITIONED BY (b)\n"
                                         + "COMMENT 'tbl comment'\n"
+                                        + "LOCATION '%s'\n"
                                         + "TBLPROPERTIES (\n"
                                         + "  'k1' = 'v1',\n"
                                         + "  'path' = '%s',\n"
@@ -377,7 +397,8 @@ public class SparkReadITCase extends SparkReadTestBase {
                                         "tbl",
                                         "a INT NOT NULL COMMENT 'a comment'",
                                         "b STRING NOT NULL"),
-                                new Path(warehousePath, "default.db/tbl")));
+                                tablePath,
+                                tablePath));
     }
 
     @Test
