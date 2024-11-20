@@ -62,6 +62,7 @@ public class LookupDataTableScan extends DataTableStreamScan {
         this.lookupScanMode = lookupScanMode;
     }
 
+    @Override
     @Nullable
     protected SnapshotReader.Plan tryGetOverwirtePlan(Snapshot snapshot) {
         SnapshotReader.Plan plan = super.tryGetOverwirtePlan(snapshot);
