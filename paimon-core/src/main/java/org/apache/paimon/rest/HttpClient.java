@@ -18,6 +18,9 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.rest.exceptions.RESTException;
+import org.apache.paimon.rest.responses.ErrorResponse;
+
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
@@ -87,11 +90,21 @@ public class HttpClient implements RESTClient {
 
     private <T extends RESTResponse> T exec(Request request, Class<T> responseType) {
         try (Response response = okHttpClient.newCall(request).execute()) {
-            String responseBody = response.body().string();
-            return mapper.readValue(responseBody, responseType);
-            // todo: need handle exception
+            String responseBodyStr = response.body() != null ? response.body().string() : null;
+            if (!response.isSuccessful()) {
+                ErrorResponse error =
+                        new ErrorResponse(
+                                responseBodyStr != null ? responseBodyStr : "response body is null",
+                                response.code(),
+                                null);
+                DefaultErrorHandler.getInstance().accept(error);
+            }
+            if (responseBodyStr == null) {
+                throw new RESTException("response body is null.");
+            }
+            return mapper.readValue(responseBodyStr, responseType);
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            throw new RESTException(e, "rest exception");
         }
     }
 

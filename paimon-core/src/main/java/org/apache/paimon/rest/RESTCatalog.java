@@ -33,6 +33,7 @@ import org.apache.paimon.table.Table;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -66,7 +67,7 @@ public class RESTCatalog implements Catalog {
     @Override
     public Map<String, String> options() {
         ConfigResponse response =
-                client.post("config", new ConfigRequest(), ConfigResponse.class, () -> null);
+                client.post("config", new ConfigRequest(), ConfigResponse.class, headers());
         return response.getDefaults();
     }
 
@@ -160,4 +161,9 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public void close() throws Exception {}
+
+    private Map<String, String> headers() {
+        Map<String, String> header = new HashMap<>();
+        return header;
+    }
 }

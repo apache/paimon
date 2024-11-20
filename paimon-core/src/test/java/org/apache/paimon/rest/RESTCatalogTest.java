@@ -44,6 +44,8 @@ public class RESTCatalogTest {
         String baseUrl = mockWebServer.url("").toString();
         Options options = new Options();
         options.set(RESTCatalogOptions.ENDPOINT, baseUrl);
+        options.set(RESTCatalogOptions.TOKEN, initToken);
+        options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
         restCatalog = new RESTCatalog(options);
     }
 
