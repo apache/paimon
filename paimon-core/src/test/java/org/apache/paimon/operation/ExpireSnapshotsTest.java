@@ -499,11 +499,11 @@ public class ExpireSnapshotsTest {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
         CoreOptions.ChangelogProducer changelogProducer;
-        //        if (random.nextBoolean()) {
-        //            changelogProducer = CoreOptions.ChangelogProducer.INPUT;
-        //        } else {
-        changelogProducer = CoreOptions.ChangelogProducer.NONE;
-        //        }
+        if (random.nextBoolean()) {
+            changelogProducer = CoreOptions.ChangelogProducer.INPUT;
+        } else {
+            changelogProducer = CoreOptions.ChangelogProducer.NONE;
+        }
 
         return new TestFileStore.Builder(
                         "avro",

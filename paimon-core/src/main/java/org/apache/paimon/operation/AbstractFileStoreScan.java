@@ -63,7 +63,6 @@ import static org.apache.paimon.utils.ManifestReadThreadPool.getExecutorService;
 import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
 import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
 
 /** Default implementation of {@link FileStoreScan}. */
@@ -81,7 +80,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private Snapshot specifiedSnapshot = null;
     private Filter<Integer> bucketFilter = null;
     private BiFilter<Integer, Integer> totalAwareBucketFilter = null;
-    private List<ManifestFileMeta> specifiedManifests = null;
     protected ScanMode scanMode = ScanMode.ALL;
     private Filter<Integer> levelFilter = null;
     private Filter<ManifestEntry> manifestEntryFilter = null;
@@ -161,22 +159,13 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withSnapshot(long snapshotId) {
-        checkState(specifiedManifests == null, "Cannot set both snapshot and manifests.");
         this.specifiedSnapshot = snapshotManager.snapshot(snapshotId);
         return this;
     }
 
     @Override
     public FileStoreScan withSnapshot(Snapshot snapshot) {
-        checkState(specifiedManifests == null, "Cannot set both snapshot and manifests.");
         this.specifiedSnapshot = snapshot;
-        return this;
-    }
-
-    @Override
-    public FileStoreScan withManifestList(List<ManifestFileMeta> manifests) {
-        checkState(specifiedSnapshot == null, "Cannot set both snapshot and manifests.");
-        this.specifiedManifests = manifests;
         return this;
     }
 
@@ -401,10 +390,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     private ManifestsReader.Result readManifests() {
-        if (specifiedManifests != null) {
-            return new ManifestsReader.Result(null, specifiedManifests, specifiedManifests);
-        }
-
         return manifestsReader.read(specifiedSnapshot, scanMode);
     }
 
