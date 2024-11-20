@@ -53,7 +53,7 @@ public class HttpClient implements RESTClient {
         // todo: support config
         this.endpoint = httpClientBuildParameter.getEndpoint();
         this.mapper = httpClientBuildParameter.getMapper();
-        this.okHttpClient = createHttpClient(1, 3_000, 3_000, interceptor);
+        this.okHttpClient = createHttpClient(httpClientBuildParameter);
     }
 
     public HttpClient(OkHttpClient okHttpClient, String endpoint, ObjectMapper mapper) {

@@ -24,8 +24,28 @@ import org.apache.paimon.options.ConfigOptions;
 /** REST catalog options. */
 public class RESTCatalogOptions {
     public static final ConfigOption<String> ENDPOINT =
-            ConfigOptions.key("endpoint")
+            ConfigOptions.key("rest.catalog.endpoint")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog server's endpoint.");
+    public static final ConfigOption<String> TOKEN =
+            ConfigOptions.key("rest.catalog.token")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog server's auth token.");
+    public static final ConfigOption<Integer> CONNECT_TIMEOUT_MILLIS =
+            ConfigOptions.key("rest.catalog.connect.timeout.millis")
+                    .intType()
+                    .defaultValue(3_000)
+                    .withDescription("REST Catalog server connect timeout in mills.");
+    public static final ConfigOption<Integer> READ_TIMEOUT_MILLIS =
+            ConfigOptions.key("rest.catalog.read.timeout.millis")
+                    .intType()
+                    .defaultValue(3_000)
+                    .withDescription("REST Catalog server read timeout in mills.");
+    public static final ConfigOption<Integer> THREAD_POOL_SIZE =
+            ConfigOptions.key("rest.catalog.thread.size")
+                    .intType()
+                    .defaultValue(1)
+                    .withDescription("REST Catalog server thread size.");
 }

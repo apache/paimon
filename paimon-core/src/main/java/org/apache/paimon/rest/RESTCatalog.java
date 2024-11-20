@@ -43,15 +43,18 @@ public class RESTCatalog implements Catalog {
 
     public RESTCatalog(Options options) {
         String endpoint = options.get(RESTCatalogOptions.ENDPOINT);
-        // todo: token need config
+        String token = options.get(RESTCatalogOptions.TOKEN);
+        Integer connectTimeoutMillis = options.get(RESTCatalogOptions.CONNECT_TIMEOUT_MILLIS);
+        Integer readTimeoutMillis = options.get(RESTCatalogOptions.READ_TIMEOUT_MILLIS);
+        Integer threadPoolSize = options.get(RESTCatalogOptions.THREAD_POOL_SIZE);
         HttpClientBuildParameter httpClientBuildParameter =
                 new HttpClientBuildParameter(
                         endpoint,
-                        3_000,
-                        3_000,
-                        new AuthenticationInterceptor("init_token"),
+                        connectTimeoutMillis,
+                        readTimeoutMillis,
+                        new AuthenticationInterceptor(token),
                         objectMapper,
-                        1);
+                        threadPoolSize);
         this.client = new HttpClient(httpClientBuildParameter);
     }
 
