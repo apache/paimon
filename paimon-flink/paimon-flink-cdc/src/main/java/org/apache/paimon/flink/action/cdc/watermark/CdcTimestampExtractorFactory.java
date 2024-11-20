@@ -101,6 +101,10 @@ public class CdcTimestampExtractorFactory implements Serializable {
             } else if (JsonSerdeUtil.isNodeExists(record, "payload", "source", "connector")) {
                 // Dbz json
                 return JsonSerdeUtil.extractValue(record, Long.class, "payload", "ts_ms");
+            } else if (JsonSerdeUtil.isNodeExists(record, "payload", "timestamp")) {
+                // Aliyun json
+                return JsonSerdeUtil.extractValue(
+                        record, Long.class, "payload", "timestamp", "systemTime");
             } else if (JsonSerdeUtil.isNodeExists(record, "source", "connector")) {
                 // Dbz json
                 return JsonSerdeUtil.extractValue(record, Long.class, "ts_ms");
