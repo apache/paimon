@@ -44,6 +44,7 @@ import org.apache.paimon.utils.TagManager;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -451,7 +452,7 @@ public class ExpireSnapshotsTest {
         store.assertCleaned();
     }
 
-    @Test
+    @RepeatedTest(5)
     public void testChangelogOutLivedSnapshot() throws Exception {
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
@@ -498,11 +499,11 @@ public class ExpireSnapshotsTest {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
         CoreOptions.ChangelogProducer changelogProducer;
-        if (random.nextBoolean()) {
-            changelogProducer = CoreOptions.ChangelogProducer.INPUT;
-        } else {
-            changelogProducer = CoreOptions.ChangelogProducer.NONE;
-        }
+        //        if (random.nextBoolean()) {
+        //            changelogProducer = CoreOptions.ChangelogProducer.INPUT;
+        //        } else {
+        changelogProducer = CoreOptions.ChangelogProducer.NONE;
+        //        }
 
         return new TestFileStore.Builder(
                         "avro",

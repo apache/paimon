@@ -23,6 +23,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
@@ -34,6 +35,7 @@ import org.apache.paimon.utils.Pair;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 
@@ -71,10 +73,17 @@ public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
             // eg: the old version table file, we just skip clean this here, let it done by
             // ExpireChangelogImpl
             Predicate<ManifestEntry> enriched =
-                    manifestEntry ->
-                            skipper.test(manifestEntry)
-                                    || (manifestEntry.file().fileSource().orElse(FileSource.APPEND)
-                                            == FileSource.APPEND);
+                    manifestEntry -> {
+                        if (skipper.test(manifestEntry)) {
+                            return true;
+                        }
+
+                        Optional<FileSource> fileSource = manifestEntry.file().fileSource();
+                        if (!fileSource.isPresent() || fileSource.get() == FileSource.APPEND) {
+                            return manifestEntry.kind() == FileKind.ADD;
+                        }
+                        return false;
+                    };
             cleanUnusedDataFiles(snapshot.deltaManifestList(), enriched);
         } else {
             cleanUnusedDataFiles(snapshot.deltaManifestList(), skipper);
