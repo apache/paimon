@@ -33,27 +33,26 @@ import java.util.List;
 @Configuration
 public class OpenAPIConfig {
 
-    @Value("${openapi.dev-url}")
+    @Value("${openapi.url}")
     private String devUrl;
 
     @Bean
     public OpenAPI myOpenAPI() {
-        Server devServer = new Server();
-        devServer.setUrl(devUrl);
-        devServer.setDescription("Server URL in Development environment");
+        Server server = new Server();
+        server.setUrl(devUrl);
+        server.setDescription("Server URL in Development environment");
 
         License mitLicense =
                 new License().name("MIT License").url("https://choosealicense.com/licenses/mit/");
 
         Info info =
                 new Info()
-                        .title("Tutorial Management API")
+                        .title("RESTCatalog API")
                         .version("1.0")
-                        .description("This API exposes endpoints to manage tutorials.")
-                        .termsOfService("https://www.bezkoder.com/terms")
+                        .description("This API exposes endpoints to RESTCatalog.")
                         .license(mitLicense);
         List<Server> servers = new ArrayList<>();
-        servers.add(devServer);
+        servers.add(server);
         return new OpenAPI().info(info).servers(servers);
     }
 }
