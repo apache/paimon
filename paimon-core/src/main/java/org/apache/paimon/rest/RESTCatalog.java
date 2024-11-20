@@ -31,17 +31,28 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.util.List;
 import java.util.Map;
 
 /** REST catalog. */
 public class RESTCatalog implements Catalog {
     private RESTClient client;
+    private final ObjectMapper objectMapper = RESTObjectMapper.create();
 
     public RESTCatalog(Options options) {
         String endpoint = options.get(RESTCatalogOptions.ENDPOINT);
         // todo: token need config
-        this.client = new HttpClient(endpoint, "init_token");
+        HttpClientBuildParameter httpClientBuildParameter =
+                new HttpClientBuildParameter(
+                        endpoint,
+                        3_000,
+                        3_000,
+                        new AuthenticationInterceptor("init_token"),
+                        objectMapper,
+                        1);
+        this.client = new HttpClient(httpClientBuildParameter);
     }
 
     @Override

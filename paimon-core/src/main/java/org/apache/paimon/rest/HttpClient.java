@@ -47,17 +47,19 @@ public class HttpClient implements RESTClient {
 
     private final OkHttpClient okHttpClient;
     private final String endpoint;
-    private final ObjectMapper mapper = RESTObjectMapper.create();
+    private final ObjectMapper mapper;
 
-    public HttpClient(String endpoint, String initToken) {
+    public HttpClient(HttpClientBuildParameter httpClientBuildParameter) {
         // todo: support config
-        this.okHttpClient = createHttpClient(1, 3_000, 3_000, initToken);
-        this.endpoint = endpoint;
+        this.endpoint = httpClientBuildParameter.getEndpoint();
+        this.mapper = httpClientBuildParameter.getMapper();
+        this.okHttpClient = createHttpClient(1, 3_000, 3_000, interceptor);
     }
 
-    public HttpClient(OkHttpClient okHttpClient, String endpoint) {
+    public HttpClient(OkHttpClient okHttpClient, String endpoint, ObjectMapper mapper) {
         this.okHttpClient = okHttpClient;
         this.endpoint = endpoint;
+        this.mapper = mapper;
     }
 
     @Override
@@ -99,14 +101,11 @@ public class HttpClient implements RESTClient {
     }
 
     private static OkHttpClient createHttpClient(
-            int threadPoolSize,
-            long connectTimeoutMillis,
-            long readTimeoutMillis,
-            String initToken) {
+            HttpClientBuildParameter httpClientBuildParameter) {
         ExecutorService executorService =
                 new ThreadPoolExecutor(
-                        threadPoolSize,
-                        threadPoolSize,
+                        httpClientBuildParameter.getThreadPoolSize(),
+                        httpClientBuildParameter.getThreadPoolSize(),
                         60,
                         TimeUnit.SECONDS,
                         new SynchronousQueue<>(),
@@ -117,11 +116,15 @@ public class HttpClient implements RESTClient {
 
         OkHttpClient.Builder builder =
                 new OkHttpClient.Builder()
-                        .connectTimeout(connectTimeoutMillis, TimeUnit.MILLISECONDS)
-                        .readTimeout(readTimeoutMillis, TimeUnit.MILLISECONDS)
+                        .connectTimeout(
+                                httpClientBuildParameter.getConnectTimeoutMillis(),
+                                TimeUnit.MILLISECONDS)
+                        .readTimeout(
+                                httpClientBuildParameter.getReadTimeoutMillis(),
+                                TimeUnit.MILLISECONDS)
                         .dispatcher(new Dispatcher(executorService))
                         .retryOnConnectionFailure(true)
-                        .addInterceptor(new AuthenticationInterceptor(initToken))
+                        .addInterceptor(httpClientBuildParameter.getInterceptor())
                         .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT));
 
         return builder.build();
