@@ -640,8 +640,7 @@ public class HiveCatalog extends AbstractCatalog {
                         schema.comment());
         try {
             Map<String, String> tableOptions = schema.options();
-            boolean externalTable =
-                    options.containsKey(CoreOptions.PATH.key()) || usingExternalTable();
+            boolean externalTable = createExternalTable(tableOptions);
             Path location = initialTableLocation(tableOptions, identifier);
             Table hiveTable = createHiveFormatTable(identifier, newSchema, location, externalTable);
             clients.execute(client -> client.createTable(hiveTable));
@@ -651,7 +650,10 @@ public class HiveCatalog extends AbstractCatalog {
         }
     }
 
-    private boolean usingExternalTable() {
+    private boolean createExternalTable(Map<String, String> tableOptions) {
+        if (tableOptions.containsKey(CoreOptions.PATH.key())) {
+            return true;
+        }
         CatalogTableType tableType =
                 OptionsUtils.convertToEnum(
                         hiveConf.get(TABLE_TYPE.key(), CatalogTableType.MANAGED.toString()),
@@ -701,7 +703,7 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     protected void createTableImpl(Identifier identifier, Schema schema) {
         Map<String, String> tableOptions = schema.options();
-        boolean externalTable = options.containsKey(CoreOptions.PATH.key()) || usingExternalTable();
+        boolean externalTable = createExternalTable(tableOptions);
         Path location = initialTableLocation(tableOptions, identifier);
         TableSchema tableSchema;
         try {
@@ -1034,8 +1036,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private boolean isExternalTable(Table table) {
-        return (table != null && TableType.EXTERNAL_TABLE.name().equals(table.getTableType()))
-                || usingExternalTable();
+        return table != null && TableType.EXTERNAL_TABLE.name().equals(table.getTableType());
     }
 
     private Table newHmsTable(
