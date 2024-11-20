@@ -201,7 +201,9 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                     nextSnapshotId++;
                     return overwritePlan;
                 }
-            } else if (followUpScanner.shouldScanSnapshot(snapshot)) {
+            }
+
+            if (followUpScanner.shouldScanSnapshot(snapshot)) {
                 LOG.debug("Find snapshot id {}.", nextSnapshotId);
                 SnapshotReader.Plan plan = followUpScanner.scan(snapshot, snapshotReader);
                 currentWatermark = plan.watermark();
