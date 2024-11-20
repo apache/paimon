@@ -133,7 +133,7 @@ public abstract class AbstractCatalog implements Catalog {
         return catalogOptions.getOptional(ALLOW_UPPER_CASE).orElse(true);
     }
 
-    protected boolean externalTableEnabled() {
+    protected boolean allowCustomTablePath() {
         return false;
     }
 
@@ -276,7 +276,7 @@ public abstract class AbstractCatalog implements Catalog {
         validateIdentifierNameCaseInsensitive(identifier);
         validateFieldNameCaseInsensitive(schema.rowType().getFieldNames());
         validateAutoCreateClose(schema.options());
-        validateExternalTableSupport(schema.options());
+        validateCustomTablePath(schema.options());
 
         // check db exists
         getDatabase(identifier.getDatabaseName());
@@ -595,11 +595,11 @@ public abstract class AbstractCatalog implements Catalog {
                         CoreOptions.AUTO_CREATE.key(), Boolean.FALSE));
     }
 
-    private void validateExternalTableSupport(Map<String, String> options) {
-        if (!externalTableEnabled() && options.containsKey(CoreOptions.PATH.key())) {
+    private void validateCustomTablePath(Map<String, String> options) {
+        if (!allowCustomTablePath() && options.containsKey(CoreOptions.PATH.key())) {
             throw new UnsupportedOperationException(
                     String.format(
-                            "The current catalog %s does not support external tables, so specifying the path is not allowed when creating a table.",
+                            "The current catalog %s does not support specifying the table path when creating a table.",
                             this.getClass().getSimpleName()));
         }
     }

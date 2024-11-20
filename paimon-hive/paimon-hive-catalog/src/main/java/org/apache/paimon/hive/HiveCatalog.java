@@ -878,7 +878,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected boolean externalTableEnabled() {
+    protected boolean allowCustomTablePath() {
         return true;
     }
 
