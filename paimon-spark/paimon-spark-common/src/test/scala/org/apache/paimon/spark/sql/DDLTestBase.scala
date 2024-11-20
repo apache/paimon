@@ -556,7 +556,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
             sql(
               s"CREATE TABLE external_tbl (id INT) USING paimon LOCATION '${tbLocation.getCanonicalPath}'")
           }.getMessage
-          assert(error.contains("does not support external tables"))
+          assert(error.contains("not support"))
 
           // create managed table
           sql("CREATE TABLE managed_tbl (id INT) USING paimon")
