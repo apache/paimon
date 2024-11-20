@@ -58,6 +58,9 @@ public interface ActionFactory extends Factory {
     String TIMESTAMPFORMATTER = "timestamp_formatter";
     String EXPIRE_STRATEGY = "expire_strategy";
     String TIMESTAMP_PATTERN = "timestamp_pattern";
+    // Supports `full` and `minor`.
+    String COMPACT_STRATEGY = "compact_strategy";
+    String MINOR = "minor";
 
     Optional<Action> create(MultipleParameterToolAdapter params);
 

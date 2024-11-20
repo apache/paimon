@@ -55,6 +55,11 @@ public class CompactDatabaseActionFactory implements ActionFactory {
             action.withPartitionIdleTime(TimeUtils.parseDuration(partitionIdleTime));
         }
 
+        String compactStrategy = params.get(COMPACT_STRATEGY);
+        if (compactStrategy != null && compactStrategy.trim().equalsIgnoreCase(MINOR)) {
+            action.withFullCompaction(false);
+        }
+
         return Optional.of(action);
     }
 
@@ -70,7 +75,8 @@ public class CompactDatabaseActionFactory implements ActionFactory {
                         + "[--including_tables <paimon_table_name|name_regular_expr>] "
                         + "[--excluding_tables <paimon_table_name|name_regular_expr>] "
                         + "[--mode <compact_mode>]"
-                        + "[--partition_idle_time <partition_idle_time>]");
+                        + "[--partition_idle_time <partition_idle_time>]"
+                        + "[--compact_strategy <compact_strategy>]");
         System.out.println(
                 "  compact_database --warehouse s3://path/to/warehouse --including_databases <database-name|name-regular-expr> "
                         + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]]");
