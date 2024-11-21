@@ -211,7 +211,9 @@ UPDATE my_table SET b = 1, c = 2 WHERE a = 'myTable';
 {{< hint info >}}
 Important table properties setting:
 1. Only primary key tables support this feature.
-2. If the table has primary keys, [MergeEngine]({{< ref "primary-key-table/merge-engine" >}}) needs to be [deduplicate]({{< ref "primary-key-table/merge-engine#deduplicate" >}}) to support this feature.
+2. If the table has primary keys, the following [MergeEngine]({{< ref "primary-key-table/merge-engine" >}}) support this feature:
+   * [deduplicate]({{< ref "primary-key-table/merge-engine#deduplicate" >}}).
+   * [partial-update]({{< ref "primary-key-table/merge-engine#partial-update" >}}) with option 'partial-update.remove-record-on-delete' enabled.
 3. Do not support deleting from table in streaming mode.
 {{< /hint >}}
 
