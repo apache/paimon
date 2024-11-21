@@ -42,6 +42,9 @@ public class HttpClientTest {
     private HttpClient httpClient;
     private ObjectMapper objectMapper = RESTObjectMapper.create();
     private ErrorHandler errorHandler;
+    private MockRESTData mockResponseData;
+    private String mockResponseDataStr;
+    private Map<String, String> headers;
 
     @Before
     public void setUp() throws IOException {
@@ -51,7 +54,10 @@ public class HttpClientTest {
         errorHandler = mock(ErrorHandler.class);
         HttpClientBuildParameter httpClientBuildParameter =
                 new HttpClientBuildParameter(baseUrl, 1000, 1000, objectMapper, 1, errorHandler);
+        mockResponseData = new MockRESTData("test");
+        mockResponseDataStr = objectMapper.writeValueAsString(mockResponseData);
         httpClient = new HttpClient(httpClientBuildParameter);
+        headers = headers("token");
     }
 
     @After
@@ -61,21 +67,32 @@ public class HttpClientTest {
 
     @Test
     public void testPostSuccess() {
-        MockRESTData mockResponseData = new MockRESTData("test");
-        MockResponse mockResponseObj =
-                new MockResponse()
-                        .setBody(mockResponseData.toString())
-                        .addHeader("Content-Type", "application/json");
+        MockResponse mockResponseObj = generateMockResponse(mockResponseDataStr, 200);
         mockWebServer.enqueue(mockResponseObj);
         MockRESTData response =
-                httpClient.post("test", mockResponseData, MockRESTData.class, headers("token"));
+                httpClient.post("test", mockResponseData, MockRESTData.class, headers);
         verify(errorHandler, times(0)).accept(any());
         assertEquals(mockResponseData.data(), response.data());
+    }
+
+    @Test
+    public void testPostFail() {
+        MockResponse mockResponseObj = generateMockResponse(mockResponseDataStr, 400);
+        mockWebServer.enqueue(mockResponseObj);
+        httpClient.post("test", mockResponseData, MockRESTData.class, headers);
+        verify(errorHandler, times(1)).accept(any());
     }
 
     private Map<String, String> headers(String token) {
         Map<String, String> header = new HashMap<>();
         header.put("Authorization", "Bearer " + token);
         return header;
+    }
+
+    private MockResponse generateMockResponse(String data, Integer code) {
+        return new MockResponse()
+                .setResponseCode(code)
+                .setBody(data)
+                .addHeader("Content-Type", "application/json");
     }
 }

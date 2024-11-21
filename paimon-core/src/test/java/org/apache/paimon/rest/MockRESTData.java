@@ -19,6 +19,7 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.shade.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import java.beans.ConstructorProperties;
@@ -36,12 +37,13 @@ public class MockRESTData implements RESTRequest, RESTResponse {
         this.data = data;
     }
 
+    @JsonGetter(FIELD_DATA)
     public String data() {
         return data;
     }
 
-    @Override
-    public String toString() {
-        return String.format("{\"data\": \"%s\"}", data);
-    }
+    //    @Override
+    //    public String toString() {
+    //        return String.format("{\"data\": \"%s\"}", data);
+    //    }
 }
