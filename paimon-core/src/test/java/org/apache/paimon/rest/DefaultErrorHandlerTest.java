@@ -30,6 +30,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.util.ArrayList;
 
 import static org.junit.Assert.assertThrows;
 
@@ -71,6 +72,6 @@ public class DefaultErrorHandlerTest {
     }
 
     private ErrorResponse generateErrorResponse(int code) {
-        return new ErrorResponse("message", code, null);
+        return new ErrorResponse("message", code, new ArrayList<String>());
     }
 }

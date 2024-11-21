@@ -21,6 +21,7 @@ package org.apache.paimon.rest.responses;
 import org.apache.paimon.rest.RESTResponse;
 
 import org.apache.paimon.shade.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import java.beans.ConstructorProperties;
@@ -39,6 +40,7 @@ public class ConfigResponse implements RESTResponse {
         this.defaults = defaults;
     }
 
+    @JsonGetter(FIELD_DEFAULTS)
     public Map<String, String> defaults() {
         return defaults;
     }
