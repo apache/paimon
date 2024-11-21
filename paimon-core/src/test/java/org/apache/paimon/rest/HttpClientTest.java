@@ -16,16 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.requests;
+package org.apache.paimon.rest;
 
-import org.apache.paimon.rest.RESTRequest;
-
-import org.apache.paimon.shade.com.fasterxml.jackson.annotation.JsonCreator;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-
-/** Request to get config. */
-@JsonIgnoreProperties(ignoreUnknown = true)
-public class ConfigRequest implements RESTRequest {
-    @JsonCreator
-    public ConfigRequest() {}
-}
+/** Test for {@link HttpClient}. */
+public class HttpClientTest {}

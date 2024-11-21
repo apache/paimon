@@ -20,12 +20,21 @@ package org.apache.paimon.rest.responses;
 
 import org.apache.paimon.rest.RESTResponse;
 
+import org.apache.paimon.shade.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
+import java.beans.ConstructorProperties;
 import java.util.Map;
 
 /** Response for getting config. */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class ConfigResponse implements RESTResponse {
+    private static final String FIELD_DEFAULTS = "defaults";
+
+    @JsonProperty(FIELD_DEFAULTS)
     private Map<String, String> defaults;
 
+    @ConstructorProperties({FIELD_DEFAULTS})
     public ConfigResponse(Map<String, String> defaults) {
         this.defaults = defaults;
     }
