@@ -44,7 +44,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link HiveSchema}. */
+/**
+ * Tests for {@link HiveSchema}.
+ */
 public class HiveTableSchemaTest {
 
     private static final RowType ROW_TYPE =
@@ -54,7 +56,8 @@ public class HiveTableSchemaTest {
                             new DataField(1, "b", DataTypes.STRING(), "second comment"),
                             new DataField(2, "c", DataTypes.DECIMAL(5, 3), "last comment")));
 
-    @TempDir java.nio.file.Path tempDir;
+    @TempDir
+    java.nio.file.Path tempDir;
 
     @Test
     public void testExtractSchemaWithEmptyDDLAndNoPaimonTable() {
@@ -152,6 +155,56 @@ public class HiveTableSchemaTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(expected);
     }
+
+
+    @Test
+    public void testSubsetColumnNameAndType() throws Exception {
+        createSchema();
+        Properties properties = new Properties();
+        List<String> columns = Arrays.asList("a","b");
+        properties.setProperty("columns", String.join(",",columns));
+        properties.setProperty(
+                "columns.types",
+                String.join(
+                        ":",
+                        Arrays.asList(
+                                TypeInfoFactory.intTypeInfo.getTypeName(),
+                                TypeInfoFactory.stringTypeInfo.getTypeName(),
+                                TypeInfoFactory.getDecimalTypeInfo(6, 3).getTypeName())));
+        properties.setProperty("columns.comments", "\0\0");
+        properties.setProperty("location", tempDir.toString());
+        List<String> fields = HiveSchema.extract(null, properties).fieldNames();
+        assertThat(fields).isEqualTo(columns);
+    }
+
+    @Test
+    public void testSupersetColumnNameAndType() throws Exception {
+        createSchema();
+        Properties properties = new Properties();
+        properties.setProperty("columns", "a,b,c,d");
+        properties.setProperty(
+                "columns.types",
+                String.join(
+                        ":",
+                        Arrays.asList(
+                                TypeInfoFactory.intTypeInfo.getTypeName(),
+                                TypeInfoFactory.stringTypeInfo.getTypeName(),
+                                TypeInfoFactory.decimalTypeInfo.getTypeName(),
+                                TypeInfoFactory.stringTypeInfo.getTypeName(),
+                                TypeInfoFactory.getDecimalTypeInfo(6, 3).getTypeName())));
+        properties.setProperty("columns.comments", "\0\0");
+        properties.setProperty("location", tempDir.toString());
+        String expected =
+                "Hive DDL is a superset of paimon schema! "
+                        + "It is recommended not to write any column definition "
+                        + "as Paimon external table can read schema from the specified location.\n"
+                        + "There are 4 fields in Hive DDL: a, b, c, d\n"
+                        + "There are 3 fields in Paimon schema: a, b, c\n";
+        assertThatThrownBy(() -> HiveSchema.extract(null, properties))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(expected);
+    }
+
 
     @Test
     public void testTooFewColumns() throws Exception {
@@ -361,7 +414,8 @@ public class HiveTableSchemaTest {
         String dataFieldStr = JsonSerdeUtil.toJson(dataFields);
 
         List<DataField> dataFieldsDeserialized =
-                JsonSerdeUtil.fromJson(dataFieldStr, new TypeReference<List<DataField>>() {});
+                JsonSerdeUtil.fromJson(dataFieldStr, new TypeReference<List<DataField>>() {
+                });
         HiveSchema newHiveSchema = new HiveSchema(new RowType(dataFieldsDeserialized));
         assertThat(newHiveSchema).usingRecursiveComparison().isEqualTo(hiveSchema);
     }
