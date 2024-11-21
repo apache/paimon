@@ -341,13 +341,4 @@ public class Schema {
             return new Schema(columns, partitionKeys, primaryKeys, options, comment);
         }
     }
-
-    public static Schema fromTableSchema(TableSchema tableSchema) {
-        return new Schema(
-                tableSchema.fields(),
-                tableSchema.partitionKeys(),
-                tableSchema.primaryKeys(),
-                tableSchema.options(),
-                tableSchema.comment());
-    }
 }

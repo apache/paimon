@@ -29,6 +29,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -251,7 +252,8 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     public void testModifyColumnTypeBooleanAndNumeric() {
         // boolean To numeric and numeric To boolean
         sql("CREATE TABLE T (a BOOLEAN, b BOOLEAN, c TINYINT, d INT, e BIGINT, f DOUBLE)");
-        sql("INSERT INTO T VALUES(true, false, cast(0 as TINYINT), 1 , 123, 3.14)");
+        sql(
+                "INSERT INTO T VALUES(true, false, cast(0 as TINYINT), 1 , -9223372036854775808, 3.14)");
 
         sql("ALTER TABLE T MODIFY (a TINYINT, b INT, c BOOLEAN, d BOOLEAN, e BOOLEAN)");
         List<Row> result = sql("SHOW CREATE TABLE T");
@@ -1132,6 +1134,69 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
 
         assertThatCode(() -> sql("ALTER TABLE T MODIFY (v ROW(f1 BIGINT, f2 INT, f3 STRING))"))
                 .hasRootCauseMessage(
-                        "Column v.f2 can only be updated to row type, and cannot be updated to INT type");
+                        "Column v.f2 can only be updated to row type, and cannot be updated to INTEGER type");
+    }
+
+    @ParameterizedTest()
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testUpdateRowInArrayAndMap(String formatType) {
+        sql(
+                "CREATE TABLE T "
+                        + "( k INT, v1 ARRAY<ROW(f1 INT, f2 STRING)>, v2 MAP<INT, ROW(f1 STRING, f2 INT)>, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( 'bucket' = '1', 'file.format' = '"
+                        + formatType
+                        + "' )");
+        sql(
+                "INSERT INTO T VALUES "
+                        + "(1, ARRAY[ROW(100, 'apple'), ROW(101, 'banana')], MAP[100, ROW('cat', 1000), 101, ROW('dog', 1001)]), "
+                        + "(2, ARRAY[ROW(200, 'pear'), ROW(201, 'grape')], MAP[200, ROW('tiger', 2000), 201, ROW('wolf', 2001)])");
+
+        Map<Integer, Row> map1 = new HashMap<>();
+        map1.put(100, Row.of("cat", 1000));
+        map1.put(101, Row.of("dog", 1001));
+        Map<Integer, Row> map2 = new HashMap<>();
+        map2.put(200, Row.of("tiger", 2000));
+        map2.put(201, Row.of("wolf", 2001));
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, new Row[] {Row.of(100, "apple"), Row.of(101, "banana")}, map1),
+                        Row.of(2, new Row[] {Row.of(200, "pear"), Row.of(201, "grape")}, map2));
+
+        sql(
+                "ALTER TABLE T MODIFY (v1 ARRAY<ROW(f1 BIGINT, f2 STRING, f3 STRING)>, v2 MAP<INT, ROW(f3 DOUBLE, f2 INT)>)");
+        sql(
+                "INSERT INTO T VALUES "
+                        + "(1, ARRAY[ROW(1000000000000, 'apple', 'A'), ROW(1000000000001, 'banana', 'B')], MAP[100, ROW(1000.0, 1000), 101, ROW(1001.0, 1001)]), "
+                        + "(3, ARRAY[ROW(3000000000000, 'mango', 'M'), ROW(3000000000001, 'cherry', 'C')], MAP[300, ROW(3000.0, 3000), 301, ROW(3001.0, 3001)])");
+
+        map1.clear();
+        map1.put(100, Row.of(1000.0, 1000));
+        map1.put(101, Row.of(1001.0, 1001));
+        map2.clear();
+        map2.put(200, Row.of(null, 2000));
+        map2.put(201, Row.of(null, 2001));
+        Map<Integer, Row> map3 = new HashMap<>();
+        map3.put(300, Row.of(3000.0, 3000));
+        map3.put(301, Row.of(3001.0, 3001));
+        assertThat(sql("SELECT v2, v1, k FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(
+                                map1,
+                                new Row[] {
+                                    Row.of(1000000000000L, "apple", "A"),
+                                    Row.of(1000000000001L, "banana", "B")
+                                },
+                                1),
+                        Row.of(
+                                map2,
+                                new Row[] {Row.of(200L, "pear", null), Row.of(201L, "grape", null)},
+                                2),
+                        Row.of(
+                                map3,
+                                new Row[] {
+                                    Row.of(3000000000000L, "mango", "M"),
+                                    Row.of(3000000000001L, "cherry", "C")
+                                },
+                                3));
     }
 }

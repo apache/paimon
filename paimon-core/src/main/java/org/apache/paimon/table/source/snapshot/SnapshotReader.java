@@ -77,6 +77,8 @@ public interface SnapshotReader {
 
     SnapshotReader withLevelFilter(Filter<Integer> levelFilter);
 
+    SnapshotReader enableValueFilter();
+
     SnapshotReader withManifestEntryFilter(Filter<ManifestEntry> filter);
 
     SnapshotReader withBucket(int bucket);
@@ -84,6 +86,8 @@ public interface SnapshotReader {
     SnapshotReader withBucketFilter(Filter<Integer> bucketFilter);
 
     SnapshotReader withDataFileNameFilter(Filter<String> fileNameFilter);
+
+    SnapshotReader dropStats();
 
     SnapshotReader withShard(int indexOfThisSubtask, int numberOfParallelSubtasks);
 

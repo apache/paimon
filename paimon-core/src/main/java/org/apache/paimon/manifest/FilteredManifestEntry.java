@@ -16,25 +16,19 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.parquet.position;
+package org.apache.paimon.manifest;
 
-import javax.annotation.Nullable;
+/** Wrap a {@link ManifestEntry} to contain {@link #selected}. */
+public class FilteredManifestEntry extends ManifestEntry {
 
-/** To represent struct's position in repeated type. */
-public class RowPosition {
-    @Nullable private final boolean[] isNull;
-    private final int positionsCount;
+    private final boolean selected;
 
-    public RowPosition(boolean[] isNull, int positionsCount) {
-        this.isNull = isNull;
-        this.positionsCount = positionsCount;
+    public FilteredManifestEntry(ManifestEntry entry, boolean selected) {
+        super(entry.kind(), entry.partition(), entry.bucket(), entry.totalBuckets(), entry.file());
+        this.selected = selected;
     }
 
-    public boolean[] getIsNull() {
-        return isNull;
-    }
-
-    public int getPositionsCount() {
-        return positionsCount;
+    public boolean selected() {
+        return selected;
     }
 }

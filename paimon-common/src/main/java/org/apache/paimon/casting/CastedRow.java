@@ -34,8 +34,6 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  *
  * <p>It reads data from underlying {@link InternalRow} according to source logical type and casts
  * it with specific {@link CastExecutor}.
- *
- * <p>Note: This class supports only top-level castings, not nested castings.
  */
 public class CastedRow implements InternalRow {
 

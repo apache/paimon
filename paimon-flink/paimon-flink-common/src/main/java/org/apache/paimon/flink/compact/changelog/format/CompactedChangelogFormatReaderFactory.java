@@ -27,7 +27,7 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.reader.FileRecordReader;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -60,7 +60,7 @@ public class CompactedChangelogFormatReaderFactory implements FormatReaderFactor
     }
 
     @Override
-    public RecordReader<InternalRow> createReader(Context context) throws IOException {
+    public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
         OffsetReadOnlyFileIO fileIO = new OffsetReadOnlyFileIO(context.fileIO());
         long length = decodePath(context.filePath()).length;
 

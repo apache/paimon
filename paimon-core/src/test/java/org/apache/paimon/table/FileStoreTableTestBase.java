@@ -1473,10 +1473,10 @@ public abstract class FileStoreTableTestBase {
                 TestFileStore.getFilesInUse(
                         latestSnapshotId,
                         snapshotManager,
-                        store.newScan(),
                         table.fileIO(),
                         store.pathFactory(),
-                        store.manifestListFactory().create());
+                        store.manifestListFactory().create(),
+                        store.manifestFileFactory().create());
 
         List<Path> unusedFileList =
                 Files.walk(Paths.get(tempDir.toString()))

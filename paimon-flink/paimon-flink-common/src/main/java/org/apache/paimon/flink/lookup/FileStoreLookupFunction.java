@@ -249,7 +249,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 rows.add(new FlinkRowData(matchedRow));
             }
             return rows;
-        } catch (OutOfRangeException e) {
+        } catch (OutOfRangeException | ReopenException e) {
             reopen();
             return lookup(keyRow);
         } catch (Exception e) {

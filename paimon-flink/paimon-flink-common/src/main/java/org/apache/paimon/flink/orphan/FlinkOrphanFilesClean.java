@@ -279,7 +279,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                 });
 
         if (deletedInLocal.get() != 0) {
-            deleted = deleted.union(env.fromData(deletedInLocal.get()));
+            deleted = deleted.union(env.fromElements(deletedInLocal.get()));
         }
         return deleted;
     }

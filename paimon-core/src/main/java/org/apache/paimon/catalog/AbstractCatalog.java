@@ -133,6 +133,10 @@ public abstract class AbstractCatalog implements Catalog {
         return catalogOptions.getOptional(ALLOW_UPPER_CASE).orElse(true);
     }
 
+    protected boolean allowCustomTablePath() {
+        return false;
+    }
+
     @Override
     public void createDatabase(String name, boolean ignoreIfExists, Map<String, String> properties)
             throws DatabaseAlreadyExistException {
@@ -272,6 +276,7 @@ public abstract class AbstractCatalog implements Catalog {
         validateIdentifierNameCaseInsensitive(identifier);
         validateFieldNameCaseInsensitive(schema.rowType().getFieldNames());
         validateAutoCreateClose(schema.options());
+        validateCustomTablePath(schema.options());
 
         // check db exists
         getDatabase(identifier.getDatabaseName());
@@ -588,6 +593,15 @@ public abstract class AbstractCatalog implements Catalog {
                 String.format(
                         "The value of %s property should be %s.",
                         CoreOptions.AUTO_CREATE.key(), Boolean.FALSE));
+    }
+
+    private void validateCustomTablePath(Map<String, String> options) {
+        if (!allowCustomTablePath() && options.containsKey(CoreOptions.PATH.key())) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "The current catalog %s does not support specifying the table path when creating a table.",
+                            this.getClass().getSimpleName()));
+        }
     }
 
     // =============================== Meta in File System =====================================

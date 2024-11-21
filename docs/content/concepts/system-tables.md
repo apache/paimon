@@ -1,9 +1,9 @@
 ---
 title: "System Tables"
-weight: 2
+weight: 6
 type: docs
 aliases:
-- /maintenance/system-tables.html
+- /concepts/system-tables.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -26,9 +26,15 @@ under the License.
 
 # System Tables
 
-## Table Specified System Table
+Paimon provides a very rich set of system tables to help users better analyze and query the status of Paimon tables:
 
-Table specified system tables contain metadata and information about each table, such as the snapshots created and the options in use. Users can access system tables with batch queries.
+1. Query the status of the data table: Data System Table.
+2. Query the global status of the entire Catalog: Global System Table.
+
+## Data System Table
+
+Data System tables contain metadata and information about each Paimon data table, such as the snapshots created and the
+options in use. Users can access system tables with batch queries.
 
 Currently, Flink, Spark, Trino and StarRocks support querying system tables.
 
@@ -127,6 +133,26 @@ SELECT * FROM my_table$audit_log;
 |        +U        |      ...        |      ...        |
 +------------------+-----------------+-----------------+
 3 rows in set
+*/
+```
+
+### Binlog Table
+
+You can query the binlog through binlog table. In the binlog system table, the update before and update after will be packed in one row.
+
+```sql
+SELECT * FROM T$binlog;
+
+/*
++------------------+----------------------+-----------------------+
+|     rowkind      |       column_0       |       column_1        |
++------------------+----------------------+-----------------------+
+|        +I        |       [col_0]        |       [col_1]         |
++------------------+----------------------+-----------------------+
+|        +U        | [col_0_ub, col_0_ua] | [col_1_ub, col_1_ua]  |
++------------------+----------------------+-----------------------+
+|        -D        |       [col_0]        |       [col_1]         |
++------------------+----------------------+-----------------------+
 */
 ```
 
@@ -347,6 +373,22 @@ SELECT * FROM my_table$buckets;
 */
 ```
 
+### Statistic Table
+You can query the statistic information through statistic table.
+
+```sql
+SELECT * FROM T$statistics;
+
+/*
++--------------+------------+-----------------------+------------------+----------+
+|  snapshot_id |  schema_id |     mergedRecordCount | mergedRecordSize |  colstat |
++--------------+------------+-----------------------+------------------+----------+
+|            2 |          0 |              2        |         2        |    {}    |
++--------------+------------+-----------------------+------------------+----------+
+1 rows in set
+*/
+```
+
 ## Global System Table
 
 Global system tables contain the statistical information of all the tables exists in paimon. For convenient of searching, we create a reference system database called `sys`.
@@ -390,20 +432,3 @@ SELECT * FROM sys.catalog_options;
 1 rows in set
 */
 ```
-
-### Statistic Table
-You can query the statistic information through statistic table.
-
-```sql
-SELECT * FROM T$statistics;
-
-/*
-+--------------+------------+-----------------------+------------------+----------+
-|  snapshot_id |  schema_id |     mergedRecordCount | mergedRecordSize |  colstat |
-+--------------+------------+-----------------------+------------------+----------+
-|            2 |          0 |              2        |         2        |    {}    |
-+--------------+------------+-----------------------+------------------+----------+
-1 rows in set
-*/
-```
-

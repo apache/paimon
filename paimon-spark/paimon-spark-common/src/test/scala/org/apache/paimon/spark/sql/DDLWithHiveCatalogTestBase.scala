@@ -189,6 +189,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
           val props = getDatabaseProps("paimon_db")
           Assertions.assertEquals(props("k1"), "v1")
           Assertions.assertEquals(props("k2"), "v2")
+          Assertions.assertTrue(getDatabaseOwner("paimon_db").nonEmpty)
         }
     }
   }
@@ -240,12 +241,12 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
           spark.sql(s"CREATE DATABASE paimon_db")
           spark.sql(s"USE paimon_db")
           spark.sql(s"CREATE TABLE paimon_tbl (id int, name string, dt string) using paimon")
-          // Currently, only spark_catalog supports create other table or view
+          // Only spark_catalog supports create other table
           if (catalogName.equals(sparkCatalogName)) {
             spark.sql(s"CREATE TABLE parquet_tbl (id int, name string, dt string) using parquet")
             spark.sql(s"CREATE VIEW parquet_tbl_view AS SELECT * FROM parquet_tbl")
-            spark.sql(s"CREATE VIEW paimon_tbl_view AS SELECT * FROM paimon_tbl")
           }
+          spark.sql(s"CREATE VIEW paimon_tbl_view AS SELECT * FROM paimon_tbl")
           spark.sql(s"USE default")
           spark.sql(s"DROP DATABASE paimon_db CASCADE")
       }
@@ -296,29 +297,73 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
     }
   }
 
-  def getDatabaseLocation(dbName: String): String = {
-    spark
-      .sql(s"DESC DATABASE $dbName")
-      .filter("info_name == 'Location'")
-      .head()
-      .getAs[String]("info_value")
-      .split(":")(1)
+  test("Paimon DDL with hive catalog: create and drop external / managed table") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        spark.sql(s"USE $catalogName")
+        withTempDir {
+          tbLocation =>
+            withDatabase("paimon_db") {
+              spark.sql(s"CREATE DATABASE paimon_db")
+              spark.sql(s"USE paimon_db")
+              withTable("external_tbl", "managed_tbl") {
+                val expertTbLocation = tbLocation.getCanonicalPath
+                // create external table
+                spark.sql(
+                  s"CREATE TABLE external_tbl (id INT) USING paimon LOCATION '$expertTbLocation'")
+                spark.sql("INSERT INTO external_tbl VALUES (1)")
+                checkAnswer(spark.sql("SELECT * FROM external_tbl"), Row(1))
+                val table = loadTable("paimon_db", "external_tbl")
+                val fileIO = table.fileIO()
+                val actualTbLocation = table.location()
+                assert(actualTbLocation.toString.split(':').apply(1).equals(expertTbLocation))
+
+                // drop external table
+                spark.sql("DROP TABLE external_tbl")
+                assert(fileIO.exists(actualTbLocation))
+
+                // create external table again using the same location
+                spark.sql(
+                  s"CREATE TABLE external_tbl (id INT) USING paimon LOCATION '$expertTbLocation'")
+                checkAnswer(spark.sql("SELECT * FROM external_tbl"), Row(1))
+                assert(
+                  loadTable("paimon_db", "external_tbl")
+                    .location()
+                    .toString
+                    .split(':')
+                    .apply(1)
+                    .equals(expertTbLocation))
+
+                // create managed table
+                spark.sql(s"CREATE TABLE managed_tbl (id INT) USING paimon")
+                val managedTbLocation = loadTable("paimon_db", "managed_tbl").location()
+
+                // drop managed table
+                spark.sql("DROP TABLE managed_tbl")
+                assert(!fileIO.exists(managedTbLocation))
+              }
+            }
+        }
+    }
   }
 
-  def getDatabaseComment(dbName: String): String = {
+  def getDatabaseProp(dbName: String, propertyName: String): String = {
     spark
-      .sql(s"DESC DATABASE $dbName")
-      .filter("info_name == 'Comment'")
+      .sql(s"DESC DATABASE EXTENDED $dbName")
+      .filter(s"info_name == '$propertyName'")
       .head()
       .getAs[String]("info_value")
   }
+
+  def getDatabaseLocation(dbName: String): String =
+    getDatabaseProp(dbName, "Location").split(":")(1)
+
+  def getDatabaseComment(dbName: String): String = getDatabaseProp(dbName, "Comment")
+
+  def getDatabaseOwner(dbName: String): String = getDatabaseProp(dbName, "Owner")
 
   def getDatabaseProps(dbName: String): Map[String, String] = {
-    val dbPropsStr = spark
-      .sql(s"DESC DATABASE EXTENDED $dbName")
-      .filter("info_name == 'Properties'")
-      .head()
-      .getAs[String]("info_value")
+    val dbPropsStr = getDatabaseProp(dbName, "Properties")
     val pattern = "\\(([^,]+),([^)]+)\\)".r
     pattern
       .findAllIn(dbPropsStr.drop(1).dropRight(1))

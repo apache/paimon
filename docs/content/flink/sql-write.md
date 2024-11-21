@@ -257,7 +257,8 @@ CREATE TABLE my_partitioned_table (
     'partition.timestamp-formatter'='yyyyMMdd',
     'partition.timestamp-pattern'='$dt',
     'partition.time-interval'='1 d',
-    'partition.idle-time-to-done'='15 m'
+    'partition.idle-time-to-done'='15 m',
+    'partition.mark-done-action'='done-partition'
 );
 ```
 
@@ -267,4 +268,5 @@ CREATE TABLE my_partitioned_table (
    and then it will be marked as done.
 3. Thirdly, by default, partition mark done will create _SUCCESS file, the content of _SUCCESS file is a json, contains
    `creationTime` and `modificationTime`, they can help you understand if there is any delayed data. You can also
-   configure other actions.
+   configure other actions, like `'done-partition'`, for example, partition `'dt=20240501'` with produce
+   `'dt=20240501.done'` done partition.

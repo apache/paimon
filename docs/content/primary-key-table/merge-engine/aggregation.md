@@ -247,16 +247,17 @@ An example:
     uv VARBINARY
   ) WITH (
     'merge-engine' = 'aggregation',
-    'fields.f0.aggregate-function' = 'hll_sketch'
+    'fields.uv.aggregate-function' = 'hll_sketch'
   );
   
   -- Register the following class as a Flink function with the name "HLL_SKETCH" 
+  -- for example: create TEMPORARY function HLL_SKETCH as  'HllSketchFunction';
   -- which is used to transform input to sketch bytes array:
   --
   -- public static class HllSketchFunction extends ScalarFunction {
   --   public byte[] eval(String user_id) {
   --     HllSketch hllSketch = new HllSketch();
-  --     hllSketch.update(id);
+  --     hllSketch.update(user_id);
   --     return hllSketch.toCompactByteArray();
   --   }
   -- }
@@ -264,6 +265,7 @@ An example:
   INSERT INTO UV_AGG SELECT id, HLL_SKETCH(user_id) FROM VISITS;
 
   -- Register the following class as a Flink function with the name "HLL_SKETCH_COUNT"
+  -- for example: create TEMPORARY function HLL_SKETCH_COUNT as  'HllSketchCountFunction';
   -- which is used to get cardinality from sketch bytes array:
   -- 
   -- public static class HllSketchCountFunction extends ScalarFunction { 
@@ -307,10 +309,11 @@ An example:
     uv VARBINARY
   ) WITH (
     'merge-engine' = 'aggregation',
-    'fields.f0.aggregate-function' = 'theta_sketch'
+    'fields.uv.aggregate-function' = 'theta_sketch'
   );
   
   -- Register the following class as a Flink function with the name "THETA_SKETCH" 
+  -- for example: create TEMPORARY function THETA_SKETCH as  'ThetaSketchFunction';
   -- which is used to transform input to sketch bytes array:
   --
   -- public static class ThetaSketchFunction extends ScalarFunction {
@@ -324,6 +327,7 @@ An example:
   INSERT INTO UV_AGG SELECT id, THETA_SKETCH(user_id) FROM VISITS;
 
   -- Register the following class as a Flink function with the name "THETA_SKETCH_COUNT"
+  -- for example: create TEMPORARY function THETA_SKETCH_COUNT as  'ThetaSketchCountFunction';
   -- which is used to get cardinality from sketch bytes array:
   -- 
   -- public static class ThetaSketchCountFunction extends ScalarFunction { 

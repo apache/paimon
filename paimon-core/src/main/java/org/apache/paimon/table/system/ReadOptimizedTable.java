@@ -120,7 +120,8 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     public SnapshotReader newSnapshotReader() {
         if (wrapped.schema().primaryKeys().size() > 0) {
             return wrapped.newSnapshotReader()
-                    .withLevelFilter(level -> level == coreOptions().numLevels() - 1);
+                    .withLevelFilter(level -> level == coreOptions().numLevels() - 1)
+                    .enableValueFilter();
         } else {
             return wrapped.newSnapshotReader();
         }

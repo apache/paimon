@@ -23,7 +23,7 @@ import org.antlr.v4.runtime.atn.PredictionMode
 import org.antlr.v4.runtime.misc.{Interval, ParseCancellationException}
 import org.antlr.v4.runtime.tree.TerminalNodeImpl
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.AnalysisException
+import org.apache.spark.sql.{AnalysisException, SparkSession}
 import org.apache.spark.sql.catalyst.{FunctionIdentifier, TableIdentifier}
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.parser.{ParseException, ParserInterface}
@@ -61,7 +61,7 @@ class PaimonSparkSqlExtensionsParser(val delegate: ParserInterface)
       parse(sqlTextAfterSubstitution)(parser => astBuilder.visit(parser.singleStatement()))
         .asInstanceOf[LogicalPlan]
     } else {
-      delegate.parsePlan(sqlText)
+      RewritePaimonViewCommands(SparkSession.active).apply(delegate.parsePlan(sqlText))
     }
   }
 
