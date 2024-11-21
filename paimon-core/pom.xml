@@ -203,14 +203,12 @@ under the License.
             <groupId>org.apache.iceberg</groupId>
             <artifactId>iceberg-core</artifactId>
             <version>${iceberg.version}</version>
-            <scope>test</scope>
         </dependency>
 
         <dependency>
             <groupId>org.apache.iceberg</groupId>
             <artifactId>iceberg-data</artifactId>
             <version>${iceberg.version}</version>
-            <scope>test</scope>
         </dependency>
 
         <dependency>
