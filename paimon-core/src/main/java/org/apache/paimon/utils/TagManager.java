@@ -341,26 +341,26 @@ public class TagManager {
     public SortedMap<Snapshot, List<String>> tags(Predicate<String> filter) {
         TreeMap<Snapshot, List<String>> tags =
                 new TreeMap<>(Comparator.comparingLong(Snapshot::id));
-        List<Path> paths;
         try {
-            paths = tagPaths(path -> true);
+            List<Path> paths = tagPaths(path -> true);
+
+            for (Path path : paths) {
+                String tagName = path.getName().substring(TAG_PREFIX.length());
+
+                if (!filter.test(tagName)) {
+                    continue;
+                }
+                // If the tag file is not found, it might be deleted by
+                // other processes, so just skip this tag
+                try {
+                    // tag may be modified, so here do not use Snapshot.fromPath to bypass cache
+                    Snapshot snapshot = Snapshot.fromJson(fileIO.readFileUtf8(path));
+                    tags.computeIfAbsent(snapshot, s -> new ArrayList<>()).add(tagName);
+                } catch (FileNotFoundException ignored) {
+                }
+            }
         } catch (IOException e) {
             throw new RuntimeException(e);
-        }
-
-        for (Path path : paths) {
-            String tagName = path.getName().substring(TAG_PREFIX.length());
-
-            if (!filter.test(tagName)) {
-                continue;
-            }
-            // If the tag file is not found, it might be deleted by
-            // other processes, so just skip this tag
-            try {
-                Snapshot snapshot = Snapshot.tryFromPath(fileIO, path);
-                tags.computeIfAbsent(snapshot, s -> new ArrayList<>()).add(tagName);
-            } catch (FileNotFoundException ignored) {
-            }
         }
         return tags;
     }

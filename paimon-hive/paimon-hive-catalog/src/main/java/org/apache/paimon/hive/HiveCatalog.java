@@ -681,6 +681,9 @@ public class HiveCatalog extends AbstractCatalog {
                                     false,
                                     true));
 
+            Path path = getTableLocation(identifier);
+            invalidateCacheForPrefix(path);
+
             // When drop a Hive external table, only the hive metadata is deleted and the data files
             // are not deleted.
             if (externalTable) {
@@ -690,11 +693,9 @@ public class HiveCatalog extends AbstractCatalog {
             // Deletes table directory to avoid schema in filesystem exists after dropping hive
             // table successfully to keep the table consistency between which in filesystem and
             // which in Hive metastore.
-            Path path = getTableLocation(identifier);
             try {
                 if (fileIO.exists(path)) {
                     fileIO.deleteDirectoryQuietly(path);
-                    invalidateCacheForPrefix(path);
                 }
             } catch (Exception ee) {
                 LOG.error("Delete directory[{}] fail for table {}", path, identifier, ee);

@@ -37,6 +37,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.MetaCacheManager.invalidateCacheForPrefix;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 
@@ -281,8 +282,8 @@ public class SnapshotManagerTest {
     @Test
     public void testTraversalSnapshotsFromLatestSafely() throws IOException, InterruptedException {
         FileIO localFileIO = LocalFileIO.create();
-        SnapshotManager snapshotManager =
-                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+        Path path = new Path(tempDir.toString());
+        SnapshotManager snapshotManager = new SnapshotManager(localFileIO, path);
         // create 10 snapshots
         for (long i = 0; i < 10; i++) {
             Snapshot snapshot =
@@ -366,6 +367,7 @@ public class SnapshotManagerTest {
 
         thread.start();
         Thread.sleep(100);
+        invalidateCacheForPrefix(path);
         localFileIO.deleteQuietly(snapshotManager.snapshotPath(3));
         thread.join();
 
