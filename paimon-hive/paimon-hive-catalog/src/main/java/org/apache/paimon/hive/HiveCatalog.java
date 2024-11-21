@@ -792,13 +792,15 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     protected void renameTableImpl(Identifier fromTable, Identifier toTable) {
         try {
-            Table table = renameHiveTable(fromTable, toTable);
-
+            // Get fromTable's location before rename
             Path fromPath = getTableLocation(fromTable);
-            if (!new SchemaManager(fileIO, fromPath).listAllIds().isEmpty()) {
+            Table table = renameHiveTable(fromTable, toTable);
+            Path toPath = getTableLocation(toTable);
+            if (!isExternalTable(table)
+                    && !fromPath.equals(toPath)
+                    && !new SchemaManager(fileIO, fromPath).listAllIds().isEmpty()) {
                 // Rename the file system's table directory. Maintain consistency between tables in
                 // the file system and tables in the Hive Metastore.
-                Path toPath = getTableLocation(toTable);
                 try {
                     fileIO.rename(fromPath, toPath);
                 } catch (IOException e) {
