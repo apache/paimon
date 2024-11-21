@@ -27,6 +27,7 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SerializableSupplier;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.functions.Partitioner;
 import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
@@ -182,9 +183,19 @@ public class RangeShuffle {
             this.isSortBySize = isSortBySize;
         }
 
-        @Override
+        /**
+         * Do not annotate with <code>@override</code> here to maintain compatibility with Flink
+         * 1.18-.
+         */
+        public void open(OpenContext openContext) throws Exception {
+            open(new Configuration());
+        }
+
+        /**
+         * Do not annotate with <code>@override</code> here to maintain compatibility with Flink
+         * 2.0+.
+         */
         public void open(Configuration parameters) throws Exception {
-            super.open(parameters);
             InternalRowToSizeVisitor internalRowToSizeVisitor = new InternalRowToSizeVisitor();
             fieldSizeCalculator =
                     rowType.getFieldTypes().stream()

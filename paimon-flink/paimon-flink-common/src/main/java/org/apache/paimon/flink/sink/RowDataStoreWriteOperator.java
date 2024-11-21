@@ -23,10 +23,10 @@ import org.apache.paimon.flink.log.LogWriteCallback;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.SinkRecord;
 
+import org.apache.flink.api.common.functions.DefaultOpenContext;
 import org.apache.flink.api.common.functions.RichFunction;
 import org.apache.flink.api.common.functions.util.FunctionUtils;
 import org.apache.flink.api.common.state.CheckpointListener;
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
@@ -100,7 +100,7 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
             // to stay compatible with Flink 1.18-
             if (logSinkFunction instanceof RichFunction) {
                 RichFunction richFunction = (RichFunction) logSinkFunction;
-                richFunction.open(new Configuration());
+                richFunction.open(DefaultOpenContext.INSTANCE);
             }
 
             logCallback = new LogWriteCallback();
