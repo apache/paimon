@@ -51,17 +51,13 @@ public class HttpClient implements RESTClient {
     private final OkHttpClient okHttpClient;
     private final String endpoint;
     private final ObjectMapper mapper;
+    private final ErrorHandler errorHandler;
 
     public HttpClient(HttpClientBuildParameter httpClientBuildParameter) {
         this.endpoint = httpClientBuildParameter.endpoint();
         this.mapper = httpClientBuildParameter.mapper();
         this.okHttpClient = createHttpClient(httpClientBuildParameter);
-    }
-
-    public HttpClient(OkHttpClient okHttpClient, String endpoint, ObjectMapper mapper) {
-        this.okHttpClient = okHttpClient;
-        this.endpoint = endpoint;
-        this.mapper = mapper;
+        this.errorHandler = httpClientBuildParameter.errorHandler();
     }
 
     @Override
@@ -96,7 +92,7 @@ public class HttpClient implements RESTClient {
                                 responseBodyStr != null ? responseBodyStr : "response body is null",
                                 response.code(),
                                 null);
-                DefaultErrorHandler.getInstance().accept(error);
+                errorHandler.accept(error);
             }
             if (responseBodyStr == null) {
                 throw new RESTException("response body is null.");

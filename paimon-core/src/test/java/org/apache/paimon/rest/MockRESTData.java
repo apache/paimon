@@ -23,6 +23,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgn
 
 import java.beans.ConstructorProperties;
 
+/** Mock REST data. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class MockRESTData implements RESTRequest, RESTResponse {
     private static final String FIELD_DATA = "data";
@@ -37,5 +38,10 @@ public class MockRESTData implements RESTRequest, RESTResponse {
 
     public String data() {
         return data;
+    }
+
+    @Override
+    public String toString() {
+        return String.format("{\"data\": \"%s\"}", data);
     }
 }

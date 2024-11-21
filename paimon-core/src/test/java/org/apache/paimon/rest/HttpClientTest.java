@@ -24,7 +24,7 @@ import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.After;
 import org.junit.Before;
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -60,22 +60,20 @@ public class HttpClientTest {
     }
 
     @Test
-    public void testPostSuccess() throws Exception {
+    public void testPostSuccess() {
         MockRESTData mockResponseData = new MockRESTData("test");
-        String mockResponse = objectMapper.writeValueAsString(mockResponseData);
         MockResponse mockResponseObj =
                 new MockResponse()
-                        .setBody(mockResponse)
+                        .setBody(mockResponseData.toString())
                         .addHeader("Content-Type", "application/json");
         mockWebServer.enqueue(mockResponseObj);
         MockRESTData response =
-                httpClient.post("/test", mockResponseData, MockRESTData.class, headers("token"));
+                httpClient.post("test", mockResponseData, MockRESTData.class, headers("token"));
         verify(errorHandler, times(0)).accept(any());
         assertEquals(mockResponseData.data(), response.data());
     }
 
     private Map<String, String> headers(String token) {
-        // todo: need refresh token
         Map<String, String> header = new HashMap<>();
         header.put("Authorization", "Bearer " + token);
         return header;
