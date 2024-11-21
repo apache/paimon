@@ -22,8 +22,11 @@ import org.apache.paimon.catalog.CachingCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.hive.migrate.HiveMigrator;
+import org.apache.paimon.iceberg.migrate.IcebergMigrator;
 import org.apache.paimon.migrate.Migrator;
+import org.apache.paimon.options.Options;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -39,6 +42,28 @@ public class TableMigrationUtils {
             String targetTableName,
             Integer parallelism,
             Map<String, String> options) {
+        return getImporter(
+                connector,
+                catalog,
+                sourceDatabase,
+                sourceTableName,
+                targetDatabase,
+                targetTableName,
+                parallelism,
+                options,
+                Collections.emptyMap());
+    }
+
+    public static Migrator getImporter(
+            String connector,
+            Catalog catalog,
+            String sourceDatabase,
+            String sourceTableName,
+            String targetDatabase,
+            String targetTableName,
+            Integer parallelism,
+            Map<String, String> options,
+            Map<String, String> icebergOptions) {
         switch (connector) {
             case "hive":
                 if (catalog instanceof CachingCatalog) {
@@ -55,6 +80,16 @@ public class TableMigrationUtils {
                         targetTableName,
                         parallelism,
                         options);
+            case "iceberg":
+                Options icebergConf = new Options(icebergOptions);
+                return new IcebergMigrator(
+                        catalog,
+                        targetDatabase,
+                        targetTableName,
+                        sourceDatabase,
+                        sourceTableName,
+                        icebergConf,
+                        parallelism);
             default:
                 throw new UnsupportedOperationException("Don't support connector " + connector);
         }
