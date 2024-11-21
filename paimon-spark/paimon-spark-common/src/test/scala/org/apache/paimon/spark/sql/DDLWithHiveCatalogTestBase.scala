@@ -347,6 +347,60 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
     }
   }
 
+  test("Paimon DDL with hive catalog: rename external / managed table") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        spark.sql(s"USE $catalogName")
+        withTempDir {
+          tbLocation =>
+            withDatabase("paimon_db") {
+              spark.sql(s"CREATE DATABASE paimon_db")
+              spark.sql(s"USE paimon_db")
+              withTable(
+                "external_tbl",
+                "managed_tbl",
+                "external_tbl_renamed",
+                "managed_tbl_renamed") {
+                val expertTbLocation = tbLocation.getCanonicalPath
+                // create external table
+                spark.sql(
+                  s"CREATE TABLE external_tbl (id INT) USING paimon LOCATION '$expertTbLocation'")
+                spark.sql("INSERT INTO external_tbl VALUES (1)")
+                val actualTbLocation = loadTable("paimon_db", "external_tbl").location()
+                assert(actualTbLocation.toString.split(':').apply(1).equals(expertTbLocation))
+
+                // rename external table, location should not change
+                spark.sql("ALTER TABLE external_tbl RENAME TO external_tbl_renamed")
+                checkAnswer(spark.sql("SELECT * FROM external_tbl_renamed"), Row(1))
+                assert(
+                  loadTable("paimon_db", "external_tbl_renamed")
+                    .location()
+                    .toString
+                    .split(':')
+                    .apply(1)
+                    .equals(expertTbLocation))
+
+                // create managed table
+                spark.sql(s"CREATE TABLE managed_tbl (id INT) USING paimon")
+                spark.sql("INSERT INTO managed_tbl VALUES (1)")
+                val managedTbLocation = loadTable("paimon_db", "managed_tbl").location()
+
+                // rename managed table, location should change
+                spark.sql("ALTER TABLE managed_tbl RENAME TO managed_tbl_renamed")
+                checkAnswer(spark.sql("SELECT * FROM managed_tbl_renamed"), Row(1))
+                assert(
+                  !loadTable("paimon_db", "managed_tbl_renamed")
+                    .location()
+                    .toString
+                    .split(':')
+                    .apply(1)
+                    .equals(managedTbLocation.toString))
+              }
+            }
+        }
+    }
+  }
+
   def getDatabaseProp(dbName: String, propertyName: String): String = {
     spark
       .sql(s"DESC DATABASE EXTENDED $dbName")
