@@ -20,13 +20,22 @@ package org.apache.paimon.iceberg.metadata;
 
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VarBinaryType;
+import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -188,6 +197,63 @@ public class IcebergDataField {
             default:
                 throw new UnsupportedOperationException("Unsupported data type: " + dataType);
         }
+    }
+
+    // TODO: two datatype("uuid", "unknown") has not been processed
+    public DataType getDataType() {
+        String simpleType = type.toString();
+        String typePrefix =
+                !simpleType.contains("(")
+                        ? simpleType
+                        : simpleType.substring(0, simpleType.indexOf("("));
+        switch (typePrefix) {
+            case "boolean":
+                return new BooleanType(required);
+            case "int":
+                return new IntType(required);
+            case "long":
+                return new BigIntType(required);
+            case "float":
+                return new FloatType(required);
+            case "double":
+                return new DoubleType(required);
+            case "date":
+                return new DateType(required);
+            case "string":
+                return new VarCharType(required, VarCharType.MAX_LENGTH);
+            case "binary":
+                return new VarBinaryType(required, VarBinaryType.MAX_LENGTH);
+            case "fixed":
+                int fixedLength =
+                        Integer.parseInt(
+                                simpleType.substring(
+                                        simpleType.indexOf("(") + 1, simpleType.indexOf(")")));
+                return new BinaryType(required, fixedLength);
+            case "decimal":
+                int precision =
+                        Integer.parseInt(
+                                simpleType.substring(
+                                        simpleType.indexOf("(") + 1, simpleType.indexOf(",")));
+                int scale =
+                        Integer.parseInt(
+                                simpleType.substring(
+                                        simpleType.indexOf(",") + 1, simpleType.indexOf(")")));
+                return new DecimalType(required, precision, scale);
+            case "timestamp":
+                return new TimestampType(required, 6);
+            case "timestamptz":
+                return new LocalZonedTimestampType(required, 6);
+            case "timestamp_ns":
+                return new TimestampType(required, 9);
+            case "timestamptz_ns":
+                return new LocalZonedTimestampType(required, 9);
+            default:
+                throw new UnsupportedOperationException("Unsupported data type: " + type);
+        }
+    }
+
+    public DataField toDatafield() {
+        return new DataField(id, name, getDataType(), doc);
     }
 
     @Override
