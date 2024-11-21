@@ -19,47 +19,8 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.tag.Tag;
 
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
-
-import java.time.Duration;
-import java.util.List;
-import java.util.stream.Collectors;
-
 /** Cache for {@link Snapshot} and {@link Tag} and {@link TableSchema}. */
-public class MetaCacheManager {
-
-    public static final Cache<Path, Snapshot> SNAPSHOT_CACHE =
-            Caffeine.newBuilder()
-                    .softValues()
-                    .expireAfterAccess(Duration.ofMinutes(10))
-                    .maximumSize(300)
-                    .executor(Runnable::run)
-                    .build();
-
-    public static final Cache<Path, TableSchema> SCHEMA_CACHE =
-            Caffeine.newBuilder()
-                    .softValues()
-                    .expireAfterAccess(Duration.ofMinutes(10))
-                    .maximumSize(100)
-                    .executor(Runnable::run)
-                    .build();
-
-    public static void invalidateCacheForPrefix(Path tablePath) {
-        String path = tablePath.toString();
-        invalidateCacheForPrefix(SNAPSHOT_CACHE, path);
-        invalidateCacheForPrefix(SCHEMA_CACHE, path);
-    }
-
-    private static void invalidateCacheForPrefix(Cache<Path, ?> cache, String tablePath) {
-        List<Path> keys =
-                cache.asMap().keySet().stream()
-                        .filter(key -> key.toString().startsWith(tablePath))
-                        .collect(Collectors.toList());
-        cache.invalidateAll(keys);
-    }
-}
+public class MetaCacheManager {}

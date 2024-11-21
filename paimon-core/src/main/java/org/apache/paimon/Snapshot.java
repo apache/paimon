@@ -36,7 +36,7 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.Objects;
 
-import static org.apache.paimon.utils.MetaCacheManager.SNAPSHOT_CACHE;
+import static org.apache.paimon.catalog.CachingCatalog.SNAPSHOT_CACHE;
 
 /**
  * This file is the entrance to all data committed at some specific time point.

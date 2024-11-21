@@ -33,8 +33,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.catalog.CachingCatalog.invalidateMetaCacheForPrefix;
 import static org.apache.paimon.utils.FileUtils.listVersionedDirectories;
-import static org.apache.paimon.utils.MetaCacheManager.invalidateCacheForPrefix;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Manager for {@code Branch}. */
@@ -202,7 +202,7 @@ public class BranchManager {
                     tagManager.copyWithBranch(branchName).tagDirectory(),
                     tagManager.tagDirectory(),
                     true);
-            invalidateCacheForPrefix(tablePath);
+            invalidateMetaCacheForPrefix(tablePath);
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(

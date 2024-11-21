@@ -37,7 +37,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.utils.MetaCacheManager.invalidateCacheForPrefix;
+import static org.apache.paimon.catalog.CachingCatalog.invalidateMetaCacheForPrefix;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 
@@ -367,7 +367,7 @@ public class SnapshotManagerTest {
 
         thread.start();
         Thread.sleep(100);
-        invalidateCacheForPrefix(path);
+        invalidateMetaCacheForPrefix(path);
         localFileIO.deleteQuietly(snapshotManager.snapshotPath(3));
         thread.join();
 

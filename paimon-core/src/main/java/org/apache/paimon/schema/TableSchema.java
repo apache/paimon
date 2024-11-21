@@ -42,7 +42,7 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
-import static org.apache.paimon.utils.MetaCacheManager.SCHEMA_CACHE;
+import static org.apache.paimon.catalog.CachingCatalog.SCHEMA_CACHE;
 
 /**
  * Schema of a table. Unlike schema, it has more information than {@link Schema}, including schemaId

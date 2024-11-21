@@ -96,6 +96,7 @@ import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
+import static org.apache.paimon.catalog.CachingCatalog.invalidateMetaCacheForPrefix;
 import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
@@ -111,7 +112,6 @@ import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKe
 import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.HadoopUtils.addHadoopConfIfFound;
-import static org.apache.paimon.utils.MetaCacheManager.invalidateCacheForPrefix;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
@@ -682,7 +682,7 @@ public class HiveCatalog extends AbstractCatalog {
                                     true));
 
             Path path = getTableLocation(identifier);
-            invalidateCacheForPrefix(path);
+            invalidateMetaCacheForPrefix(path);
 
             // When drop a Hive external table, only the hive metadata is deleted and the data files
             // are not deleted.

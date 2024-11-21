@@ -18,11 +18,13 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.system.SystemTableLoader;
@@ -47,6 +49,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.AbstractCatalog.isSpecifiedSystemTable;
 import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
@@ -315,5 +318,37 @@ public class CachingCatalog extends DelegateCatalog {
             List<PartitionEntry> result = wrapped.listPartitions(identifier);
             partitionCache.put(identifier, result);
         }
+    }
+
+    // ====================== cache for snapshot and schema files ================================
+
+    public static final Cache<Path, Snapshot> SNAPSHOT_CACHE =
+            Caffeine.newBuilder()
+                    .softValues()
+                    .expireAfterAccess(Duration.ofMinutes(10))
+                    .maximumSize(300)
+                    .executor(Runnable::run)
+                    .build();
+
+    public static final Cache<Path, TableSchema> SCHEMA_CACHE =
+            Caffeine.newBuilder()
+                    .softValues()
+                    .expireAfterAccess(Duration.ofMinutes(10))
+                    .maximumSize(100)
+                    .executor(Runnable::run)
+                    .build();
+
+    public static void invalidateMetaCacheForPrefix(Path tablePath) {
+        String path = tablePath.toString();
+        invalidateMetaCacheForPrefix(SNAPSHOT_CACHE, path);
+        invalidateMetaCacheForPrefix(SCHEMA_CACHE, path);
+    }
+
+    private static void invalidateMetaCacheForPrefix(Cache<Path, ?> cache, String tablePath) {
+        List<Path> keys =
+                cache.asMap().keySet().stream()
+                        .filter(key -> key.toString().startsWith(tablePath))
+                        .collect(Collectors.toList());
+        cache.invalidateAll(keys);
     }
 }
