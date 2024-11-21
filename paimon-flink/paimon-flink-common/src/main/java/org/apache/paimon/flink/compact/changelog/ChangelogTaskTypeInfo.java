@@ -21,6 +21,7 @@ package org.apache.paimon.flink.compact.changelog;
 import org.apache.paimon.flink.sink.NoneCopyVersionedSerializerTypeSerializerProxy;
 
 import org.apache.flink.api.common.ExecutionConfig;
+import org.apache.flink.api.common.serialization.SerializerConfig;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 
@@ -56,7 +57,17 @@ public class ChangelogTaskTypeInfo extends TypeInformation<ChangelogCompactTask>
         return false;
     }
 
-    @Override
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
+     */
+    public TypeSerializer<ChangelogCompactTask> createSerializer(
+            SerializerConfig serializerConfig) {
+        return this.createSerializer((ExecutionConfig) null);
+    }
+
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
+     */
     public TypeSerializer<ChangelogCompactTask> createSerializer(ExecutionConfig config) {
         // we don't need copy for task
         return new NoneCopyVersionedSerializerTypeSerializerProxy<ChangelogCompactTask>(

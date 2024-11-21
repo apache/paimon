@@ -23,8 +23,9 @@ import org.apache.paimon.flink.ReadWriteTableITCase;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.common.time.Time;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
@@ -75,12 +76,11 @@ public class ReadWriteTableTestUtil {
     }
 
     public static void init(String warehouse, int parallelism) {
-        StreamExecutionEnvironment sExeEnv = buildStreamEnv(parallelism);
-        sExeEnv.getConfig().setRestartStrategy(RestartStrategies.noRestart());
+        // Using `none` to avoid compatibility issues with Flink 1.18-.
+        StreamExecutionEnvironment sExeEnv = buildStreamEnv(parallelism, "none");
         sEnv = StreamTableEnvironment.create(sExeEnv);
 
-        bExeEnv = buildBatchEnv(parallelism);
-        bExeEnv.getConfig().setRestartStrategy(RestartStrategies.noRestart());
+        bExeEnv = buildBatchEnv(parallelism, "none");
         bEnv = StreamTableEnvironment.create(bExeEnv, EnvironmentSettings.inBatchMode());
 
         ReadWriteTableTestUtil.warehouse = warehouse;
@@ -95,16 +95,24 @@ public class ReadWriteTableTestUtil {
         bEnv.useCatalog(catalog);
     }
 
-    public static StreamExecutionEnvironment buildStreamEnv(int parallelism) {
-        final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+    public static StreamExecutionEnvironment buildStreamEnv(
+            int parallelism, String restartStrategy) {
+        Configuration configuration = new Configuration();
+        configuration.set(RestartStrategyOptions.RESTART_STRATEGY, restartStrategy);
+        final StreamExecutionEnvironment env =
+                StreamExecutionEnvironment.getExecutionEnvironment(configuration);
         env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
         env.enableCheckpointing(100);
         env.setParallelism(parallelism);
         return env;
     }
 
-    public static StreamExecutionEnvironment buildBatchEnv(int parallelism) {
-        final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+    public static StreamExecutionEnvironment buildBatchEnv(
+            int parallelism, String restartStrategy) {
+        Configuration configuration = new Configuration();
+        configuration.set(RestartStrategyOptions.RESTART_STRATEGY, restartStrategy);
+        final StreamExecutionEnvironment env =
+                StreamExecutionEnvironment.getExecutionEnvironment(configuration);
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
         env.setParallelism(parallelism);
         return env;

@@ -76,13 +76,12 @@ public class MongodbSchemaITCase extends MongoDBActionITCaseBase {
     @Test
     public void testCreateSchemaFromValidConfig() {
         Configuration mongodbConfig = new Configuration();
-        mongodbConfig.setString(MongoDBSourceOptions.HOSTS, MONGODB_CONTAINER.getHostAndPort());
-        mongodbConfig.setString(MongoDBSourceOptions.USERNAME, MongoDBContainer.PAIMON_USER);
-        mongodbConfig.setString(
-                MongoDBSourceOptions.PASSWORD, MongoDBContainer.PAIMON_USER_PASSWORD);
-        mongodbConfig.setString(MongoDBSourceOptions.CONNECTION_OPTIONS, "authSource=admin");
-        mongodbConfig.setString(MongoDBSourceOptions.DATABASE, "testDatabase");
-        mongodbConfig.setString(MongoDBSourceOptions.COLLECTION, "testCollection");
+        mongodbConfig.set(MongoDBSourceOptions.HOSTS, MONGODB_CONTAINER.getHostAndPort());
+        mongodbConfig.set(MongoDBSourceOptions.USERNAME, MongoDBContainer.PAIMON_USER);
+        mongodbConfig.set(MongoDBSourceOptions.PASSWORD, MongoDBContainer.PAIMON_USER_PASSWORD);
+        mongodbConfig.set(MongoDBSourceOptions.CONNECTION_OPTIONS, "authSource=admin");
+        mongodbConfig.set(MongoDBSourceOptions.DATABASE, "testDatabase");
+        mongodbConfig.set(MongoDBSourceOptions.COLLECTION, "testCollection");
         Schema schema = MongodbSchemaUtils.getMongodbSchema(mongodbConfig);
         assertNotNull(schema);
     }
@@ -90,13 +89,12 @@ public class MongodbSchemaITCase extends MongoDBActionITCaseBase {
     @Test
     public void testCreateSchemaFromInvalidHost() {
         Configuration mongodbConfig = new Configuration();
-        mongodbConfig.setString(MongoDBSourceOptions.HOSTS, "127.0.0.1:12345");
-        mongodbConfig.setString(MongoDBSourceOptions.USERNAME, MongoDBContainer.PAIMON_USER);
-        mongodbConfig.setString(
-                MongoDBSourceOptions.PASSWORD, MongoDBContainer.PAIMON_USER_PASSWORD);
-        mongodbConfig.setString(MongoDBSourceOptions.CONNECTION_OPTIONS, "authSource=admin");
-        mongodbConfig.setString(MongoDBSourceOptions.DATABASE, "testDatabase");
-        mongodbConfig.setString(MongoDBSourceOptions.COLLECTION, "testCollection");
+        mongodbConfig.set(MongoDBSourceOptions.HOSTS, "127.0.0.1:12345");
+        mongodbConfig.set(MongoDBSourceOptions.USERNAME, MongoDBContainer.PAIMON_USER);
+        mongodbConfig.set(MongoDBSourceOptions.PASSWORD, MongoDBContainer.PAIMON_USER_PASSWORD);
+        mongodbConfig.set(MongoDBSourceOptions.CONNECTION_OPTIONS, "authSource=admin");
+        mongodbConfig.set(MongoDBSourceOptions.DATABASE, "testDatabase");
+        mongodbConfig.set(MongoDBSourceOptions.COLLECTION, "testCollection");
 
         assertThrows(
                 RuntimeException.class, () -> MongodbSchemaUtils.getMongodbSchema(mongodbConfig));
@@ -106,7 +104,7 @@ public class MongodbSchemaITCase extends MongoDBActionITCaseBase {
     public void testCreateSchemaFromIncompleteConfig() {
         // Create a Configuration object with missing necessary settings
         Configuration mongodbConfig = new Configuration();
-        mongodbConfig.setString(MongoDBSourceOptions.HOSTS, MONGODB_CONTAINER.getHostAndPort());
+        mongodbConfig.set(MongoDBSourceOptions.HOSTS, MONGODB_CONTAINER.getHostAndPort());
         // Expect an exception to be thrown due to missing necessary settings
         assertThrows(
                 NullPointerException.class,
@@ -117,13 +115,12 @@ public class MongodbSchemaITCase extends MongoDBActionITCaseBase {
     public void testCreateSchemaFromDynamicConfig() {
         // Create a Configuration object with the necessary settings
         Configuration mongodbConfig = new Configuration();
-        mongodbConfig.setString(MongoDBSourceOptions.HOSTS, MONGODB_CONTAINER.getHostAndPort());
-        mongodbConfig.setString(MongoDBSourceOptions.USERNAME, MongoDBContainer.PAIMON_USER);
-        mongodbConfig.setString(
-                MongoDBSourceOptions.PASSWORD, MongoDBContainer.PAIMON_USER_PASSWORD);
-        mongodbConfig.setString(MongoDBSourceOptions.CONNECTION_OPTIONS, "authSource=admin");
-        mongodbConfig.setString(MongoDBSourceOptions.DATABASE, "testDatabase");
-        mongodbConfig.setString(MongoDBSourceOptions.COLLECTION, "testCollection");
+        mongodbConfig.set(MongoDBSourceOptions.HOSTS, MONGODB_CONTAINER.getHostAndPort());
+        mongodbConfig.set(MongoDBSourceOptions.USERNAME, MongoDBContainer.PAIMON_USER);
+        mongodbConfig.set(MongoDBSourceOptions.PASSWORD, MongoDBContainer.PAIMON_USER_PASSWORD);
+        mongodbConfig.set(MongoDBSourceOptions.CONNECTION_OPTIONS, "authSource=admin");
+        mongodbConfig.set(MongoDBSourceOptions.DATABASE, "testDatabase");
+        mongodbConfig.set(MongoDBSourceOptions.COLLECTION, "testCollection");
 
         // Call the method and check the results
         Schema schema = MongodbSchemaUtils.getMongodbSchema(mongodbConfig);
@@ -142,13 +139,12 @@ public class MongodbSchemaITCase extends MongoDBActionITCaseBase {
     @Test
     public void testCreateSchemaFromInvalidDatabase() {
         Configuration mongodbConfig = new Configuration();
-        mongodbConfig.setString(MongoDBSourceOptions.HOSTS, MONGODB_CONTAINER.getHostAndPort());
-        mongodbConfig.setString(MongoDBSourceOptions.USERNAME, MongoDBContainer.PAIMON_USER);
-        mongodbConfig.setString(
-                MongoDBSourceOptions.PASSWORD, MongoDBContainer.PAIMON_USER_PASSWORD);
-        mongodbConfig.setString(MongoDBSourceOptions.CONNECTION_OPTIONS, "authSource=admin");
-        mongodbConfig.setString(MongoDBSourceOptions.DATABASE, "invalidDatabase");
-        mongodbConfig.setString(MongoDBSourceOptions.COLLECTION, "testCollection");
+        mongodbConfig.set(MongoDBSourceOptions.HOSTS, MONGODB_CONTAINER.getHostAndPort());
+        mongodbConfig.set(MongoDBSourceOptions.USERNAME, MongoDBContainer.PAIMON_USER);
+        mongodbConfig.set(MongoDBSourceOptions.PASSWORD, MongoDBContainer.PAIMON_USER_PASSWORD);
+        mongodbConfig.set(MongoDBSourceOptions.CONNECTION_OPTIONS, "authSource=admin");
+        mongodbConfig.set(MongoDBSourceOptions.DATABASE, "invalidDatabase");
+        mongodbConfig.set(MongoDBSourceOptions.COLLECTION, "testCollection");
 
         assertThrows(
                 RuntimeException.class, () -> MongodbSchemaUtils.getMongodbSchema(mongodbConfig));
@@ -157,13 +153,12 @@ public class MongodbSchemaITCase extends MongoDBActionITCaseBase {
     @Test
     public void testCreateSchemaFromInvalidCollection() {
         Configuration mongodbConfig = new Configuration();
-        mongodbConfig.setString(MongoDBSourceOptions.HOSTS, MONGODB_CONTAINER.getHostAndPort());
-        mongodbConfig.setString(MongoDBSourceOptions.USERNAME, MongoDBContainer.PAIMON_USER);
-        mongodbConfig.setString(
-                MongoDBSourceOptions.PASSWORD, MongoDBContainer.PAIMON_USER_PASSWORD);
-        mongodbConfig.setString(MongoDBSourceOptions.CONNECTION_OPTIONS, "authSource=admin");
-        mongodbConfig.setString(MongoDBSourceOptions.DATABASE, "testDatabase");
-        mongodbConfig.setString(MongoDBSourceOptions.COLLECTION, "invalidCollection");
+        mongodbConfig.set(MongoDBSourceOptions.HOSTS, MONGODB_CONTAINER.getHostAndPort());
+        mongodbConfig.set(MongoDBSourceOptions.USERNAME, MongoDBContainer.PAIMON_USER);
+        mongodbConfig.set(MongoDBSourceOptions.PASSWORD, MongoDBContainer.PAIMON_USER_PASSWORD);
+        mongodbConfig.set(MongoDBSourceOptions.CONNECTION_OPTIONS, "authSource=admin");
+        mongodbConfig.set(MongoDBSourceOptions.DATABASE, "testDatabase");
+        mongodbConfig.set(MongoDBSourceOptions.COLLECTION, "invalidCollection");
 
         assertThrows(
                 RuntimeException.class, () -> MongodbSchemaUtils.getMongodbSchema(mongodbConfig));

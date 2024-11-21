@@ -22,6 +22,7 @@ import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.table.sink.CompactionTaskSerializer;
 
 import org.apache.flink.api.common.ExecutionConfig;
+import org.apache.flink.api.common.serialization.SerializerConfig;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 
@@ -58,7 +59,16 @@ public class CompactionTaskTypeInfo extends TypeInformation<UnawareAppendCompact
         return false;
     }
 
-    @Override
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
+     */
+    public TypeSerializer<UnawareAppendCompactionTask> createSerializer(SerializerConfig config) {
+        return this.createSerializer((ExecutionConfig) null);
+    }
+
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
+     */
     public TypeSerializer<UnawareAppendCompactionTask> createSerializer(ExecutionConfig config) {
         // we don't need copy for task
         return new NoneCopyVersionedSerializerTypeSerializerProxy<UnawareAppendCompactionTask>(
