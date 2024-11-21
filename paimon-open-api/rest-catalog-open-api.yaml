@@ -23,7 +23,7 @@ info:
   license:
     name: Apache 2.0
     url: https://www.apache.org/licenses/LICENSE-2.0.html
-  version: '1.0'
+  version: "1.0"
 servers:
   - url: http://localhost:8080
     description: Server URL in Development environment
@@ -47,14 +47,14 @@ paths:
               $ref: '#/components/schemas/ConfigRequest'
         required: true
       responses:
-        '201':
+        "500":
+          description: Internal Server Error
+        "201":
           description: Created
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConfigResponse'
-        '500':
-          description: Internal Server Error
 components:
   schemas:
     ConfigRequest:
@@ -66,3 +66,4 @@ components:
           type: object
           additionalProperties:
             type: string
+          writeOnly: true
