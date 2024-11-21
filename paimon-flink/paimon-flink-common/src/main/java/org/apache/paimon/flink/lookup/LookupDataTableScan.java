@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.table.source.DataTableStreamScan;
 import org.apache.paimon.table.source.snapshot.AllDeltaFollowUpScanner;
@@ -28,6 +29,8 @@ import org.apache.paimon.table.source.snapshot.FullStartingScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.utils.SnapshotManager;
+
+import javax.annotation.Nullable;
 
 import static org.apache.paimon.CoreOptions.StartupMode;
 import static org.apache.paimon.flink.lookup.LookupFileStoreTable.LookupStreamScanMode;
@@ -56,6 +59,16 @@ public class LookupDataTableScan extends DataTableStreamScan {
                 defaultValueAssigner);
         this.startupMode = options.startupMode();
         this.lookupScanMode = lookupScanMode;
+    }
+
+    @Override
+    @Nullable
+    protected SnapshotReader.Plan handleOverwriteSnapshot(Snapshot snapshot) {
+        SnapshotReader.Plan plan = super.handleOverwriteSnapshot(snapshot);
+        if (plan != null) {
+            return plan;
+        }
+        throw new ReopenException();
     }
 
     @Override
