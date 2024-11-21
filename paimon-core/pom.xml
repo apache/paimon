@@ -248,7 +248,7 @@ under the License.
                             <relocations>
                                 <relocation>
                                     <pattern>okhttp3</pattern>
-                                    <shadedPattern>org.apache.paimon.shade.okhttp</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shade.okhttp3</shadedPattern>
                                 </relocation>
                             </relocations>
                         </configuration>
