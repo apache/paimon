@@ -55,7 +55,8 @@ public class RESTCatalog implements Catalog {
                         connectTimeoutMillis,
                         readTimeoutMillis,
                         objectMapper,
-                        threadPoolSize);
+                        threadPoolSize,
+                        DefaultErrorHandler.getInstance());
         this.client = new HttpClient(httpClientBuildParameter);
     }
 

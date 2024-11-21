@@ -27,18 +27,21 @@ public class HttpClientBuildParameter {
     private final int readTimeoutMillis;
     private final ObjectMapper mapper;
     private final int threadPoolSize;
+    private final ErrorHandler errorHandler;
 
     public HttpClientBuildParameter(
             String endpoint,
             int connectTimeoutMillis,
             int readTimeoutMillis,
             ObjectMapper mapper,
-            int threadPoolSize) {
+            int threadPoolSize,
+            ErrorHandler errorHandler) {
         this.endpoint = endpoint;
         this.connectTimeoutMillis = connectTimeoutMillis;
         this.readTimeoutMillis = readTimeoutMillis;
         this.mapper = mapper;
         this.threadPoolSize = threadPoolSize;
+        this.errorHandler = errorHandler;
     }
 
     public String endpoint() {
@@ -59,5 +62,9 @@ public class HttpClientBuildParameter {
 
     public int threadPoolSize() {
         return threadPoolSize;
+    }
+
+    public ErrorHandler errorHandler() {
+        return errorHandler;
     }
 }
