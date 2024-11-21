@@ -20,6 +20,7 @@ package org.apache.paimon.rest.responses;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -48,6 +49,9 @@ public class ErrorResponse {
     }
 
     private List<String> getStackFromThrowable(Throwable throwable) {
+        if (throwable == null) {
+            return new ArrayList<String>();
+        }
         StringWriter sw = new StringWriter();
         try (PrintWriter pw = new PrintWriter(sw)) {
             throwable.printStackTrace(pw);
