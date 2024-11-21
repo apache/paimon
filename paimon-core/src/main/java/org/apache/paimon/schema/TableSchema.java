@@ -29,8 +29,10 @@ import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.Serializable;
+import java.io.UncheckedIOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -40,6 +42,7 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.utils.MetaCacheManager.SCHEMA_CACHE;
 
 /**
  * Schema of a table. Unlike schema, it has more information than {@link Schema}, including schemaId
@@ -296,19 +299,6 @@ public class TableSchema implements Serializable {
                 timeMillis);
     }
 
-    public static TableSchema fromJson(String json) {
-        return JsonSerdeUtil.fromJson(json, TableSchema.class);
-    }
-
-    public static TableSchema fromPath(FileIO fileIO, Path path) {
-        try {
-            String json = fileIO.readFileUtf8(path);
-            return TableSchema.fromJson(json);
-        } catch (IOException e) {
-            throw new RuntimeException("Fails to read schema from path " + path, e);
-        }
-    }
-
     @Override
     public String toString() {
         return JsonSerdeUtil.toJson(this);
@@ -340,5 +330,34 @@ public class TableSchema implements Serializable {
 
     public static List<DataField> newFields(RowType rowType) {
         return rowType.getFields();
+    }
+
+    // =================== Utils for reading =========================
+
+    public static TableSchema fromJson(String json) {
+        return JsonSerdeUtil.fromJson(json, TableSchema.class);
+    }
+
+    public static TableSchema fromPath(FileIO fileIO, Path path) {
+        try {
+            return tryFromPath(fileIO, path);
+        } catch (FileNotFoundException e) {
+            throw new RuntimeException(e.getMessage(), e);
+        }
+    }
+
+    public static TableSchema tryFromPath(FileIO fileIO, Path path) throws FileNotFoundException {
+        try {
+            TableSchema schema = SCHEMA_CACHE.getIfPresent(path);
+            if (schema == null) {
+                schema = fromJson(fileIO.readFileUtf8(path));
+                SCHEMA_CACHE.put(path, schema);
+            }
+            return schema;
+        } catch (FileNotFoundException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 }

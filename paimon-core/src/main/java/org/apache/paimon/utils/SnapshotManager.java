@@ -126,14 +126,7 @@ public class SnapshotManager implements Serializable {
     }
 
     public Snapshot tryGetSnapshot(long snapshotId) throws FileNotFoundException {
-        try {
-            Path snapshotPath = snapshotPath(snapshotId);
-            return Snapshot.fromJson(fileIO.readFileUtf8(snapshotPath));
-        } catch (FileNotFoundException fileNotFoundException) {
-            throw fileNotFoundException;
-        } catch (IOException ioException) {
-            throw new RuntimeException(ioException);
-        }
+        return Snapshot.tryFromPath(fileIO, snapshotPath(snapshotId));
     }
 
     public Changelog changelog(long snapshotId) {
@@ -486,11 +479,8 @@ public class SnapshotManager implements Serializable {
         collectSnapshots(
                 path -> {
                     try {
-                        snapshots.add(Snapshot.fromJson(fileIO.readFileUtf8(path)));
-                    } catch (IOException e) {
-                        if (!(e instanceof FileNotFoundException)) {
-                            throw new RuntimeException(e);
-                        }
+                        snapshots.add(Snapshot.tryFromPath(fileIO, path));
+                    } catch (FileNotFoundException ignored) {
                     }
                 },
                 paths);
