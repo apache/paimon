@@ -23,13 +23,13 @@ import org.apache.paimon.utils.FileIOUtils;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.client.program.ClusterClient;
+import org.apache.flink.configuration.CheckpointingOptions;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.runtime.client.JobStatusMessage;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.streaming.api.CheckpointingMode;
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
@@ -183,7 +183,7 @@ public class AbstractTestBase {
                     tEnv.getConfig()
                             .getConfiguration()
                             .set(
-                                    ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL,
+                                    CheckpointingOptions.CHECKPOINTING_INTERVAL,
                                     Duration.ofMillis(checkpointIntervalMs));
                 }
             } else {

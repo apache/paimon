@@ -24,7 +24,7 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
-import org.apache.flink.api.common.serialization.SerializerConfigImpl;
+import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.java.typeutils.runtime.kryo.KryoSerializer;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
@@ -102,7 +102,7 @@ public class CdcRecordSerializeITCase {
     }
 
     public static <T> KryoSerializer<T> createFlinkKryoSerializer(Class<T> type) {
-        return new KryoSerializer<>(type, new SerializerConfigImpl());
+        return new KryoSerializer<>(type, new ExecutionConfig());
     }
 
     private static final class TestOutputView extends DataOutputStream implements DataOutputView {

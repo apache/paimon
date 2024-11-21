@@ -24,9 +24,9 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.apache.flink.configuration.StateRecoveryOptions;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.execution.SavepointFormatType;
-import org.apache.flink.runtime.jobgraph.SavepointConfigOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
@@ -106,9 +106,7 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
         assertThat(batchSql("SELECT * FROM T3")).containsExactlyInAnyOrderElementsOf(committedData);
 
         // step5: resume streaming job
-        sEnv.getConfig()
-                .getConfiguration()
-                .set(SavepointConfigOptions.SAVEPOINT_PATH, savepointPath);
+        sEnv.getConfig().getConfiguration().set(StateRecoveryOptions.SAVEPOINT_PATH, savepointPath);
         JobClient resumedJobClient =
                 startJobAndCommitSnapshot(streamSql, snapshotAfterRescale.id());
         // stop job

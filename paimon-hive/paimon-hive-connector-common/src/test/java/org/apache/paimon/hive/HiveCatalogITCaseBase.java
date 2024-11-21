@@ -34,9 +34,9 @@ import org.apache.paimon.utils.IOUtils;
 
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
+import org.apache.flink.configuration.CheckpointingOptions;
 import org.apache.flink.core.fs.FSDataInputStream;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableResult;
@@ -139,7 +139,7 @@ public abstract class HiveCatalogITCaseBase {
                         EnvironmentSettings.newInstance().inStreamingMode().build());
         sEnv.getConfig()
                 .getConfiguration()
-                .set(ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL, Duration.ofSeconds(1));
+                .set(CheckpointingOptions.CHECKPOINTING_INTERVAL, Duration.ofSeconds(1));
         sEnv.getConfig().set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 1);
 
         tEnv.executeSql(

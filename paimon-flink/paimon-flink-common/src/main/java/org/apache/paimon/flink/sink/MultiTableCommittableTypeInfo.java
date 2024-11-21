@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 
 import org.apache.flink.api.common.ExecutionConfig;
+import org.apache.flink.api.common.serialization.SerializerConfig;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 
@@ -57,7 +58,16 @@ public class MultiTableCommittableTypeInfo extends TypeInformation<MultiTableCom
         return false;
     }
 
-    @Override
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
+     */
+    public TypeSerializer<MultiTableCommittable> createSerializer(SerializerConfig config) {
+        return this.createSerializer((ExecutionConfig) null);
+    }
+
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
+     */
     public TypeSerializer<MultiTableCommittable> createSerializer(ExecutionConfig config) {
         // no copy, so that data from writer is directly going into committer while chaining
         return new NoneCopyVersionedSerializerTypeSerializerProxy<MultiTableCommittable>(
