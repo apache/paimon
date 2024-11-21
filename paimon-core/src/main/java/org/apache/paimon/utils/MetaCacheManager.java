@@ -41,14 +41,6 @@ public class MetaCacheManager {
                     .executor(Runnable::run)
                     .build();
 
-    public static final Cache<Path, Tag> TAG_CACHE =
-            Caffeine.newBuilder()
-                    .softValues()
-                    .expireAfterAccess(Duration.ofMinutes(10))
-                    .maximumSize(100)
-                    .executor(Runnable::run)
-                    .build();
-
     public static final Cache<Path, TableSchema> SCHEMA_CACHE =
             Caffeine.newBuilder()
                     .softValues()
@@ -60,7 +52,6 @@ public class MetaCacheManager {
     public static void invalidateCacheForPrefix(Path tablePath) {
         String path = tablePath.toString();
         invalidateCacheForPrefix(SNAPSHOT_CACHE, path);
-        invalidateCacheForPrefix(TAG_CACHE, path);
         invalidateCacheForPrefix(SCHEMA_CACHE, path);
     }
 

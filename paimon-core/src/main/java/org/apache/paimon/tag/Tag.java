@@ -39,8 +39,6 @@ import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Objects;
 
-import static org.apache.paimon.utils.MetaCacheManager.TAG_CACHE;
-
 /** Snapshot with tagCreateTime and tagTimeRetained. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Tag extends Snapshot {
@@ -198,12 +196,7 @@ public class Tag extends Snapshot {
 
     public static Tag tryFromPath(FileIO fileIO, Path path) throws FileNotFoundException {
         try {
-            Tag tag = TAG_CACHE.getIfPresent(path);
-            if (tag == null) {
-                tag = fromJson(fileIO.readFileUtf8(path));
-                TAG_CACHE.put(path, tag);
-            }
-            return tag;
+            return fromJson(fileIO.readFileUtf8(path));
         } catch (FileNotFoundException e) {
             throw e;
         } catch (IOException e) {
