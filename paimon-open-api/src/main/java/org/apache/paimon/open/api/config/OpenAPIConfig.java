@@ -29,7 +29,7 @@ import org.springframework.context.annotation.Configuration;
 import java.util.ArrayList;
 import java.util.List;
 
-/** OpenAPI config. */
+/** Config for OpenAPI. */
 @Configuration
 public class OpenAPIConfig {
 
@@ -37,7 +37,7 @@ public class OpenAPIConfig {
     private String devUrl;
 
     @Bean
-    public OpenAPI myOpenAPI() {
+    public OpenAPI restCatalogOpenAPI() {
         Server server = new Server();
         server.setUrl(devUrl);
         server.setDescription("Server URL in Development environment");

@@ -53,9 +53,8 @@ public class HttpClient implements RESTClient {
     private final ObjectMapper mapper;
 
     public HttpClient(HttpClientBuildParameter httpClientBuildParameter) {
-        // todo: support config
-        this.endpoint = httpClientBuildParameter.getEndpoint();
-        this.mapper = httpClientBuildParameter.getMapper();
+        this.endpoint = httpClientBuildParameter.endpoint();
+        this.mapper = httpClientBuildParameter.mapper();
         this.okHttpClient = createHttpClient(httpClientBuildParameter);
     }
 
@@ -117,8 +116,8 @@ public class HttpClient implements RESTClient {
             HttpClientBuildParameter httpClientBuildParameter) {
         ExecutorService executorService =
                 new ThreadPoolExecutor(
-                        httpClientBuildParameter.getThreadPoolSize(),
-                        httpClientBuildParameter.getThreadPoolSize(),
+                        httpClientBuildParameter.threadPoolSize(),
+                        httpClientBuildParameter.threadPoolSize(),
                         60,
                         TimeUnit.SECONDS,
                         new SynchronousQueue<>(),
@@ -130,11 +129,10 @@ public class HttpClient implements RESTClient {
         OkHttpClient.Builder builder =
                 new OkHttpClient.Builder()
                         .connectTimeout(
-                                httpClientBuildParameter.getConnectTimeoutMillis(),
+                                httpClientBuildParameter.connectTimeoutMillis(),
                                 TimeUnit.MILLISECONDS)
                         .readTimeout(
-                                httpClientBuildParameter.getReadTimeoutMillis(),
-                                TimeUnit.MILLISECONDS)
+                                httpClientBuildParameter.readTimeoutMillis(), TimeUnit.MILLISECONDS)
                         .dispatcher(new Dispatcher(executorService))
                         .retryOnConnectionFailure(true)
                         .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT));

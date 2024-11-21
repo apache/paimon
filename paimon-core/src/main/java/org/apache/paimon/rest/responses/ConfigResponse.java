@@ -22,21 +22,15 @@ import org.apache.paimon.rest.RESTResponse;
 
 import java.util.Map;
 
-/** Response to get config. */
+/** Response for getting config. */
 public class ConfigResponse implements RESTResponse {
     private Map<String, String> defaults;
-
-    public ConfigResponse() {}
 
     public ConfigResponse(Map<String, String> defaults) {
         this.defaults = defaults;
     }
 
-    public Map<String, String> getDefaults() {
+    public Map<String, String> defaults() {
         return defaults;
-    }
-
-    public void setDefaults(Map<String, String> defaults) {
-        this.defaults = defaults;
     }
 }

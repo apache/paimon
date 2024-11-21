@@ -22,7 +22,7 @@ import java.io.Closeable;
 import java.util.Map;
 import java.util.function.Supplier;
 
-/** REST client. */
+/** Interface for a basic HTTP Client for interfacing with the REST catalog. */
 public interface RESTClient extends Closeable {
     default <T extends RESTResponse> T post(
             String path,

@@ -23,7 +23,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.SerializationFeature;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
-/** REST object mapper. */
+/** Object mapper for REST request and response. */
 public class RESTObjectMapper {
     public static ObjectMapper create() {
         ObjectMapper mapper = new ObjectMapper();

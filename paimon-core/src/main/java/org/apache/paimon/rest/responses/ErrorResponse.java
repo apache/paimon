@@ -29,34 +29,30 @@ public class ErrorResponse {
     private final int code;
     private List<String> stack;
 
-    public ErrorResponse(String message, int code, List<String> stack) {
+    public ErrorResponse(String message, int code, Throwable throwable) {
         this.message = message;
         this.code = code;
-        this.stack = stack;
+        this.stack = getStackFromThrowable(throwable);
     }
 
-    public String getMessage() {
+    public String message() {
         return message;
     }
 
-    public int getCode() {
+    public int code() {
         return code;
     }
 
-    public List<String> getStack() {
+    public List<String> stack() {
         return stack;
     }
 
-    public void setStack(Throwable throwable) {
+    private List<String> getStackFromThrowable(Throwable throwable) {
         StringWriter sw = new StringWriter();
         try (PrintWriter pw = new PrintWriter(sw)) {
             throwable.printStackTrace(pw);
         }
 
-        this.stack = Arrays.asList(sw.toString().split("\n"));
-    }
-
-    public void setStack(List<String> trace) {
-        this.stack = trace;
+        return Arrays.asList(sw.toString().split("\n"));
     }
 }

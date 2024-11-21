@@ -31,7 +31,7 @@ import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 
-/** REST catalog api test. */
+/** Test for REST Catalog. */
 public class RESTCatalogTest {
     private MockWebServer mockWebServer;
     private RESTCatalog restCatalog;

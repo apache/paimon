@@ -37,7 +37,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** REST catalog. */
+/** A catalog implementation for REST. */
 public class RESTCatalog implements Catalog {
     private RESTClient client;
     private final ObjectMapper objectMapper = RESTObjectMapper.create();
@@ -68,7 +68,7 @@ public class RESTCatalog implements Catalog {
     public Map<String, String> options() {
         ConfigResponse response =
                 client.post("config", new ConfigRequest(), ConfigResponse.class, headers());
-        return response.getDefaults();
+        return response.defaults();
     }
 
     @Override

@@ -36,26 +36,25 @@ public class DefaultErrorHandler extends ErrorHandler {
 
     @Override
     public void accept(ErrorResponse error) {
-        switch (error.getCode()) {
+        switch (error.code()) {
             case 400:
                 throw new BadRequestException(
-                        String.format("Malformed request: %s", error.getMessage()));
+                        String.format("Malformed request: %s", error.message()));
             case 401:
-                throw new NotAuthorizedException("Not authorized: %s", error.getMessage());
+                throw new NotAuthorizedException("Not authorized: %s", error.message());
             case 403:
-                throw new ForbiddenException("Forbidden: %s", error.getMessage());
+                throw new ForbiddenException("Forbidden: %s", error.message());
             case 405:
             case 406:
                 break;
             case 500:
-                throw new ServiceFailureException("Server error: %s", error.getMessage());
+                throw new ServiceFailureException("Server error: %s", error.message());
             case 501:
-                throw new UnsupportedOperationException(error.getMessage());
+                throw new UnsupportedOperationException(error.message());
             case 503:
-                throw new ServiceUnavailableException(
-                        "Service unavailable: %s", error.getMessage());
+                throw new ServiceUnavailableException("Service unavailable: %s", error.message());
         }
 
-        throw new RESTException("Unable to process: %s", error.getMessage());
+        throw new RESTException("Unable to process: %s", error.message());
     }
 }

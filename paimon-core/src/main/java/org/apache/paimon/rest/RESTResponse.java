@@ -18,5 +18,5 @@
 
 package org.apache.paimon.rest;
 
-/** REST response. */
+/** Interface to mark a REST response. */
 public interface RESTResponse extends RESTMessage {}

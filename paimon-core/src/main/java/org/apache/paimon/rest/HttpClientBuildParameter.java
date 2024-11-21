@@ -41,23 +41,23 @@ public class HttpClientBuildParameter {
         this.threadPoolSize = threadPoolSize;
     }
 
-    public String getEndpoint() {
+    public String endpoint() {
         return endpoint;
     }
 
-    public int getConnectTimeoutMillis() {
+    public int connectTimeoutMillis() {
         return connectTimeoutMillis;
     }
 
-    public int getReadTimeoutMillis() {
+    public int readTimeoutMillis() {
         return readTimeoutMillis;
     }
 
-    public ObjectMapper getMapper() {
+    public ObjectMapper mapper() {
         return mapper;
     }
 
-    public int getThreadPoolSize() {
+    public int threadPoolSize() {
         return threadPoolSize;
     }
 }
