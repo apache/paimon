@@ -196,7 +196,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
 
             // first try to get overwrite changes
             if (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE) {
-                SnapshotReader.Plan overwritePlan = tryGetOverwirtePlan(snapshot);
+                SnapshotReader.Plan overwritePlan = handleOverwriteSnapshot(snapshot);
                 if (overwritePlan != null) {
                     nextSnapshotId++;
                     return overwritePlan;
@@ -229,7 +229,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
     }
 
     @Nullable
-    protected SnapshotReader.Plan tryGetOverwirtePlan(Snapshot snapshot) {
+    protected SnapshotReader.Plan handleOverwriteSnapshot(Snapshot snapshot) {
         if (supportStreamingReadOverwrite) {
             LOG.debug("Find overwrite snapshot id {}.", nextSnapshotId);
             SnapshotReader.Plan overwritePlan =

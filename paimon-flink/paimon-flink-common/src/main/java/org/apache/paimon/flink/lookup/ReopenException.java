@@ -16,14 +16,14 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.source;
+package org.apache.paimon.flink.lookup;
 
-/** Signals that dim table source scans an OVERWRITE snapshot. */
-public class DimScanOverwriteException extends RuntimeException {
+/** Signals that dim table source need to reopen. */
+public class ReopenException extends RuntimeException {
 
     private static final long serialVersionUID = 1L;
 
-    public DimScanOverwriteException() {
+    public ReopenException() {
         super();
     }
 }

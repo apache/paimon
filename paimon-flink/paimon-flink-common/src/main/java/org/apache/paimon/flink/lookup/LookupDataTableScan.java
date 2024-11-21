@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.table.source.DataTableStreamScan;
-import org.apache.paimon.table.source.DimScanOverwriteException;
 import org.apache.paimon.table.source.snapshot.AllDeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.FollowUpScanner;
@@ -64,12 +63,12 @@ public class LookupDataTableScan extends DataTableStreamScan {
 
     @Override
     @Nullable
-    protected SnapshotReader.Plan tryGetOverwirtePlan(Snapshot snapshot) {
-        SnapshotReader.Plan plan = super.tryGetOverwirtePlan(snapshot);
+    protected SnapshotReader.Plan handleOverwriteSnapshot(Snapshot snapshot) {
+        SnapshotReader.Plan plan = super.handleOverwriteSnapshot(snapshot);
         if (plan != null) {
             return plan;
         }
-        throw new DimScanOverwriteException();
+        throw new ReopenException();
     }
 
     @Override
