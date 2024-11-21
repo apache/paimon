@@ -25,6 +25,7 @@ import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Collections;
 import java.util.List;
@@ -974,6 +975,34 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                         Row.of(2, 22, 222, 2222),
                         Row.of(3, 33, 333, 3333),
                         Row.of(4, null, null, null));
+
+        iterator.close();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testOverwriteDimTable(boolean isPkTable) throws Exception {
+        sql(
+                "CREATE TABLE DIM (i INT %s, v int, pt STRING) "
+                        + "PARTITIONED BY (pt) WITH ('continuous.discovery-interval'='1 ms')",
+                isPkTable ? "PRIMARY KEY NOT ENFORCED" : "");
+
+        BlockingIterator<Row, Row> iterator =
+                streamSqlBlockIter(
+                        "SELECT T.i, D.v, D.pt FROM T LEFT JOIN DIM FOR SYSTEM_TIME AS OF T.proctime AS D ON T.i = D.i");
+
+        sql("INSERT INTO DIM VALUES (1, 11, 'A'), (2, 22, 'B')");
+        sql("INSERT INTO T VALUES (1), (2)");
+
+        List<Row> result = iterator.collect(2);
+        assertThat(result).containsExactlyInAnyOrder(Row.of(1, 11, "A"), Row.of(2, 22, "B"));
+
+        sql("INSERT OVERWRITE DIM PARTITION (pt='B') VALUES (3, 33)");
+        Thread.sleep(2000); // wait refresh
+        sql("INSERT INTO T VALUES (3)");
+
+        result = iterator.collect(1);
+        assertThat(result).containsExactlyInAnyOrder(Row.of(3, 33, "B"));
 
         iterator.close();
     }

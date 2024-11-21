@@ -16,21 +16,14 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.catalog;
+package org.apache.paimon.flink.lookup;
 
-import org.apache.paimon.options.ConfigOption;
-import org.apache.paimon.options.ConfigOptions;
+/** Signals that dim table source need to reopen. */
+public class ReopenException extends RuntimeException {
 
-/** Options for filesystem catalog. */
-public final class FileSystemCatalogOptions {
+    private static final long serialVersionUID = 1L;
 
-    public static final ConfigOption<Boolean> CASE_SENSITIVE =
-            ConfigOptions.key("case-sensitive")
-                    .booleanType()
-                    .defaultValue(true)
-                    .withFallbackKeys("allow-upper-case")
-                    .withDescription(
-                            "Is case sensitive. If case insensitive, you need to set this option to false, and the table name and fields be converted to lowercase.");
-
-    private FileSystemCatalogOptions() {}
+    public ReopenException() {
+        super();
+    }
 }
