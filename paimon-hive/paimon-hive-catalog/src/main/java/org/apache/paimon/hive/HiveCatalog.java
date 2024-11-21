@@ -111,6 +111,7 @@ import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKe
 import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.HadoopUtils.addHadoopConfIfFound;
+import static org.apache.paimon.utils.MetaCacheManager.invalidateCacheForPrefix;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
@@ -693,6 +694,7 @@ public class HiveCatalog extends AbstractCatalog {
             try {
                 if (fileIO.exists(path)) {
                     fileIO.deleteDirectoryQuietly(path);
+                    invalidateCacheForPrefix(path);
                 }
             } catch (Exception ee) {
                 LOG.error("Delete directory[{}] fail for table {}", path, identifier, ee);

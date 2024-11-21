@@ -35,6 +35,7 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 
 import static org.apache.paimon.catalog.FileSystemCatalogOptions.CASE_SENSITIVE;
+import static org.apache.paimon.utils.MetaCacheManager.invalidateCacheForPrefix;
 
 /** A catalog implementation for {@link FileIO}. */
 public class FileSystemCatalog extends AbstractCatalog {
@@ -108,6 +109,7 @@ public class FileSystemCatalog extends AbstractCatalog {
     protected void dropTableImpl(Identifier identifier) {
         Path path = getTableLocation(identifier);
         uncheck(() -> fileIO.delete(path, true));
+        invalidateCacheForPrefix(path);
     }
 
     @Override
