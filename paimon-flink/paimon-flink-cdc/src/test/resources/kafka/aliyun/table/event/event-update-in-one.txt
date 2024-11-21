@@ -16,16 +16,4 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink;
-
-import org.apache.paimon.flink.sink.StoreSinkWrite;
-
-import org.apache.flink.streaming.api.operators.Output;
-import org.apache.flink.streaming.runtime.streamrecord.RecordAttributes;
-
-/** Placeholder class for new feature introduced since flink 1.19. Should never be used. */
-public class ProcessRecordAttributesUtil {
-    public static void processWithWrite(RecordAttributes recordAttributes, StoreSinkWrite write) {}
-
-    public static void processWithOutput(RecordAttributes recordAttributes, Output output) {}
-}
+ {"schema":{"dataColumn":[{"name":"id","type":"LONG"},{"name":"val","type":"DOUBLE"},{"name":"name","type":"STRING"},{"name":"create_time","type":"DATE"}],"primaryKey":["id"],"source":{"dbType":"MySQL","dbName":"bigdata_test","tableName":"sync_test_table"}},"payload":{"before":{"dataColumn":{"id":2,"val":"1.100000","name":"a","create_time":1731661114000}},"after":{"dataColumn":{"id":2,"val":"2.200000","name":"a","create_time":1731661114000}},"sequenceId":"1731663842292000001","timestamp":{"eventTime":1731662097000,"systemTime":1731663848979,"checkpointTime":1731662097000},"op":"UPDATE_AFTER","ddl":null},"version":"0.0.1"}
