@@ -32,6 +32,9 @@ public class MigrateTableAction extends ActionBase {
     private final String tableProperties;
     private final Integer parallelism;
 
+    private final String paimonTableFullName;
+    private final String icebergProperties;
+
     public MigrateTableAction(
             String connector,
             String hiveTableFullName,
@@ -43,6 +46,25 @@ public class MigrateTableAction extends ActionBase {
         this.hiveTableFullName = hiveTableFullName;
         this.tableProperties = tableProperties;
         this.parallelism = parallelism;
+        this.paimonTableFullName = null;
+        this.icebergProperties = null;
+    }
+
+    public MigrateTableAction(
+            String connector,
+            String hiveTableFullName,
+            Map<String, String> catalogConfig,
+            String tableProperties,
+            Integer parallelism,
+            String paimonTableFullName,
+            String icebergProperties) {
+        super(catalogConfig);
+        this.connector = connector;
+        this.hiveTableFullName = hiveTableFullName;
+        this.tableProperties = tableProperties;
+        this.parallelism = parallelism;
+        this.paimonTableFullName = paimonTableFullName;
+        this.icebergProperties = icebergProperties;
     }
 
     @Override
@@ -54,6 +76,8 @@ public class MigrateTableAction extends ActionBase {
                 connector,
                 hiveTableFullName,
                 tableProperties,
-                parallelism);
+                parallelism,
+                paimonTableFullName,
+                icebergProperties);
     }
 }

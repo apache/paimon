@@ -20,6 +20,7 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.TableMigrationUtils;
+import org.apache.paimon.migrate.Migrator;
 import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
@@ -49,6 +50,14 @@ public class MigrateTableProcedure extends ProcedureBase {
                 @ArgumentHint(
                         name = "parallelism",
                         type = @DataTypeHint("Integer"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "target_table",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "iceberg_options",
+                        type = @DataTypeHint("STRING"),
                         isOptional = true)
             })
     public String[] call(
@@ -56,18 +65,25 @@ public class MigrateTableProcedure extends ProcedureBase {
             String connector,
             String sourceTablePath,
             String properties,
-            Integer parallelism)
+            Integer parallelism,
+            String targetTablePath,
+            String icebergProperties)
             throws Exception {
         properties = notnull(properties);
+        icebergProperties = notnull(icebergProperties);
 
         String targetPaimonTablePath = sourceTablePath + PAIMON_SUFFIX;
+        if (targetTablePath != null) {
+            targetPaimonTablePath = targetTablePath;
+        }
 
         Identifier sourceTableId = Identifier.fromString(sourceTablePath);
         Identifier targetTableId = Identifier.fromString(targetPaimonTablePath);
 
         Integer p = parallelism == null ? Runtime.getRuntime().availableProcessors() : parallelism;
 
-        TableMigrationUtils.getImporter(
+        Migrator migrator =
+                TableMigrationUtils.getImporter(
                         connector,
                         catalog,
                         sourceTableId.getDatabaseName(),
@@ -75,11 +91,12 @@ public class MigrateTableProcedure extends ProcedureBase {
                         targetTableId.getDatabaseName(),
                         targetTableId.getObjectName(),
                         p,
-                        ParameterUtils.parseCommaSeparatedKeyValues(properties))
-                .executeMigrate();
+                        ParameterUtils.parseCommaSeparatedKeyValues(properties),
+                        ParameterUtils.parseCommaSeparatedKeyValues(icebergProperties));
+        LOG.info("create migrator success.");
+        migrator.executeMigrate();
 
-        LOG.info("Last step: rename " + targetTableId + " to " + sourceTableId);
-        catalog.renameTable(targetTableId, sourceTableId, false);
+        migrator.renameTable(false);
         return new String[] {"Success"};
     }
 }
