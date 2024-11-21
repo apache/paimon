@@ -546,4 +546,28 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
         }
     }
   }
+
+  test("Paimon DDL: create and drop external / managed table") {
+    withTempDir {
+      tbLocation =>
+        withTable("external_tbl", "managed_tbl") {
+          // create external table
+          val error = intercept[UnsupportedOperationException] {
+            sql(
+              s"CREATE TABLE external_tbl (id INT) USING paimon LOCATION '${tbLocation.getCanonicalPath}'")
+          }.getMessage
+          assert(error.contains("not support"))
+
+          // create managed table
+          sql("CREATE TABLE managed_tbl (id INT) USING paimon")
+          val table = loadTable("managed_tbl")
+          val fileIO = table.fileIO()
+          val tableLocation = table.location()
+
+          // drop managed table
+          sql("DROP TABLE managed_tbl")
+          assert(!fileIO.exists(tableLocation))
+        }
+    }
+  }
 }
