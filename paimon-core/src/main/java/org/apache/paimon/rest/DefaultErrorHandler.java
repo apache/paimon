@@ -36,7 +36,8 @@ public class DefaultErrorHandler extends ErrorHandler {
 
     @Override
     public void accept(ErrorResponse error) {
-        switch (error.code()) {
+        int code = error.code();
+        switch (code) {
             case 400:
                 throw new BadRequestException(
                         String.format("Malformed request: %s", error.message()));

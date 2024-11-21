@@ -90,8 +90,7 @@ public class HttpClient implements RESTClient {
                 ErrorResponse error =
                         new ErrorResponse(
                                 responseBodyStr != null ? responseBodyStr : "response body is null",
-                                response.code(),
-                                null);
+                                response.code());
                 errorHandler.accept(error);
             }
             if (responseBodyStr == null) {

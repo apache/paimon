@@ -42,6 +42,7 @@ public class RESTCatalog implements Catalog {
     private RESTClient client;
     private final ObjectMapper objectMapper = RESTObjectMapper.create();
     private String token;
+    private ResourcePaths resourcePaths;
 
     public RESTCatalog(Options options) {
         String endpoint = options.get(RESTCatalogOptions.ENDPOINT);
@@ -58,6 +59,8 @@ public class RESTCatalog implements Catalog {
                         threadPoolSize,
                         DefaultErrorHandler.getInstance());
         this.client = new HttpClient(httpClientBuildParameter);
+        this.resourcePaths =
+                ResourcePaths.forCatalogProperties(options.get(RESTCatalogOptions.ENDPOINT_PREFIX));
     }
 
     @Override
@@ -68,7 +71,11 @@ public class RESTCatalog implements Catalog {
     @Override
     public Map<String, String> options() {
         ConfigResponse response =
-                client.post("config", new ConfigRequest(), ConfigResponse.class, headers());
+                client.post(
+                        resourcePaths.config(),
+                        new ConfigRequest(),
+                        ConfigResponse.class,
+                        headers());
         return response.defaults();
     }
 

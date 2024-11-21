@@ -28,6 +28,11 @@ public class RESTCatalogOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog server's endpoint.");
+    public static final ConfigOption<String> ENDPOINT_PREFIX =
+            ConfigOptions.key("rest.catalog.endpoint.prefix")
+                    .stringType()
+                    .defaultValue("default")
+                    .withDescription("REST Catalog server's endpoint orefix.");
     public static final ConfigOption<String> TOKEN =
             ConfigOptions.key("rest.catalog.token")
                     .stringType()

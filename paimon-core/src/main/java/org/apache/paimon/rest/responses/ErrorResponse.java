@@ -43,6 +43,12 @@ public class ErrorResponse {
     @JsonProperty(FIELD_STACK)
     private final List<String> stack;
 
+    public ErrorResponse(String message, Integer code) {
+        this.code = code;
+        this.message = message;
+        this.stack = new ArrayList<String>();
+    }
+
     @ConstructorProperties({FIELD_MESSAGE, FIELD_CODE, FIELD_STACK})
     public ErrorResponse(String message, int code, List<String> stack) {
         this.message = message;
