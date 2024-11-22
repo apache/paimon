@@ -54,7 +54,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.catalog.CachingCatalog.invalidateMetaCacheForPrefix;
 import static org.apache.paimon.jdbc.JdbcCatalogLock.acquireTimeout;
 import static org.apache.paimon.jdbc.JdbcCatalogLock.checkMaxSleep;
 import static org.apache.paimon.jdbc.JdbcUtils.execute;
@@ -226,7 +225,6 @@ public class JdbcCatalog extends AbstractCatalog {
             try {
                 if (fileIO.exists(path)) {
                     fileIO.deleteDirectoryQuietly(path);
-                    invalidateMetaCacheForPrefix(path);
                 }
             } catch (Exception ex) {
                 LOG.error("Delete directory[{}] fail for table {}", path, identifier, ex);

@@ -24,6 +24,8 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -74,16 +76,26 @@ public class SnapshotManager implements Serializable {
     private final FileIO fileIO;
     private final Path tablePath;
     private final String branch;
+    @Nullable private final Cache<Path, Snapshot> cache;
 
     public SnapshotManager(FileIO fileIO, Path tablePath) {
         this(fileIO, tablePath, DEFAULT_MAIN_BRANCH);
     }
 
     /** Specify the default branch for data writing. */
-    public SnapshotManager(FileIO fileIO, Path tablePath, String branchName) {
+    public SnapshotManager(FileIO fileIO, Path tablePath, @Nullable String branchName) {
+        this(fileIO, tablePath, branchName, null);
+    }
+
+    public SnapshotManager(
+            FileIO fileIO,
+            Path tablePath,
+            @Nullable String branchName,
+            @Nullable Cache<Path, Snapshot> cache) {
         this.fileIO = fileIO;
         this.tablePath = tablePath;
         this.branch = BranchManager.normalizeBranch(branchName);
+        this.cache = cache;
     }
 
     public SnapshotManager copyWithBranch(String branchName) {
@@ -120,13 +132,34 @@ public class SnapshotManager implements Serializable {
         return new Path(branchPath(tablePath, branch) + "/snapshot");
     }
 
+    public void invalidateCache() {
+        if (cache != null) {
+            cache.invalidateAll();
+        }
+    }
+
     public Snapshot snapshot(long snapshotId) {
-        Path snapshotPath = snapshotPath(snapshotId);
-        return Snapshot.fromPath(fileIO, snapshotPath);
+        Path path = snapshotPath(snapshotId);
+        Snapshot snapshot = cache == null ? null : cache.getIfPresent(path);
+        if (snapshot == null) {
+            snapshot = Snapshot.fromPath(fileIO, path);
+            if (cache != null) {
+                cache.put(path, snapshot);
+            }
+        }
+        return snapshot;
     }
 
     public Snapshot tryGetSnapshot(long snapshotId) throws FileNotFoundException {
-        return Snapshot.tryFromPath(fileIO, snapshotPath(snapshotId));
+        Path path = snapshotPath(snapshotId);
+        Snapshot snapshot = cache == null ? null : cache.getIfPresent(path);
+        if (snapshot == null) {
+            snapshot = Snapshot.tryFromPath(fileIO, path);
+            if (cache != null) {
+                cache.put(path, snapshot);
+            }
+        }
+        return snapshot;
     }
 
     public Changelog changelog(long snapshotId) {
@@ -479,6 +512,7 @@ public class SnapshotManager implements Serializable {
         collectSnapshots(
                 path -> {
                     try {
+                        // do not pollution cache
                         snapshots.add(Snapshot.tryFromPath(fileIO, path));
                     } catch (FileNotFoundException ignored) {
                     }

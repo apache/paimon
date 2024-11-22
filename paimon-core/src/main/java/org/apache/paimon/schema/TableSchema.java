@@ -42,7 +42,6 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
-import static org.apache.paimon.catalog.CachingCatalog.SCHEMA_CACHE;
 
 /**
  * Schema of a table. Unlike schema, it has more information than {@link Schema}, including schemaId
@@ -348,12 +347,7 @@ public class TableSchema implements Serializable {
 
     public static TableSchema tryFromPath(FileIO fileIO, Path path) throws FileNotFoundException {
         try {
-            TableSchema schema = SCHEMA_CACHE.getIfPresent(path);
-            if (schema == null) {
-                schema = fromJson(fileIO.readFileUtf8(path));
-                SCHEMA_CACHE.put(path, schema);
-            }
-            return schema;
+            return fromJson(fileIO.readFileUtf8(path));
         } catch (FileNotFoundException e) {
             throw e;
         } catch (IOException e) {

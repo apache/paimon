@@ -96,7 +96,6 @@ import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
-import static org.apache.paimon.catalog.CachingCatalog.invalidateMetaCacheForPrefix;
 import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
@@ -681,9 +680,6 @@ public class HiveCatalog extends AbstractCatalog {
                                     false,
                                     true));
 
-            Path path = getTableLocation(identifier);
-            invalidateMetaCacheForPrefix(path);
-
             // When drop a Hive external table, only the hive metadata is deleted and the data files
             // are not deleted.
             if (externalTable) {
@@ -693,6 +689,7 @@ public class HiveCatalog extends AbstractCatalog {
             // Deletes table directory to avoid schema in filesystem exists after dropping hive
             // table successfully to keep the table consistency between which in filesystem and
             // which in Hive metastore.
+            Path path = getTableLocation(identifier);
             try {
                 if (fileIO.exists(path)) {
                     fileIO.deleteDirectoryQuietly(path);

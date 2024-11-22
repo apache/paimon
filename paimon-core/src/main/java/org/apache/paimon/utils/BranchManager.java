@@ -23,6 +23,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.tag.Tag;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,7 +34,6 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.apache.paimon.catalog.CachingCatalog.invalidateMetaCacheForPrefix;
 import static org.apache.paimon.utils.FileUtils.listVersionedDirectories;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -179,7 +179,7 @@ public class BranchManager {
             List<Path> deleteSchemaPaths = schemaManager.schemaPaths(id -> id >= earliestSchemaId);
             List<Path> deleteTagPaths =
                     tagManager.tagPaths(
-                            path -> Snapshot.fromPath(fileIO, path).id() >= earliestSnapshotId);
+                            path -> Tag.fromPath(fileIO, path).id() >= earliestSnapshotId);
 
             List<Path> deletePaths =
                     Stream.of(deleteSnapshotPaths, deleteSchemaPaths, deleteTagPaths)
@@ -202,7 +202,7 @@ public class BranchManager {
                     tagManager.copyWithBranch(branchName).tagDirectory(),
                     tagManager.tagDirectory(),
                     true);
-            invalidateMetaCacheForPrefix(tablePath);
+            snapshotManager.invalidateCache();
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(

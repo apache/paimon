@@ -36,8 +36,6 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.Objects;
 
-import static org.apache.paimon.catalog.CachingCatalog.SNAPSHOT_CACHE;
-
 /**
  * This file is the entrance to all data committed at some specific time point.
  *
@@ -438,12 +436,7 @@ public class Snapshot {
 
     public static Snapshot tryFromPath(FileIO fileIO, Path path) throws FileNotFoundException {
         try {
-            Snapshot snapshot = SNAPSHOT_CACHE.getIfPresent(path);
-            if (snapshot == null) {
-                snapshot = Snapshot.fromJson(fileIO.readFileUtf8(path));
-                SNAPSHOT_CACHE.put(path, snapshot);
-            }
-            return snapshot;
+            return Snapshot.fromJson(fileIO.readFileUtf8(path));
         } catch (FileNotFoundException e) {
             throw e;
         } catch (IOException e) {

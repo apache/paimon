@@ -76,7 +76,6 @@ import java.util.stream.LongStream;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
-import static org.apache.paimon.catalog.CachingCatalog.invalidateMetaCacheForPrefix;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
@@ -250,7 +249,6 @@ public class SchemaManager implements Serializable {
 
             boolean success = commit(newSchema);
             if (success) {
-                invalidateMetaCacheForPrefix(tableRoot);
                 return newSchema;
             }
         }

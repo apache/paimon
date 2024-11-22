@@ -353,8 +353,7 @@ public class TagManager {
                 // If the tag file is not found, it might be deleted by
                 // other processes, so just skip this tag
                 try {
-                    // tag may be modified, so here do not use Snapshot.fromPath to bypass cache
-                    Snapshot snapshot = Snapshot.fromJson(fileIO.readFileUtf8(path));
+                    Snapshot snapshot = Tag.tryFromPath(fileIO, path).trimToSnapshot();
                     tags.computeIfAbsent(snapshot, s -> new ArrayList<>()).add(tagName);
                 } catch (FileNotFoundException ignored) {
                 }
