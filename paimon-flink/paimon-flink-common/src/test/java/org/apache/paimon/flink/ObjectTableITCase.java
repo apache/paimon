@@ -80,4 +80,31 @@ public class ObjectTableITCase extends CatalogITCaseBase {
                 .hasMessageContaining("Object table does not support Write.");
         assertThat(sql("SELECT name, length FROM T")).containsExactlyInAnyOrder(Row.of("f1", 5L));
     }
+
+    @Test
+    public void testObjectTableRefreshInPrivileged() throws IOException {
+        sql("CALL sys.init_file_based_privilege('root-passwd')");
+
+        tEnv.executeSql(
+                String.format(
+                        "CREATE CATALOG rootcat WITH (\n"
+                                + "  'type' = 'paimon',\n"
+                                + "  'warehouse' = '%s',\n"
+                                + "  'user' = 'root',\n"
+                                + "  'password' = 'root-passwd'\n"
+                                + ")",
+                        path));
+        tEnv.useCatalog("rootcat");
+
+        Path objectLocation = new Path(path + "/object-location");
+        FileIO fileIO = LocalFileIO.create();
+        sql(
+                "CREATE TABLE T WITH ('type' = 'object-table', 'object-location' = '%s')",
+                objectLocation);
+
+        // add new file
+        fileIO.overwriteFileUtf8(new Path(objectLocation, "f0"), "1,2,3");
+        sql("CALL sys.refresh_object_table('default.T')");
+        assertThat(sql("SELECT name, length FROM T")).containsExactlyInAnyOrder(Row.of("f0", 5L));
+    }
 }
