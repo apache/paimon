@@ -138,7 +138,8 @@ public class CompactAction extends TableActionBase {
         }
         CompactorSourceBuilder sourceBuilder =
                 new CompactorSourceBuilder(identifier.getFullName(), table);
-        CompactorSinkBuilder sinkBuilder = new CompactorSinkBuilder(table);
+        CompactorSinkBuilder sinkBuilder =
+                new CompactorSinkBuilder(table).withFullCompaction(!isStreaming);
 
         sourceBuilder.withPartitionPredicate(getPredicate());
         DataStreamSource<RowData> source =
