@@ -28,7 +28,7 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.types.RowKind
 
-import org.apache.spark.sql.{Dataset, Row, SparkSession}
+import org.apache.spark.sql.{Column, Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
@@ -38,7 +38,7 @@ import org.apache.spark.sql.catalyst.expressions.codegen.GeneratePredicate
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, lit, monotonically_increasing_id, sum}
-import org.apache.spark.sql.paimon.shims.ExpressionUtils.{column, convertToExpression}
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.{ByteType, StructField, StructType}
 
 import scala.collection.mutable
@@ -153,12 +153,12 @@ case class MergeIntoPaimonTable(
       }
       if (hasUpdate(matchedActions)) {
         touchedFilePathsSet ++= findTouchedFiles(
-          targetDS.join(sourceDS, column(mergeCondition), "inner"),
+          targetDS.join(sourceDS, toColumn(mergeCondition), "inner"),
           sparkSession)
       }
       if (hasUpdate(notMatchedBySourceActions)) {
         touchedFilePathsSet ++= findTouchedFiles(
-          targetDS.join(sourceDS, column(mergeCondition), "left_anti"),
+          targetDS.join(sourceDS, toColumn(mergeCondition), "left_anti"),
           sparkSession)
       }
 
@@ -200,7 +200,7 @@ case class MergeIntoPaimonTable(
     val sourceDS = createDataset(sparkSession, sourceTable)
       .withColumn(SOURCE_ROW_COL, lit(true))
 
-    val joinedDS = sourceDS.join(targetDS, column(mergeCondition), "fullOuter")
+    val joinedDS = sourceDS.join(targetDS, toColumn(mergeCondition), "fullOuter")
     val joinedPlan = joinedDS.queryExecution.analyzed
 
     def resolveOnJoinedPlan(exprs: Seq[Expression]): Seq[Expression] = {
@@ -209,9 +209,9 @@ case class MergeIntoPaimonTable(
 
     val targetOutput = filteredTargetPlan.output
     val targetRowNotMatched = resolveOnJoinedPlan(
-      Seq(convertToExpression(sparkSession, col(SOURCE_ROW_COL).isNull))).head
+      Seq(toExpression(sparkSession, col(SOURCE_ROW_COL).isNull))).head
     val sourceRowNotMatched = resolveOnJoinedPlan(
-      Seq(convertToExpression(sparkSession, col(TARGET_ROW_COL).isNull))).head
+      Seq(toExpression(sparkSession, col(TARGET_ROW_COL).isNull))).head
     val matchedExprs = matchedActions.map(_.condition.getOrElse(TrueLiteral))
     val notMatchedExprs = notMatchedActions.map(_.condition.getOrElse(TrueLiteral))
     val notMatchedBySourceExprs = notMatchedBySourceActions.map(_.condition.getOrElse(TrueLiteral))
@@ -275,7 +275,7 @@ case class MergeIntoPaimonTable(
         .withColumn(ROW_ID_COL, monotonically_increasing_id())
       val sourceDS = createDataset(sparkSession, sourceTable)
       val count = sourceDS
-        .join(targetDS, column(mergeCondition), "inner")
+        .join(targetDS, toColumn(mergeCondition), "inner")
         .select(col(ROW_ID_COL), lit(1).as("one"))
         .groupBy(ROW_ID_COL)
         .agg(sum("one").as("count"))
@@ -287,6 +287,14 @@ case class MergeIntoPaimonTable(
             "them match more then one source rows. It may lead to an unexpected result.")
       }
     }
+  }
+
+  private def toColumn(expr: Expression): Column = {
+    SparkShimLoader.getSparkShim.column(expr)
+  }
+
+  private def toExpression(spark: SparkSession, col: Column): Expression = {
+    SparkShimLoader.getSparkShim.convertToExpression(spark, col)
   }
 }
 

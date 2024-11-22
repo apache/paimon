@@ -28,7 +28,7 @@ import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreePattern.{SCALAR_SUBQUERY, SCALAR_SUBQUERY_REFERENCE, TreePattern}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.sql.paimon.shims
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.{DataType, StructType}
 
 import scala.collection.mutable.ArrayBuffer
@@ -344,7 +344,7 @@ trait MergePaimonScalarSubqueriesBase extends Rule[LogicalPlan] with PredicateHe
     val Seq(newPlanSupportsHashAggregate, cachedPlanSupportsHashAggregate) =
       aggregateExpressionsSeq.zip(groupByExpressionSeq).map {
         case (aggregateExpressions, groupByExpressions) =>
-          shims.Aggregate.supportsHashAggregate(
+          SparkShimLoader.getSparkShim.supportsHashAggregate(
             aggregateExpressions.flatMap(_.aggregateFunction.aggBufferAttributes),
             groupByExpressions)
       }

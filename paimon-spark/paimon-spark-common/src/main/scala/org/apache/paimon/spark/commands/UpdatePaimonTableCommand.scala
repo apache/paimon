@@ -33,7 +33,7 @@ import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Assignment, Filter, Project, SupportsSubquery}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.lit
-import org.apache.spark.sql.paimon.shims.ExpressionUtils.column
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 case class UpdatePaimonTableCommand(
     relation: DataSourceV2Relation,
@@ -133,7 +133,8 @@ case class UpdatePaimonTableCommand(
       sparkSession: SparkSession,
       touchedDataSplits: Array[DataSplit]): Seq[CommitMessage] = {
     val updateColumns = updateExpressions.zip(relation.output).map {
-      case (update, origin) => column(update).as(origin.name, origin.metadata)
+      case (update, origin) =>
+        SparkShimLoader.getSparkShim.column(update).as(origin.name, origin.metadata)
     }
 
     val toUpdateScanRelation = createNewRelation(touchedDataSplits, relation)
@@ -156,7 +157,7 @@ case class UpdatePaimonTableCommand(
         } else {
           If(condition, update, origin)
         }
-        column(updated).as(origin.name, origin.metadata)
+        SparkShimLoader.getSparkShim.column(updated).as(origin.name, origin.metadata)
     }
 
     val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)

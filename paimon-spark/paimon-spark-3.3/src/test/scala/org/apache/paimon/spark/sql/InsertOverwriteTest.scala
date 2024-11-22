@@ -248,7 +248,7 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
               spark.sql("SELECT * FROM T ORDER BY a, b"),
               Row(1, 3, "3") :: Row(2, 4, "4") :: Nil)
 
-            withSQLConf("spark.sql.sources.partitionOverwriteMode" -> "dynamic") {
+            withSparkSQLConf("spark.sql.sources.partitionOverwriteMode" -> "dynamic") {
               // dynamic overwrite the a=1 partition
               spark.sql("INSERT OVERWRITE T VALUES (1, 5, '5'), (1, 7, '7')")
               checkAnswer(
@@ -289,7 +289,7 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
                 "ptv2",
                 22) :: Nil)
 
-            withSQLConf("spark.sql.sources.partitionOverwriteMode" -> "dynamic") {
+            withSparkSQLConf("spark.sql.sources.partitionOverwriteMode" -> "dynamic") {
               // dynamic overwrite the pt2=22 partition
               spark.sql(
                 "INSERT OVERWRITE T PARTITION (pt2 = 22) VALUES (3, 'c2', 'ptv1'), (4, 'd2', 'ptv3')")
