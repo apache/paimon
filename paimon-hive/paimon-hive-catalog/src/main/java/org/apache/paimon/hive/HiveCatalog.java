@@ -87,6 +87,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
@@ -850,9 +851,11 @@ public class HiveCatalog extends AbstractCatalog {
         updateHmsTable(table, identifier, newSchema, newSchema.options().get("provider"), location);
         EnvironmentContext environmentContext = new EnvironmentContext();
         environmentContext.putToProperties(StatsSetupConst.CASCADE, "true");
-        environmentContext.putToProperties(
-                StatsSetupConst.DO_NOT_UPDATE_STATS,
-                options.getString(StatsSetupConst.DO_NOT_UPDATE_STATS, "false"));
+        if (Objects.nonNull(options)) {
+            environmentContext.putToProperties(
+                    StatsSetupConst.DO_NOT_UPDATE_STATS,
+                    options.getString(StatsSetupConst.DO_NOT_UPDATE_STATS, "false"));
+        }
         clients.execute(
                 client ->
                         client.alter_table_with_environmentContext(
