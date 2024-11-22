@@ -135,6 +135,7 @@ public class HiveCatalog extends AbstractCatalog {
             "org.apache.paimon.hive.PaimonStorageHandler";
     private static final String HIVE_PREFIX = "hive.";
     public static final String HIVE_SITE_FILE = "hive-site.xml";
+    public static final String HIVE_EXTERNAL_TABLE_PROP = "EXTERNAL";
 
     private final HiveConf hiveConf;
     private final String clientClassName;
@@ -218,7 +219,7 @@ public class HiveCatalog extends AbstractCatalog {
             externalTable = true;
             location = new Path(tableOptions.get(CoreOptions.PATH.key()));
         } else {
-            externalTable = usingExternalTable();
+            externalTable = usingExternalTable(tableOptions);
             location = getTableLocation(identifier, null);
         }
         return Pair.of(location, externalTable);
@@ -659,12 +660,15 @@ public class HiveCatalog extends AbstractCatalog {
         }
     }
 
-    private boolean usingExternalTable() {
+    private boolean usingExternalTable(Map<String, String> tableOptions) {
         CatalogTableType tableType =
                 OptionsUtils.convertToEnum(
                         hiveConf.get(TABLE_TYPE.key(), CatalogTableType.MANAGED.toString()),
                         CatalogTableType.class);
-        return CatalogTableType.EXTERNAL.equals(tableType);
+
+        return CatalogTableType.EXTERNAL.equals(tableType)
+                || "TRUE"
+                        .equalsIgnoreCase(tableOptions.get(HIVE_EXTERNAL_TABLE_PROP.toLowerCase()));
     }
 
     @Override
@@ -968,7 +972,10 @@ public class HiveCatalog extends AbstractCatalog {
                 if (newTable == null) {
                     newTable =
                             createHiveTable(
-                                    identifier, tableSchema, location, usingExternalTable());
+                                    identifier,
+                                    tableSchema,
+                                    location,
+                                    usingExternalTable(tableSchema.options()));
                 }
                 Table finalNewTable = newTable;
                 clients.execute(client -> client.createTable(finalNewTable));
@@ -1087,7 +1094,7 @@ public class HiveCatalog extends AbstractCatalog {
             table.getParameters().put(TYPE.key(), FORMAT_TABLE.toString());
         }
         if (externalTable) {
-            table.getParameters().put("EXTERNAL", "TRUE");
+            table.getParameters().put(HIVE_EXTERNAL_TABLE_PROP, "TRUE");
         }
         return table;
     }
