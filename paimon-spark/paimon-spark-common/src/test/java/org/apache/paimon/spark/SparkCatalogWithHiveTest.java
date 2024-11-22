@@ -33,7 +33,9 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.FileNotFoundException;
 import java.util.stream.Collectors;
 
-import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Base tests for spark read. */
 public class SparkCatalogWithHiveTest {
