@@ -849,20 +849,25 @@ public class HiveCatalog extends AbstractCatalog {
         updateHmsTablePars(table, newSchema);
         Path location = getTableLocation(identifier, table);
         updateHmsTable(table, identifier, newSchema, newSchema.options().get("provider"), location);
-        EnvironmentContext environmentContext = new EnvironmentContext();
-        environmentContext.putToProperties(StatsSetupConst.CASCADE, "true");
-        if (Objects.nonNull(options)) {
-            environmentContext.putToProperties(
-                    StatsSetupConst.DO_NOT_UPDATE_STATS,
-                    options.getString(StatsSetupConst.DO_NOT_UPDATE_STATS, "false"));
-        }
         clients.execute(
                 client ->
                         client.alter_table_with_environmentContext(
                                 identifier.getDatabaseName(),
                                 identifier.getTableName(),
                                 table,
-                                environmentContext));
+                                createHiveEnvironmentContext()));
+    }
+
+    private EnvironmentContext createHiveEnvironmentContext() {
+        EnvironmentContext environmentContext = new EnvironmentContext();
+        environmentContext.putToProperties(StatsSetupConst.CASCADE, "true");
+        if (Objects.isNull(options)) {
+            return environmentContext;
+        }
+        environmentContext.putToProperties(
+                StatsSetupConst.DO_NOT_UPDATE_STATS,
+                options.getString(StatsSetupConst.DO_NOT_UPDATE_STATS, "false"));
+        return environmentContext;
     }
 
     @Override

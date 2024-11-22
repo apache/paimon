@@ -18,8 +18,12 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.paimon.catalog.CatalogTestBase;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -34,6 +38,7 @@ import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Collections;
 import java.util.UUID;
@@ -42,17 +47,22 @@ import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORECONNECTURLK
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Verify that table stats has been updated. */
-public class HiveTableStatsTest extends CatalogTestBase {
+public class HiveTableStatsTest {
+    @TempDir java.nio.file.Path tempFile;
+    protected Catalog catalog;
 
     @BeforeEach
     public void setUp() throws Exception {
-        super.setUp();
+        String warehouse = tempFile.toUri().toString();
         HiveConf hiveConf = new HiveConf();
         String jdoConnectionURL = "jdbc:derby:memory:" + UUID.randomUUID();
         hiveConf.setVar(METASTORECONNECTURLKEY, jdoConnectionURL + ";create=true");
         String metastoreClientClass = "org.apache.hadoop.hive.metastore.HiveMetaStoreClient";
         Options catalogOptions = new Options();
         catalogOptions.set(StatsSetupConst.DO_NOT_UPDATE_STATS, "true");
+        catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
+        CatalogContext catalogContext = CatalogContext.create(catalogOptions);
+        FileIO fileIO = FileIO.get(new Path(warehouse), catalogContext);
         catalog =
                 new HiveCatalog(fileIO, hiveConf, metastoreClientClass, catalogOptions, warehouse);
     }
@@ -80,10 +90,5 @@ public class HiveTableStatsTest extends CatalogTestBase {
         HiveCatalog hiveCatalog = (HiveCatalog) catalog;
         Table table = hiveCatalog.getHmsTable(identifier);
         assertThat(table.getParameters().get("COLUMN_STATS_ACCURATE")).isEqualTo(null);
-    }
-
-    @Test
-    public void testListDatabasesWhenNoDatabases() {
-        // nothing
     }
 }
