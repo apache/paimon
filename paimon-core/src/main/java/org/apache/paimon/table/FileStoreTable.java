@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.FileStore;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestCacheFilter;
@@ -29,6 +30,8 @@ import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SegmentsCache;
+
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 
 import java.util.List;
 import java.util.Map;
@@ -41,6 +44,8 @@ import java.util.Optional;
 public interface FileStoreTable extends DataTable {
 
     void setManifestCache(SegmentsCache<Path> manifestCache);
+
+    void setSnapshotCache(Cache<Path, Snapshot> cache);
 
     @Override
     default RowType rowType() {

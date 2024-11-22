@@ -54,6 +54,8 @@ import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+
 import javax.annotation.Nullable;
 
 import java.time.Duration;
@@ -79,6 +81,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Nullable private final SegmentsCache<Path> writeManifestCache;
     @Nullable private SegmentsCache<Path> readManifestCache;
+    @Nullable private Cache<Path, Snapshot> snapshotCache;
 
     protected AbstractFileStore(
             FileIO fileIO,
@@ -116,7 +119,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public SnapshotManager snapshotManager() {
-        return new SnapshotManager(fileIO, options.path(), options.branch());
+        return new SnapshotManager(fileIO, options.path(), options.branch(), snapshotCache);
     }
 
     @Override
@@ -339,5 +342,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public void setManifestCache(SegmentsCache<Path> manifestCache) {
         this.readManifestCache = manifestCache;
+    }
+
+    @Override
+    public void setSnapshotCache(Cache<Path, Snapshot> cache) {
+        this.snapshotCache = cache;
     }
 }

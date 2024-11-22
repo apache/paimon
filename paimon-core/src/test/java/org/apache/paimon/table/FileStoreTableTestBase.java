@@ -1193,7 +1193,7 @@ public abstract class FileStoreTableTestBase {
         SchemaManager schemaManager =
                 new SchemaManager(new TraceableFileIO(), tablePath, "test-branch");
         TableSchema branchSchema =
-                SchemaManager.fromPath(new TraceableFileIO(), schemaManager.toSchemaPath(0));
+                TableSchema.fromPath(new TraceableFileIO(), schemaManager.toSchemaPath(0));
         TableSchema schema0 = schemaManager.schema(0);
         assertThat(branchSchema.equals(schema0)).isTrue();
     }
@@ -1344,7 +1344,7 @@ public abstract class FileStoreTableTestBase {
         // verify schema in branch1 and main branch is same
         SchemaManager schemaManager = new SchemaManager(new TraceableFileIO(), tablePath);
         TableSchema branchSchema =
-                SchemaManager.fromPath(
+                TableSchema.fromPath(
                         new TraceableFileIO(),
                         schemaManager.copyWithBranch(BRANCH_NAME).toSchemaPath(0));
         TableSchema schema0 = schemaManager.schema(0);

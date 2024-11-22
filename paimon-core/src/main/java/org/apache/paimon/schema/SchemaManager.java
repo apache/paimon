@@ -45,7 +45,6 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
-import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.StringUtils;
@@ -769,11 +768,7 @@ public class SchemaManager implements Serializable {
 
     /** Read schema for schema id. */
     public TableSchema schema(long id) {
-        try {
-            return JsonSerdeUtil.fromJson(fileIO.readFileUtf8(toSchemaPath(id)), TableSchema.class);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        return TableSchema.fromPath(fileIO, toSchemaPath(id));
     }
 
     /** Check if a schema exists. */
@@ -786,14 +781,6 @@ public class SchemaManager implements Serializable {
                     String.format(
                             "Failed to determine if schema '%s' exists in path %s.", id, path),
                     e);
-        }
-    }
-
-    public static TableSchema fromPath(FileIO fileIO, Path path) {
-        try {
-            return JsonSerdeUtil.fromJson(fileIO.readFileUtf8(path), TableSchema.class);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
         }
     }
 
