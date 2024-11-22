@@ -18,24 +18,23 @@
 
 package org.apache.paimon.rest;
 
-import java.util.StringJoiner;
+import org.junit.Test;
 
-/** Resource paths for REST catalog. */
-public class ResourcePaths {
-    private static final StringJoiner SLASH = new StringJoiner("/");
-    public static final String V1_CONFIG = "/api/v1/{prefix}/config";
+import static org.junit.Assert.assertEquals;
 
-    public static ResourcePaths forCatalogProperties(String prefix) {
-        return new ResourcePaths(prefix);
+/** Test for {@link ResourcePaths}. */
+public class ResourcePathsTest {
+    private final String prefix = "test";
+    private ResourcePaths resourcePaths = ResourcePaths.forCatalogProperties(prefix);
+
+    @Test
+    public void configPathTest() {
+        ResourcePaths resourcePaths = ResourcePaths.forCatalogProperties(prefix);
+        String expected = replacePrefix(ResourcePaths.V1_CONFIG, prefix);
+        assertEquals(expected, "/" + resourcePaths.config());
     }
 
-    private final String prefix;
-
-    public ResourcePaths(String prefix) {
-        this.prefix = prefix;
-    }
-
-    public String config() {
-        return SLASH.add("api").add("v1").add(prefix).add("config").toString();
+    private String replacePrefix(String path, String prefix) {
+        return path.replace("{prefix}", prefix);
     }
 }

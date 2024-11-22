@@ -18,6 +18,7 @@
 
 package org.apache.paimon.open.api;
 
+import org.apache.paimon.rest.ResourcePaths;
 import org.apache.paimon.rest.requests.ConfigRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
 
@@ -32,7 +33,6 @@ import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.HashMap;
@@ -41,7 +41,6 @@ import java.util.Map;
 /** * RESTCatalog management APIs. */
 @CrossOrigin(origins = "http://localhost:8081")
 @RestController
-@RequestMapping("/api/v1/{prefix}")
 public class RESTCatalogController {
 
     @Operation(
@@ -59,7 +58,7 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @PostMapping("/config")
+    @PostMapping(ResourcePaths.V1_CONFIG)
     public ResponseEntity<ConfigResponse> getConfig(
             @PathVariable String prefix, @RequestBody ConfigRequest request) {
         try {
