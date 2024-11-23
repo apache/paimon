@@ -154,14 +154,14 @@ public class PreAggregationITCase {
             // So we need to sort the input data.
             batchSql(
                     "CREATE TABLE myTable AS "
-                            + "SELECT b, c, d FROM "
+                            + "SELECT a, b, c, d FROM "
                             + "(VALUES "
                             + "  (1, 1, 2, 'first line'),"
                             + "  (2, 1, 2, CAST(NULL AS STRING)),"
                             + "  (3, 1, 2, 'second line')"
                             + ") AS V(a, b, c, d) "
                             + "ORDER BY a");
-            batchSql("INSERT INTO T6 SELECT * FROM myTable");
+            batchSql("INSERT INTO T6 SELECT b, c, d FROM myTable ORDER BY a");
             List<Row> result = batchSql("SELECT * FROM T6");
             assertThat(result).containsExactlyInAnyOrder(Row.of(1, 2, "first line,second line"));
         }
@@ -232,14 +232,14 @@ public class PreAggregationITCase {
             // So we need to sort the input data.
             batchSql(
                     "CREATE TABLE myTable AS "
-                            + "SELECT b, c, d, e FROM "
+                            + "SELECT a, b, c, d, e FROM "
                             + "(VALUES "
                             + "  (1, 1, 2, CAST(NULL AS INT), CAST('2020-01-01' AS DATE)),"
                             + "  (2, 1, 2, 2, CAST('2020-01-02' AS DATE)),"
                             + "  (3, 1, 2, 3, CAST(NULL AS DATE))"
                             + ") AS V(a, b, c, d, e) "
                             + "ORDER BY a");
-            batchSql("INSERT INTO T5 SELECT * FROM myTable");
+            batchSql("INSERT INTO T5 SELECT b, c, d, e FROM myTable ORDER BY a");
             List<Row> result = batchSql("SELECT * FROM T5");
             assertThat(result).containsExactlyInAnyOrder(Row.of(1, 2, 3, null));
         }
@@ -311,14 +311,14 @@ public class PreAggregationITCase {
             // So we need to sort the input data.
             batchSql(
                     "CREATE TABLE myTable AS "
-                            + "SELECT b, c, d, e, f FROM "
+                            + "SELECT a, b, c, d, e, f FROM "
                             + "(VALUES "
                             + "  (1, 1, 2, CAST(NULL AS INT), 4, CAST('2020-01-01' AS DATE)),"
                             + "  (2, 1, 2, 2, CAST(NULL as INT), CAST('2020-01-02' AS DATE)),"
                             + "  (3, 1, 2, 3, 5, CAST(NULL AS DATE))"
                             + ") AS V(a, b, c, d, e, f) "
                             + "ORDER BY a");
-            batchSql("INSERT INTO T4 SELECT * FROM myTable");
+            batchSql("INSERT INTO T4 SELECT b, c, d, e, f FROM myTable ORDER BY a");
             List<Row> result = batchSql("SELECT * FROM T4");
             assertThat(result)
                     .containsExactlyInAnyOrder(Row.of(1, 2, 3, 5, LocalDate.of(2020, 1, 2)));
@@ -1807,14 +1807,15 @@ public class PreAggregationITCase {
             // So we need to sort the input data.
             batchSql(
                     "CREATE TABLE myTable AS "
-                            + "SELECT b, c, d, e, f FROM "
+                            + "SELECT a, b, c, d, e, f FROM "
                             + "(VALUES "
                             + "  (1, 1, 2, CAST(NULL AS INT), 4, CAST('2020-01-01' AS DATE)),"
                             + "  (2, 1, 2, 2, CAST(NULL as INT), CAST('2020-01-02' AS DATE)),"
                             + "  (3, 1, 2, 3, 5, CAST(NULL AS DATE))"
                             + ") AS V(a, b, c, d, e, f) "
                             + "ORDER BY a");
-            batchSql("INSERT INTO test_default_agg_func SELECT * FROM myTable");
+            batchSql(
+                    "INSERT INTO test_default_agg_func SELECT b, c, d, e, f FROM myTable ORDER BY a");
             List<Row> result = batchSql("SELECT * FROM test_default_agg_func");
             assertThat(result)
                     .containsExactlyInAnyOrder(Row.of(1, 2, 2, 4, LocalDate.of(2020, 1, 2)));
