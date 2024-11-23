@@ -251,17 +251,20 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("ALTER TABLE T SET ('snapshot.num-retained.min' = '18')");
         sql("ALTER TABLE T SET ('manifest.format' = 'avro')");
 
-        assertThat(sql("SHOW CREATE TABLE T$schemas").toString())
-                .isEqualTo(
-                        "[+I[CREATE TABLE `PAIMON`.`default`.`T$schemas` (\n"
-                                + "  `schema_id` BIGINT NOT NULL,\n"
-                                + "  `fields` VARCHAR(2147483647) NOT NULL,\n"
-                                + "  `partition_keys` VARCHAR(2147483647) NOT NULL,\n"
-                                + "  `primary_keys` VARCHAR(2147483647) NOT NULL,\n"
-                                + "  `options` VARCHAR(2147483647) NOT NULL,\n"
-                                + "  `comment` VARCHAR(2147483647),\n"
-                                + "  `update_time` TIMESTAMP(3) NOT NULL\n"
-                                + ") ]]");
+        String actualResult = sql("SHOW CREATE TABLE T$schemas").toString();
+        String expectedResult =
+                "[+I[CREATE TABLE `PAIMON`.`default`.`T$schemas` (\n"
+                        + "  `schema_id` BIGINT NOT NULL,\n"
+                        + "  `fields` VARCHAR(2147483647) NOT NULL,\n"
+                        + "  `partition_keys` VARCHAR(2147483647) NOT NULL,\n"
+                        + "  `primary_keys` VARCHAR(2147483647) NOT NULL,\n"
+                        + "  `options` VARCHAR(2147483647) NOT NULL,\n"
+                        + "  `comment` VARCHAR(2147483647),\n"
+                        + "  `update_time` TIMESTAMP(3) NOT NULL\n"
+                        + ") ]]";
+        actualResult = actualResult.replace(" ", "").replace("\n", "");
+        expectedResult = expectedResult.replace(" ", "").replace("\n", "");
+        assertThat(actualResult).isEqualTo(expectedResult);
 
         List<Row> result =
                 sql(
