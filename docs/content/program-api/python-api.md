@@ -1,6 +1,6 @@
 ---
 title: "Python API"
-weight: 3
+weight: 4
 type: docs
 aliases:
 - /api/python-api.html
