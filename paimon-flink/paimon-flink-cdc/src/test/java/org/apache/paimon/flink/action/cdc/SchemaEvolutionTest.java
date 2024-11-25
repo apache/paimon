@@ -21,13 +21,11 @@ package org.apache.paimon.flink.action.cdc;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -36,14 +34,13 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
-import org.apache.paimon.table.system.FilesTable;
+import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.VarCharType;
-import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -60,7 +57,7 @@ public class SchemaEvolutionTest extends TableTestBase {
         List<DataField> upField1 =
                 Arrays.asList(
                         new DataField(0, "col_0", new VarCharType(), "test description."),
-                        new DataField(1, "col_1", new VarCharType(), "test description."),
+                        new DataField(1, "col_1", new IntType(), "test description."),
                         new DataField(2, "col_2", new IntType(), "test description."),
                         new DataField(3, "col_3", new VarCharType(), "Someone's desc."),
                         new DataField(4, "col_4", new VarCharType(), "Someone's desc."),
@@ -83,7 +80,7 @@ public class SchemaEvolutionTest extends TableTestBase {
         List<DataField> upField2 =
                 Arrays.asList(
                         new DataField(0, "col_0", new VarCharType(), "test description."),
-                        new DataField(1, "col_1", new IntType(), "test description."),
+                        new DataField(1, "col_1", new BigIntType(), "test description."),
                         new DataField(2, "col_2", new IntType(), "test description."),
                         new DataField(3, "col_3", new VarCharType(), "Someone's desc."),
                         new DataField(4, "col_4", new VarCharType(), "Someone's desc."),
@@ -97,7 +94,7 @@ public class SchemaEvolutionTest extends TableTestBase {
                         new DataField(12, "col_12", new DoubleType(), "Someone's desc."),
                         new DataField(13, "col_13", new VarCharType(), "Someone's desc."),
                         new DataField(14, "col_14", new VarCharType(), "Someone's desc."),
-                        new DataField(15, "col_15_1", new VarCharType(), "Someone's desc."),
+                        new DataField(15, "col_15", new VarCharType(), "Someone's desc."),
                         new DataField(16, "col_16", new VarCharType(), "Someone's desc."),
                         new DataField(17, "col_17", new VarCharType(), "Someone's desc."),
                         new DataField(18, "col_18", new VarCharType(), "Someone's desc."),
@@ -106,31 +103,8 @@ public class SchemaEvolutionTest extends TableTestBase {
         List<DataField> upField3 =
                 Arrays.asList(
                         new DataField(0, "col_0", new VarCharType(), "test description."),
-                        new DataField(1, "col_1", new VarCharType(), "test description."),
-                        new DataField(2, "col_2", new IntType(), "test description."),
-                        new DataField(3, "col_3", new VarCharType(), "Someone's desc."),
-                        new DataField(4, "col_4", new VarCharType(), "Someone's desc."),
-                        new DataField(5, "col_5", new VarCharType(), "Someone's desc."),
-                        new DataField(6, "col_6", new DecimalType(), "Someone's desc."),
-                        new DataField(7, "col_7", new VarCharType(), "Someone's desc."),
-                        new DataField(8, "col_8", new VarCharType(), "Someone's desc."),
-                        new DataField(9, "col_9", new VarCharType(), "Someone's desc."),
-                        new DataField(10, "col_10", new VarCharType(), "Someone's desc."),
-                        new DataField(11, "col_11", new IntType(), "Someone's desc."),
-                        new DataField(12, "col_12_2", new DoubleType(), "Someone's desc."),
-                        new DataField(13, "col_13", new VarCharType(), "Someone's desc."),
-                        new DataField(14, "col_14", new VarCharType(), "Someone's desc."),
-                        new DataField(15, "col_15", new VarCharType(), "Someone's desc."),
-                        new DataField(16, "col_16", new VarCharType(), "Someone's desc."),
-                        new DataField(17, "col_17", new VarCharType(), "Someone's desc."),
-                        new DataField(18, "col_18", new VarCharType(), "Someone's desc."),
-                        new DataField(19, "col_19_1", new VarCharType(), "Someone's desc."),
-                        new DataField(20, "col_20", new VarCharType(), "Someone's desc."));
-        List<DataField> upField4 =
-                Arrays.asList(
-                        new DataField(0, "col_0", new VarCharType(), "test description."),
-                        new DataField(1, "col_1", new VarCharType(), "test description."),
-                        new DataField(2, "col_2", new IntType(), "test description."),
+                        new DataField(1, "col_1", new BigIntType(), "test description."),
+                        new DataField(2, "col_2", new IntType(), "test description 2."),
                         new DataField(3, "col_3", new VarCharType(), "Someone's desc."),
                         new DataField(4, "col_4", new VarCharType(), "Someone's desc."),
                         new DataField(5, "col_5", new VarCharType(), "Someone's desc."),
@@ -140,11 +114,34 @@ public class SchemaEvolutionTest extends TableTestBase {
                         new DataField(9, "col_9", new VarCharType(), "Someone's desc."),
                         new DataField(10, "col_10", new VarCharType(), "Someone's desc."),
                         new DataField(11, "col_11", new VarCharType(), "Someone's desc."),
-                        new DataField(12, "col_12", new DoubleType(), "up desc."),
+                        new DataField(12, "col_12", new DoubleType(), "Someone's desc."),
                         new DataField(13, "col_13", new VarCharType(), "Someone's desc."),
                         new DataField(14, "col_14", new VarCharType(), "Someone's desc."),
                         new DataField(15, "col_15", new VarCharType(), "Someone's desc."),
-                        new DataField(16, "col_16_1", new VarCharType(), "up desc."),
+                        new DataField(16, "col_16", new VarCharType(), "Someone's desc."),
+                        new DataField(17, "col_17", new VarCharType(), "Someone's desc."),
+                        new DataField(18, "col_18", new VarCharType(), "Someone's desc."),
+                        new DataField(19, "col_19", new VarCharType(), "Someone's desc."),
+                        new DataField(20, "col_20", new VarCharType(), "Someone's desc."));
+        List<DataField> upField4 =
+                Arrays.asList(
+                        new DataField(0, "col_0", new VarCharType(), "test description."),
+                        new DataField(1, "col_1", new BigIntType(), "test description."),
+                        new DataField(2, "col_2", new IntType(), "test description."),
+                        new DataField(3, "col_3_1", new VarCharType(), "Someone's desc."),
+                        new DataField(4, "col_4", new VarCharType(), "Someone's desc."),
+                        new DataField(5, "col_5", new VarCharType(), "Someone's desc."),
+                        new DataField(6, "col_6", new DecimalType(), "Someone's desc."),
+                        new DataField(7, "col_7", new VarCharType(), "Someone's desc."),
+                        new DataField(8, "col_8", new VarCharType(), "Someone's desc."),
+                        new DataField(9, "col_9", new VarCharType(), "Someone's desc."),
+                        new DataField(10, "col_10", new VarCharType(), "Someone's desc."),
+                        new DataField(11, "col_11", new VarCharType(), "Someone's desc."),
+                        new DataField(12, "col_12", new DoubleType(), "Someone's desc."),
+                        new DataField(13, "col_13", new VarCharType(), "Someone's desc."),
+                        new DataField(14, "col_14", new VarCharType(), "Someone's desc."),
+                        new DataField(15, "col_15", new VarCharType(), "Someone's desc."),
+                        new DataField(16, "col_16", new VarCharType(), "Someone's desc."),
                         new DataField(17, "col_17", new VarCharType(), "Someone's desc."),
                         new DataField(18, "col_18", new VarCharType(), "Someone's desc."),
                         new DataField(19, "col_19", new VarCharType(), "Someone's desc."),
@@ -152,8 +149,8 @@ public class SchemaEvolutionTest extends TableTestBase {
         List<DataField> upField5 =
                 Arrays.asList(
                         new DataField(0, "col_0", new VarCharType(), "test description."),
-                        new DataField(1, "col_1", new VarCharType(), "test description."),
-                        new DataField(2, "col_2", new IntType(), "test description."),
+                        new DataField(1, "col_1", new BigIntType(), "test description."),
+                        new DataField(2, "col_2_1", new BigIntType(), "test description 2."),
                         new DataField(3, "col_3", new VarCharType(), "Someone's desc."),
                         new DataField(4, "col_4", new VarCharType(), "Someone's desc."),
                         new DataField(5, "col_5", new VarCharType(), "Someone's desc."),
@@ -176,9 +173,6 @@ public class SchemaEvolutionTest extends TableTestBase {
     }
 
     private FileStoreTable table;
-    private FileStoreScan scan;
-    private FilesTable filesTable;
-    private SnapshotManager snapshotManager;
     private String tableName = "MyTable";
 
     @BeforeEach
@@ -200,18 +194,6 @@ public class SchemaEvolutionTest extends TableTestBase {
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(new SchemaManager(fileIO, tablePath), schema);
         table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
-        scan = table.store().newScan();
-
-        Identifier filesTableId =
-                identifier(tableName + Catalog.SYSTEM_TABLE_SPLITTER + FilesTable.FILES);
-        filesTable = (FilesTable) catalog.getTable(filesTableId);
-        snapshotManager = new SnapshotManager(fileIO, tablePath);
-
-        // snapshot 1: append
-        write(table, GenericRow.of(1, 1, 10, 1), GenericRow.of(1, 2, 20, 5));
-
-        // snapshot 2: append
-        write(table, GenericRow.of(2, 1, 10, 3), GenericRow.of(2, 2, 20, 4));
     }
 
     @Test
@@ -222,13 +204,16 @@ public class SchemaEvolutionTest extends TableTestBase {
         options.set("warehouse", tempPath.toString());
         final Catalog.Loader catalogLoader = () -> FlinkCatalogFactory.createPaimonCatalog(options);
         Identifier identifier = Identifier.create(database, tableName);
-        upDataFieldStream
-                .process(
-                        new UpdatedDataFieldsProcessFunction(
-                                new SchemaManager(table.fileIO(), table.location()),
-                                identifier,
-                                catalogLoader))
-                .name("Schema Evolution");
+        DataStream<Void> schemaChangeProcessFunction =
+                upDataFieldStream
+                        .process(
+                                new UpdatedDataFieldsProcessFunction(
+                                        new SchemaManager(table.fileIO(), table.location()),
+                                        identifier,
+                                        catalogLoader))
+                        .name("Schema Evolution");
+        schemaChangeProcessFunction.getTransformation().setParallelism(1);
+        schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
         env.execute();
     }
 }

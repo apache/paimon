@@ -23,17 +23,17 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.FieldIdentifier;
 import org.apache.paimon.types.RowType;
 
 import org.apache.commons.collections.CollectionUtils;
-import org.apache.flink.runtime.state.FunctionInitializationContext;
-import org.apache.flink.runtime.state.FunctionSnapshotContext;
-import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 
-import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -44,21 +44,20 @@ import java.util.stream.Collectors;
  * be 1.
  */
 public class UpdatedDataFieldsProcessFunction
-        extends UpdatedDataFieldsProcessFunctionBase<List<DataField>, Void>
-        implements CheckpointedFunction {
+        extends UpdatedDataFieldsProcessFunctionBase<List<DataField>, Void> {
 
     private final SchemaManager schemaManager;
 
     private final Identifier identifier;
 
-    private final List<DataField> latestSchemaList;
+    private Set<FieldIdentifier> latestFields;
 
     public UpdatedDataFieldsProcessFunction(
             SchemaManager schemaManager, Identifier identifier, Catalog.Loader catalogLoader) {
         super(catalogLoader);
         this.schemaManager = schemaManager;
         this.identifier = identifier;
-        this.latestSchemaList = new ArrayList<>();
+        this.latestFields = new HashSet<>();
     }
 
     @Override
@@ -67,7 +66,9 @@ public class UpdatedDataFieldsProcessFunction
             throws Exception {
         List<DataField> actualUpdatedDataFields =
                 updatedDataFields.stream()
-                        .filter(dataField -> !dataFieldContainIgnoreId(dataField))
+                        .filter(
+                                dataField ->
+                                        !latestDataFieldContain(new FieldIdentifier(dataField)))
                         .collect(Collectors.toList());
         if (CollectionUtils.isEmpty(actualUpdatedDataFields)) {
             return;
@@ -76,22 +77,24 @@ public class UpdatedDataFieldsProcessFunction
                 extractSchemaChanges(schemaManager, actualUpdatedDataFields)) {
             applySchemaChange(schemaManager, schemaChange, identifier);
         }
-        latestSchemaList.addAll(actualUpdatedDataFields);
+        /**
+         * Here, actualUpdatedDataFields cannot be used to update latestFields because there is a
+         * non-SchemaChange.AddColumn scenario. Otherwise, the previously existing fields cannot be
+         * modified again.
+         */
+        updateLatestFields();
     }
 
-    @Override
-    public void snapshotState(FunctionSnapshotContext context) throws Exception {
-        // nothing
+    private boolean latestDataFieldContain(FieldIdentifier dataField) {
+        return latestFields.stream().anyMatch(previous -> Objects.equals(previous, dataField));
     }
 
-    @Override
-    public void initializeState(FunctionInitializationContext context) throws Exception {
+    private void updateLatestFields() {
         RowType oldRowType = schemaManager.latest().get().logicalRowType();
-        latestSchemaList.addAll(oldRowType.getFields());
-    }
-
-    private boolean dataFieldContainIgnoreId(DataField dataField) {
-        return latestSchemaList.stream()
-                .anyMatch(previous -> DataField.dataFieldEqualsIgnoreId(previous, dataField));
+        Set<FieldIdentifier> fieldIdentifiers =
+                oldRowType.getFields().stream()
+                        .map(item -> new FieldIdentifier(item))
+                        .collect(Collectors.toSet());
+        latestFields = fieldIdentifiers;
     }
 }
