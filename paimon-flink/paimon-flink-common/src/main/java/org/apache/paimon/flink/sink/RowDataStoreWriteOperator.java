@@ -23,6 +23,8 @@ import org.apache.paimon.flink.log.LogWriteCallback;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.SinkRecord;
 
+import org.apache.flink.api.common.functions.Function;
+import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.functions.RichFunction;
 import org.apache.flink.api.common.functions.util.FunctionUtils;
 import org.apache.flink.api.common.state.CheckpointListener;
@@ -42,6 +44,8 @@ import org.apache.flink.streaming.util.functions.StreamingFunctionUtils;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Objects;
 
@@ -97,14 +101,26 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
 
         this.sinkContext = new SimpleContext(getProcessingTimeService());
         if (logSinkFunction != null) {
-            // to stay compatible with Flink 1.18-
-            if (logSinkFunction instanceof RichFunction) {
-                RichFunction richFunction = (RichFunction) logSinkFunction;
-                richFunction.open(new Configuration());
-            }
-
+            openFunction(logSinkFunction);
             logCallback = new LogWriteCallback();
             logSinkFunction.setWriteCallback(logCallback);
+        }
+    }
+
+    private static void openFunction(Function function) throws Exception {
+        if (function instanceof RichFunction) {
+            RichFunction richFunction = (RichFunction) function;
+
+            try {
+                Method method = RichFunction.class.getDeclaredMethod("open", OpenContext.class);
+                method.invoke(richFunction, new OpenContext() {});
+                return;
+            } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
+                // to stay compatible with Flink 1.18-
+            }
+
+            Method method = RichFunction.class.getDeclaredMethod("open", Configuration.class);
+            method.invoke(richFunction, new Configuration());
         }
     }
 

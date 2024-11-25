@@ -25,6 +25,7 @@ import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 
+import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.connector.source.Boundedness;
@@ -59,7 +60,16 @@ public class CombinedAwareStreamingSourceFunction
         this.monitorInterval = monitorInterval;
     }
 
-    @Override
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
+     */
+    public void open(OpenContext openContext) throws Exception {
+        open(new Configuration());
+    }
+
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
+     */
     public void open(Configuration parameters) throws Exception {
         super.open(parameters);
         tableScan =
