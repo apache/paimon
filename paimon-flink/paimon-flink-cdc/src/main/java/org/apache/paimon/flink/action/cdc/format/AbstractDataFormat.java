@@ -19,14 +19,12 @@
 package org.apache.paimon.flink.action.cdc.format;
 
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
-import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
 
-import java.util.List;
 import java.util.function.Function;
 
 /** Data format common implementation of {@link DataFormat}. */
@@ -44,9 +42,8 @@ public abstract class AbstractDataFormat implements DataFormat {
             pulsarDeserializer();
 
     @Override
-    public AbstractRecordParser createParser(
-            TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        return parser().createParser(typeMapping, computedColumns);
+    public AbstractRecordParser createParser(TypeMapping typeMapping) {
+        return parser().createParser(typeMapping);
     }
 
     @Override

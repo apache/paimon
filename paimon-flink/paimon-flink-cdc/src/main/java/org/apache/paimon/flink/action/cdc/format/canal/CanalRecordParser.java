@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.format.canal;
 
-import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.AbstractJsonRecordParser;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
@@ -84,8 +83,8 @@ public class CanalRecordParser extends AbstractJsonRecordParser {
         return !isNull(node) && node.asBoolean();
     }
 
-    public CanalRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        super(typeMapping, computedColumns);
+    public CanalRecordParser(TypeMapping typeMapping) {
+        super(typeMapping);
     }
 
     @Override
@@ -179,8 +178,6 @@ public class CanalRecordParser extends AbstractJsonRecordParser {
                 rowData.put(entry.getKey(), Objects.toString(entry.getValue(), null));
             }
         }
-
-        evalComputedColumns(rowData, rowTypeBuilder);
         return rowData;
     }
 

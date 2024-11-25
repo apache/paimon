@@ -157,13 +157,14 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
 
     @Override
     protected FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> recordParse() {
-        return syncJobHandler.provideRecordParser(computedColumns, typeMapping, metadataConverters);
+        return syncJobHandler.provideRecordParser(typeMapping, metadataConverters);
     }
 
     @Override
     protected EventParser.Factory<RichCdcMultiplexRecord> buildEventParserFactory() {
         boolean caseSensitive = this.allowUpperCase;
-        return () -> new RichCdcMultiplexRecordEventParser(caseSensitive);
+        List<String> computedColumnArgs = this.computedColumnArgs;
+        return () -> new RichCdcMultiplexRecordEventParser(caseSensitive, computedColumnArgs);
     }
 
     @Override

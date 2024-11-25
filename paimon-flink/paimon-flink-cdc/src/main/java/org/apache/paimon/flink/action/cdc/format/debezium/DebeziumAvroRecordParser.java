@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action.cdc.format.debezium;
 
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
-import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.AbstractRecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -74,8 +73,8 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
     private GenericRecord keyRecord;
     private GenericRecord valueRecord;
 
-    public DebeziumAvroRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        super(typeMapping, computedColumns);
+    public DebeziumAvroRecordParser(TypeMapping typeMapping) {
+        super(typeMapping);
     }
 
     @Override
@@ -157,8 +156,6 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
             resultMap.put(fieldName, transformed);
             rowTypeBuilder.field(fieldName, avroToPaimonDataType(schema));
         }
-
-        evalComputedColumns(resultMap, rowTypeBuilder);
         return resultMap;
     }
 

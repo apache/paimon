@@ -393,6 +393,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
         private final List<String> primaryKeys = new ArrayList<>();
         private final List<String> metadataColumn = new ArrayList<>();
         protected Map<String, String> partitionKeyMultiple = new HashMap<>();
+        private final List<String> computedColumnArgs = new ArrayList<>();
 
         public SyncDatabaseActionBuilder(Class<T> clazz, Map<String, String> sourceConfig) {
             this.clazz = clazz;
@@ -472,6 +473,16 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             return this;
         }
 
+        public SyncDatabaseActionBuilder<T> withComputedColumnArgs(String... computedColumnArgs) {
+            return withComputedColumnArgs(Arrays.asList(computedColumnArgs));
+        }
+
+        public SyncDatabaseActionBuilder<T> withComputedColumnArgs(
+                List<String> computedColumnArgs) {
+            this.computedColumnArgs.addAll(computedColumnArgs);
+            return this;
+        }
+
         public T build() {
             List<String> args =
                     new ArrayList<>(
@@ -499,6 +510,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             args.addAll(mapToArgs("--multiple-table-partition-keys", partitionKeyMultiple));
             args.addAll(listToArgs("--primary-keys", primaryKeys));
             args.addAll(listToArgs("--metadata-column", metadataColumn));
+            args.addAll(listToMultiArgs("--computed_column", computedColumnArgs));
 
             return createAction(clazz, args);
         }

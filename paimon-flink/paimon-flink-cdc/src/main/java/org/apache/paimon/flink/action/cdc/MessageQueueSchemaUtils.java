@@ -26,7 +26,6 @@ import org.apache.paimon.schema.Schema;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -59,8 +58,7 @@ public class MessageQueueSchemaUtils {
         int retry = 0;
         int retryInterval = 1000;
 
-        AbstractRecordParser recordParser =
-                dataFormat.createParser(typeMapping, Collections.emptyList());
+        AbstractRecordParser recordParser = dataFormat.createParser(typeMapping);
 
         while (true) {
             Optional<Schema> schema =
