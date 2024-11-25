@@ -19,7 +19,9 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.hive.TestHiveMetastore;
+import org.apache.paimon.table.FileStoreTableFactory;
 
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
@@ -32,6 +34,7 @@ import java.io.FileNotFoundException;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Base tests for spark read. */
@@ -133,6 +136,48 @@ public class SparkCatalogWithHiveTest {
                 .rootCause()
                 .isInstanceOf(FileNotFoundException.class)
                 .hasMessageContaining("nonExistentPath");
+
+        spark.close();
+    }
+
+    @Test
+    public void testCreateExternalTable(@TempDir java.nio.file.Path tempDir) {
+        Path warehousePath = new Path("file:" + tempDir.toString());
+        SparkSession spark =
+                SparkSession.builder()
+                        .config("spark.sql.warehouse.dir", warehousePath.toString())
+                        // with hive metastore
+                        .config("spark.sql.catalogImplementation", "hive")
+                        .config("hive.metastore.uris", "thrift://localhost:" + PORT)
+                        .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
+                        .config("spark.sql.catalog.spark_catalog.metastore", "hive")
+                        .config(
+                                "spark.sql.catalog.spark_catalog.hive.metastore.uris",
+                                "thrift://localhost:" + PORT)
+                        .config(
+                                "spark.sql.catalog.spark_catalog.warehouse",
+                                warehousePath.toString())
+                        .master("local[2]")
+                        .getOrCreate();
+
+        spark.sql("CREATE DATABASE IF NOT EXISTS test_db");
+        spark.sql("USE spark_catalog.test_db");
+
+        // create hive external table
+        spark.sql("CREATE EXTERNAL TABLE t1 (a INT, bb INT, c STRING)");
+
+        // drop hive external table
+        spark.sql("DROP TABLE t1");
+
+        // file system table exists
+        assertThatCode(
+                        () ->
+                                FileStoreTableFactory.create(
+                                        LocalFileIO.create(),
+                                        new Path(
+                                                warehousePath,
+                                                String.format("%s.db/%s", "test_db", "t1"))))
+                .doesNotThrowAnyException();
 
         spark.close();
     }
