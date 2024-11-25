@@ -26,8 +26,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
 import org.apache.commons.collections.CollectionUtils;
-import org.apache.flink.api.common.state.ListState;
-import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.runtime.state.FunctionInitializationContext;
 import org.apache.flink.runtime.state.FunctionSnapshotContext;
 import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
@@ -53,7 +51,6 @@ public class UpdatedDataFieldsProcessFunction
 
     private final Identifier identifier;
 
-    private ListState<DataField> latestSchemaListState;
     private final List<DataField> latestSchemaList;
 
     public UpdatedDataFieldsProcessFunction(
@@ -83,24 +80,14 @@ public class UpdatedDataFieldsProcessFunction
     }
 
     @Override
-    public void snapshotState(FunctionSnapshotContext functionSnapshotContext) throws Exception {
-        latestSchemaListState.clear();
-        latestSchemaListState.update(latestSchemaList);
+    public void snapshotState(FunctionSnapshotContext context) throws Exception {
+        // nothing
     }
 
     @Override
     public void initializeState(FunctionInitializationContext context) throws Exception {
-        latestSchemaListState =
-                context.getOperatorStateStore()
-                        .getListState(
-                                new ListStateDescriptor<>(
-                                        "latest-schema-list-state", DataField.class));
-        if (context.isRestored()) {
-            latestSchemaListState.get().forEach(latestSchemaList::add);
-        } else {
-            RowType oldRowType = schemaManager.latest().get().logicalRowType();
-            latestSchemaList.addAll(oldRowType.getFields());
-        }
+        RowType oldRowType = schemaManager.latest().get().logicalRowType();
+        latestSchemaList.addAll(oldRowType.getFields());
     }
 
     private boolean dataFieldContainIgnoreId(DataField dataField) {
