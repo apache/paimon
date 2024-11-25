@@ -92,7 +92,12 @@ public class ArrowUtils {
 
     public static Field toArrowField(String fieldName, int fieldId, DataType dataType, int depth) {
         FieldType fieldType = dataType.accept(ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR);
-        fieldType.getMetadata().put(PARQUET_FIELD_ID, String.valueOf(fieldId));
+        fieldType =
+                new FieldType(
+                        fieldType.isNullable(),
+                        fieldType.getType(),
+                        fieldType.getDictionary(),
+                        Collections.singletonMap(PARQUET_FIELD_ID, String.valueOf(fieldId)));
         List<Field> children = null;
         if (dataType instanceof ArrayType) {
             Field field =
@@ -101,11 +106,20 @@ public class ArrowUtils {
                             fieldId,
                             ((ArrayType) dataType).getElementType(),
                             depth + 1);
-            field.getMetadata()
-                    .put(
-                            PARQUET_FIELD_ID,
-                            String.valueOf(
-                                    SpecialFields.getArrayElementFieldId(fieldId, depth + 1)));
+            FieldType typeInner = field.getFieldType();
+            field =
+                    new Field(
+                            field.getName(),
+                            new FieldType(
+                                    typeInner.isNullable(),
+                                    typeInner.getType(),
+                                    typeInner.getDictionary(),
+                                    Collections.singletonMap(
+                                            PARQUET_FIELD_ID,
+                                            String.valueOf(
+                                                    SpecialFields.getArrayElementFieldId(
+                                                            fieldId, depth + 1)))),
+                            field.getChildren());
             children = Collections.singletonList(field);
         } else if (dataType instanceof MapType) {
             MapType mapType = (MapType) dataType;
@@ -113,10 +127,20 @@ public class ArrowUtils {
             Field keyField =
                     toArrowField(
                             MapVector.KEY_NAME, fieldId, mapType.getKeyType().notNull(), depth + 1);
-            keyField.getMetadata()
-                    .put(
-                            PARQUET_FIELD_ID,
-                            String.valueOf(SpecialFields.getMapKeyFieldId(fieldId, depth + 1)));
+            FieldType keyType = keyField.getFieldType();
+            keyField =
+                    new Field(
+                            keyField.getName(),
+                            new FieldType(
+                                    keyType.isNullable(),
+                                    keyType.getType(),
+                                    keyType.getDictionary(),
+                                    Collections.singletonMap(
+                                            PARQUET_FIELD_ID,
+                                            String.valueOf(
+                                                    SpecialFields.getMapKeyFieldId(
+                                                            fieldId, depth + 1)))),
+                            keyField.getChildren());
 
             Field valueField =
                     toArrowField(
@@ -124,11 +148,20 @@ public class ArrowUtils {
                             fieldId,
                             mapType.getValueType().notNull(),
                             depth + 1);
-            valueField
-                    .getMetadata()
-                    .put(
-                            PARQUET_FIELD_ID,
-                            String.valueOf(SpecialFields.getMapKeyFieldId(fieldId, depth + 1)));
+            FieldType valueType = valueField.getFieldType();
+            valueField =
+                    new Field(
+                            valueField.getName(),
+                            new FieldType(
+                                    valueType.isNullable(),
+                                    valueType.getType(),
+                                    valueType.getDictionary(),
+                                    Collections.singletonMap(
+                                            PARQUET_FIELD_ID,
+                                            String.valueOf(
+                                                    SpecialFields.getMapValueFieldId(
+                                                            fieldId, depth + 1)))),
+                            valueField.getChildren());
 
             Field mapField =
                     new Field(
