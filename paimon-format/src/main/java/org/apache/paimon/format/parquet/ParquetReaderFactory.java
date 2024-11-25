@@ -130,7 +130,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 buildFieldsList(projectedType.getFields(), projectedType.getFieldNames(), columnIO);
 
         return new ParquetReader(
-                reader, requestedSchema, reader.getRecordCount(), poolOfBatches, fields);
+                reader, requestedSchema, reader.getFilteredRecordCount(), poolOfBatches, fields);
     }
 
     private void setReadOptions(ParquetReadOptions.Builder builder) {
@@ -406,7 +406,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         }
 
         private void readNextRowGroup() throws IOException {
-            PageReadStore rowGroup = reader.readNextRowGroup();
+            PageReadStore rowGroup = reader.readNextFilteredRowGroup();
             if (rowGroup == null) {
                 throw new IOException(
                         "expecting more rows but reached last block. Read "
