@@ -56,7 +56,7 @@ public class DeletionVectorsMaintainer {
      * @param fileName The name of the file where the deletion occurred.
      * @param position The row position within the file that has been deleted.
      */
-    public void notifyNewDeletion(String fileName, long position) {
+    public synchronized void notifyNewDeletion(String fileName, long position) {
         DeletionVector deletionVector =
                 deletionVectors.computeIfAbsent(fileName, k -> new BitmapDeletionVector());
         if (deletionVector.checkedDelete(position)) {
@@ -70,7 +70,7 @@ public class DeletionVectorsMaintainer {
      * @param fileName The name of the file where the deletion occurred.
      * @param deletionVector The deletion vector
      */
-    public void notifyNewDeletion(String fileName, DeletionVector deletionVector) {
+    public synchronized void notifyNewDeletion(String fileName, DeletionVector deletionVector) {
         deletionVectors.put(fileName, deletionVector);
         modified = true;
     }
@@ -82,7 +82,7 @@ public class DeletionVectorsMaintainer {
      * @param fileName The name of the file where the deletion occurred.
      * @param deletionVector The deletion vector
      */
-    public void mergeNewDeletion(String fileName, DeletionVector deletionVector) {
+    public synchronized void mergeNewDeletion(String fileName, DeletionVector deletionVector) {
         DeletionVector old = deletionVectors.get(fileName);
         if (old != null) {
             deletionVector.merge(old);
@@ -97,7 +97,7 @@ public class DeletionVectorsMaintainer {
      *
      * @param fileName The name of the file whose deletion vector should be removed.
      */
-    public void removeDeletionVectorOf(String fileName) {
+    public synchronized void removeDeletionVectorOf(String fileName) {
         if (deletionVectors.containsKey(fileName)) {
             deletionVectors.remove(fileName);
             modified = true;
@@ -110,7 +110,7 @@ public class DeletionVectorsMaintainer {
      * @return A list containing the metadata of the deletion vectors index file, or an empty list
      *     if no changes need to be committed.
      */
-    public List<IndexFileMeta> writeDeletionVectorsIndex() {
+    public synchronized List<IndexFileMeta> writeDeletionVectorsIndex() {
         if (modified) {
             modified = false;
             return indexFileHandler.writeDeletionVectorsIndex(deletionVectors);
@@ -125,7 +125,7 @@ public class DeletionVectorsMaintainer {
      * @return An {@code Optional} containing the deletion vector if it exists, or an empty {@code
      *     Optional} if not.
      */
-    public Optional<DeletionVector> deletionVectorOf(String fileName) {
+    public synchronized Optional<DeletionVector> deletionVectorOf(String fileName) {
         return Optional.ofNullable(deletionVectors.get(fileName));
     }
 
@@ -134,7 +134,7 @@ public class DeletionVectorsMaintainer {
     }
 
     @VisibleForTesting
-    public Map<String, DeletionVector> deletionVectors() {
+    public synchronized Map<String, DeletionVector> deletionVectors() {
         return deletionVectors;
     }
 

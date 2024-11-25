@@ -30,6 +30,7 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.FileIOUtils;
+import org.apache.paimon.utils.ThreadPoolUtils;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,6 +40,9 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadPoolExecutor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -165,5 +169,57 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
 
         deletionFile4.getOrCompute();
         assertThat(indexDir.listFiles()).hasSize(1);
+    }
+
+    @Test
+    void testParallelNotifyNewDeletionAndWriteIndex() {
+        DeletionVectorsMaintainer.Factory factory =
+                new DeletionVectorsMaintainer.Factory(fileHandler);
+        DeletionVectorsMaintainer dvMaintainer =
+                factory.createOrRestore(null, BinaryRow.EMPTY_ROW, 0);
+
+        ThreadPoolExecutor threadPool = ThreadPoolUtils.createCachedThreadPool(2, "dv-");
+        try {
+            Runnable delete =
+                    () -> {
+                        for (int i = 0; i < 100; i++) {
+                            dvMaintainer.notifyNewDeletion("f" + i, i);
+                            try {
+                                Thread.sleep(10);
+                            } catch (InterruptedException e) {
+                                throw new RuntimeException(e);
+                            }
+                        }
+                    };
+
+            Runnable compact =
+                    () -> {
+                        for (int i = 0; i < 10; i++) {
+                            dvMaintainer.writeDeletionVectorsIndex();
+                            try {
+                                Thread.sleep(50);
+                            } catch (InterruptedException e) {
+                                throw new RuntimeException(e);
+                            }
+                        }
+                    };
+
+            Future<?> deleteFuture = threadPool.submit(delete);
+            Future<?> compactFuture = threadPool.submit(compact);
+
+            try {
+                compactFuture.get();
+                deleteFuture.get();
+            } catch (ExecutionException | InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+
+            dvMaintainer.notifyNewDeletion("f101", 101);
+            List<IndexFileMeta> indexFileMetas = dvMaintainer.writeDeletionVectorsIndex();
+            assertThat(indexFileMetas.size()).isEqualTo(1);
+            assertThat(indexFileMetas.get(0).rowCount()).isEqualTo(101);
+        } finally {
+            threadPool.shutdown();
+        }
     }
 }
