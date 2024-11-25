@@ -56,7 +56,7 @@ import static org.apache.paimon.spark.DataConverter.fromPaimon;
 import static org.apache.paimon.utils.InternalRowUtils.copyInternalRow;
 
 /**
- * An abstract {@link SparkInternalRow} that overwrite all the common methods in spark3 and spark4
+ * An abstract {@link SparkInternalRow} that overwrite all the common methods in spark3 and spark4.
  */
 public abstract class AbstractSparkInternalRow extends SparkInternalRow {
 
