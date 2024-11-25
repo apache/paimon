@@ -163,13 +163,18 @@ public class ArrowUtils {
                                                             fieldId, depth + 1)))),
                             valueField.getChildren());
 
+            FieldType structType =
+                    new FieldType(
+                            false,
+                            Types.MinorType.STRUCT.getType(),
+                            null,
+                            Collections.singletonMap(PARQUET_FIELD_ID, String.valueOf(fieldId)));
             Field mapField =
                     new Field(
                             MapVector.DATA_VECTOR_NAME,
                             // data vector, key vector and value vector CANNOT be null
-                            new FieldType(false, Types.MinorType.STRUCT.getType(), null),
+                            structType,
                             Arrays.asList(keyField, valueField));
-            mapField.getMetadata().put(PARQUET_FIELD_ID, String.valueOf(fieldId));
 
             children = Collections.singletonList(mapField);
         } else if (dataType instanceof RowType) {
