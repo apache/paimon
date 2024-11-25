@@ -22,6 +22,7 @@ import org.apache.paimon.arrow.vector.ArrowCStruct;
 import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -48,6 +49,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -55,6 +57,8 @@ import java.util.stream.Collectors;
 
 /** Utilities for creating Arrow objects. */
 public class ArrowUtils {
+
+    private static final String PARQUET_FIELD_ID = "PARQUET:field_id";
 
     public static VectorSchemaRoot createVectorSchemaRoot(
             RowType rowType, BufferAllocator allocator) {
@@ -69,7 +73,9 @@ public class ArrowUtils {
                                 f ->
                                         toArrowField(
                                                 allowUpperCase ? f.name() : f.name().toLowerCase(),
-                                                f.type()))
+                                                f.id(),
+                                                f.type(),
+                                                0))
                         .collect(Collectors.toList());
         return VectorSchemaRoot.create(new Schema(fields), allocator);
     }
@@ -78,40 +84,67 @@ public class ArrowUtils {
             DataField dataField, BufferAllocator allocator, boolean allowUpperCase) {
         return toArrowField(
                         allowUpperCase ? dataField.name() : dataField.name().toLowerCase(),
-                        dataField.type())
+                        dataField.id(),
+                        dataField.type(),
+                        0)
                 .createVector(allocator);
     }
 
-    public static Field toArrowField(String fieldName, DataType dataType) {
+    public static Field toArrowField(String fieldName, int fieldId, DataType dataType, int depth) {
         FieldType fieldType = dataType.accept(ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR);
+        fieldType.getMetadata().put(PARQUET_FIELD_ID, String.valueOf(fieldId));
         List<Field> children = null;
         if (dataType instanceof ArrayType) {
-            children =
-                    Collections.singletonList(
-                            toArrowField(
-                                    ListVector.DATA_VECTOR_NAME,
-                                    ((ArrayType) dataType).getElementType()));
+            Field field =
+                    toArrowField(
+                            ListVector.DATA_VECTOR_NAME,
+                            fieldId,
+                            ((ArrayType) dataType).getElementType(),
+                            depth + 1);
+            field.getMetadata()
+                    .put(
+                            PARQUET_FIELD_ID,
+                            String.valueOf(
+                                    SpecialFields.getArrayElementFieldId(fieldId, depth + 1)));
+            children = Collections.singletonList(field);
         } else if (dataType instanceof MapType) {
             MapType mapType = (MapType) dataType;
-            children =
-                    Collections.singletonList(
-                            new Field(
-                                    MapVector.DATA_VECTOR_NAME,
-                                    // data vector, key vector and value vector CANNOT be null
-                                    new FieldType(false, Types.MinorType.STRUCT.getType(), null),
-                                    Arrays.asList(
-                                            toArrowField(
-                                                    MapVector.KEY_NAME,
-                                                    mapType.getKeyType().notNull()),
-                                            toArrowField(
-                                                    MapVector.VALUE_NAME,
-                                                    mapType.getValueType().notNull()))));
+
+            Field keyField =
+                    toArrowField(
+                            MapVector.KEY_NAME, fieldId, mapType.getKeyType().notNull(), depth + 1);
+            keyField.getMetadata()
+                    .put(
+                            PARQUET_FIELD_ID,
+                            String.valueOf(SpecialFields.getMapKeyFieldId(fieldId, depth + 1)));
+
+            Field valueField =
+                    toArrowField(
+                            MapVector.VALUE_NAME,
+                            fieldId,
+                            mapType.getValueType().notNull(),
+                            depth + 1);
+            valueField
+                    .getMetadata()
+                    .put(
+                            PARQUET_FIELD_ID,
+                            String.valueOf(SpecialFields.getMapKeyFieldId(fieldId, depth + 1)));
+
+            Field mapField =
+                    new Field(
+                            MapVector.DATA_VECTOR_NAME,
+                            // data vector, key vector and value vector CANNOT be null
+                            new FieldType(false, Types.MinorType.STRUCT.getType(), null),
+                            Arrays.asList(keyField, valueField));
+            mapField.getMetadata().put(PARQUET_FIELD_ID, String.valueOf(fieldId));
+
+            children = Collections.singletonList(mapField);
         } else if (dataType instanceof RowType) {
             RowType rowType = (RowType) dataType;
-            children =
-                    rowType.getFields().stream()
-                            .map(f -> toArrowField(f.name(), f.type()))
-                            .collect(Collectors.toList());
+            children = new ArrayList<>();
+            for (DataField field : rowType.getFields()) {
+                children.add(toArrowField(field.name(), field.id(), field.type(), 0));
+            }
         }
         return new Field(fieldName, fieldType, children);
     }
