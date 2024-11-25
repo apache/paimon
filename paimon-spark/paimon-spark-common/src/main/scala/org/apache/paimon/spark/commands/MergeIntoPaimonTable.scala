@@ -28,7 +28,7 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.types.RowKind
 
-import org.apache.spark.sql.{Column, Dataset, Row, SparkSession}
+import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
@@ -38,7 +38,6 @@ import org.apache.spark.sql.catalyst.expressions.codegen.GeneratePredicate
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, lit, monotonically_increasing_id, sum}
-import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.{ByteType, StructField, StructType}
 
 import scala.collection.mutable
@@ -287,14 +286,6 @@ case class MergeIntoPaimonTable(
             "them match more then one source rows. It may lead to an unexpected result.")
       }
     }
-  }
-
-  private def toColumn(expr: Expression): Column = {
-    SparkShimLoader.getSparkShim.column(expr)
-  }
-
-  private def toExpression(spark: SparkSession, col: Column): Expression = {
-    SparkShimLoader.getSparkShim.convertToExpression(spark, col)
   }
 }
 

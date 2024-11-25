@@ -18,10 +18,8 @@
 
 package org.apache.spark.sql.paimon
 
-import org.apache.spark.sql.{Column, DataFrame, Dataset, SparkSession}
-import org.apache.spark.sql.catalyst.expressions.Expression
+import org.apache.spark.sql.{DataFrame, Dataset, SparkSession}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
-import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.util.{Utils => SparkUtils}
 
 import java.io.File
@@ -37,16 +35,8 @@ object Utils {
     spark.sparkContext.listenerBus.waitUntilEmpty()
   }
 
-  def createDataset(sparkSession: SparkSession, plan: LogicalPlan): DataFrame = {
+  def createDataFrame(sparkSession: SparkSession, plan: LogicalPlan): DataFrame = {
     Dataset.ofRows(sparkSession, plan)
-  }
-
-  def toColumn(expr: Expression): Column = {
-    SparkShimLoader.getSparkShim.column(expr)
-  }
-
-  def toExpression(sparkSession: SparkSession, col: Column): Expression = {
-    SparkShimLoader.getSparkShim.convertToExpression(sparkSession, col)
   }
 
 }

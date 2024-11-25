@@ -25,7 +25,7 @@ import org.apache.paimon.spark.sql.{SparkVersionSupport, WithTableOptions}
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.SparkConf
-import org.apache.spark.sql.{QueryTest, SparkSession}
+import org.apache.spark.sql.QueryTest
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.connector.catalog.{Identifier => SparkIdentifier}
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}

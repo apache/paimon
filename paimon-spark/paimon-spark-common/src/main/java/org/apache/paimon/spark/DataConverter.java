@@ -40,7 +40,7 @@ import org.apache.spark.sql.catalyst.util.MapData;
 import org.apache.spark.sql.types.Decimal;
 import org.apache.spark.unsafe.types.UTF8String;
 
-/** DataConverter. */
+/** A data converter that convert Paimon data to Spark Data. */
 public class DataConverter {
 
     public static Object fromPaimon(Object o, DataType type) {

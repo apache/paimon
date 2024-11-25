@@ -20,6 +20,7 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.catalyst.optimizer.MergePaimonScalarSubqueries
 
 import org.apache.spark.sql.Row
@@ -32,7 +33,7 @@ import org.junit.jupiter.api.Assertions
 
 import scala.collection.immutable
 
-abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase {
+abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase with ExpressionHelper {
 
   import org.apache.spark.sql.catalyst.dsl.expressions._
   import org.apache.spark.sql.catalyst.dsl.plans._
@@ -60,15 +61,15 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase {
                                |""".stripMargin)
       val optimizedPlan = Optimize.execute(query.queryExecution.analyzed)
 
-      val relation = Utils.createDataset(spark, createRelationV2("T"))
-      val mergedSubquery = relation
+      val df = Utils.createDataFrame(spark, createRelationV2("T"))
+      val mergedSubquery = df
         .select(
-          Utils.toColumn(count(Literal(1))).as("cnt"),
-          Utils.toColumn(sum(Utils.toExpression(spark, col("a")))).as("sum_a"),
-          Utils.toColumn(avg(Utils.toExpression(spark, col("b"))).as("avg_b"))
+          toColumn(count(Literal(1))).as("cnt"),
+          toColumn(sum(toExpression(spark, col("a")))).as("sum_a"),
+          toColumn(avg(toExpression(spark, col("b"))).as("avg_b"))
         )
         .select(
-          Utils.toColumn(
+          toColumn(
             CreateNamedStruct(
               Seq(
                 Literal("cnt"),

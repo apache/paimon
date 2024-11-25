@@ -30,6 +30,11 @@ import org.apache.spark.sql.types.StructType
 
 import java.util.{Map => JMap}
 
+/**
+ * A spark shim trait. It declare methods which have incompatible implementations between Spark 3
+ * and Spark 4. The specific SparkShim implementation will be loaded through Service Provider
+ * Interface.
+ */
 trait SparkShim {
 
   def createSparkParser(delegate: ParserInterface): ParserInterface

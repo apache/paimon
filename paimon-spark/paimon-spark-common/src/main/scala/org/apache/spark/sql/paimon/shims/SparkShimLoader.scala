@@ -22,6 +22,7 @@ import java.util.ServiceLoader
 
 import scala.collection.JavaConverters._
 
+/** Load a [[SparkShim]]'s implementation. */
 object SparkShimLoader {
 
   private var sparkShim: SparkShim = _
@@ -36,7 +37,7 @@ object SparkShimLoader {
   private def loadSparkShim(): SparkShim = {
     val shims = ServiceLoader.load(classOf[SparkShim]).asScala
     if (shims.size != 1) {
-      throw new IllegalStateException("Exactly one spark shim should be here.")
+      throw new IllegalStateException("No available spark shim here.")
     }
     shims.head
   }

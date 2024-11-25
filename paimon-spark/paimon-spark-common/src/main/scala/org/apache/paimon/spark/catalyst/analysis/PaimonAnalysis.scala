@@ -55,9 +55,6 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
 
     case s @ ShowColumns(PaimonRelation(table), _, _) if s.resolved =>
       PaimonShowColumnsCommand(table)
-
-//    case s@ShowTableExtended(PaimonRelation(table), _, _) if s.resolved =>
-//      PaimonShowColumnsCommand(table)
   }
 
   private def paimonWriteResolved(query: LogicalPlan, table: NamedRelation): Boolean = {

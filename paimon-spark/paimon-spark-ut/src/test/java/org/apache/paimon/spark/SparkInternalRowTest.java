@@ -49,7 +49,7 @@ import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.spark.SparkTypeTest.ALL_TYPES;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link SparkInternalRowX}. */
+/** Test for {@link SparkInternalRow}. */
 public class SparkInternalRowTest {
 
     @Test

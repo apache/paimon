@@ -28,7 +28,6 @@ import org.apache.spark.sql.catalyst.parser.extensions.PaimonSparkSqlExtensionsP
 import org.apache.spark.sql.catalyst.plans.logical.Aggregate
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
-import org.apache.spark.sql.paimon.shims.SparkShim
 import org.apache.spark.sql.types.StructType
 
 import java.util.{Map => JMap}
