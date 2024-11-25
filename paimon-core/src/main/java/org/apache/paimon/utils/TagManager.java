@@ -353,7 +353,7 @@ public class TagManager {
                 // If the tag file is not found, it might be deleted by
                 // other processes, so just skip this tag
                 try {
-                    Snapshot snapshot = Snapshot.fromJson(fileIO.readFileUtf8(path));
+                    Snapshot snapshot = Tag.tryFromPath(fileIO, path).trimToSnapshot();
                     tags.computeIfAbsent(snapshot, s -> new ArrayList<>()).add(tagName);
                 } catch (FileNotFoundException ignored) {
                 }
@@ -371,9 +371,9 @@ public class TagManager {
             List<Pair<Tag, String>> tags = new ArrayList<>();
             for (Path path : paths) {
                 String tagName = path.getName().substring(TAG_PREFIX.length());
-                Tag tag = Tag.safelyFromPath(fileIO, path);
-                if (tag != null) {
-                    tags.add(Pair.of(tag, tagName));
+                try {
+                    tags.add(Pair.of(Tag.tryFromPath(fileIO, path), tagName));
+                } catch (FileNotFoundException ignored) {
                 }
             }
             return tags;

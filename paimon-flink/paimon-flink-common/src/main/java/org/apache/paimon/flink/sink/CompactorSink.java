@@ -29,14 +29,17 @@ public class CompactorSink extends FlinkSink<RowData> {
 
     private static final long serialVersionUID = 1L;
 
-    public CompactorSink(FileStoreTable table) {
+    private final boolean fullCompaction;
+
+    public CompactorSink(FileStoreTable table, boolean fullCompaction) {
         super(table, false);
+        this.fullCompaction = fullCompaction;
     }
 
     @Override
     protected OneInputStreamOperator<RowData, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new StoreCompactOperator(table, writeProvider, commitUser);
+        return new StoreCompactOperator(table, writeProvider, commitUser, fullCompaction);
     }
 
     @Override

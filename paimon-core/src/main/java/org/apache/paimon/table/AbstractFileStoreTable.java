@@ -68,6 +68,8 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.utils.TagManager;
 
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -121,6 +123,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public void setManifestCache(SegmentsCache<Path> manifestCache) {
         store().setManifestCache(manifestCache);
+    }
+
+    @Override
+    public void setSnapshotCache(Cache<Path, Snapshot> cache) {
+        store().setSnapshotCache(cache);
     }
 
     @Override
@@ -340,7 +347,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 : new PrimaryKeyFileStoreTable(fileIO, path, newTableSchema, catalogEnvironment);
     }
 
-    protected SchemaManager schemaManager() {
+    @Override
+    public SchemaManager schemaManager() {
         return new SchemaManager(fileIO(), path, currentBranch());
     }
 
