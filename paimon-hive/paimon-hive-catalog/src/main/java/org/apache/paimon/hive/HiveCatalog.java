@@ -1148,7 +1148,6 @@ public class HiveCatalog extends AbstractCatalog {
             TableSchema schema,
             @Nullable FormatTable.Format provider,
             Path location) {
-
         StorageDescriptor sd = table.getSd() != null ? table.getSd() : new StorageDescriptor();
 
         sd.setInputFormat(getInputFormatName(provider));
