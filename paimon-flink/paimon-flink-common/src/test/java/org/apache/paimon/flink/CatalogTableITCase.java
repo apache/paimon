@@ -33,6 +33,7 @@ import org.apache.flink.table.catalog.exceptions.PartitionNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotPartitionedException;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import javax.annotation.Nonnull;
 
@@ -940,6 +941,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    @Timeout(60)
     public void testConsumersTable() throws Exception {
         batchSql("CREATE TABLE T (a INT, b INT)");
         batchSql("INSERT INTO T VALUES (1, 2)");
@@ -952,9 +954,17 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         batchSql("INSERT INTO T VALUES (5, 6), (7, 8)");
         assertThat(iterator.collect(2)).containsExactlyInAnyOrder(Row.of(1, 2), Row.of(3, 4));
+
+        List<Row> result;
+        do {
+            result = sql("SELECT * FROM T$consumers");
+            if (!result.isEmpty()) {
+                break;
+            }
+            Thread.sleep(1000);
+        } while (true);
         iterator.close();
 
-        List<Row> result = sql("SELECT * FROM T$consumers");
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getField(0)).isEqualTo("my1");
         assertThat((Long) result.get(0).getField(1)).isGreaterThanOrEqualTo(3);

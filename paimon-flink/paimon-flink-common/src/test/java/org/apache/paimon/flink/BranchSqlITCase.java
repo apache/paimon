@@ -27,6 +27,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -440,6 +441,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
+    @Timeout(60)
     public void testBranchConsumersTable() throws Exception {
         sql("CREATE TABLE t (a INT, b INT)");
         sql("INSERT INTO t VALUES (1, 2), (3,4)");
@@ -451,11 +453,18 @@ public class BranchSqlITCase extends CatalogITCaseBase {
                                 "SELECT * FROM t$branch_b1 /*+ OPTIONS('consumer-id'='id1','consumer.expiration-time'='3h') */"));
         sql("INSERT INTO t$branch_b1 VALUES (5, 6), (7, 8)");
         assertThat(iterator.collect(2)).containsExactlyInAnyOrder(Row.of(5, 6), Row.of(7, 8));
+        List<String> branchResult;
+        do {
+            branchResult = collectResult("SELECT * FROM t$branch_b1$consumers");
+            if (!branchResult.isEmpty()) {
+                break;
+            }
+            Thread.sleep(1000);
+        } while (true);
         iterator.close();
 
         assertThat(collectResult("SELECT * FROM t$consumers")).isEmpty();
-        assertThat(collectResult("SELECT * FROM t$branch_b1$consumers"))
-                .containsExactlyInAnyOrder("+I[id1, 2]");
+        assertThat(branchResult).containsExactlyInAnyOrder("+I[id1, 2]");
         assertThat(collectResult("SELECT * FROM t$consumers /*+ OPTIONS('branch'='b1') */"))
                 .containsExactlyInAnyOrder("+I[id1, 2]");
     }
