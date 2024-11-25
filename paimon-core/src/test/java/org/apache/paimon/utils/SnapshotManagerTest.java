@@ -281,8 +281,8 @@ public class SnapshotManagerTest {
     @Test
     public void testTraversalSnapshotsFromLatestSafely() throws IOException, InterruptedException {
         FileIO localFileIO = LocalFileIO.create();
-        SnapshotManager snapshotManager =
-                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+        Path path = new Path(tempDir.toString());
+        SnapshotManager snapshotManager = new SnapshotManager(localFileIO, path);
         // create 10 snapshots
         for (long i = 0; i < 10; i++) {
             Snapshot snapshot =

@@ -637,7 +637,7 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Whether to remove the whole row in partial-update engine when -D records of specified sequence group are received.");
+                            "When -D records of the given sequence groups are received, remove the whole row.");
 
     @Immutable
     public static final ConfigOption<String> ROWKIND_FIELD =

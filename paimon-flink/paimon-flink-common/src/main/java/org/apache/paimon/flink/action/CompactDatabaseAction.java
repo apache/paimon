@@ -259,7 +259,8 @@ public class CompactDatabaseAction extends ActionBase {
         CompactorSourceBuilder sourceBuilder =
                 new CompactorSourceBuilder(fullName, table)
                         .withPartitionIdleTime(partitionIdleTime);
-        CompactorSinkBuilder sinkBuilder = new CompactorSinkBuilder(table);
+        CompactorSinkBuilder sinkBuilder =
+                new CompactorSinkBuilder(table).withFullCompaction(!isStreaming);
 
         DataStreamSource<RowData> source =
                 sourceBuilder.withEnv(env).withContinuousMode(isStreaming).build();

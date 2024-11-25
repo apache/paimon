@@ -19,14 +19,12 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.utils.StringUtils;
 
 import java.io.IOException;
@@ -35,7 +33,6 @@ import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Factory to create {@link FileStoreTable}. */
 public class FileStoreTableFactory {
@@ -127,17 +124,6 @@ public class FileStoreTableFactory {
                                 fileIO, tablePath, tableSchema, catalogEnvironment)
                         : new PrimaryKeyFileStoreTable(
                                 fileIO, tablePath, tableSchema, catalogEnvironment);
-        table = table.copy(dynamicOptions.toMap());
-        CoreOptions options = table.coreOptions();
-        if (options.type() == TableType.OBJECT_TABLE) {
-            String objectLocation = options.objectLocation();
-            checkNotNull(objectLocation, "Object location should not be null for object table.");
-            table =
-                    ObjectTable.builder()
-                            .underlyingTable(table)
-                            .objectLocation(objectLocation)
-                            .build();
-        }
-        return table;
+        return table.copy(dynamicOptions.toMap());
     }
 }

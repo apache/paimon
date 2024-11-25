@@ -105,7 +105,8 @@ public abstract class OrphanFilesClean implements Serializable {
 
         List<String> abnormalBranches = new ArrayList<>();
         for (String branch : branches) {
-            if (!new SchemaManager(table.fileIO(), table.location(), branch).latest().isPresent()) {
+            SchemaManager schemaManager = table.schemaManager().copyWithBranch(branch);
+            if (!schemaManager.latest().isPresent()) {
                 abnormalBranches.add(branch);
             }
         }

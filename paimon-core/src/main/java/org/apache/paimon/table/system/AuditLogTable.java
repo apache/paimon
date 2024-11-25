@@ -39,6 +39,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateReplaceVisitor;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -185,6 +186,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     @Override
     public SnapshotManager snapshotManager() {
         return wrapped.snapshotManager();
+    }
+
+    @Override
+    public SchemaManager schemaManager() {
+        return wrapped.schemaManager();
     }
 
     @Override

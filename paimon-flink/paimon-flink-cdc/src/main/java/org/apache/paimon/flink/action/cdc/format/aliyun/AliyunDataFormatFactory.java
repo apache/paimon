@@ -16,16 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink;
+package org.apache.paimon.flink.action.cdc.format.aliyun;
 
-import org.apache.paimon.flink.sink.StoreSinkWrite;
+import org.apache.paimon.flink.action.cdc.format.DataFormat;
+import org.apache.paimon.flink.action.cdc.format.DataFormatFactory;
 
-import org.apache.flink.streaming.api.operators.Output;
-import org.apache.flink.streaming.runtime.streamrecord.RecordAttributes;
+/** Factory to create {@link AliyunDataFormat}. */
+public class AliyunDataFormatFactory implements DataFormatFactory {
 
-/** Placeholder class for new feature introduced since flink 1.19. Should never be used. */
-public class ProcessRecordAttributesUtil {
-    public static void processWithWrite(RecordAttributes recordAttributes, StoreSinkWrite write) {}
+    public static final String IDENTIFIER = "aliyun-json";
 
-    public static void processWithOutput(RecordAttributes recordAttributes, Output output) {}
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
+    }
+
+    @Override
+    public DataFormat create() {
+        return new AliyunDataFormat();
+    }
 }

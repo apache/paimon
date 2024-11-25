@@ -26,6 +26,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.DefaultValueAssigner;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -163,6 +164,11 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     @Override
     public SnapshotManager snapshotManager() {
         return wrapped.snapshotManager();
+    }
+
+    @Override
+    public SchemaManager schemaManager() {
+        return wrapped.schemaManager();
     }
 
     @Override

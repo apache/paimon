@@ -16,25 +16,4 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.hive;
-
-import org.apache.paimon.types.LocalZonedTimestampType;
-
-import org.apache.hadoop.hive.serde2.typeinfo.TimestampLocalTZTypeInfo;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
-
-/**
- * Utils to convert between Hive {@link TimestampLocalTZTypeInfo} and Paimon {@link
- * LocalZonedTimestampType}.
- */
-public class LocalZonedTimestampTypeUtils {
-
-    public static boolean isLocalZonedTimestampType(TypeInfo hiveTypeInfo) {
-        return hiveTypeInfo instanceof TimestampLocalTZTypeInfo;
-    }
-
-    public static TypeInfo toHiveType(LocalZonedTimestampType paimonType) {
-        return TypeInfoFactory.timestampLocalTZTypeInfo;
-    }
-}
+ {"schema":{"dataColumn":[{"name":"id","type":"LONG"},{"name":"val","type":"DOUBLE"},{"name":"name","type":"STRING"},{"name":"create_time","type":"DATE"}],"primaryKey":["id"],"source":{"dbType":"MySQL","dbName":"bigdata_test","tableName":"sync_test_table"}},"payload":{"before":{"dataColumn":{"id":2,"val":"1.100000","name":"a","create_time":1731661114000}},"after":{"dataColumn":{"id":2,"val":"2.200000","name":"a","create_time":1731661114000}},"sequenceId":"1731663842292000001","timestamp":{"eventTime":1731662097000,"systemTime":1731663848979,"checkpointTime":1731662097000},"op":"UPDATE_AFTER","ddl":null},"version":"0.0.1"}

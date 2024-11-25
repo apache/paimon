@@ -877,13 +877,7 @@ public class HiveCatalog extends AbstractCatalog {
         updateHmsTablePars(table, newSchema);
         Path location = getTableLocation(identifier, table);
         updateHmsTable(table, identifier, newSchema, newSchema.options().get("provider"), location);
-        clients.execute(
-                client ->
-                        client.alter_table(
-                                identifier.getDatabaseName(),
-                                identifier.getTableName(),
-                                table,
-                                true));
+        clients.execute(client -> HiveAlterTableUtils.alterTable(client, identifier, table));
     }
 
     @Override
@@ -1008,7 +1002,7 @@ public class HiveCatalog extends AbstractCatalog {
         return warehouse;
     }
 
-    private Table getHmsTable(Identifier identifier) throws TableNotExistException {
+    public Table getHmsTable(Identifier identifier) throws TableNotExistException {
         try {
             return clients.run(
                     client ->
