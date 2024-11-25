@@ -135,7 +135,7 @@ public class HiveCatalog extends AbstractCatalog {
             "org.apache.paimon.hive.PaimonStorageHandler";
     private static final String HIVE_PREFIX = "hive.";
     public static final String HIVE_SITE_FILE = "hive-site.xml";
-    public static final String HIVE_EXTERNAL_TABLE_PROP = "EXTERNAL";
+    private static final String HIVE_EXTERNAL_TABLE_PROP = "EXTERNAL";
 
     private final HiveConf hiveConf;
     private final String clientClassName;
@@ -666,9 +666,12 @@ public class HiveCatalog extends AbstractCatalog {
                         hiveConf.get(TABLE_TYPE.key(), CatalogTableType.MANAGED.toString()),
                         CatalogTableType.class);
 
+        String externalPropValue =
+                tableOptions.getOrDefault(
+                        HIVE_EXTERNAL_TABLE_PROP.toLowerCase(),
+                        tableOptions.get(HIVE_EXTERNAL_TABLE_PROP.toUpperCase()));
         return CatalogTableType.EXTERNAL.equals(tableType)
-                || "TRUE"
-                        .equalsIgnoreCase(tableOptions.get(HIVE_EXTERNAL_TABLE_PROP.toLowerCase()));
+                || "TRUE".equalsIgnoreCase(externalPropValue);
     }
 
     @Override
