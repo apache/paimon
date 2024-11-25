@@ -62,6 +62,7 @@ import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
+import org.apache.hadoop.hive.metastore.api.SerDeInfo;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
@@ -90,6 +91,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTOREWAREHOUSE;
+import static org.apache.hadoop.hive.serde.serdeConstants.FIELD_DELIM;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
 import static org.apache.paimon.CoreOptions.TYPE;
@@ -100,13 +102,13 @@ import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
-import static org.apache.paimon.hive.HiveTableUtils.applyFileFormatToTable;
 import static org.apache.paimon.hive.HiveTableUtils.convertToFormatTable;
 import static org.apache.paimon.options.CatalogOptions.ALLOW_UPPER_CASE;
 import static org.apache.paimon.options.CatalogOptions.FORMAT_TABLE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.SYNC_ALL_PROPERTIES;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
+import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.HadoopUtils.addHadoopConfIfFound;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -123,11 +125,11 @@ public class HiveCatalog extends AbstractCatalog {
 
     // we don't include paimon-hive-connector as dependencies because it depends on
     // hive-exec
-    public static final String INPUT_FORMAT_CLASS_NAME =
+    private static final String INPUT_FORMAT_CLASS_NAME =
             "org.apache.paimon.hive.mapred.PaimonInputFormat";
-    public static final String OUTPUT_FORMAT_CLASS_NAME =
+    private static final String OUTPUT_FORMAT_CLASS_NAME =
             "org.apache.paimon.hive.mapred.PaimonOutputFormat";
-    public static final String SERDE_CLASS_NAME = "org.apache.paimon.hive.PaimonSerDe";
+    private static final String SERDE_CLASS_NAME = "org.apache.paimon.hive.PaimonSerDe";
     private static final String STORAGE_HANDLER_CLASS_NAME =
             "org.apache.paimon.hive.PaimonStorageHandler";
     private static final String HIVE_PREFIX = "hive.";
@@ -1077,6 +1079,59 @@ public class HiveCatalog extends AbstractCatalog {
         return table;
     }
 
+    private String getSerdeClassName(@Nullable FormatTable.Format provider) {
+        if (provider == null) {
+            return SERDE_CLASS_NAME;
+        }
+        switch (provider) {
+            case CSV:
+                return "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe";
+            case PARQUET:
+                return "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe";
+            case ORC:
+                return "org.apache.hadoop.hive.ql.io.orc.OrcSerde";
+        }
+        return SERDE_CLASS_NAME;
+    }
+
+    private String getInputFormatName(@Nullable FormatTable.Format provider) {
+        if (provider == null) {
+            return INPUT_FORMAT_CLASS_NAME;
+        }
+        switch (provider) {
+            case CSV:
+                return "org.apache.hadoop.mapred.TextInputFormat";
+            case PARQUET:
+                return "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat";
+            case ORC:
+                return "org.apache.hadoop.hive.ql.io.orc.OrcInputFormat";
+        }
+        return INPUT_FORMAT_CLASS_NAME;
+    }
+
+    private String getOutputFormatClassName(@Nullable FormatTable.Format provider) {
+        if (provider == null) {
+            return OUTPUT_FORMAT_CLASS_NAME;
+        }
+        switch (provider) {
+            case CSV:
+                return "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat";
+            case PARQUET:
+                return "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat";
+            case ORC:
+                return "org.apache.hadoop.hive.ql.io.orc.OrcOutputFormat";
+        }
+        return OUTPUT_FORMAT_CLASS_NAME;
+    }
+
+    private Map<String, String> setSerDeInfoParam(@Nullable FormatTable.Format provider) {
+        Map<String, String> param = new HashMap<>();
+        if (provider == FormatTable.Format.CSV) {
+            param.put(FIELD_DELIM, options.get(FIELD_DELIMITER));
+        }
+        return param;
+    }
+
     private void updateHmsTable(
             Table table,
             Identifier identifier,
@@ -1084,9 +1139,16 @@ public class HiveCatalog extends AbstractCatalog {
             @Nullable FormatTable.Format provider,
             Path location) {
 
-        applyFileFormatToTable(table, options, provider);
+        StorageDescriptor sd = table.getSd() != null ? table.getSd() : new StorageDescriptor();
 
-        StorageDescriptor sd = table.getSd();
+        sd.setInputFormat(getInputFormatName(provider));
+        sd.setOutputFormat(getOutputFormatClassName(provider));
+
+        SerDeInfo serDeInfo = sd.getSerdeInfo() != null ? sd.getSerdeInfo() : new SerDeInfo();
+        serDeInfo.setParameters(setSerDeInfoParam(provider));
+        serDeInfo.setSerializationLib(getSerdeClassName(provider));
+        sd.setSerdeInfo(serDeInfo);
+
         CoreOptions options = new CoreOptions(schema.options());
         if (options.partitionedTableInMetastore() && !schema.partitionKeys().isEmpty()) {
             Map<String, DataField> fieldMap =
