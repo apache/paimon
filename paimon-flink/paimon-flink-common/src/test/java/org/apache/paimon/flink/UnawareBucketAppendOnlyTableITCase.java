@@ -20,6 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.reader.RecordReader;
@@ -395,7 +396,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
 
         @Override
         public void run(SourceContext<Integer> sourceContext) throws Exception {
-            int taskId = getRuntimeContext().getIndexOfThisSubtask();
+            int taskId = RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext());
             // wait some time in parallelism #2,
             // so that it does not commit in the same checkpoint with parallelism #1
             int waitCount = (taskId == 0 ? 0 : 10);

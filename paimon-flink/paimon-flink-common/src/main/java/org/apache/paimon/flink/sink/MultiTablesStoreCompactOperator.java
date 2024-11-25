@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.options.Options;
@@ -109,8 +110,10 @@ public class MultiTablesStoreCompactOperator
                                 ChannelComputer.select(
                                                 partition,
                                                 bucket,
-                                                getRuntimeContext().getNumberOfParallelSubtasks())
-                                        == getRuntimeContext().getIndexOfThisSubtask());
+                                                RuntimeContextUtils.getNumberOfParallelSubtasks(
+                                                        getRuntimeContext()))
+                                        == RuntimeContextUtils.getIndexOfThisSubtask(
+                                                getRuntimeContext()));
 
         tables = new HashMap<>();
         writes = new HashMap<>();
