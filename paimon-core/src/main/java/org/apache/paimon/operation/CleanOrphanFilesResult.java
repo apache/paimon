@@ -20,24 +20,29 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.fs.Path;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /** The result of OrphanFilesClean. */
 public class CleanOrphanFilesResult {
 
-    private List<Path> deletedFilesPath;
     private final long deletedFileCount;
     private final long deletedFileTotalLenInBytes;
 
+    @Nullable private final List<Path> deletedFilesPath;
+
     public CleanOrphanFilesResult(long deletedFileCount, long deletedFileTotalLenInBytes) {
-        this.deletedFileCount = deletedFileCount;
-        this.deletedFileTotalLenInBytes = deletedFileTotalLenInBytes;
+        this(deletedFileCount, deletedFileTotalLenInBytes, null);
     }
 
     public CleanOrphanFilesResult(
-            List<Path> deletedFilesPath, long deletedFileCount, long deletedFileTotalLenInBytes) {
-        this(deletedFileCount, deletedFileTotalLenInBytes);
+            long deletedFileCount,
+            long deletedFileTotalLenInBytes,
+            @Nullable List<Path> deletedFilesPath) {
         this.deletedFilesPath = deletedFilesPath;
+        this.deletedFileCount = deletedFileCount;
+        this.deletedFileTotalLenInBytes = deletedFileTotalLenInBytes;
     }
 
     public long getDeletedFileCount() {
@@ -48,6 +53,7 @@ public class CleanOrphanFilesResult {
         return deletedFileTotalLenInBytes;
     }
 
+    @Nullable
     public List<Path> getDeletedFilesPath() {
         return deletedFilesPath;
     }

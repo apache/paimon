@@ -101,7 +101,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         Map<String, Pair<Path, Long>> candidates = getCandidateDeletingFiles();
         if (candidates.isEmpty()) {
             return new CleanOrphanFilesResult(
-                    deleteFiles, deleteFiles.size(), deletedFilesLenInBytes.get());
+                    deleteFiles.size(), deletedFilesLenInBytes.get(), deleteFiles);
         }
         candidateDeletes = new HashSet<>(candidates.keySet());
 
@@ -128,7 +128,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         candidateDeletes.clear();
 
         return new CleanOrphanFilesResult(
-                deleteFiles, deleteFiles.size(), deletedFilesLenInBytes.get());
+                deleteFiles.size(), deletedFilesLenInBytes.get(), deleteFiles);
     }
 
     private void collectWithoutDataFile(
