@@ -21,6 +21,7 @@ package org.apache.paimon.spark.catalyst.analysis
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
+import org.apache.paimon.spark.catalyst.plans.logical.{PaimonTableValuedFunctions, PaimonTableValueFunction}
 import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonShowColumnsCommand, PaimonTruncateTableCommand}
 import org.apache.paimon.table.FileStoreTable
 
@@ -49,6 +50,9 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
 
     case o @ PaimonDynamicPartitionOverwrite(r, d) if o.resolved =>
       PaimonDynamicPartitionOverwriteCommand(r, d, o.query, o.writeOptions, o.isByName)
+
+    case func: PaimonTableValueFunction if func.args.forall(_.resolved) =>
+      PaimonTableValuedFunctions.resolvePaimonTableValuedFunction(session, func)
 
     case merge: MergeIntoTable if isPaimonTable(merge.targetTable) && merge.childrenResolved =>
       PaimonMergeIntoResolver(merge, session)

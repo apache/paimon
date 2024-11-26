@@ -18,15 +18,10 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.spark.catalyst.plans.logical.{PaimonTableValuedFunctions, PaimonTableValueFunction}
-
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.rules.Rule
 
-/** These resolution rules are incompatible between different versions of spark. */
-case class PaimonIncompatibleResolutionRules(session: SparkSession) extends Rule[LogicalPlan] {
-
+case class Spark4ResolutionRules(session: SparkSession) extends Rule[LogicalPlan] {
   override def apply(plan: LogicalPlan): LogicalPlan = plan
-
 }

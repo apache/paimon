@@ -16,17 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.catalyst.analysis
+package org.apache.spark.sql.connector.catalog
 
-import org.apache.paimon.spark.catalyst.plans.logical.{PaimonTableValuedFunctions, PaimonTableValueFunction}
+object PaimonCatalogImplicits {
 
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
-import org.apache.spark.sql.catalyst.rules.Rule
+  import CatalogV2Implicits._
 
-/** These resolution rules are incompatible between different versions of spark. */
-case class PaimonIncompatibleResolutionRules(session: SparkSession) extends Rule[LogicalPlan] {
+  implicit class PaimonCatalogHelper(plugin: CatalogPlugin) extends CatalogHelper(plugin)
 
-  override def apply(plan: LogicalPlan): LogicalPlan = plan
+  implicit class PaimonNamespaceHelper(namespace: Array[String]) extends NamespaceHelper(namespace)
 
+//  implicit class PaimonTableHelper(table: Table) extends TableHelper(table)
 }
