@@ -16,12 +16,10 @@
  * limitations under the License.
  */
 
-package org.apache.spark.sql.catalyst.parser.extensions
+package org.apache.paimon.spark.catalyst.parser.extensions
 
-import org.apache.spark.sql.catalyst.parser.{CompoundBody, ParserInterface}
+import org.apache.spark.sql.catalyst.parser.ParserInterface
+import org.apache.spark.sql.catalyst.parser.extensions.AbstractPaimonSparkSqlExtensionsParser
 
-class PaimonSparkSqlExtensionsParser(override val delegate: ParserInterface)
-  extends AbstractPaimonSparkSqlExtensionsParser(delegate) {
-
-  def parseScript(sqlScriptText: String): CompoundBody = delegate.parseScript(sqlScriptText)
-}
+class PaimonSpark3SqlExtensionsParser(override val delegate: ParserInterface)
+  extends AbstractPaimonSparkSqlExtensionsParser(delegate) {}

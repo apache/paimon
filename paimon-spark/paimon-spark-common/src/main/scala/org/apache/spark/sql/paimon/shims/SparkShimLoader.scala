@@ -25,19 +25,18 @@ import scala.collection.JavaConverters._
 /** Load a [[SparkShim]]'s implementation. */
 object SparkShimLoader {
 
-  private var sparkShim: SparkShim = _
+  private lazy val sparkShim: SparkShim = loadSparkShim()
 
   def getSparkShim: SparkShim = {
-    if (sparkShim == null) {
-      sparkShim = loadSparkShim()
-    }
     sparkShim
   }
 
   private def loadSparkShim(): SparkShim = {
     val shims = ServiceLoader.load(classOf[SparkShim]).asScala
-    if (shims.size != 1) {
+    if (shims.isEmpty) {
       throw new IllegalStateException("No available spark shim here.")
+    } else if (shims.size > 1) {
+      throw new IllegalStateException("Found more than one spark shim here.")
     }
     shims.head
   }

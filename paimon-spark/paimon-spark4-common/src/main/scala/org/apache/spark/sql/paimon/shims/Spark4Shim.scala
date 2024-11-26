@@ -18,13 +18,13 @@
 
 package org.apache.spark.sql.paimon.shims
 
+import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark4SqlExtensionsParser
 import org.apache.paimon.spark.data.{Spark4ArrayData, Spark4InternalRow, SparkArrayData, SparkInternalRow}
 import org.apache.paimon.types.{DataType, RowType}
 
 import org.apache.spark.sql.{Column, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.parser.extensions.PaimonSparkSqlExtensionsParser
 import org.apache.spark.sql.catalyst.plans.logical.Aggregate
 import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
@@ -36,7 +36,7 @@ import java.util.{Map => JMap}
 class Spark4Shim extends SparkShim {
 
   override def createSparkParser(delegate: ParserInterface): ParserInterface = {
-    new PaimonSparkSqlExtensionsParser(delegate)
+    new PaimonSpark4SqlExtensionsParser(delegate)
   }
   override def createSparkInternalRow(rowType: RowType): SparkInternalRow = {
     new Spark4InternalRow(rowType)
