@@ -83,6 +83,7 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
         this.read = readBuilder.newRead().withIOManager(ioManager);
         this.reuseRow = new FlinkRowData(null);
         this.reuseRecord = new StreamRecord<>(reuseRow);
+        this.sourceReaderMetrics.idlingStarted();
     }
 
     @Override
@@ -113,6 +114,7 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
                 output.collect(reuseRecord);
             }
         }
+        sourceReaderMetrics.idlingStarted();
     }
 
     @Override
