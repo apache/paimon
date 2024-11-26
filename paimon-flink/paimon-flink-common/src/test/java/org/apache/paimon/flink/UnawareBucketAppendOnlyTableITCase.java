@@ -28,6 +28,7 @@ import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.TimeUtils;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -50,7 +51,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
-import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -203,7 +203,11 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
         batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
         batchSql("ALTER TABLE append_table SET ('continuous.discovery-interval' = '1 s')");
 
-        sEnv.getConfig().getConfiguration().set(CHECKPOINTING_INTERVAL, Duration.ofMillis(500));
+        sEnv.getConfig()
+                .getConfiguration()
+                .setString(
+                        "execution.checkpointing.interval",
+                        TimeUtils.formatWithHighestUnit(Duration.ofMillis(500)));
         sEnv.executeSql(
                 "CREATE TEMPORARY TABLE Orders_in (\n"
                         + "    f0        INT,\n"
@@ -224,7 +228,11 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
         batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
         batchSql("ALTER TABLE append_table SET ('continuous.discovery-interval' = '1 s')");
 
-        sEnv.getConfig().getConfiguration().set(CHECKPOINTING_INTERVAL, Duration.ofMillis(500));
+        sEnv.getConfig()
+                .getConfiguration()
+                .setString(
+                        "execution.checkpointing.interval",
+                        TimeUtils.formatWithHighestUnit(Duration.ofMillis(500)));
         sEnv.executeSql(
                 "CREATE TEMPORARY TABLE Orders_in (\n"
                         + "    f0        INT,\n"

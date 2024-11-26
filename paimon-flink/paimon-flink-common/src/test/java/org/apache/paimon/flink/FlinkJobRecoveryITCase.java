@@ -65,7 +65,7 @@ public class FlinkJobRecoveryITCase extends CatalogITCaseBase {
                 .set(
                         CheckpointingOptions.EXTERNALIZED_CHECKPOINT_RETENTION,
                         ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION)
-                .removeConfig(CheckpointingOptions.CHECKPOINTING_INTERVAL);
+                .removeKey("execution.checkpointing.interval");
 
         // insert source data
         batchSql("INSERT INTO source_table1 VALUES (1, 'test-1', '20241030')");
@@ -219,10 +219,9 @@ public class FlinkJobRecoveryITCase extends CatalogITCaseBase {
             batchSql(sql);
         }
 
-        Configuration config =
-                sEnv.getConfig()
-                        .getConfiguration()
-                        .set(StateRecoveryOptions.SAVEPOINT_PATH, checkpointPath);
+        Configuration config = sEnv.getConfig().getConfiguration();
+        // use config string to stay compatible with flink 1.19-
+        config.setString("execution.state-recovery.path", checkpointPath);
         for (Map.Entry<String, String> entry : recoverOptions.entrySet()) {
             config.setString(entry.getKey(), entry.getValue());
         }
