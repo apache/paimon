@@ -66,7 +66,7 @@ class FileStoreSourceReaderMetricsTest {
         Thread.sleep(10L);
         assertThat(sourceReaderMetrics.getIdleTime()).isGreaterThan(9L);
 
-        //non-idle
+        // non-idle
         sourceReaderMetrics.recordSnapshotUpdate(123);
         Thread.sleep(10L);
         assertThat(sourceReaderMetrics.getIdleTime()).isEqualTo(0L);
