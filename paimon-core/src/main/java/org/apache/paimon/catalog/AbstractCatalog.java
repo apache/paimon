@@ -653,7 +653,16 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected boolean tableExistsInFileSystem(Path tablePath, String branchName) {
-        return !new SchemaManager(fileIO, tablePath, branchName).listAllIds().isEmpty();
+        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath, branchName);
+
+        // in order to improve the performance, check the schema-0 firstly.
+        boolean schemaZeroExists = schemaManager.schemaExists(0);
+        if (schemaZeroExists) {
+            return true;
+        } else {
+            // if schema-0 not exists, fallback to check other schemas
+            return !schemaManager.listAllIds().isEmpty();
+        }
     }
 
     public Optional<TableSchema> tableSchemaInFileSystem(Path tablePath, String branchName) {
