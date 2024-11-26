@@ -205,9 +205,12 @@ public class OperatorSourceTest {
                 .isEqualTo(-1L);
 
         Thread.sleep(300L);
-        assertThat((Long)TestingMetricUtils.getGauge(
-                        readerOperatorMetricGroup, "sourceIdleTime")
-                .getValue()).isGreaterThan(299L);
+        assertThat(
+                        (Long)
+                                TestingMetricUtils.getGauge(
+                                                readerOperatorMetricGroup, "sourceIdleTime")
+                                        .getValue())
+                .isGreaterThan(299L);
 
         harness.processElement(new StreamRecord<>(splits.get(0)));
         assertThat(
@@ -234,10 +237,13 @@ public class OperatorSourceTest {
                                         .getValue())
                 .isEqualTo(emitEventTimeLag);
 
-        assertThat((Long)TestingMetricUtils.getGauge(
-                        readerOperatorMetricGroup, "sourceIdleTime")
-                .getValue()).isGreaterThan(99L).isLessThan(300L);
-
+        assertThat(
+                        (Long)
+                                TestingMetricUtils.getGauge(
+                                                readerOperatorMetricGroup, "sourceIdleTime")
+                                        .getValue())
+                .isGreaterThan(99L)
+                .isLessThan(300L);
     }
 
     private <T> T testReadSplit(
