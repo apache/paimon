@@ -23,18 +23,27 @@ import org.apache.paimon.spark.SparkFilterConverter
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.types.RowType
 
+import org.apache.spark.sql.{Column, SparkSession}
 import org.apache.spark.sql.PaimonUtils.{normalizeExprs, translateFilter}
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.Resolver
 import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, Cast, Expression, GetStructField, Literal, PredicateHelper, SubqueryExpression}
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, LogicalPlan}
 import org.apache.spark.sql.internal.SQLConf
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.{DataType, NullType}
 
 /** An expression helper. */
 trait ExpressionHelper extends PredicateHelper {
 
   import ExpressionHelper._
+
+  def toColumn(expr: Expression): Column = {
+    SparkShimLoader.getSparkShim.column(expr)
+  }
+
+  def toExpression(spark: SparkSession, col: Column): Expression = {
+    SparkShimLoader.getSparkShim.convertToExpression(spark, col)
+  }
 
   protected def resolveExpression(
       spark: SparkSession)(expr: Expression, plan: LogicalPlan): Expression = {

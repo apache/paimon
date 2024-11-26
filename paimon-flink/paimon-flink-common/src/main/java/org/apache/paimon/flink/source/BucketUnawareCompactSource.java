@@ -21,11 +21,13 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.append.UnawareAppendTableCompactionCoordinator;
 import org.apache.paimon.flink.sink.CompactionTaskTypeInfo;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
@@ -72,12 +74,21 @@ public class BucketUnawareCompactSource extends RichSourceFunction<UnawareAppend
         this.filter = filter;
     }
 
-    @Override
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
+     */
+    public void open(OpenContext openContext) throws Exception {
+        open(new Configuration());
+    }
+
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
+     */
     public void open(Configuration parameters) throws Exception {
         compactionCoordinator =
                 new UnawareAppendTableCompactionCoordinator(table, streaming, filter);
         Preconditions.checkArgument(
-                this.getRuntimeContext().getNumberOfParallelSubtasks() == 1,
+                RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext()) == 1,
                 "Compaction Operator parallelism in paimon MUST be one.");
     }
 

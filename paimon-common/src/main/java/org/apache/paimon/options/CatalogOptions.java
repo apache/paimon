@@ -123,6 +123,13 @@ public class CatalogOptions {
                     .noDefaultValue()
                     .withDescription("Controls the maximum memory to cache manifest content.");
 
+    public static final ConfigOption<Integer> CACHE_SNAPSHOT_MAX_NUM_PER_TABLE =
+            key("cache.snapshot.max-num-per-table")
+                    .intType()
+                    .defaultValue(20)
+                    .withDescription(
+                            "Controls the max number for snapshots per table in the catalog are cached.");
+
     public static final ConfigOption<String> LINEAGE_META =
             key("lineage-meta")
                     .stringType()

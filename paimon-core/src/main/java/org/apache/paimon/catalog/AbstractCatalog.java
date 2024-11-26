@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.TableType;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
@@ -66,6 +67,7 @@ import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
@@ -430,17 +432,39 @@ public abstract class AbstractCatalog implements Catalog {
     protected Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
         Preconditions.checkArgument(identifier.getSystemTableName() == null);
         TableMeta tableMeta = getDataTableMeta(identifier);
-        return FileStoreTableFactory.create(
-                fileIO,
-                getTableLocation(identifier),
-                tableMeta.schema,
-                new CatalogEnvironment(
-                        identifier,
-                        tableMeta.uuid,
-                        Lock.factory(
-                                lockFactory().orElse(null), lockContext().orElse(null), identifier),
-                        metastoreClientFactory(identifier, tableMeta.schema).orElse(null),
-                        lineageMetaFactory));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        fileIO,
+                        getTableLocation(identifier),
+                        tableMeta.schema,
+                        new CatalogEnvironment(
+                                identifier,
+                                tableMeta.uuid,
+                                Lock.factory(
+                                        lockFactory().orElse(null),
+                                        lockContext().orElse(null),
+                                        identifier),
+                                metastoreClientFactory(identifier, tableMeta.schema).orElse(null),
+                                lineageMetaFactory));
+        CoreOptions options = table.coreOptions();
+        if (options.type() == TableType.OBJECT_TABLE) {
+            String objectLocation = options.objectLocation();
+            checkNotNull(objectLocation, "Object location should not be null for object table.");
+            table =
+                    ObjectTable.builder()
+                            .underlyingTable(table)
+                            .objectLocation(objectLocation)
+                            .objectFileIO(objectFileIO(objectLocation))
+                            .build();
+        }
+        return table;
+    }
+
+    /**
+     * Catalog implementation may override this method to provide {@link FileIO} to object table.
+     */
+    protected FileIO objectFileIO(String objectLocation) {
+        return fileIO;
     }
 
     /**
@@ -629,7 +653,16 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected boolean tableExistsInFileSystem(Path tablePath, String branchName) {
-        return !new SchemaManager(fileIO, tablePath, branchName).listAllIds().isEmpty();
+        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath, branchName);
+
+        // in order to improve the performance, check the schema-0 firstly.
+        boolean schemaZeroExists = schemaManager.schemaExists(0);
+        if (schemaZeroExists) {
+            return true;
+        } else {
+            // if schema-0 not exists, fallback to check other schemas
+            return !schemaManager.listAllIds().isEmpty();
+        }
     }
 
     public Optional<TableSchema> tableSchemaInFileSystem(Path tablePath, String branchName) {

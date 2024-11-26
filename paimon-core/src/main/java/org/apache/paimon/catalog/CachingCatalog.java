@@ -55,12 +55,16 @@ import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_MAX_MEMORY
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_MEMORY;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_THRESHOLD;
 import static org.apache.paimon.options.CatalogOptions.CACHE_PARTITION_MAX_NUM;
+import static org.apache.paimon.options.CatalogOptions.CACHE_SNAPSHOT_MAX_NUM_PER_TABLE;
 import static org.apache.paimon.table.system.SystemTableLoader.SYSTEM_TABLES;
 
 /** A {@link Catalog} to cache databases and tables and manifests. */
 public class CachingCatalog extends DelegateCatalog {
 
     private static final Logger LOG = LoggerFactory.getLogger(CachingCatalog.class);
+
+    private final Duration expirationInterval;
+    private final int snapshotMaxNumPerTable;
 
     protected final Cache<String, Database> databaseCache;
     protected final Cache<Identifier, Table> tableCache;
@@ -75,7 +79,8 @@ public class CachingCatalog extends DelegateCatalog {
                 CACHE_EXPIRATION_INTERVAL_MS.defaultValue(),
                 CACHE_MANIFEST_SMALL_FILE_MEMORY.defaultValue(),
                 CACHE_MANIFEST_SMALL_FILE_THRESHOLD.defaultValue().getBytes(),
-                CACHE_PARTITION_MAX_NUM.defaultValue());
+                CACHE_PARTITION_MAX_NUM.defaultValue(),
+                CACHE_SNAPSHOT_MAX_NUM_PER_TABLE.defaultValue());
     }
 
     public CachingCatalog(
@@ -83,13 +88,15 @@ public class CachingCatalog extends DelegateCatalog {
             Duration expirationInterval,
             MemorySize manifestMaxMemory,
             long manifestCacheThreshold,
-            long cachedPartitionMaxNum) {
+            long cachedPartitionMaxNum,
+            int snapshotMaxNumPerTable) {
         this(
                 wrapped,
                 expirationInterval,
                 manifestMaxMemory,
                 manifestCacheThreshold,
                 cachedPartitionMaxNum,
+                snapshotMaxNumPerTable,
                 Ticker.systemTicker());
     }
 
@@ -99,12 +106,16 @@ public class CachingCatalog extends DelegateCatalog {
             MemorySize manifestMaxMemory,
             long manifestCacheThreshold,
             long cachedPartitionMaxNum,
+            int snapshotMaxNumPerTable,
             Ticker ticker) {
         super(wrapped);
         if (expirationInterval.isZero() || expirationInterval.isNegative()) {
             throw new IllegalArgumentException(
                     "When cache.expiration-interval is set to negative or 0, the catalog cache should be disabled.");
         }
+
+        this.expirationInterval = expirationInterval;
+        this.snapshotMaxNumPerTable = snapshotMaxNumPerTable;
 
         this.databaseCache =
                 Caffeine.newBuilder()
@@ -121,6 +132,7 @@ public class CachingCatalog extends DelegateCatalog {
                         .expireAfterAccess(expirationInterval)
                         .ticker(ticker)
                         .build();
+        this.manifestCache = SegmentsCache.create(manifestMaxMemory, manifestCacheThreshold);
         this.partitionCache =
                 cachedPartitionMaxNum == 0
                         ? null
@@ -134,7 +146,6 @@ public class CachingCatalog extends DelegateCatalog {
                                 .maximumWeight(cachedPartitionMaxNum)
                                 .ticker(ticker)
                                 .build();
-        this.manifestCache = SegmentsCache.create(manifestMaxMemory, manifestCacheThreshold);
     }
 
     public static Catalog tryToCreate(Catalog catalog, Options options) {
@@ -155,7 +166,8 @@ public class CachingCatalog extends DelegateCatalog {
                 options.get(CACHE_EXPIRATION_INTERVAL_MS),
                 manifestMaxMemory,
                 manifestThreshold,
-                options.get(CACHE_PARTITION_MAX_NUM));
+                options.get(CACHE_PARTITION_MAX_NUM),
+                options.get(CACHE_SNAPSHOT_MAX_NUM_PER_TABLE));
     }
 
     @Override
@@ -244,9 +256,20 @@ public class CachingCatalog extends DelegateCatalog {
     }
 
     private void putTableCache(Identifier identifier, Table table) {
-        if (manifestCache != null && table instanceof FileStoreTable) {
-            ((FileStoreTable) table).setManifestCache(manifestCache);
+        if (table instanceof FileStoreTable) {
+            FileStoreTable storeTable = (FileStoreTable) table;
+            storeTable.setSnapshotCache(
+                    Caffeine.newBuilder()
+                            .softValues()
+                            .expireAfterAccess(expirationInterval)
+                            .maximumSize(snapshotMaxNumPerTable)
+                            .executor(Runnable::run)
+                            .build());
+            if (manifestCache != null) {
+                storeTable.setManifestCache(manifestCache);
+            }
         }
+
         tableCache.put(identifier, table);
     }
 

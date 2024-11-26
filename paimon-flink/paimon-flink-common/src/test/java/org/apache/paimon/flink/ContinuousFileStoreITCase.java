@@ -120,7 +120,14 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
         assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
 
-        Thread.sleep(1000);
+        List<Row> result;
+        do {
+            result = sql("SELECT * FROM %s$consumers", table);
+            if (!result.isEmpty()) {
+                break;
+            }
+            Thread.sleep(1000);
+        } while (true);
         iterator.close();
 
         iterator =

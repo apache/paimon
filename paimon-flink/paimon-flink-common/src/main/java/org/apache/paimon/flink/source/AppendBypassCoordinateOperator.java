@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.append.UnawareAppendTableCompactionCoordinator;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.ExecutorUtils;
 
@@ -67,7 +68,7 @@ public class AppendBypassCoordinateOperator<CommitT>
     public void open() throws Exception {
         super.open();
         checkArgument(
-                getRuntimeContext().getNumberOfParallelSubtasks() == 1,
+                RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext()) == 1,
                 "Compaction Coordinator parallelism in paimon MUST be one.");
         long intervalMs = table.coreOptions().continuousDiscoveryInterval().toMillis();
         this.compactTasks = new LinkedBlockingQueue<>();

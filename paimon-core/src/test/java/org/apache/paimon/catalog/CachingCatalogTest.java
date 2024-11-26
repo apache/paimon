@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
@@ -333,6 +334,27 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testSnapshotCache() throws Exception {
+        TestableCachingCatalog wrappedCatalog =
+                new TestableCachingCatalog(this.catalog, EXPIRATION_TTL, ticker);
+        Identifier tableIdent = new Identifier("db", "tbl");
+        wrappedCatalog.createTable(tableIdent, DEFAULT_TABLE_SCHEMA, false);
+        Table table = wrappedCatalog.getTable(tableIdent);
+
+        // write
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, fromString("1"), fromString("1")));
+            write.write(GenericRow.of(2, fromString("2"), fromString("2")));
+            commit.commit(write.prepareCommit());
+        }
+
+        Snapshot snapshot = table.snapshot(1);
+        assertThat(snapshot).isSameAs(table.snapshot(1));
+    }
+
+    @Test
     public void testManifestCache() throws Exception {
         innerTestManifestCache(Long.MAX_VALUE);
         assertThatThrownBy(() -> innerTestManifestCache(10))
@@ -346,7 +368,8 @@ class CachingCatalogTest extends CatalogTestBase {
                         Duration.ofSeconds(10),
                         MemorySize.ofMebiBytes(1),
                         manifestCacheThreshold,
-                        0L);
+                        0L,
+                        10);
         Identifier tableIdent = new Identifier("db", "tbl");
         catalog.dropTable(tableIdent, true);
         catalog.createTable(tableIdent, DEFAULT_TABLE_SCHEMA, false);

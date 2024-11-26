@@ -53,7 +53,8 @@ public class StoreCompactOperatorTest extends TableTestBase {
                         getTableDefault(),
                         (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
                                 compactRememberStoreWrite,
-                        "10086");
+                        "10086",
+                        !streamingMode);
 
         TypeSerializer<Committable> serializer =
                 new CommittableTypeInfo().createSerializer(new ExecutionConfig());

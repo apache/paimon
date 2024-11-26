@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.options.Options;
@@ -52,6 +53,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
     private final FileStoreTable table;
     private final StoreSinkWrite.Provider storeSinkWriteProvider;
     private final String initialCommitUser;
+    private final boolean fullCompaction;
 
     private transient StoreSinkWriteState state;
     private transient StoreSinkWrite write;
@@ -61,7 +63,8 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
     public StoreCompactOperator(
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
-            String initialCommitUser) {
+            String initialCommitUser,
+            boolean fullCompaction) {
         super(Options.fromMap(table.options()));
         Preconditions.checkArgument(
                 !table.coreOptions().writeOnly(),
@@ -69,6 +72,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
         this.table = table;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
         this.initialCommitUser = initialCommitUser;
+        this.fullCompaction = fullCompaction;
     }
 
     @Override
@@ -89,8 +93,10 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
                                 ChannelComputer.select(
                                                 partition,
                                                 bucket,
-                                                getRuntimeContext().getNumberOfParallelSubtasks())
-                                        == getRuntimeContext().getIndexOfThisSubtask());
+                                                RuntimeContextUtils.getNumberOfParallelSubtasks(
+                                                        getRuntimeContext()))
+                                        == RuntimeContextUtils.getIndexOfThisSubtask(
+                                                getRuntimeContext()));
         write =
                 storeSinkWriteProvider.provide(
                         table,
@@ -136,10 +142,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
 
         try {
             for (Pair<BinaryRow, Integer> partitionBucket : waitToCompact) {
-                write.compact(
-                        partitionBucket.getKey(),
-                        partitionBucket.getRight(),
-                        !write.streamingMode());
+                write.compact(partitionBucket.getKey(), partitionBucket.getRight(), fullCompaction);
             }
         } catch (Exception e) {
             throw new RuntimeException("Exception happens while executing compaction.", e);
