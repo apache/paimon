@@ -31,6 +31,9 @@ import org.apache.flink.table.procedure.ProcedureContext;
 import java.util.Collections;
 import java.util.Map;
 
+import static org.apache.paimon.flink.action.ActionFactory.FULL;
+import static org.apache.paimon.flink.action.CompactActionFactory.checkCompactStrategy;
+
 /**
  * Stay compatible with 1.18 procedure which doesn't support named argument. Usage:
  *
@@ -114,6 +117,7 @@ public class CompactProcedure extends ProcedureBase {
                 procedureContext,
                 tableId,
                 partitions,
+                null,
                 orderStrategy,
                 orderByColumns,
                 tableOptions,
@@ -125,6 +129,7 @@ public class CompactProcedure extends ProcedureBase {
             ProcedureContext procedureContext,
             String tableId,
             String partitions,
+            String compactStrategy,
             String orderStrategy,
             String orderByColumns,
             String tableOptions,
@@ -151,6 +156,10 @@ public class CompactProcedure extends ProcedureBase {
                             tableConf);
             if (!(StringUtils.isNullOrWhitespaceOnly(partitionIdleTime))) {
                 action.withPartitionIdleTime(TimeUtils.parseDuration(partitionIdleTime));
+            }
+
+            if (checkCompactStrategy(compactStrategy)) {
+                action.withFullCompaction(compactStrategy.trim().equalsIgnoreCase(FULL));
             }
             jobName = "Compact Job";
         } else if (!orderStrategy.isEmpty() && !orderByColumns.isEmpty()) {

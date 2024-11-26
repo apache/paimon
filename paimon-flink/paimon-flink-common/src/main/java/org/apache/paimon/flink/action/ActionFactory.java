@@ -61,6 +61,7 @@ public interface ActionFactory extends Factory {
     // Supports `full` and `minor`.
     String COMPACT_STRATEGY = "compact_strategy";
     String MINOR = "minor";
+    String FULL = "full";
 
     Optional<Action> create(MultipleParameterToolAdapter params);
 

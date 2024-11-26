@@ -130,7 +130,7 @@ Example: compact table
     --catalog_conf s3.secret-key=*****
 ```
 * `--compact_strategy` Determines how to pick files to be merged, the default is determined by the runtime execution mode, streaming-mode use `minor` strategy and batch-mode use `full` strategy.
-  * `full` : Only support in batch mode. All files will be picked up for merging.
+  * `full` : Only supports batch mode. All files will be selected for merging.
   * `minor` : Pick the set of files that need to be merged based on specified conditions.
 
 You can use `-D execution.runtime-mode=batch` or `-yD execution.runtime-mode=batch` (for the ON-YARN scenario) to control batch or streaming mode. If you submit a batch job, all

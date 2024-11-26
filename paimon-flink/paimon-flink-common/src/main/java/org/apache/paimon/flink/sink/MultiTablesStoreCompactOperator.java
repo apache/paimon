@@ -165,13 +165,13 @@ public class MultiTablesStoreCompactOperator
 
         if (write.streamingMode()) {
             write.notifyNewFiles(snapshotId, partition, bucket, files);
+            // The full compact is not supported in streaming mode.
             write.compact(partition, bucket, false);
         } else {
             Preconditions.checkArgument(
                     files.isEmpty(),
                     "Batch compact job does not concern what files are compacted. "
                             + "They only need to know what buckets are compacted.");
-            // `minor` compact strategy is supported in batch mode.
             write.compact(partition, bucket, fullCompaction);
         }
     }

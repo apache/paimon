@@ -31,6 +31,7 @@ import org.apache.paimon.utils.StringUtils;
 import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -238,6 +239,112 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
                 "CALL sys.compact(`table` => 'default.T', order_strategy => 'zorder', order_by => 'f2,f1')");
 
         checkLatestSnapshot(table, 21, Snapshot.CommitKind.OVERWRITE);
+    }
+
+    // ----------------------- Minor Compact -----------------------
+
+    @Test
+    public void testBatchMinorCompactStrategy() throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " k INT,"
+                        + " v INT,"
+                        + " hh INT,"
+                        + " dt STRING,"
+                        + " PRIMARY KEY (k, dt, hh) NOT ENFORCED"
+                        + ") PARTITIONED BY (dt, hh) WITH ("
+                        + " 'write-only' = 'true',"
+                        + " 'bucket' = '1'"
+                        + ")");
+        FileStoreTable table = paimonTable("T");
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+
+        sql("INSERT INTO T VALUES (1, 100, 15, '20221208'), (1, 100, 16, '20221208')");
+        sql("INSERT INTO T VALUES (2, 100, 15, '20221208'), (2, 100, 16, '20221208')");
+
+        checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
+
+        sql(
+                "CALL sys.compact(`table` => 'default.T', compact_strategy => 'minor', "
+                        + "options => 'num-sorted-run.compaction-trigger=3')");
+
+        checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
+
+        sql("INSERT INTO T VALUES (1, 100, 15, '20221208')");
+
+        sql(
+                "CALL sys.compact(`table` => 'default.T', compact_strategy => 'minor', "
+                        + "options => 'num-sorted-run.compaction-trigger=3')");
+
+        checkLatestSnapshot(table, 4, Snapshot.CommitKind.COMPACT);
+
+        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+        assertThat(splits.size()).isEqualTo(2);
+        for (DataSplit split : splits) {
+            // Par-16 is not compacted.
+            assertThat(split.dataFiles().size())
+                    .isEqualTo(split.partition().getInt(1) == 16 ? 2 : 1);
+        }
+    }
+
+    @Test
+    public void testBatchFullCompactStrategy() throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " k INT,"
+                        + " v INT,"
+                        + " hh INT,"
+                        + " dt STRING,"
+                        + " PRIMARY KEY (k, dt, hh) NOT ENFORCED"
+                        + ") PARTITIONED BY (dt, hh) WITH ("
+                        + " 'write-only' = 'true',"
+                        + " 'bucket' = '1'"
+                        + ")");
+        FileStoreTable table = paimonTable("T");
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+
+        sql("INSERT INTO T VALUES (1, 100, 15, '20221208'), (1, 100, 16, '20221208')");
+        sql("INSERT INTO T VALUES (2, 100, 15, '20221208'), (2, 100, 16, '20221208')");
+
+        checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
+
+        sql(
+                "CALL sys.compact(`table` => 'default.T', compact_strategy => 'full', "
+                        + "options => 'num-sorted-run.compaction-trigger=3')");
+
+        checkLatestSnapshot(table, 3, Snapshot.CommitKind.COMPACT);
+
+        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+        assertThat(splits.size()).isEqualTo(2);
+        for (DataSplit split : splits) {
+            // Par-16 is not compacted.
+            assertThat(split.dataFiles().size()).isEqualTo(1);
+        }
+    }
+
+    @Test
+    public void testStreamFullCompactStrategy() throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " k INT,"
+                        + " v INT,"
+                        + " hh INT,"
+                        + " dt STRING,"
+                        + " PRIMARY KEY (k, dt, hh) NOT ENFORCED"
+                        + ") PARTITIONED BY (dt, hh) WITH ("
+                        + " 'write-only' = 'true',"
+                        + " 'bucket' = '1'"
+                        + ")");
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+
+        Assertions.assertThatThrownBy(
+                        () ->
+                                streamSqlIter(
+                                                "CALL sys.compact(`table` => 'default.T', compact_strategy => 'full', "
+                                                        + "options => 'num-sorted-run.compaction-trigger=3')")
+                                        .close())
+                .hasMessageContaining(
+                        "The full compact strategy is only supported in batch mode. Please add -Dexecution.runtime-mode=BATCH.");
     }
 
     private void checkLatestSnapshot(

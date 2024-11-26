@@ -22,6 +22,8 @@ import org.apache.paimon.utils.TimeUtils;
 
 import java.util.Optional;
 
+import static org.apache.paimon.flink.action.CompactActionFactory.checkCompactStrategy;
+
 /** Factory to create {@link CompactDatabaseAction}. */
 public class CompactDatabaseActionFactory implements ActionFactory {
 
@@ -56,8 +58,8 @@ public class CompactDatabaseActionFactory implements ActionFactory {
         }
 
         String compactStrategy = params.get(COMPACT_STRATEGY);
-        if (compactStrategy != null && compactStrategy.trim().equalsIgnoreCase(MINOR)) {
-            action.withFullCompaction(false);
+        if (checkCompactStrategy(compactStrategy)) {
+            action.withFullCompaction(compactStrategy.trim().equalsIgnoreCase(FULL));
         }
 
         return Optional.of(action);
@@ -99,6 +101,11 @@ public class CompactDatabaseActionFactory implements ActionFactory {
         System.out.println(
                 "--partition_idle_time is used to do a full compaction for partition which had not receive any new data for 'partition_idle_time' time. And only these partitions will be compacted.");
         System.out.println("--partition_idle_time is only supported in batch mode. ");
+        System.out.println(
+                "--compact_strategy determines how to pick files to be merged, the default is determined by the runtime execution mode. "
+                        + "`full` : Only supports batch mode. All files will be selected for merging."
+                        + "`minor`: Pick the set of files that need to be merged based on specified conditions.");
+
         System.out.println();
 
         System.out.println("Examples:");

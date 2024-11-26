@@ -32,6 +32,8 @@ import org.apache.flink.table.procedure.ProcedureContext;
 import java.util.Collections;
 import java.util.Map;
 
+import static org.apache.paimon.flink.action.ActionFactory.FULL;
+import static org.apache.paimon.flink.action.CompactActionFactory.checkCompactStrategy;
 import static org.apache.paimon.utils.ParameterUtils.getPartitions;
 import static org.apache.paimon.utils.ParameterUtils.parseCommaSeparatedKeyValues;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
@@ -46,6 +48,10 @@ public class CompactProcedure extends ProcedureBase {
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
                 @ArgumentHint(
                         name = "partitions",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "compact_strategy",
                         type = @DataTypeHint("STRING"),
                         isOptional = true),
                 @ArgumentHint(
@@ -64,6 +70,7 @@ public class CompactProcedure extends ProcedureBase {
             ProcedureContext procedureContext,
             String tableId,
             String partitions,
+            String compactStrategy,
             String orderStrategy,
             String orderByColumns,
             String tableOptions,
@@ -89,6 +96,10 @@ public class CompactProcedure extends ProcedureBase {
                             tableConf);
             if (!isNullOrWhitespaceOnly(partitionIdleTime)) {
                 action.withPartitionIdleTime(TimeUtils.parseDuration(partitionIdleTime));
+            }
+
+            if (checkCompactStrategy(compactStrategy)) {
+                action.withFullCompaction(compactStrategy.trim().equalsIgnoreCase(FULL));
             }
             jobName = "Compact Job";
         } else if (!isNullOrWhitespaceOnly(orderStrategy)

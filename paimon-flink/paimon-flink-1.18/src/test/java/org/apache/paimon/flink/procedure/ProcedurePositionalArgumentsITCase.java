@@ -68,9 +68,15 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
                                 sql(
                                         "CALL sys.compact('default.T', '', '', '', 'sink.parallelism=1','pt=1')"))
                 .doesNotThrowAnyException();
-        assertThatCode(() -> sql("CALL sys.compact('default.T', '', 'zorder', 'k', '','','5s')"))
+        assertThatCode(
+                        () ->
+                                sql(
+                                        "CALL sys.compact('default.T', '', '' ,'zorder', 'k', '','','5s')"))
                 .message()
                 .contains("sort compact do not support 'partition_idle_time'.");
+
+        assertThatCode(() -> sql("CALL sys.compact('default.T', '', 'full' ,'', '', '','','')"))
+                .doesNotThrowAnyException();
 
         assertThatCode(() -> sql("CALL sys.compact_database('default')"))
                 .doesNotThrowAnyException();

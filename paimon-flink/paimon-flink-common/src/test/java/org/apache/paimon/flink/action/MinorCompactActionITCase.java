@@ -172,6 +172,34 @@ public class MinorCompactActionITCase extends CompactActionITCaseBase {
                 streamExecutionEnvironmentBuilder().streamingMode().build();
         Assertions.assertThatThrownBy(() -> action.withStreamExecutionEnvironment(env).build())
                 .hasMessage(
-                        "full compact strategy is only supported in batch mode. Please add -Dexecution.runtime-mode=BATCH.");
+                        "The full compact strategy is only supported in batch mode. Please add -Dexecution.runtime-mode=BATCH.");
+    }
+
+    @Test
+    @Timeout(60)
+    public void testCompactStrategyWithWrongUsage() throws Exception {
+        prepareTable(
+                Arrays.asList("dt", "hh"),
+                Arrays.asList("dt", "hh", "k"),
+                Collections.emptyList(),
+                Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true"));
+        Assertions.assertThatThrownBy(
+                        () ->
+                                createAction(
+                                        CompactAction.class,
+                                        "compact",
+                                        "--warehouse",
+                                        warehouse,
+                                        "--database",
+                                        database,
+                                        "--table",
+                                        tableName,
+                                        "--compact_strategy",
+                                        "wrong_usage",
+                                        "--table_conf",
+                                        CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER.key()
+                                                + "=3"))
+                .hasMessage(
+                        "The compact strategy only supports 'full' or 'minor', but 'wrong_usage' is configured.");
     }
 }

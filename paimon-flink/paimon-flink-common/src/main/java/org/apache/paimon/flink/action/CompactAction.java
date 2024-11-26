@@ -136,7 +136,7 @@ public class CompactAction extends TableActionBase {
         } else {
             Preconditions.checkArgument(
                     !(fullCompaction && isStreaming),
-                    "full compact strategy is only supported in batch mode. Please add -Dexecution.runtime-mode=BATCH.");
+                    "The full compact strategy is only supported in batch mode. Please add -Dexecution.runtime-mode=BATCH.");
         }
         if (isStreaming) {
             // for completely asynchronous compaction
