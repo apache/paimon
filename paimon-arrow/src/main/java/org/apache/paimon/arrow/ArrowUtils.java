@@ -58,7 +58,7 @@ import java.util.stream.Collectors;
 /** Utilities for creating Arrow objects. */
 public class ArrowUtils {
 
-    private static final String PARQUET_FIELD_ID = "PARQUET:field_id";
+    static final String PARQUET_FIELD_ID = "PARQUET:field_id";
 
     public static VectorSchemaRoot createVectorSchemaRoot(
             RowType rowType, BufferAllocator allocator) {
