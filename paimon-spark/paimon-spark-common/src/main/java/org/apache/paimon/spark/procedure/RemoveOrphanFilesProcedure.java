@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.operation.CleanOrphanFilesResult;
 import org.apache.paimon.operation.LocalOrphanFilesClean;
 import org.apache.paimon.operation.OrphanFilesClean;
 import org.apache.paimon.spark.catalog.WithPaimonCatalog;
@@ -66,7 +67,9 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                        new StructField("result", LongType, true, Metadata.empty())
+                        new StructField("deletedFileCount", LongType, true, Metadata.empty()),
+                        new StructField(
+                                "deletedFileTotalLenInBytes", LongType, true, Metadata.empty())
                     });
 
     private RemoveOrphanFilesProcedure(TableCatalog tableCatalog) {
@@ -104,11 +107,11 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
         Catalog catalog = ((WithPaimonCatalog) tableCatalog()).paimonCatalog();
         String mode = args.isNullAt(4) ? "DISTRIBUTED" : args.getString(4);
 
-        long deletedFiles;
+        CleanOrphanFilesResult cleanOrphanFilesResult;
         try {
             switch (mode.toUpperCase(Locale.ROOT)) {
                 case "LOCAL":
-                    deletedFiles =
+                    cleanOrphanFilesResult =
                             LocalOrphanFilesClean.executeDatabaseOrphanFiles(
                                     catalog,
                                     identifier.getDatabaseName(),
@@ -120,7 +123,7 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
                                     args.isNullAt(3) ? null : args.getInt(3));
                     break;
                 case "DISTRIBUTED":
-                    deletedFiles =
+                    cleanOrphanFilesResult =
                             SparkOrphanFilesClean.executeDatabaseOrphanFiles(
                                     catalog,
                                     identifier.getDatabaseName(),
@@ -137,7 +140,12 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
                                     + mode
                                     + ". Only 'DISTRIBUTED' and 'LOCAL' are supported.");
             }
-            return new InternalRow[] {newInternalRow(deletedFiles)};
+
+            return new InternalRow[] {
+                newInternalRow(
+                        cleanOrphanFilesResult.getDeletedFileCount(),
+                        cleanOrphanFilesResult.getDeletedFileTotalLenInBytes())
+            };
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

@@ -21,12 +21,12 @@ package org.apache.paimon.operation;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SerializableConsumer;
 
 import javax.annotation.Nullable;
@@ -47,6 +47,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -68,6 +69,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
 
     private final List<Path> deleteFiles;
 
+    private final AtomicLong deletedFilesLenInBytes = new AtomicLong(0);
+
     private Set<String> candidateDeletes;
 
     public LocalOrphanFilesClean(FileStoreTable table) {
@@ -87,16 +90,18 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                         table.coreOptions().deleteFileThreadNum(), "ORPHAN_FILES_CLEAN");
     }
 
-    public List<Path> clean() throws IOException, ExecutionException, InterruptedException {
+    public CleanOrphanFilesResult clean()
+            throws IOException, ExecutionException, InterruptedException {
         List<String> branches = validBranches();
 
         // specially handle to clear snapshot dir
-        cleanSnapshotDir(branches, deleteFiles::add);
+        cleanSnapshotDir(branches, deleteFiles::add, deletedFilesLenInBytes::addAndGet);
 
         // delete candidate files
-        Map<String, Path> candidates = getCandidateDeletingFiles();
+        Map<String, Pair<Path, Long>> candidates = getCandidateDeletingFiles();
         if (candidates.isEmpty()) {
-            return deleteFiles;
+            return new CleanOrphanFilesResult(
+                    deleteFiles, deleteFiles.size(), deletedFilesLenInBytes.get());
         }
         candidateDeletes = new HashSet<>(candidates.keySet());
 
@@ -108,12 +113,22 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
 
         // delete unused files
         candidateDeletes.removeAll(usedFiles);
-        candidateDeletes.stream().map(candidates::get).forEach(fileCleaner);
+        candidateDeletes.stream()
+                .map(candidates::get)
+                .forEach(
+                        deleteFileInfo -> {
+                            deletedFilesLenInBytes.addAndGet(deleteFileInfo.getRight());
+                            fileCleaner.accept(deleteFileInfo.getLeft());
+                        });
         deleteFiles.addAll(
-                candidateDeletes.stream().map(candidates::get).collect(Collectors.toList()));
+                candidateDeletes.stream()
+                        .map(candidates::get)
+                        .map(Pair::getLeft)
+                        .collect(Collectors.toList()));
         candidateDeletes.clear();
 
-        return deleteFiles;
+        return new CleanOrphanFilesResult(
+                deleteFiles, deleteFiles.size(), deletedFilesLenInBytes.get());
     }
 
     private void collectWithoutDataFile(
@@ -172,19 +187,20 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
      * Get all the candidate deleting files in the specified directories and filter them by
      * olderThanMillis.
      */
-    private Map<String, Path> getCandidateDeletingFiles() {
+    private Map<String, Pair<Path, Long>> getCandidateDeletingFiles() {
         List<Path> fileDirs = listPaimonFileDirs();
-        Function<Path, List<Path>> processor =
+        Function<Path, List<Pair<Path, Long>>> processor =
                 path ->
                         tryBestListingDirs(path).stream()
                                 .filter(this::oldEnough)
-                                .map(FileStatus::getPath)
+                                .map(status -> Pair.of(status.getPath(), status.getLen()))
                                 .collect(Collectors.toList());
-        Iterator<Path> allPaths = randomlyExecuteSequentialReturn(executor, processor, fileDirs);
-        Map<String, Path> result = new HashMap<>();
-        while (allPaths.hasNext()) {
-            Path next = allPaths.next();
-            result.put(next.getName(), next);
+        Iterator<Pair<Path, Long>> allFilesInfo =
+                randomlyExecuteSequentialReturn(executor, processor, fileDirs);
+        Map<String, Pair<Path, Long>> result = new HashMap<>();
+        while (allFilesInfo.hasNext()) {
+            Pair<Path, Long> fileInfo = allFilesInfo.next();
+            result.put(fileInfo.getLeft().getName(), fileInfo);
         }
         return result;
     }
@@ -197,7 +213,6 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
             SerializableConsumer<Path> fileCleaner,
             @Nullable Integer parallelism)
             throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
-        List<LocalOrphanFilesClean> orphanFilesCleans = new ArrayList<>();
         List<String> tableNames = Collections.singletonList(tableName);
         if (tableName == null || "*".equals(tableName)) {
             tableNames = catalog.listTables(databaseName);
@@ -214,6 +229,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                             }
                         };
 
+        List<LocalOrphanFilesClean> orphanFilesCleans = new ArrayList<>(tableNames.size());
         for (String t : tableNames) {
             Identifier identifier = new Identifier(databaseName, t);
             Table table = catalog.getTable(identifier).copy(dynamicOptions);
@@ -230,7 +246,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         return orphanFilesCleans;
     }
 
-    public static long executeDatabaseOrphanFiles(
+    public static CleanOrphanFilesResult executeDatabaseOrphanFiles(
             Catalog catalog,
             String databaseName,
             @Nullable String tableName,
@@ -249,15 +265,17 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
 
         ExecutorService executorService =
                 Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
-        List<Future<List<Path>>> tasks = new ArrayList<>();
+        List<Future<CleanOrphanFilesResult>> tasks = new ArrayList<>(tableCleans.size());
         for (LocalOrphanFilesClean clean : tableCleans) {
             tasks.add(executorService.submit(clean::clean));
         }
 
-        List<Path> cleanOrphanFiles = new ArrayList<>();
-        for (Future<List<Path>> task : tasks) {
+        long deletedFileCount = 0;
+        long deletedFileTotalLenInBytes = 0;
+        for (Future<CleanOrphanFilesResult> task : tasks) {
             try {
-                cleanOrphanFiles.addAll(task.get());
+                deletedFileCount += task.get().getDeletedFileCount();
+                deletedFileTotalLenInBytes += task.get().getDeletedFileTotalLenInBytes();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new RuntimeException(e);
@@ -267,6 +285,6 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         }
 
         executorService.shutdownNow();
-        return cleanOrphanFiles.size();
+        return new CleanOrphanFilesResult(deletedFileCount, deletedFileTotalLenInBytes);
     }
 }
