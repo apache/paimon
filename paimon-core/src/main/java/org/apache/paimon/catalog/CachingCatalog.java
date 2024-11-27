@@ -265,6 +265,13 @@ public class CachingCatalog extends DelegateCatalog {
                             .maximumSize(snapshotMaxNumPerTable)
                             .executor(Runnable::run)
                             .build());
+            storeTable.setStatsCache(
+                    Caffeine.newBuilder()
+                            .softValues()
+                            .expireAfterAccess(expirationInterval)
+                            .maximumSize(5)
+                            .executor(Runnable::run)
+                            .build());
             if (manifestCache != null) {
                 storeTable.setManifestCache(manifestCache);
             }

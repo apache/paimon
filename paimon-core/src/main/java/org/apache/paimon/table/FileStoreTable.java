@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
@@ -46,6 +47,8 @@ public interface FileStoreTable extends DataTable {
     void setManifestCache(SegmentsCache<Path> manifestCache);
 
     void setSnapshotCache(Cache<Path, Snapshot> cache);
+
+    void setStatsCache(Cache<String, Statistics> cache);
 
     @Override
     default RowType rowType() {

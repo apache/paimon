@@ -352,6 +352,10 @@ class CachingCatalogTest extends CatalogTestBase {
 
         Snapshot snapshot = table.snapshot(1);
         assertThat(snapshot).isSameAs(table.snapshot(1));
+
+        // copy
+        Snapshot copied = table.copy(Collections.singletonMap("a", "b")).snapshot(1);
+        assertThat(copied).isSameAs(snapshot);
     }
 
     @Test
@@ -386,7 +390,8 @@ class CachingCatalogTest extends CatalogTestBase {
 
         // repeat read
         for (int i = 0; i < 5; i++) {
-            table = catalog.getTable(tableIdent);
+            // test copy too
+            table = catalog.getTable(tableIdent).copy(Collections.singletonMap("a", "b"));
             ReadBuilder readBuilder = table.newReadBuilder();
             TableScan scan = readBuilder.newScan();
             TableRead read = readBuilder.newRead();
