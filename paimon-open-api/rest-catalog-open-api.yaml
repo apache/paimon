@@ -62,7 +62,7 @@ components:
     ConfigResponse:
       type: object
       properties:
-        optionsoptions:
+        options:
           type: object
           additionalProperties:
             type: string
