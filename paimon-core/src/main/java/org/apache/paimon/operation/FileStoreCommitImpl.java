@@ -176,7 +176,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.manifestFile = manifestFileFactory.create();
         this.manifestList = manifestListFactory.create();
         this.indexManifestFile = indexManifestFileFactory.create();
-        this.scan = scan;
+        // Stats in DELETE Manifest Entries is useless
+        this.scan = scan.dropStats();
         this.numBucket = numBucket;
         this.manifestTargetSize = manifestTargetSize;
         this.manifestFullCompactionSize = manifestFullCompactionSize;
