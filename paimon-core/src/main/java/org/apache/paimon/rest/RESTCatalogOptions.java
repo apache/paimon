@@ -31,12 +31,12 @@ public class RESTCatalogOptions {
                     .noDefaultValue()
                     .withDescription("REST Catalog server's uri.");
     public static final ConfigOption<String> TOKEN =
-            ConfigOptions.key("rest.catalog.auth.token")
+            ConfigOptions.key("token")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog server's auth token.");
     public static final ConfigOption<Duration> CONNECT_TIMEOUT =
-            ConfigOptions.key("rest.client.connect-timeout")
+            ConfigOptions.key("rest.client.connection-timeout")
                     .durationType()
                     .noDefaultValue()
                     .withDescription("REST Catalog http client connect timeout.");

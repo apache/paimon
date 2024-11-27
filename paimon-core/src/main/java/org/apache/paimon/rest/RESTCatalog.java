@@ -56,7 +56,7 @@ public class RESTCatalog implements Catalog {
         String uri = options.get(RESTCatalogOptions.URI);
         token = options.get(RESTCatalogOptions.TOKEN);
         Optional<Duration> connectTimeout = options.getOptional(RESTCatalogOptions.CONNECT_TIMEOUT);
-        Optional<Duration> readTimeout = options.getOptional(RESTCatalogOptions.CONNECT_TIMEOUT);
+        Optional<Duration> readTimeout = options.getOptional(RESTCatalogOptions.READ_TIMEOUT);
         Integer threadPoolSize = options.get(RESTCatalogOptions.THREAD_POOL_SIZE);
         int queueSize = options.get(RESTCatalogOptions.THREAD_POOL_QUEUE_SIZE);
         HttpClientOptions httpClientOptions =
