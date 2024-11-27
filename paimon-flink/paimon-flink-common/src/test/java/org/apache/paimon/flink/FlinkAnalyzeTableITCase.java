@@ -28,6 +28,7 @@ import org.apache.paimon.utils.DateTimeUtils;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
 import java.util.Map;
 import java.util.Optional;
 
@@ -63,7 +64,13 @@ public class FlinkAnalyzeTableITCase extends CatalogITCaseBase {
         Assertions.assertTrue(stats.mergedRecordSize().isPresent());
         Assertions.assertTrue(stats.colStats().isEmpty());
 
+        // by default, caching catalog should cache it
         Optional<Statistics> newStats = table.statistics();
+        assertThat(newStats.isPresent()).isTrue();
+        assertThat(newStats.get()).isSameAs(stats);
+
+        // copy the table
+        newStats = table.copy(Collections.singletonMap("a", "b")).statistics();
         assertThat(newStats.isPresent()).isTrue();
         assertThat(newStats.get()).isSameAs(stats);
     }

@@ -61,7 +61,6 @@ import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanne
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.utils.BranchManager;
-import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SimpleFileReader;
@@ -101,7 +100,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     protected final TableSchema tableSchema;
     protected final CatalogEnvironment catalogEnvironment;
 
-    @Nullable private transient LazyField<Statistics> cachedStats;
+    @Nullable protected transient SegmentsCache<Path> manifestCache;
+    @Nullable protected transient Cache<Path, Snapshot> snapshotCache;
+    @Nullable protected transient Cache<String, Statistics> statsCache;
 
     protected AbstractFileStoreTable(
             FileIO fileIO,
@@ -126,12 +127,19 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void setManifestCache(SegmentsCache<Path> manifestCache) {
+        this.manifestCache = manifestCache;
         store().setManifestCache(manifestCache);
     }
 
     @Override
     public void setSnapshotCache(Cache<Path, Snapshot> cache) {
+        this.snapshotCache = cache;
         store().setSnapshotCache(cache);
+    }
+
+    @Override
+    public void setStatsCache(Cache<String, Statistics> cache) {
+        this.statsCache = cache;
     }
 
     @Override
@@ -189,22 +197,25 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public Optional<Statistics> statistics() {
-        return Optional.ofNullable(cachedStats().get());
-    }
-
-    private LazyField<Statistics> cachedStats() {
-        if (cachedStats == null) {
-            cachedStats = new LazyField<>(this::readStats);
-        }
-        return cachedStats;
-    }
-
-    @Nullable
-    private Statistics readStats() {
         Snapshot snapshot = TimeTravelUtil.resolveSnapshot(this);
-        return snapshot == null
-                ? null
-                : store().newStatsFileHandler().readStats(snapshot).orElse(null);
+        if (snapshot != null) {
+            String file = snapshot.statistics();
+            if (file == null) {
+                return Optional.empty();
+            }
+            if (statsCache != null) {
+                Statistics stats = statsCache.getIfPresent(file);
+                if (stats != null) {
+                    return Optional.of(stats);
+                }
+            }
+            Statistics stats = store().newStatsFileHandler().readStats(file);
+            if (statsCache != null) {
+                statsCache.put(file, stats);
+            }
+            return Optional.of(stats);
+        }
+        return Optional.empty();
     }
 
     @Override
@@ -357,9 +368,22 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public FileStoreTable copy(TableSchema newTableSchema) {
-        return newTableSchema.primaryKeys().isEmpty()
-                ? new AppendOnlyFileStoreTable(fileIO, path, newTableSchema, catalogEnvironment)
-                : new PrimaryKeyFileStoreTable(fileIO, path, newTableSchema, catalogEnvironment);
+        AbstractFileStoreTable copied =
+                newTableSchema.primaryKeys().isEmpty()
+                        ? new AppendOnlyFileStoreTable(
+                                fileIO, path, newTableSchema, catalogEnvironment)
+                        : new PrimaryKeyFileStoreTable(
+                                fileIO, path, newTableSchema, catalogEnvironment);
+        if (snapshotCache != null) {
+            copied.setSnapshotCache(snapshotCache);
+        }
+        if (manifestCache != null) {
+            copied.setManifestCache(manifestCache);
+        }
+        if (statsCache != null) {
+            copied.setStatsCache(statsCache);
+        }
+        return copied;
     }
 
     @Override
