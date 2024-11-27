@@ -27,6 +27,11 @@ import org.apache.spark.sql.catalyst.rules.Rule
 /** These resolution rules are incompatible between different versions of spark. */
 case class PaimonIncompatibleResolutionRules(session: SparkSession) extends Rule[LogicalPlan] {
 
-  override def apply(plan: LogicalPlan): LogicalPlan = plan
+  override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperatorsDown {
+
+    case func: PaimonTableValueFunction if func.args.forall(_.resolved) =>
+      PaimonTableValuedFunctions.resolvePaimonTableValuedFunction(session, func)
+
+  }
 
 }
