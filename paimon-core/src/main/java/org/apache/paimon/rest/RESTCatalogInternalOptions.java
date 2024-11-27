@@ -26,6 +26,6 @@ public class RESTCatalogInternalOptions {
     public static final ConfigOption<String> PREFIX =
             ConfigOptions.key("prefix")
                     .stringType()
-                    .defaultValue("default")
-                    .withDescription("REST Catalog server's endpoint prefix.");
+                    .noDefaultValue()
+                    .withDescription("REST Catalog uri's prefix.");
 }
