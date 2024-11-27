@@ -254,8 +254,10 @@ under the License.
                         <configuration>
                             <filters>
                                 <filter>
-                                    <artifact>*</artifact>
+                                    <artifact>*:*</artifact>
                                     <excludes>
+                                        <exclude>okhttp3/internal/publicsuffix/NOTICE</exclude>
+                                        <exclude>okhttp/LICENSE</exclude>
                                         <exclude>NOTICE</exclude>
                                     </excludes>
                                 </filter>
