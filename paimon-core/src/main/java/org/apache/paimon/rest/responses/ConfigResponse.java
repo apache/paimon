@@ -19,29 +19,58 @@
 package org.apache.paimon.rest.responses;
 
 import org.apache.paimon.rest.RESTResponse;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import java.beans.ConstructorProperties;
 import java.util.Map;
+import java.util.Objects;
 
 /** Response for getting config. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ConfigResponse implements RESTResponse {
-    private static final String FIELD_OPTIONS = "options";
+    private static final String FIELD_DEFAULTS = "defaults";
+    private static final String FIELD_OVERRIDES = "overrides";
 
-    @JsonProperty(FIELD_OPTIONS)
-    private Map<String, String> options;
+    @JsonProperty(FIELD_DEFAULTS)
+    private Map<String, String> defaults;
 
-    @ConstructorProperties({FIELD_OPTIONS})
-    public ConfigResponse(Map<String, String> options) {
-        this.options = options;
+    @JsonProperty(FIELD_OVERRIDES)
+    private Map<String, String> overrides;
+
+    @ConstructorProperties({FIELD_DEFAULTS, FIELD_OVERRIDES})
+    public ConfigResponse(Map<String, String> defaults, Map<String, String> overrides) {
+        this.defaults = defaults;
+        this.overrides = overrides;
     }
 
-    @JsonGetter(FIELD_OPTIONS)
-    public Map<String, String> options() {
-        return options;
+    public Map<String, String> merge(Map<String, String> clientProperties) {
+        Preconditions.checkNotNull(
+                clientProperties,
+                "Cannot merge client properties with server-provided properties. Invalid client configuration: null");
+        Map<String, String> merged =
+                defaults != null ? Maps.newHashMap(defaults) : Maps.newHashMap();
+        merged.putAll(clientProperties);
+
+        if (overrides != null) {
+            merged.putAll(overrides);
+        }
+
+        return ImmutableMap.copyOf(Maps.filterValues(merged, Objects::nonNull));
+    }
+
+    @JsonGetter(FIELD_DEFAULTS)
+    public Map<String, String> defaults() {
+        return defaults;
+    }
+
+    @JsonGetter(FIELD_OVERRIDES)
+    public Map<String, String> overrides() {
+        return overrides;
     }
 }

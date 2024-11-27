@@ -32,15 +32,12 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
-import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 
 /** A catalog implementation for REST. */
@@ -49,6 +46,7 @@ public class RESTCatalog implements Catalog {
     private String token;
     private ResourcePaths resourcePaths;
     private Map<String, String> options;
+    private Map<String, String> baseHeader;
 
     private static final ObjectMapper objectMapper = RESTObjectMapper.create();
 
@@ -70,7 +68,10 @@ public class RESTCatalog implements Catalog {
                         queueSize,
                         DefaultErrorHandler.getInstance());
         this.client = new HttpClient(httpClientOptions);
-        this.options = mergeOptions(optionsInner(), options.toMap());
+        Map<String, String> initHeaders =
+                RESTUtil.merge(configHeaders(options.toMap()), authHeaders(token));
+        this.options = optionsInner(initHeaders, options.toMap());
+        this.baseHeader = configHeaders(this.options());
         this.resourcePaths =
                 ResourcePaths.forCatalogProperties(
                         this.options.get(RESTCatalogInternalOptions.PREFIX));
@@ -178,29 +179,21 @@ public class RESTCatalog implements Catalog {
     public void close() throws Exception {}
 
     @VisibleForTesting
-    Map<String, String> optionsInner() {
+    Map<String, String> optionsInner(
+            Map<String, String> headers, Map<String, String> clientProperties) {
         ConfigResponse response =
                 client.post(
-                        ResourcePaths.config(),
-                        new ConfigRequest(),
-                        ConfigResponse.class,
-                        headers());
-        return response.options();
+                        ResourcePaths.config(), new ConfigRequest(), ConfigResponse.class, headers);
+        return response.merge(clientProperties);
     }
 
-    private Map<String, String> mergeOptions(
-            Map<String, String> propertiesFromServer, Map<String, String> clientProperties) {
-        Map<String, String> merged =
-                propertiesFromServer != null
-                        ? Maps.newHashMap(propertiesFromServer)
-                        : Maps.newHashMap();
-        merged.putAll(clientProperties);
-        return ImmutableMap.copyOf(Maps.filterValues(merged, Objects::nonNull));
-    }
-
-    private Map<String, String> headers() {
+    private Map<String, String> authHeaders(String token) {
         Map<String, String> header = new HashMap<>();
         header.put("Authorization", "Bearer " + token);
         return header;
+    }
+
+    private static Map<String, String> configHeaders(Map<String, String> properties) {
+        return RESTUtil.extractPrefixMap(properties, "header.");
     }
 }

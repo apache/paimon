@@ -21,8 +21,7 @@ package org.apache.paimon.rest;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.CatalogOptions;
 
 /** Factory to create {@link RESTCatalog}. */
 public class RESTCatalogFactory implements CatalogFactory {
@@ -34,7 +33,10 @@ public class RESTCatalogFactory implements CatalogFactory {
     }
 
     @Override
-    public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
+    public Catalog create(CatalogContext context) {
+        if (context.options().getOptional(CatalogOptions.WAREHOUSE).isPresent()) {
+            throw new IllegalArgumentException("warehouse is not supported in config.");
+        }
         return new RESTCatalog(context.options());
     }
 }

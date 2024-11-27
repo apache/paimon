@@ -61,7 +61,8 @@ public class RESTCatalogController {
     public ResponseEntity<ConfigResponse> getConfig(@RequestBody ConfigRequest request) {
         try {
             Map<String, String> defaults = new HashMap<>();
-            ConfigResponse response = new ConfigResponse(defaults);
+            Map<String, String> overrides = new HashMap<>();
+            ConfigResponse response = new ConfigResponse(defaults, overrides);
             return new ResponseEntity<>(response, HttpStatus.CREATED);
         } catch (Exception e) {
             return new ResponseEntity<>(null, HttpStatus.INTERNAL_SERVER_ERROR);

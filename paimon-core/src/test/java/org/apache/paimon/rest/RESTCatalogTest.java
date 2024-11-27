@@ -27,6 +27,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
@@ -60,12 +61,13 @@ public class RESTCatalogTest {
         String key = "a";
         String value = "b";
         mockOptions(key, value);
-        Map<String, String> response = restCatalog.optionsInner();
+        Map<String, String> header = new HashMap<>();
+        Map<String, String> response = restCatalog.optionsInner(header, new HashMap<>());
         assertEquals(value, response.get(key));
     }
 
     private void mockOptions(String key, String value) {
-        String mockResponse = String.format("{\"options\": {\"%s\": \"%s\"}}", key, value);
+        String mockResponse = String.format("{\"defaults\": {\"%s\": \"%s\"}}", key, value);
         MockResponse mockResponseObj =
                 new MockResponse()
                         .setBody(mockResponse)
