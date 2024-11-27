@@ -187,7 +187,7 @@ public class RESTCatalog implements Catalog {
         return response.options();
     }
 
-    public Map<String, String> mergeOptions(
+    private Map<String, String> mergeOptions(
             Map<String, String> propertiesFromServer, Map<String, String> clientProperties) {
         Map<String, String> merged =
                 propertiesFromServer != null
