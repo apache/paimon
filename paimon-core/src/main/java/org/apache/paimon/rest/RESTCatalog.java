@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
@@ -31,32 +32,36 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
-import java.net.URI;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 
 /** A catalog implementation for REST. */
 public class RESTCatalog implements Catalog {
     private RESTClient client;
     private String token;
     private ResourcePaths resourcePaths;
+    private Map<String, String> options;
 
     private static final ObjectMapper objectMapper = RESTObjectMapper.create();
 
     public RESTCatalog(Options options) {
-        URI endpoint = options.get(RESTCatalogOptions.ENDPOINT);
+        String uri = options.get(RESTCatalogOptions.URI);
         token = options.get(RESTCatalogOptions.TOKEN);
-        Duration connectTimeout = options.get(RESTCatalogOptions.CONNECT_TIMEOUT);
-        Duration readTimeout = options.get(RESTCatalogOptions.CONNECT_TIMEOUT);
+        Optional<Duration> connectTimeout = options.getOptional(RESTCatalogOptions.CONNECT_TIMEOUT);
+        Optional<Duration> readTimeout = options.getOptional(RESTCatalogOptions.CONNECT_TIMEOUT);
         Integer threadPoolSize = options.get(RESTCatalogOptions.THREAD_POOL_SIZE);
         int queueSize = options.get(RESTCatalogOptions.THREAD_POOL_QUEUE_SIZE);
         HttpClientOptions httpClientOptions =
                 new HttpClientOptions(
-                        endpoint,
+                        uri,
                         connectTimeout,
                         readTimeout,
                         objectMapper,
@@ -64,8 +69,10 @@ public class RESTCatalog implements Catalog {
                         queueSize,
                         DefaultErrorHandler.getInstance());
         this.client = new HttpClient(httpClientOptions);
+        this.options = mergeOptions(optionsInner(), options.toMap());
         this.resourcePaths =
-                ResourcePaths.forCatalogProperties(options.get(RESTCatalogOptions.ENDPOINT_PREFIX));
+                ResourcePaths.forCatalogProperties(
+                        this.options.get(RESTCatalogInternalOptions.PREFIX));
     }
 
     @Override
@@ -75,13 +82,7 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public Map<String, String> options() {
-        ConfigResponse response =
-                client.post(
-                        resourcePaths.config(),
-                        new ConfigRequest(),
-                        ConfigResponse.class,
-                        headers());
-        return response.options();
+        return this.options;
     }
 
     @Override
@@ -174,6 +175,27 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public void close() throws Exception {}
+
+    @VisibleForTesting
+    Map<String, String> optionsInner() {
+        ConfigResponse response =
+                client.post(
+                        ResourcePaths.config(),
+                        new ConfigRequest(),
+                        ConfigResponse.class,
+                        headers());
+        return response.options();
+    }
+
+    public Map<String, String> mergeOptions(
+            Map<String, String> propertiesFromServer, Map<String, String> clientProperties) {
+        Map<String, String> merged =
+                propertiesFromServer != null
+                        ? Maps.newHashMap(propertiesFromServer)
+                        : Maps.newHashMap();
+        merged.putAll(clientProperties);
+        return ImmutableMap.copyOf(Maps.filterValues(merged, Objects::nonNull));
+    }
 
     private Map<String, String> headers() {
         Map<String, String> header = new HashMap<>();

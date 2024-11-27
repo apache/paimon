@@ -33,7 +33,6 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 import java.io.IOException;
-import java.net.URI;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
@@ -49,7 +48,7 @@ import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 public class HttpClient implements RESTClient {
 
     private final OkHttpClient okHttpClient;
-    private final URI endpoint;
+    private final String uri;
     private final ObjectMapper mapper;
     private final ErrorHandler errorHandler;
 
@@ -57,7 +56,7 @@ public class HttpClient implements RESTClient {
     private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
 
     public HttpClient(HttpClientOptions httpClientOptions) {
-        this.endpoint = httpClientOptions.endpoint();
+        this.uri = httpClientOptions.uri();
         this.mapper = httpClientOptions.mapper();
         this.okHttpClient = createHttpClient(httpClientOptions);
         this.errorHandler = httpClientOptions.errorHandler();
@@ -70,7 +69,7 @@ public class HttpClient implements RESTClient {
             RequestBody requestBody = buildRequestBody(body);
             Request request =
                     new Request.Builder()
-                            .url(endpoint + path)
+                            .url(uri + path)
                             .post(requestBody)
                             .headers(Headers.of(headers))
                             .build();
@@ -117,11 +116,15 @@ public class HttpClient implements RESTClient {
 
         OkHttpClient.Builder builder =
                 new OkHttpClient.Builder()
-                        .connectTimeout(httpClientOptions.connectTimeout())
-                        .readTimeout(httpClientOptions.readTimeout())
                         .dispatcher(new Dispatcher(executorService))
                         .retryOnConnectionFailure(true)
                         .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT));
+        if (httpClientOptions.connectTimeout().isPresent()) {
+            builder.connectTimeout(httpClientOptions.connectTimeout().get());
+        }
+        if (httpClientOptions.readTimeout().isPresent()) {
+            builder.readTimeout(httpClientOptions.readTimeout().get());
+        }
 
         return builder.build();
     }

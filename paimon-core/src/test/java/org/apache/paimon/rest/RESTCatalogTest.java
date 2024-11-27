@@ -27,7 +27,6 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.IOException;
-import java.net.URI;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
@@ -42,11 +41,12 @@ public class RESTCatalogTest {
     public void setUp() throws IOException {
         mockWebServer = new MockWebServer();
         mockWebServer.start();
-        URI baseUrl = mockWebServer.url("").uri();
+        String baseUrl = mockWebServer.url("").toString();
         Options options = new Options();
-        options.set(RESTCatalogOptions.ENDPOINT, baseUrl);
+        options.set(RESTCatalogOptions.URI, baseUrl);
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
+        mockOptions(RESTCatalogInternalOptions.PREFIX.key(), "prefix");
         restCatalog = new RESTCatalog(options);
     }
 
@@ -57,13 +57,19 @@ public class RESTCatalogTest {
 
     @Test
     public void testGetConfig() {
-        String mockResponse = "{\"options\": {\"a\": \"b\"}}";
+        String key = "a";
+        String value = "b";
+        mockOptions(key, value);
+        Map<String, String> response = restCatalog.optionsInner();
+        assertEquals(value, response.get(key));
+    }
+
+    private void mockOptions(String key, String value) {
+        String mockResponse = String.format("{\"options\": {\"%s\": \"%s\"}}", key, value);
         MockResponse mockResponseObj =
                 new MockResponse()
                         .setBody(mockResponse)
                         .addHeader("Content-Type", "application/json");
         mockWebServer.enqueue(mockResponseObj);
-        Map<String, String> response = restCatalog.options();
-        assertEquals("b", response.get("a"));
     }
 }

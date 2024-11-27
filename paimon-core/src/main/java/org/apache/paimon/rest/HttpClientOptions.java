@@ -20,29 +20,29 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
-import java.net.URI;
 import java.time.Duration;
+import java.util.Optional;
 
 /** HTTP client build parameter. */
 public class HttpClientOptions {
 
-    private final URI endpoint;
-    private final Duration connectTimeout;
-    private final Duration readTimeout;
+    private final String uri;
+    private final Optional<Duration> connectTimeout;
+    private final Optional<Duration> readTimeout;
     private final ObjectMapper mapper;
     private final int threadPoolSize;
     private final ErrorHandler errorHandler;
     private final int queueSize;
 
     public HttpClientOptions(
-            URI endpoint,
-            Duration connectTimeout,
-            Duration readTimeout,
+            String uri,
+            Optional<Duration> connectTimeout,
+            Optional<Duration> readTimeout,
             ObjectMapper mapper,
             int threadPoolSize,
             int queueSize,
             ErrorHandler errorHandler) {
-        this.endpoint = endpoint;
+        this.uri = uri;
         this.connectTimeout = connectTimeout;
         this.readTimeout = readTimeout;
         this.mapper = mapper;
@@ -51,15 +51,15 @@ public class HttpClientOptions {
         this.queueSize = queueSize;
     }
 
-    public URI endpoint() {
-        return endpoint;
+    public String uri() {
+        return uri;
     }
 
-    public Duration connectTimeout() {
+    public Optional<Duration> connectTimeout() {
         return connectTimeout;
     }
 
-    public Duration readTimeout() {
+    public Optional<Duration> readTimeout() {
         return readTimeout;
     }
 

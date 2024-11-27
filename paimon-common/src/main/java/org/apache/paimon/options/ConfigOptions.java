@@ -21,7 +21,6 @@ package org.apache.paimon.options;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.options.description.Description;
 
-import java.net.URI;
 import java.time.Duration;
 import java.util.Map;
 
@@ -163,11 +162,6 @@ public class ConfigOptions {
          */
         public TypedConfigOptionBuilder<Map<String, String>> mapType() {
             return new TypedConfigOptionBuilder<>(key, PROPERTIES_MAP_CLASS);
-        }
-
-        /** Defines that the value of the option should be of {@link URI} type. */
-        public TypedConfigOptionBuilder<URI> uriType() {
-            return new TypedConfigOptionBuilder<>(key, URI.class);
         }
 
         /**

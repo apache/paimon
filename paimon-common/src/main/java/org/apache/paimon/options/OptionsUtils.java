@@ -75,8 +75,6 @@ public class OptionsUtils {
             return (T) convertToMemorySize(rawValue);
         } else if (clazz == Map.class) {
             return (T) convertToProperties(rawValue);
-        } else if (clazz == URI.class) {
-            return (T) convertToUri(rawValue);
         }
 
         throw new IllegalArgumentException("Unsupported type: " + clazz);

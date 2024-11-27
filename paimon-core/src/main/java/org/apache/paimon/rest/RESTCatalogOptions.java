@@ -21,21 +21,15 @@ package org.apache.paimon.rest;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 
-import java.net.URI;
 import java.time.Duration;
 
 /** Options for REST Catalog. */
 public class RESTCatalogOptions {
-    public static final ConfigOption<URI> ENDPOINT =
-            ConfigOptions.key("rest.catalog.endpoint")
-                    .uriType()
-                    .noDefaultValue()
-                    .withDescription("REST Catalog server's endpoint.");
-    public static final ConfigOption<String> ENDPOINT_PREFIX =
-            ConfigOptions.key("rest.catalog.endpoint.prefix")
+    public static final ConfigOption<String> URI =
+            ConfigOptions.key("uri")
                     .stringType()
-                    .defaultValue("default")
-                    .withDescription("REST Catalog server's endpoint prefix.");
+                    .noDefaultValue()
+                    .withDescription("REST Catalog server's uri.");
     public static final ConfigOption<String> TOKEN =
             ConfigOptions.key("rest.catalog.auth.token")
                     .stringType()
@@ -44,12 +38,12 @@ public class RESTCatalogOptions {
     public static final ConfigOption<Duration> CONNECT_TIMEOUT =
             ConfigOptions.key("rest.client.connect-timeout")
                     .durationType()
-                    .defaultValue(Duration.ofMillis(3_000))
+                    .noDefaultValue()
                     .withDescription("REST Catalog http client connect timeout.");
     public static final ConfigOption<Duration> READ_TIMEOUT =
             ConfigOptions.key("rest.client.read-timeout")
                     .durationType()
-                    .defaultValue(Duration.ofMillis(3_000))
+                    .noDefaultValue()
                     .withDescription("REST Catalog http client read timeout.");
     public static final ConfigOption<Integer> THREAD_POOL_SIZE =
             ConfigOptions.key("rest.client.num-threads")

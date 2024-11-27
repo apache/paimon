@@ -27,10 +27,10 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.IOException;
-import java.net.URI;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.Assert.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
@@ -52,13 +52,13 @@ public class HttpClientTest {
     public void setUp() throws IOException {
         mockWebServer = new MockWebServer();
         mockWebServer.start();
-        URI baseUrl = mockWebServer.url("").uri();
+        String baseUrl = mockWebServer.url("").toString();
         errorHandler = mock(ErrorHandler.class);
         HttpClientOptions httpClientOptions =
                 new HttpClientOptions(
                         baseUrl,
-                        Duration.ofSeconds(3),
-                        Duration.ofSeconds(3),
+                        Optional.of(Duration.ofSeconds(3)),
+                        Optional.of(Duration.ofSeconds(3)),
                         objectMapper,
                         1,
                         10,
