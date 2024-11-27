@@ -42,12 +42,12 @@ public class RESTCatalogOptions {
                     .noDefaultValue()
                     .withDescription("REST Catalog server's auth token.");
     public static final ConfigOption<Duration> CONNECT_TIMEOUT =
-            ConfigOptions.key("rest.catalog.connect-timeout")
+            ConfigOptions.key("rest.client.connect-timeout")
                     .durationType()
                     .defaultValue(Duration.ofMillis(3_000))
                     .withDescription("REST Catalog http client connect timeout.");
     public static final ConfigOption<Duration> READ_TIMEOUT =
-            ConfigOptions.key("rest.catalog.read-timeout")
+            ConfigOptions.key("rest.client.read-timeout")
                     .durationType()
                     .defaultValue(Duration.ofMillis(3_000))
                     .withDescription("REST Catalog http client read timeout.");

@@ -57,7 +57,7 @@ public class RESTCatalogTest {
 
     @Test
     public void testGetConfig() {
-        String mockResponse = "{\"defaults\": {\"a\": \"b\"}}";
+        String mockResponse = "{\"options\": {\"a\": \"b\"}}";
         MockResponse mockResponseObj =
                 new MockResponse()
                         .setBody(mockResponse)

@@ -30,18 +30,18 @@ import java.util.Map;
 /** Response for getting config. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ConfigResponse implements RESTResponse {
-    private static final String FIELD_DEFAULTS = "defaults";
+    private static final String FIELD_OPTIONS = "options";
 
-    @JsonProperty(FIELD_DEFAULTS)
-    private Map<String, String> defaults;
+    @JsonProperty(FIELD_OPTIONS)
+    private Map<String, String> options;
 
-    @ConstructorProperties({FIELD_DEFAULTS})
-    public ConfigResponse(Map<String, String> defaults) {
-        this.defaults = defaults;
+    @ConstructorProperties({FIELD_OPTIONS})
+    public ConfigResponse(Map<String, String> options) {
+        this.options = options;
     }
 
-    @JsonGetter(FIELD_DEFAULTS)
-    public Map<String, String> defaults() {
-        return defaults;
+    @JsonGetter(FIELD_OPTIONS)
+    public Map<String, String> options() {
+        return options;
     }
 }
