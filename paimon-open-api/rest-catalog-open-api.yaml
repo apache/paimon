@@ -34,12 +34,6 @@ paths:
         - config
       summary: Get Config
       operationId: getConfig
-      parameters:
-        - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
       requestBody:
         content:
           application/json:

@@ -20,7 +20,6 @@ package org.apache.paimon.options;
 
 import org.apache.paimon.utils.TimeUtils;
 
-import java.net.URI;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -78,14 +77,6 @@ public class OptionsUtils {
         }
 
         throw new IllegalArgumentException("Unsupported type: " + clazz);
-    }
-
-    static URI convertToUri(Object o) {
-        if (o.getClass() == URI.class) {
-            return (URI) o;
-        }
-
-        return URI.create(o.toString());
     }
 
     @SuppressWarnings("unchecked")
