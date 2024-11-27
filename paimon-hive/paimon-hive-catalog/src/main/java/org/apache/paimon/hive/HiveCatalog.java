@@ -1017,10 +1017,8 @@ public class HiveCatalog extends AbstractCatalog {
 
     private boolean isPaimonTable(Identifier identifier, Table table) {
         return isPaimonTable(table)
-                && tableSchemaInFileSystem(
-                                getTableLocation(identifier, table),
-                                identifier.getBranchNameOrDefault())
-                        .isPresent();
+                && tableExistsInFileSystem(
+                        getTableLocation(identifier, table), identifier.getBranchNameOrDefault());
     }
 
     private static boolean isPaimonTable(Table table) {
