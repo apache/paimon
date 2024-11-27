@@ -43,7 +43,7 @@ import java.util.function.Function;
 public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWriter<T, R> {
 
     @Nullable private final SimpleStatsExtractor simpleStatsExtractor;
-    @Nullable private SimpleStatsCollector simpleStatsCollector = null;
+    private final SimpleStatsCollector simpleStatsCollector;
 
     public StatsCollectingSingleFileWriter(
             FileIO fileIO,
@@ -57,9 +57,7 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
             boolean asyncWrite) {
         super(fileIO, factory, path, converter, compression, asyncWrite);
         this.simpleStatsExtractor = simpleStatsExtractor;
-        if (this.simpleStatsExtractor == null) {
-            this.simpleStatsCollector = new SimpleStatsCollector(writeSchema, statsCollectors);
-        }
+        this.simpleStatsCollector = new SimpleStatsCollector(writeSchema, statsCollectors);
         Preconditions.checkArgument(
                 statsCollectors.length == writeSchema.getFieldCount(),
                 "The stats collector is not aligned to write schema.");
@@ -68,7 +66,7 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
     @Override
     public void write(T record) throws IOException {
         InternalRow rowData = writeImpl(record);
-        if (simpleStatsCollector != null && !simpleStatsCollector.isDisabled()) {
+        if (simpleStatsExtractor == null && !simpleStatsCollector.isDisabled()) {
             simpleStatsCollector.collect(rowData);
         }
     }
@@ -84,7 +82,7 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
 
     public SimpleColStats[] fieldStats() throws IOException {
         Preconditions.checkState(closed, "Cannot access metric unless the writer is closed.");
-        if (simpleStatsExtractor != null) {
+        if (simpleStatsExtractor != null && !simpleStatsCollector.isDisabled()) {
             return simpleStatsExtractor.extract(fileIO, path);
         } else {
             return simpleStatsCollector.extract();
