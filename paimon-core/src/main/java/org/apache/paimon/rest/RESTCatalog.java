@@ -81,7 +81,7 @@ public class RESTCatalog implements Catalog {
                         new ConfigRequest(),
                         ConfigResponse.class,
                         headers());
-        return response.defaults();
+        return response.options();
     }
 
     @Override
