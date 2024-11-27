@@ -30,27 +30,23 @@ public class RESTUtil {
             Map<String, String> properties, String prefix) {
         Preconditions.checkNotNull(properties, "Invalid properties map: null");
         Map<String, String> result = Maps.newHashMap();
-        properties.forEach(
-                (key, value) -> {
-                    if (key != null && key.startsWith(prefix)) {
-                        result.put(key.substring(prefix.length()), value);
-                    }
-                });
-
+        for (Map.Entry<String, String> entry : properties.entrySet()) {
+            if (entry.getKey() != null && entry.getKey().startsWith(prefix)) {
+                result.put(
+                        entry.getKey().substring(prefix.length()), properties.get(entry.getKey()));
+            }
+        }
         return result;
     }
 
     public static Map<String, String> merge(
             Map<String, String> target, Map<String, String> updates) {
         ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
-
-        target.forEach(
-                (key, value) -> {
-                    if (!updates.containsKey(key)) {
-                        builder.put(key, value);
-                    }
-                });
-
+        for (Map.Entry<String, String> entry : target.entrySet()) {
+            if (!updates.containsKey(entry.getKey())) {
+                builder.put(entry.getKey(), entry.getValue());
+            }
+        }
         updates.forEach(builder::put);
 
         return builder.build();
