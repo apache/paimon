@@ -61,6 +61,7 @@ import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanne
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SimpleFileReader;
@@ -92,12 +93,15 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final long serialVersionUID = 1L;
+
     private static final String WATERMARK_PREFIX = "watermark-";
 
     protected final FileIO fileIO;
     protected final Path path;
     protected final TableSchema tableSchema;
     protected final CatalogEnvironment catalogEnvironment;
+
+    @Nullable private transient LazyField<Statistics> cachedStats;
 
     protected AbstractFileStoreTable(
             FileIO fileIO,
@@ -185,11 +189,22 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public Optional<Statistics> statistics() {
-        Snapshot snapshot = TimeTravelUtil.resolveSnapshot(this);
-        if (snapshot != null) {
-            return store().newStatsFileHandler().readStats(snapshot);
+        return Optional.ofNullable(cachedStats().get());
+    }
+
+    private LazyField<Statistics> cachedStats() {
+        if (cachedStats == null) {
+            cachedStats = new LazyField<>(this::readStats);
         }
-        return Optional.empty();
+        return cachedStats;
+    }
+
+    @Nullable
+    private Statistics readStats() {
+        Snapshot snapshot = TimeTravelUtil.resolveSnapshot(this);
+        return snapshot == null
+                ? null
+                : store().newStatsFileHandler().readStats(snapshot).orElse(null);
     }
 
     @Override

@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.DateTimeUtils;
 
 import org.junit.jupiter.api.Assertions;
@@ -51,7 +52,8 @@ public class FlinkAnalyzeTableITCase extends CatalogITCaseBase {
         sql("INSERT INTO T VALUES ('2', 'aaa', 1, 2)");
         sql("ANALYZE TABLE T COMPUTE STATISTICS");
 
-        Optional<Statistics> statisticsOpt = paimonTable("T").statistics();
+        FileStoreTable table = paimonTable("T");
+        Optional<Statistics> statisticsOpt = table.statistics();
         assertThat(statisticsOpt.isPresent()).isTrue();
         Statistics stats = statisticsOpt.get();
 
@@ -60,6 +62,10 @@ public class FlinkAnalyzeTableITCase extends CatalogITCaseBase {
 
         Assertions.assertTrue(stats.mergedRecordSize().isPresent());
         Assertions.assertTrue(stats.colStats().isEmpty());
+
+        Optional<Statistics> newStats = table.statistics();
+        assertThat(newStats.isPresent()).isTrue();
+        assertThat(newStats.get()).isSameAs(stats);
     }
 
     @Test
