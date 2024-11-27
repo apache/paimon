@@ -252,6 +252,11 @@ under the License.
                             <goal>shade</goal>
                         </goals>
                         <configuration>
+                            <artifactSet>
+                                <includes combine.children="append">
+                                    <include>com.squareup.okhttp3:okhttp</include>
+                                </includes>
+                            </artifactSet>
                             <relocations>
                                 <relocation>
                                     <pattern>okhttp3</pattern>

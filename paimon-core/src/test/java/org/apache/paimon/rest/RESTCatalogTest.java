@@ -27,6 +27,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.net.URI;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
@@ -41,7 +42,7 @@ public class RESTCatalogTest {
     public void setUp() throws IOException {
         mockWebServer = new MockWebServer();
         mockWebServer.start();
-        String baseUrl = mockWebServer.url("").toString();
+        URI baseUrl = mockWebServer.url("").uri();
         Options options = new Options();
         options.set(RESTCatalogOptions.ENDPOINT, baseUrl);
         options.set(RESTCatalogOptions.TOKEN, initToken);

@@ -30,6 +30,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Queue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -46,21 +47,28 @@ import static org.apache.paimon.utils.ThreadUtils.newDaemonThreadFactory;
 /** Utils for thread pool. */
 public class ThreadPoolUtils {
 
+    /** Create a thread pool with max thread number and default queue. */
+    public static ThreadPoolExecutor createCachedThreadPool(int threadNum, String namePrefix) {
+        return createCachedThreadPool(threadNum, namePrefix, new LinkedBlockingQueue<>());
+    }
+
     /**
-     * Create a thread pool with max thread number. Inactive threads will automatically exit.
+     * Create a thread pool with max thread number and user define queue. Inactive threads will
+     * automatically exit.
      *
      * <p>The {@link Executors#newCachedThreadPool} cannot limit max thread number. Non-core threads
      * must be used with {@link SynchronousQueue}, but synchronous queue will be blocked when there
      * is max thread number.
      */
-    public static ThreadPoolExecutor createCachedThreadPool(int threadNum, String namePrefix) {
+    public static ThreadPoolExecutor createCachedThreadPool(
+            int threadNum, String namePrefix, BlockingQueue<Runnable> workQueue) {
         ThreadPoolExecutor executor =
                 new ThreadPoolExecutor(
                         threadNum,
                         threadNum,
                         1,
                         TimeUnit.MINUTES,
-                        new LinkedBlockingQueue<>(),
+                        workQueue,
                         newDaemonThreadFactory(namePrefix));
         executor.allowCoreThreadTimeOut(true);
         return executor;

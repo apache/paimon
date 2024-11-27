@@ -20,40 +20,47 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.net.URI;
+import java.time.Duration;
+
 /** HTTP client build parameter. */
-public class HttpClientBuildParameter {
-    private final String endpoint;
-    private final int connectTimeoutMillis;
-    private final int readTimeoutMillis;
+public class HttpClientOptions {
+
+    private final URI endpoint;
+    private final Duration connectTimeout;
+    private final Duration readTimeout;
     private final ObjectMapper mapper;
     private final int threadPoolSize;
     private final ErrorHandler errorHandler;
+    private final int queueSize;
 
-    public HttpClientBuildParameter(
-            String endpoint,
-            int connectTimeoutMillis,
-            int readTimeoutMillis,
+    public HttpClientOptions(
+            URI endpoint,
+            Duration connectTimeout,
+            Duration readTimeout,
             ObjectMapper mapper,
             int threadPoolSize,
+            int queueSize,
             ErrorHandler errorHandler) {
         this.endpoint = endpoint;
-        this.connectTimeoutMillis = connectTimeoutMillis;
-        this.readTimeoutMillis = readTimeoutMillis;
+        this.connectTimeout = connectTimeout;
+        this.readTimeout = readTimeout;
         this.mapper = mapper;
         this.threadPoolSize = threadPoolSize;
         this.errorHandler = errorHandler;
+        this.queueSize = queueSize;
     }
 
-    public String endpoint() {
+    public URI endpoint() {
         return endpoint;
     }
 
-    public int connectTimeoutMillis() {
-        return connectTimeoutMillis;
+    public Duration connectTimeout() {
+        return connectTimeout;
     }
 
-    public int readTimeoutMillis() {
-        return readTimeoutMillis;
+    public Duration readTimeout() {
+        return readTimeout;
     }
 
     public ObjectMapper mapper() {
@@ -62,6 +69,10 @@ public class HttpClientBuildParameter {
 
     public int threadPoolSize() {
         return threadPoolSize;
+    }
+
+    public int queueSize() {
+        return queueSize;
     }
 
     public ErrorHandler errorHandler() {

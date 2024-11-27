@@ -21,7 +21,6 @@ package org.apache.paimon.rest;
 import org.apache.paimon.rest.exceptions.RESTException;
 import org.apache.paimon.rest.responses.ErrorResponse;
 
-import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -34,30 +33,34 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 import java.io.IOException;
+import java.net.URI;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.SynchronousQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.LinkedBlockingQueue;
 
 import static okhttp3.ConnectionSpec.CLEARTEXT;
 import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
 import static okhttp3.ConnectionSpec.MODERN_TLS;
+import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
 /** HTTP client for REST catalog. */
 public class HttpClient implements RESTClient {
 
     private final OkHttpClient okHttpClient;
-    private final String endpoint;
+    private final URI endpoint;
     private final ObjectMapper mapper;
     private final ErrorHandler errorHandler;
 
-    public HttpClient(HttpClientBuildParameter httpClientBuildParameter) {
-        this.endpoint = httpClientBuildParameter.endpoint();
-        this.mapper = httpClientBuildParameter.mapper();
-        this.okHttpClient = createHttpClient(httpClientBuildParameter);
-        this.errorHandler = httpClientBuildParameter.errorHandler();
+    private static final String thread_name = "REST-CATALOG-HTTP-CLIENT-THREAD-POOL";
+    private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
+
+    public HttpClient(HttpClientOptions httpClientOptions) {
+        this.endpoint = httpClientOptions.endpoint();
+        this.mapper = httpClientOptions.mapper();
+        this.okHttpClient = createHttpClient(httpClientOptions);
+        this.errorHandler = httpClientOptions.errorHandler();
     }
 
     @Override
@@ -103,31 +106,19 @@ public class HttpClient implements RESTClient {
     }
 
     private RequestBody buildRequestBody(RESTRequest body) throws JsonProcessingException {
-        return RequestBody.create(
-                MediaType.parse("application/json"), mapper.writeValueAsString(body));
+        return RequestBody.create(mapper.writeValueAsBytes(body), MEDIA_TYPE);
     }
 
-    private static OkHttpClient createHttpClient(
-            HttpClientBuildParameter httpClientBuildParameter) {
+    private static OkHttpClient createHttpClient(HttpClientOptions httpClientOptions) {
+        BlockingQueue<Runnable> workQueue =
+                new LinkedBlockingQueue<>(httpClientOptions.queueSize());
         ExecutorService executorService =
-                new ThreadPoolExecutor(
-                        httpClientBuildParameter.threadPoolSize(),
-                        httpClientBuildParameter.threadPoolSize(),
-                        60,
-                        TimeUnit.SECONDS,
-                        new SynchronousQueue<>(),
-                        new ThreadFactoryBuilder()
-                                .setDaemon(true)
-                                .setNameFormat("rest catalog http client %d")
-                                .build());
+                createCachedThreadPool(httpClientOptions.threadPoolSize(), thread_name, workQueue);
 
         OkHttpClient.Builder builder =
                 new OkHttpClient.Builder()
-                        .connectTimeout(
-                                httpClientBuildParameter.connectTimeoutMillis(),
-                                TimeUnit.MILLISECONDS)
-                        .readTimeout(
-                                httpClientBuildParameter.readTimeoutMillis(), TimeUnit.MILLISECONDS)
+                        .connectTimeout(httpClientOptions.connectTimeout())
+                        .readTimeout(httpClientOptions.readTimeout())
                         .dispatcher(new Dispatcher(executorService))
                         .retryOnConnectionFailure(true)
                         .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT));

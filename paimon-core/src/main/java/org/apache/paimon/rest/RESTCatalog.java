@@ -33,6 +33,8 @@ import org.apache.paimon.table.Table;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.net.URI;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,25 +42,28 @@ import java.util.Map;
 /** A catalog implementation for REST. */
 public class RESTCatalog implements Catalog {
     private RESTClient client;
-    private final ObjectMapper objectMapper = RESTObjectMapper.create();
     private String token;
     private ResourcePaths resourcePaths;
 
+    private static final ObjectMapper objectMapper = RESTObjectMapper.create();
+
     public RESTCatalog(Options options) {
-        String endpoint = options.get(RESTCatalogOptions.ENDPOINT);
+        URI endpoint = options.get(RESTCatalogOptions.ENDPOINT);
         token = options.get(RESTCatalogOptions.TOKEN);
-        Integer connectTimeoutMillis = options.get(RESTCatalogOptions.CONNECT_TIMEOUT_MILLIS);
-        Integer readTimeoutMillis = options.get(RESTCatalogOptions.READ_TIMEOUT_MILLIS);
+        Duration connectTimeout = options.get(RESTCatalogOptions.CONNECT_TIMEOUT);
+        Duration readTimeout = options.get(RESTCatalogOptions.CONNECT_TIMEOUT);
         Integer threadPoolSize = options.get(RESTCatalogOptions.THREAD_POOL_SIZE);
-        HttpClientBuildParameter httpClientBuildParameter =
-                new HttpClientBuildParameter(
+        int queueSize = options.get(RESTCatalogOptions.THREAD_POOL_QUEUE_SIZE);
+        HttpClientOptions httpClientOptions =
+                new HttpClientOptions(
                         endpoint,
-                        connectTimeoutMillis,
-                        readTimeoutMillis,
+                        connectTimeout,
+                        readTimeout,
                         objectMapper,
                         threadPoolSize,
+                        queueSize,
                         DefaultErrorHandler.getInstance());
-        this.client = new HttpClient(httpClientBuildParameter);
+        this.client = new HttpClient(httpClientOptions);
         this.resourcePaths =
                 ResourcePaths.forCatalogProperties(options.get(RESTCatalogOptions.ENDPOINT_PREFIX));
     }
@@ -171,7 +176,6 @@ public class RESTCatalog implements Catalog {
     public void close() throws Exception {}
 
     private Map<String, String> headers() {
-        // todo: need refresh token
         Map<String, String> header = new HashMap<>();
         header.put("Authorization", "Bearer " + token);
         return header;

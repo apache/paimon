@@ -27,6 +27,8 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.net.URI;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -50,13 +52,20 @@ public class HttpClientTest {
     public void setUp() throws IOException {
         mockWebServer = new MockWebServer();
         mockWebServer.start();
-        String baseUrl = mockWebServer.url("").toString();
+        URI baseUrl = mockWebServer.url("").uri();
         errorHandler = mock(ErrorHandler.class);
-        HttpClientBuildParameter httpClientBuildParameter =
-                new HttpClientBuildParameter(baseUrl, 1000, 1000, objectMapper, 1, errorHandler);
+        HttpClientOptions httpClientOptions =
+                new HttpClientOptions(
+                        baseUrl,
+                        Duration.ofSeconds(3),
+                        Duration.ofSeconds(3),
+                        objectMapper,
+                        1,
+                        10,
+                        errorHandler);
         mockResponseData = new MockRESTData("test");
         mockResponseDataStr = objectMapper.writeValueAsString(mockResponseData);
-        httpClient = new HttpClient(httpClientBuildParameter);
+        httpClient = new HttpClient(httpClientOptions);
         headers = headers("token");
     }
 
