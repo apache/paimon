@@ -56,7 +56,12 @@ components:
     ConfigResponse:
       type: object
       properties:
-        options:
+        defaults:
+          type: object
+          additionalProperties:
+            type: string
+          writeOnly: true
+        overrides:
           type: object
           additionalProperties:
             type: string

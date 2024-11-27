@@ -25,6 +25,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import java.util.Map;
 
+/** Util for REST. */
 public class RESTUtil {
     public static Map<String, String> extractPrefixMap(
             Map<String, String> properties, String prefix) {
