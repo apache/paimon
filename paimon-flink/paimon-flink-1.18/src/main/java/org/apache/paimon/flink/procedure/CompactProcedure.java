@@ -52,6 +52,9 @@ import static org.apache.paimon.flink.action.CompactActionFactory.checkCompactSt
  *  -- compact specific partitions with sorting
  *  CALL sys.compact('tableId', 'partitions', 'ORDER/ZORDER', 'col1,col2', 'sink.parallelism=6')
  *
+ *  -- compact with specific compact strategy
+ *  CALL sys.compact('tableId', 'partitions', 'ORDER/ZORDER', 'col1,col2', 'sink.parallelism=6', 'minor')
+ *
  * </code></pre>
  */
 public class CompactProcedure extends ProcedureBase {
@@ -117,24 +120,24 @@ public class CompactProcedure extends ProcedureBase {
                 procedureContext,
                 tableId,
                 partitions,
-                null,
                 orderStrategy,
                 orderByColumns,
                 tableOptions,
                 whereSql,
-                "");
+                "",
+                null);
     }
 
     public String[] call(
             ProcedureContext procedureContext,
             String tableId,
             String partitions,
-            String compactStrategy,
             String orderStrategy,
             String orderByColumns,
             String tableOptions,
             String whereSql,
-            String partitionIdleTime)
+            String partitionIdleTime,
+            String compactStrategy)
             throws Exception {
 
         String warehouse = catalog.warehouse();

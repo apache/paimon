@@ -268,8 +268,13 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
                 "CALL sys.compact(`table` => 'default.T', compact_strategy => 'minor', "
                         + "options => 'num-sorted-run.compaction-trigger=3')");
 
+        // Due to the limitation of parameter 'num-sorted-run.compaction-trigger' = 3, so compact is
+        // not
+        // performed.
         checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
 
+        // Make par-15 has 3 datafile and par-16 has 2 datafile, so par-16 will not be picked out to
+        // compact.
         sql("INSERT INTO T VALUES (1, 100, 15, '20221208')");
 
         sql(
