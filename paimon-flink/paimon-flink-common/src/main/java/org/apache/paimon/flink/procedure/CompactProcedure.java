@@ -51,10 +51,6 @@ public class CompactProcedure extends ProcedureBase {
                         type = @DataTypeHint("STRING"),
                         isOptional = true),
                 @ArgumentHint(
-                        name = "compact_strategy",
-                        type = @DataTypeHint("STRING"),
-                        isOptional = true),
-                @ArgumentHint(
                         name = "order_strategy",
                         type = @DataTypeHint("STRING"),
                         isOptional = true),
@@ -64,18 +60,22 @@ public class CompactProcedure extends ProcedureBase {
                 @ArgumentHint(
                         name = "partition_idle_time",
                         type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "compact_strategy",
+                        type = @DataTypeHint("STRING"),
                         isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
             String tableId,
             String partitions,
-            String compactStrategy,
             String orderStrategy,
             String orderByColumns,
             String tableOptions,
             String where,
-            String partitionIdleTime)
+            String partitionIdleTime,
+            String compactStrategy)
             throws Exception {
         String warehouse = catalog.warehouse();
         Map<String, String> catalogOptions = catalog.options();

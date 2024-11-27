@@ -64,7 +64,6 @@ class PaimonSparkTestBase
       "org.apache.spark.serializer.JavaSerializer"
     }
     super.sparkConf
-      .set("spark.driver.bindAddress", "127.0.0.1")
       .set("spark.sql.catalog.paimon", classOf[SparkCatalog].getName)
       .set("spark.sql.catalog.paimon.warehouse", tempDBDir.getCanonicalPath)
       .set("spark.sql.catalog.paimon.cache-enabled", "false")

@@ -121,8 +121,8 @@ public class CompactProcedure extends BaseProcedure {
                         new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
                     });
 
-    private final String MINOR = "minor";
-    private final String FULL = "full";
+    private static final String MINOR = "minor";
+    private static final String FULL = "full";
 
     protected CompactProcedure(TableCatalog tableCatalog) {
         super(tableCatalog);
