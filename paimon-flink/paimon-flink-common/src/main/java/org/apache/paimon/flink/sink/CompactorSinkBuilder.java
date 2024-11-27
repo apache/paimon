@@ -37,19 +37,15 @@ public class CompactorSinkBuilder {
 
     private DataStream<RowData> input;
 
-    private boolean fullCompaction;
+    private final boolean fullCompaction;
 
-    public CompactorSinkBuilder(FileStoreTable table) {
+    public CompactorSinkBuilder(FileStoreTable table, boolean fullCompaction) {
         this.table = table;
+        this.fullCompaction = fullCompaction;
     }
 
     public CompactorSinkBuilder withInput(DataStream<RowData> input) {
         this.input = input;
-        return this;
-    }
-
-    public CompactorSinkBuilder withFullCompaction(boolean fullCompaction) {
-        this.fullCompaction = fullCompaction;
         return this;
     }
 

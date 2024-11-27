@@ -76,6 +76,10 @@ public class CompactActionFactory implements ActionFactory {
                 action.withPartitionIdleTime(
                         TimeUtils.parseDuration(params.get(PARTITION_IDLE_TIME)));
             }
+            String compactStrategy = params.get(COMPACT_STRATEGY);
+            if (checkCompactStrategy(compactStrategy)) {
+                action.withFullCompaction(compactStrategy.trim().equalsIgnoreCase(FULL));
+            }
         }
 
         if (params.has(PARTITION)) {
@@ -86,6 +90,19 @@ public class CompactActionFactory implements ActionFactory {
         }
 
         return Optional.of(action);
+    }
+
+    public static boolean checkCompactStrategy(String compactStrategy) {
+        if (compactStrategy != null) {
+            Preconditions.checkArgument(
+                    compactStrategy.equalsIgnoreCase(MINOR)
+                            || compactStrategy.equalsIgnoreCase(FULL),
+                    String.format(
+                            "The compact strategy only supports 'full' or 'minor', but '%s' is configured.",
+                            compactStrategy));
+            return true;
+        }
+        return false;
     }
 
     @Override
@@ -101,7 +118,8 @@ public class CompactActionFactory implements ActionFactory {
                         + "[--order_strategy <order_strategy>]"
                         + "[--table_conf <key>=<value>]"
                         + "[--order_by <order_columns>]"
-                        + "[--partition_idle_time <partition_idle_time>]");
+                        + "[--partition_idle_time <partition_idle_time>]"
+                        + "[--compact_strategy <compact_strategy>]");
         System.out.println(
                 "  compact --warehouse s3://path/to/warehouse --database <database_name> "
                         + "--table <table_name> [--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]]");
@@ -132,6 +150,10 @@ public class CompactActionFactory implements ActionFactory {
         System.out.println(
                 "  compact --warehouse hdfs:///path/to/warehouse --database test_db --table test_table "
                         + "--partition_idle_time 10s");
+        System.out.println(
+                "--compact_strategy determines how to pick files to be merged, the default is determined by the runtime execution mode. "
+                        + "`full` : Only supports batch mode. All files will be selected for merging."
+                        + "`minor`: Pick the set of files that need to be merged based on specified conditions.");
         System.out.println(
                 "  compact --warehouse s3:///path/to/warehouse "
                         + "--database test_db "

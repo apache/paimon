@@ -63,6 +63,7 @@ public class MultiTablesStoreCompactOperator
     private final CheckpointConfig checkpointConfig;
     private final boolean isStreaming;
     private final boolean ignorePreviousFiles;
+    private final boolean fullCompaction;
     private final String initialCommitUser;
 
     private transient StoreSinkWriteState state;
@@ -81,6 +82,7 @@ public class MultiTablesStoreCompactOperator
             CheckpointConfig checkpointConfig,
             boolean isStreaming,
             boolean ignorePreviousFiles,
+            boolean fullCompaction,
             Options options) {
         super(options);
         this.catalogLoader = catalogLoader;
@@ -88,6 +90,7 @@ public class MultiTablesStoreCompactOperator
         this.checkpointConfig = checkpointConfig;
         this.isStreaming = isStreaming;
         this.ignorePreviousFiles = ignorePreviousFiles;
+        this.fullCompaction = fullCompaction;
     }
 
     @Override
@@ -162,13 +165,14 @@ public class MultiTablesStoreCompactOperator
 
         if (write.streamingMode()) {
             write.notifyNewFiles(snapshotId, partition, bucket, files);
+            // The full compact is not supported in streaming mode.
             write.compact(partition, bucket, false);
         } else {
             Preconditions.checkArgument(
                     files.isEmpty(),
                     "Batch compact job does not concern what files are compacted. "
                             + "They only need to know what buckets are compacted.");
-            write.compact(partition, bucket, true);
+            write.compact(partition, bucket, fullCompaction);
         }
     }
 
