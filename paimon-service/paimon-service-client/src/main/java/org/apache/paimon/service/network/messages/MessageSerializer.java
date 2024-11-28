@@ -18,6 +18,7 @@
 
 package org.apache.paimon.service.network.messages;
 
+import io.github.pixee.security.ObjectInputFilters;
 import org.apache.paimon.service.network.NetworkClient;
 import org.apache.paimon.service.network.NetworkServer;
 import org.apache.paimon.utils.Preconditions;
@@ -301,6 +302,7 @@ public final class MessageSerializer<REQ extends MessageBody, RESP extends Messa
         Throwable cause;
         try (ByteBufInputStream bis = new ByteBufInputStream(buf);
                 ObjectInputStream in = new ObjectInputStream(bis)) {
+            ObjectInputFilters.enableObjectFilterIfUnprotected(in);
             cause = (Throwable) in.readObject();
         }
         return new RequestFailure(requestId, cause);
@@ -321,6 +323,7 @@ public final class MessageSerializer<REQ extends MessageBody, RESP extends Messa
             throws IOException, ClassNotFoundException {
         try (ByteBufInputStream bis = new ByteBufInputStream(buf);
                 ObjectInputStream in = new ObjectInputStream(bis)) {
+            ObjectInputFilters.enableObjectFilterIfUnprotected(in);
             return (Throwable) in.readObject();
         }
     }

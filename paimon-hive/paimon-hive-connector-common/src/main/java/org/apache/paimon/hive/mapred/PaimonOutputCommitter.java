@@ -18,6 +18,7 @@
 
 package org.apache.paimon.hive.mapred;
 
+import io.github.pixee.security.ObjectInputFilters;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.FileStoreTable;
@@ -273,6 +274,7 @@ public class PaimonOutputCommitter extends OutputCommitter {
     private static List<CommitMessage> readPreCommitFile(Path location, FileIO io) {
         try (ObjectInputStream objectInputStream =
                 new ObjectInputStream(io.newInputStream(location))) {
+            ObjectInputFilters.enableObjectFilterIfUnprotected(objectInputStream);
             return (List<CommitMessage>) objectInputStream.readObject();
         } catch (ClassNotFoundException | IOException e) {
             throw new RuntimeException(

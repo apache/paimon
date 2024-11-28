@@ -18,6 +18,7 @@
 
 package org.apache.paimon.hive;
 
+import io.github.pixee.security.ObjectInputFilters;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.junit.jupiter.api.Test;
 
@@ -48,6 +49,7 @@ public class SerializableHiveConfTest {
         // deserialize
         ByteArrayInputStream bais = new ByteArrayInputStream(baos.toByteArray());
         ObjectInputStream ois = new ObjectInputStream(bais);
+        ObjectInputFilters.enableObjectFilterIfUnprotected(ois);
         SerializableHiveConf deserializedHiveConf = (SerializableHiveConf) ois.readObject();
         ois.close();
 
