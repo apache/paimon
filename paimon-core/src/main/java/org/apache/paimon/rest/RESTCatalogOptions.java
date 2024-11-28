@@ -50,9 +50,4 @@ public class RESTCatalogOptions {
                     .intType()
                     .defaultValue(1)
                     .withDescription("REST Catalog http client thread num.");
-    public static final ConfigOption<Integer> THREAD_POOL_QUEUE_SIZE =
-            ConfigOptions.key("rest.client.num-queue")
-                    .intType()
-                    .defaultValue(500)
-                    .withDescription("REST Catalog http client thread queue size.");
 }

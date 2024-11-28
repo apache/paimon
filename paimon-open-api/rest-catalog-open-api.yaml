@@ -28,18 +28,12 @@ servers:
   - url: http://localhost:8080
     description: Server URL in Development environment
 paths:
-  /api/v1/{prefix}/config:
-    post:
+  /api/v1/config:
+    get:
       tags:
         - config
       summary: Get Config
       operationId: getConfig
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ConfigRequest'
-        required: true
       responses:
         "500":
           description: Internal Server Error
@@ -51,8 +45,6 @@ paths:
                 $ref: '#/components/schemas/ConfigResponse'
 components:
   schemas:
-    ConfigRequest:
-      type: object
     ConfigResponse:
       type: object
       properties:

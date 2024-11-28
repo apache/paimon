@@ -19,7 +19,6 @@
 package org.apache.paimon.open.api;
 
 import org.apache.paimon.rest.ResourcePaths;
-import org.apache.paimon.rest.requests.ConfigRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -30,8 +29,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.HashMap;
@@ -57,8 +55,8 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @PostMapping(ResourcePaths.V1_CONFIG)
-    public ResponseEntity<ConfigResponse> getConfig(@RequestBody ConfigRequest request) {
+    @GetMapping(ResourcePaths.V1_CONFIG)
+    public ResponseEntity<ConfigResponse> getConfig() {
         try {
             Map<String, String> defaults = new HashMap<>();
             Map<String, String> overrides = new HashMap<>();

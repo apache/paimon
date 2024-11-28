@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import okhttp3.mockwebserver.MockResponse;
@@ -32,6 +33,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.rest.RESTCatalog.AUTH_HEADER;
+import static org.apache.paimon.rest.RESTCatalog.AUTH_HEADER_VALUE_FORMAT;
 import static org.junit.Assert.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -47,6 +50,8 @@ public class HttpClientTest {
     private MockRESTData mockResponseData;
     private String mockResponseDataStr;
     private Map<String, String> headers;
+    private static final String MOCK_PATH = "/v1/api/mock";
+    private static final String TOKEN = "token";
 
     @Before
     public void setUp() throws IOException {
@@ -61,12 +66,12 @@ public class HttpClientTest {
                         Optional.of(Duration.ofSeconds(3)),
                         objectMapper,
                         1,
-                        10,
                         errorHandler);
-        mockResponseData = new MockRESTData("test");
+        mockResponseData = new MockRESTData(MOCK_PATH);
         mockResponseDataStr = objectMapper.writeValueAsString(mockResponseData);
         httpClient = new HttpClient(httpClientOptions);
-        headers = headers("token");
+        headers = ImmutableMap.of(AUTH_HEADER, String.format(AUTH_HEADER_VALUE_FORMAT, TOKEN));
+        ;
     }
 
     @After
@@ -75,20 +80,33 @@ public class HttpClientTest {
     }
 
     @Test
+    public void testGetSuccess() {
+        mockHttpCallWithCode(mockResponseDataStr, 200);
+        MockRESTData response = httpClient.get(MOCK_PATH, MockRESTData.class, headers);
+        verify(errorHandler, times(0)).accept(any());
+        assertEquals(mockResponseData.data(), response.data());
+    }
+
+    @Test
+    public void testGetFail() {
+        mockHttpCallWithCode(mockResponseDataStr, 400);
+        httpClient.get(MOCK_PATH, MockRESTData.class, headers);
+        verify(errorHandler, times(1)).accept(any());
+    }
+
+    @Test
     public void testPostSuccess() {
-        MockResponse mockResponseObj = generateMockResponse(mockResponseDataStr, 200);
-        mockWebServer.enqueue(mockResponseObj);
+        mockHttpCallWithCode(mockResponseDataStr, 200);
         MockRESTData response =
-                httpClient.post("test", mockResponseData, MockRESTData.class, headers);
+                httpClient.post(MOCK_PATH, mockResponseData, MockRESTData.class, headers);
         verify(errorHandler, times(0)).accept(any());
         assertEquals(mockResponseData.data(), response.data());
     }
 
     @Test
     public void testPostFail() {
-        MockResponse mockResponseObj = generateMockResponse(mockResponseDataStr, 400);
-        mockWebServer.enqueue(mockResponseObj);
-        httpClient.post("test", mockResponseData, MockRESTData.class, headers);
+        mockHttpCallWithCode(mockResponseDataStr, 400);
+        httpClient.post(MOCK_PATH, mockResponseData, MockRESTData.class, headers);
         verify(errorHandler, times(1)).accept(any());
     }
 
@@ -96,6 +114,11 @@ public class HttpClientTest {
         Map<String, String> header = new HashMap<>();
         header.put("Authorization", "Bearer " + token);
         return header;
+    }
+
+    private void mockHttpCallWithCode(String body, Integer code) {
+        MockResponse mockResponseObj = generateMockResponse(body, code);
+        mockWebServer.enqueue(mockResponseObj);
     }
 
     private MockResponse generateMockResponse(String data, Integer code) {

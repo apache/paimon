@@ -32,7 +32,6 @@ public class HttpClientOptions {
     private final ObjectMapper mapper;
     private final int threadPoolSize;
     private final ErrorHandler errorHandler;
-    private final int queueSize;
 
     public HttpClientOptions(
             String uri,
@@ -40,7 +39,6 @@ public class HttpClientOptions {
             Optional<Duration> readTimeout,
             ObjectMapper mapper,
             int threadPoolSize,
-            int queueSize,
             ErrorHandler errorHandler) {
         this.uri = uri;
         this.connectTimeout = connectTimeout;
@@ -48,7 +46,6 @@ public class HttpClientOptions {
         this.mapper = mapper;
         this.threadPoolSize = threadPoolSize;
         this.errorHandler = errorHandler;
-        this.queueSize = queueSize;
     }
 
     public String uri() {
@@ -69,10 +66,6 @@ public class HttpClientOptions {
 
     public int threadPoolSize() {
         return threadPoolSize;
-    }
-
-    public int queueSize() {
-        return queueSize;
     }
 
     public ErrorHandler errorHandler() {

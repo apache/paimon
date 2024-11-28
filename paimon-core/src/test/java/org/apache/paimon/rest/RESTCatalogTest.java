@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 
 import okhttp3.mockwebserver.MockResponse;
@@ -31,6 +32,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 
 /** Test for REST Catalog. */
 public class RESTCatalogTest {
@@ -57,12 +59,19 @@ public class RESTCatalogTest {
     }
 
     @Test
+    public void testInitFailWhenDefineWarehouse() {
+        Options options = new Options();
+        options.set(CatalogOptions.WAREHOUSE, "/a/b/c");
+        assertThrows(IllegalArgumentException.class, () -> new RESTCatalog(options));
+    }
+
+    @Test
     public void testGetConfig() {
         String key = "a";
         String value = "b";
         mockOptions(key, value);
         Map<String, String> header = new HashMap<>();
-        Map<String, String> response = restCatalog.optionsInner(header, new HashMap<>());
+        Map<String, String> response = restCatalog.fetchOptionsFromServer(header, new HashMap<>());
         assertEquals(value, response.get(key));
     }
 

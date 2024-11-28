@@ -25,17 +25,17 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.rest.requests.ConfigRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.Duration;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -49,15 +49,19 @@ public class RESTCatalog implements Catalog {
     private Map<String, String> baseHeader;
 
     private static final ObjectMapper objectMapper = RESTObjectMapper.create();
+    static final String AUTH_HEADER = "Authorization";
+    static final String AUTH_HEADER_VALUE_FORMAT = "Bearer %s";
 
     public RESTCatalog(Options options) {
+        if (options.getOptional(CatalogOptions.WAREHOUSE).isPresent()) {
+            throw new IllegalArgumentException("Can not config warehouse in RESTCatalog.");
+        }
         String uri = options.get(RESTCatalogOptions.URI);
         token = options.get(RESTCatalogOptions.TOKEN);
         Optional<Duration> connectTimeout =
                 options.getOptional(RESTCatalogOptions.CONNECTION_TIMEOUT);
         Optional<Duration> readTimeout = options.getOptional(RESTCatalogOptions.READ_TIMEOUT);
         Integer threadPoolSize = options.get(RESTCatalogOptions.THREAD_POOL_SIZE);
-        int queueSize = options.get(RESTCatalogOptions.THREAD_POOL_QUEUE_SIZE);
         HttpClientOptions httpClientOptions =
                 new HttpClientOptions(
                         uri,
@@ -65,12 +69,13 @@ public class RESTCatalog implements Catalog {
                         readTimeout,
                         objectMapper,
                         threadPoolSize,
-                        queueSize,
                         DefaultErrorHandler.getInstance());
         this.client = new HttpClient(httpClientOptions);
+        Map<String, String> authHeaders =
+                ImmutableMap.of(AUTH_HEADER, String.format(AUTH_HEADER_VALUE_FORMAT, token));
         Map<String, String> initHeaders =
-                RESTUtil.merge(configHeaders(options.toMap()), authHeaders(token));
-        this.options = optionsInner(initHeaders, options.toMap());
+                RESTUtil.merge(configHeaders(options.toMap()), authHeaders);
+        this.options = fetchOptionsFromServer(initHeaders, options.toMap());
         this.baseHeader = configHeaders(this.options());
         this.resourcePaths =
                 ResourcePaths.forCatalogProperties(
@@ -179,18 +184,10 @@ public class RESTCatalog implements Catalog {
     public void close() throws Exception {}
 
     @VisibleForTesting
-    Map<String, String> optionsInner(
+    Map<String, String> fetchOptionsFromServer(
             Map<String, String> headers, Map<String, String> clientProperties) {
-        ConfigResponse response =
-                client.post(
-                        ResourcePaths.config(), new ConfigRequest(), ConfigResponse.class, headers);
+        ConfigResponse response = client.get(ResourcePaths.config(), ConfigResponse.class, headers);
         return response.merge(clientProperties);
-    }
-
-    private Map<String, String> authHeaders(String token) {
-        Map<String, String> header = new HashMap<>();
-        header.put("Authorization", "Bearer " + token);
-        return header;
     }
 
     private static Map<String, String> configHeaders(Map<String, String> properties) {

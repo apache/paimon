@@ -37,7 +37,7 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.SynchronousQueue;
 
 import static okhttp3.ConnectionSpec.CLEARTEXT;
 import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
@@ -60,6 +60,22 @@ public class HttpClient implements RESTClient {
         this.mapper = httpClientOptions.mapper();
         this.okHttpClient = createHttpClient(httpClientOptions);
         this.errorHandler = httpClientOptions.errorHandler();
+    }
+
+    @Override
+    public <T extends RESTResponse> T get(
+            String path, Class<T> responseType, Map<String, String> headers) {
+        try {
+            Request request =
+                    new Request.Builder()
+                            .url(uri + path)
+                            .get()
+                            .headers(Headers.of(headers))
+                            .build();
+            return exec(request, responseType);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
@@ -109,8 +125,7 @@ public class HttpClient implements RESTClient {
     }
 
     private static OkHttpClient createHttpClient(HttpClientOptions httpClientOptions) {
-        BlockingQueue<Runnable> workQueue =
-                new LinkedBlockingQueue<>(httpClientOptions.queueSize());
+        BlockingQueue<Runnable> workQueue = new SynchronousQueue<>();
         ExecutorService executorService =
                 createCachedThreadPool(httpClientOptions.threadPoolSize(), thread_name, workQueue);
 

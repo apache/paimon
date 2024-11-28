@@ -24,6 +24,8 @@ import java.util.Map;
 /** Interface for a basic HTTP Client for interfacing with the REST catalog. */
 public interface RESTClient extends Closeable {
 
+    <T extends RESTResponse> T get(String path, Class<T> responseType, Map<String, String> headers);
+
     <T extends RESTResponse> T post(
             String path, RESTRequest body, Class<T> responseType, Map<String, String> headers);
 }
