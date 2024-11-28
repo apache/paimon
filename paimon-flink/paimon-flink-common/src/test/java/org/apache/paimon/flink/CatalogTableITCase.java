@@ -21,8 +21,6 @@ package org.apache.paimon.flink;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
-import org.apache.paimon.table.system.SinkTableLineageTable;
-import org.apache.paimon.table.system.SourceTableLineageTable;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.commons.lang3.StringUtils;
@@ -200,9 +198,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertThat(sql("SHOW TABLES"))
                 .containsExactlyInAnyOrder(
                         Row.of(AllTableOptionsTable.ALL_TABLE_OPTIONS),
-                        Row.of(CatalogOptionsTable.CATALOG_OPTIONS),
-                        Row.of(SourceTableLineageTable.SOURCE_TABLE_LINEAGE),
-                        Row.of(SinkTableLineageTable.SINK_TABLE_LINEAGE));
+                        Row.of(CatalogOptionsTable.CATALOG_OPTIONS));
     }
 
     @Test
