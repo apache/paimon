@@ -71,7 +71,6 @@ public class HttpClientTest {
         mockResponseDataStr = objectMapper.writeValueAsString(mockResponseData);
         httpClient = new HttpClient(httpClientOptions);
         headers = ImmutableMap.of(AUTH_HEADER, String.format(AUTH_HEADER_VALUE_FORMAT, TOKEN));
-        ;
     }
 
     @After
