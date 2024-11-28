@@ -22,6 +22,7 @@ import org.apache.paimon.data.columnar.writable.WritableByteVector;
 import org.apache.paimon.data.columnar.writable.WritableIntVector;
 
 import org.apache.parquet.column.ColumnDescriptor;
+import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.schema.PrimitiveType;
 
@@ -31,8 +32,8 @@ import java.nio.ByteBuffer;
 /** Byte {@link ColumnReader}. Using INT32 to store byte, so just cast int to byte. */
 public class ByteColumnReader extends AbstractColumnReader<WritableByteVector> {
 
-    public ByteColumnReader(ColumnDescriptor descriptor, PageReader pageReader) throws IOException {
-        super(descriptor, pageReader);
+    public ByteColumnReader(ColumnDescriptor descriptor, PageReadStore pageReadStore) throws IOException {
+        super(descriptor, pageReadStore);
         checkTypeName(PrimitiveType.PrimitiveTypeName.INT32);
     }
 
@@ -67,6 +68,38 @@ public class ByteColumnReader extends AbstractColumnReader<WritableByteVector> {
             left -= n;
             runLenDecoder.currentCount -= n;
         }
+    }
+
+    @Override
+    protected void skipBatch(int num) {
+        int left = num;
+        while (left > 0) {
+            if (runLenDecoder.currentCount == 0) {
+                runLenDecoder.readNextGroup();
+            }
+            int n = Math.min(left, runLenDecoder.currentCount);
+            switch (runLenDecoder.mode) {
+                case RLE:
+                    if (runLenDecoder.currentValue == maxDefLevel) {
+                        skipByte(n);
+                    }
+                    break;
+                case PACKED:
+                    for (int i = 0; i < n; ++i) {
+                        if (runLenDecoder.currentBuffer[runLenDecoder.currentBufferIdx++]
+                                == maxDefLevel) {
+                            skipByte(1);
+                        }
+                    }
+                    break;
+            }
+            left -= n;
+            runLenDecoder.currentCount -= n;
+        }
+    }
+
+    private void skipByte(int num) {
+        skipDataBuffer(4 * num);
     }
 
     @Override

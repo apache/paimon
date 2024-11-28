@@ -194,6 +194,54 @@ final class RunLengthDecoder {
         }
     }
 
+    void skipDictionaryIds(
+            int total,
+            int level,
+            RunLengthDecoder data) {
+        int left = total;
+        while (left > 0) {
+            if (this.currentCount == 0) {
+                this.readNextGroup();
+            }
+            int n = Math.min(left, this.currentCount);
+            switch (mode) {
+                case RLE:
+                    if (currentValue == level) {
+                        data.skipDictionaryIdData(n);
+                    }
+                    break;
+                case PACKED:
+                    for (int i = 0; i < n; ++i) {
+                        if (currentBuffer[currentBufferIdx++] == level) {
+                            data.readInteger();
+                        }
+                    }
+                    break;
+            }
+            left -= n;
+            currentCount -= n;
+        }
+    }
+
+    private void skipDictionaryIdData(int total) {
+        int left = total;
+        while (left > 0) {
+            if (this.currentCount == 0) {
+                this.readNextGroup();
+            }
+            int n = Math.min(left, this.currentCount);
+            switch (mode) {
+                case RLE:
+                    break;
+                case PACKED:
+                    currentBufferIdx += n;
+                    break;
+            }
+            left -= n;
+            currentCount -= n;
+        }
+    }
+
     /** Reads the next varint encoded int. */
     private int readUnsignedVarInt() throws IOException {
         int value = 0;

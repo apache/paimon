@@ -21,6 +21,7 @@ package org.apache.paimon.format.parquet.reader;
 import org.apache.paimon.data.columnar.writable.WritableIntVector;
 
 import org.apache.parquet.column.ColumnDescriptor;
+import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.schema.PrimitiveType;
 
@@ -30,8 +31,8 @@ import java.nio.ByteBuffer;
 /** Int {@link ColumnReader}. */
 public class IntColumnReader extends AbstractColumnReader<WritableIntVector> {
 
-    public IntColumnReader(ColumnDescriptor descriptor, PageReader pageReader) throws IOException {
-        super(descriptor, pageReader);
+    public IntColumnReader(ColumnDescriptor descriptor, PageReadStore pageReadStore) throws IOException {
+        super(descriptor, pageReadStore);
         checkTypeName(PrimitiveType.PrimitiveTypeName.INT32);
     }
 
@@ -67,6 +68,39 @@ public class IntColumnReader extends AbstractColumnReader<WritableIntVector> {
             runLenDecoder.currentCount -= n;
         }
     }
+
+    @Override
+    protected void skipBatch(int num) {
+        int left = num;
+        while (left > 0) {
+            if (runLenDecoder.currentCount == 0) {
+                runLenDecoder.readNextGroup();
+            }
+            int n = Math.min(left, runLenDecoder.currentCount);
+            switch (runLenDecoder.mode) {
+                case RLE:
+                    if (runLenDecoder.currentValue == maxDefLevel) {
+                        skipInteger(n);
+                    }
+                    break;
+                case PACKED:
+                    for (int i = 0; i < n; ++i) {
+                        if (runLenDecoder.currentBuffer[runLenDecoder.currentBufferIdx++]
+                                == maxDefLevel) {
+                            skipInteger(1);
+                        }
+                    }
+                    break;
+            }
+            left -= n;
+            runLenDecoder.currentCount -= n;
+        }
+    }
+
+    private void skipInteger(int num) {
+        skipDataBuffer(4 * num);
+    }
+
 
     @Override
     protected void readBatchFromDictionaryIds(

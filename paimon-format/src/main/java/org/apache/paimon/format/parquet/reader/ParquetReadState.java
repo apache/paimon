@@ -1,5 +1,11 @@
 package org.apache.paimon.format.parquet.reader;
 
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.PrimitiveIterator;
+
 /*Parquet reader state*/
 public class ParquetReadState {
   /**
@@ -92,6 +98,10 @@ public class ParquetReadState {
     return currentRange.end;
   }
 
+  boolean isFinished(){
+    return this.currentRange.equals(this.END_ROW_RANGE);
+  }
+
   /**
    * Advance to the next range.
    */
@@ -115,6 +125,16 @@ public class ParquetReadState {
     RowRange(long start, long end) {
       this.start = start;
       this.end = end;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+      if (!(obj instanceof RowRange)){
+        return false;
+      }
+      return ((RowRange) obj).start == this.start &&
+              ((RowRange) obj).end == this.end;
+
     }
   }
 }

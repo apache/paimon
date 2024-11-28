@@ -25,6 +25,7 @@ import org.apache.paimon.data.columnar.writable.WritableLongVector;
 import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 
 import org.apache.parquet.column.ColumnDescriptor;
+import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.schema.PrimitiveType;
@@ -39,8 +40,8 @@ public class FixedLenBytesColumnReader<VECTOR extends WritableColumnVector>
     private final int precision;
 
     public FixedLenBytesColumnReader(
-            ColumnDescriptor descriptor, PageReader pageReader, int precision) throws IOException {
-        super(descriptor, pageReader);
+            ColumnDescriptor descriptor, PageReadStore pageReadStore, int precision) throws IOException {
+        super(descriptor, pageReadStore);
         checkTypeName(PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY);
         this.precision = precision;
     }
@@ -78,6 +79,37 @@ public class FixedLenBytesColumnReader<VECTOR extends WritableColumnVector>
             }
         }
     }
+
+    @Override
+    protected void skipBatch(int num) {
+        int bytesLen = descriptor.getPrimitiveType().getTypeLength();
+        if (ParquetSchemaConverter.is32BitDecimal(precision)) {
+            for (int i = 0; i < num; i++) {
+                if (runLenDecoder.readInteger() == maxDefLevel) {
+                    skipDataBinary(bytesLen);
+                }
+            }
+        } else if (ParquetSchemaConverter.is64BitDecimal(precision)) {
+
+            for (int i = 0; i < num; i++) {
+                if (runLenDecoder.readInteger() == maxDefLevel) {
+                    skipDataBinary(bytesLen);
+                }
+            }
+        } else {
+            for (int i = 0; i < num; i++) {
+                if (runLenDecoder.readInteger() == maxDefLevel) {
+                    skipDataBinary(bytesLen);
+
+                }
+            }
+        }
+    }
+
+    private void skipDataBinary(int len){
+        skipDataBuffer(len);
+    }
+
 
     @Override
     protected void readBatchFromDictionaryIds(

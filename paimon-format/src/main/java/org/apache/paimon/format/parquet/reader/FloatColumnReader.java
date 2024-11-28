@@ -22,6 +22,7 @@ import org.apache.paimon.data.columnar.writable.WritableFloatVector;
 import org.apache.paimon.data.columnar.writable.WritableIntVector;
 
 import org.apache.parquet.column.ColumnDescriptor;
+import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.schema.PrimitiveType;
 
@@ -31,9 +32,9 @@ import java.nio.ByteBuffer;
 /** Float {@link ColumnReader}. */
 public class FloatColumnReader extends AbstractColumnReader<WritableFloatVector> {
 
-    public FloatColumnReader(ColumnDescriptor descriptor, PageReader pageReader)
+    public FloatColumnReader(ColumnDescriptor descriptor, PageReadStore pageReadStore)
             throws IOException {
-        super(descriptor, pageReader);
+        super(descriptor, pageReadStore);
         checkTypeName(PrimitiveType.PrimitiveTypeName.FLOAT);
     }
 
@@ -69,6 +70,40 @@ public class FloatColumnReader extends AbstractColumnReader<WritableFloatVector>
             runLenDecoder.currentCount -= n;
         }
     }
+
+
+    @Override
+    protected void skipBatch(int num) {
+        int left = num;
+        while (left > 0) {
+            if (runLenDecoder.currentCount == 0) {
+                runLenDecoder.readNextGroup();
+            }
+            int n = Math.min(left, runLenDecoder.currentCount);
+            switch (runLenDecoder.mode) {
+                case RLE:
+                    if (runLenDecoder.currentValue == maxDefLevel) {
+                        skipFloat(n);
+                    }
+                    break;
+                case PACKED:
+                    for (int i = 0; i < n; ++i) {
+                        if (runLenDecoder.currentBuffer[runLenDecoder.currentBufferIdx++]
+                                == maxDefLevel) {
+                            skipFloat(1);
+                        }
+                    }
+                    break;
+            }
+            left -= n;
+            runLenDecoder.currentCount -= n;
+        }
+    }
+
+    private void skipFloat(int num){
+        skipDataBuffer(4 * num);
+    }
+
 
     @Override
     protected void readBatchFromDictionaryIds(
