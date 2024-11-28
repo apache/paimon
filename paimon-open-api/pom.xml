@@ -28,6 +28,7 @@ under the License.
     </parent>
 
     <artifactId>paimon-open-api</artifactId>
+    <name>Paimon : Open API</name>
 
     <properties>
         <maven.compiler.source>8</maven.compiler.source>
