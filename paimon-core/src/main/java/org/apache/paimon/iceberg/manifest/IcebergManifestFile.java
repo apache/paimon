@@ -19,6 +19,8 @@
 package org.apache.paimon.iceberg.manifest;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -38,8 +40,13 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.FileUtils;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -107,6 +114,50 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                 avroOptions.get(IcebergOptions.MANIFEST_COMPRESSION),
                 pathFactory.manifestFileFactory(),
                 table.coreOptions().manifestTargetSize());
+    }
+
+    public List<IcebergManifestEntry> read(IcebergManifestFileMeta meta) {
+        return read(meta, null);
+    }
+
+    public List<IcebergManifestEntry> read(IcebergManifestFileMeta meta, @Nullable Long fileSize) {
+        String fileName = new Path(meta.manifestPath()).getName();
+        try {
+            Path path = pathFactory.toPath(fileName);
+
+            return readFromIterator(
+                    meta,
+                    createIterator(path, fileSize),
+                    (IcebergManifestEntrySerializer) serializer,
+                    Filter.alwaysTrue());
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to read " + fileName, e);
+        }
+    }
+
+    private CloseableIterator<InternalRow> createIterator(Path file, @Nullable Long fileSize)
+            throws IOException {
+        return FileUtils.createFormatReader(fileIO, readerFactory, file, fileSize)
+                .toCloseableIterator();
+    }
+
+    private static List<IcebergManifestEntry> readFromIterator(
+            IcebergManifestFileMeta meta,
+            CloseableIterator<InternalRow> inputIterator,
+            IcebergManifestEntrySerializer serializer,
+            Filter<InternalRow> readFilter) {
+        try (CloseableIterator<InternalRow> iterator = inputIterator) {
+            List<IcebergManifestEntry> result = new ArrayList<>();
+            while (iterator.hasNext()) {
+                InternalRow row = iterator.next();
+                if (readFilter.test(row)) {
+                    result.add(serializer.fromRow(row, meta));
+                }
+            }
+            return result;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public List<IcebergManifestFileMeta> rollingWrite(
