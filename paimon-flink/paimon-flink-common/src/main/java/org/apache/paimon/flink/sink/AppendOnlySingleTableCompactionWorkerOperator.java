@@ -22,6 +22,9 @@ import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.flink.source.BucketUnawareCompactSource;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.flink.streaming.api.operators.StreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 /**
@@ -31,12 +34,39 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 public class AppendOnlySingleTableCompactionWorkerOperator
         extends AppendCompactWorkerOperator<UnawareAppendCompactionTask> {
 
-    public AppendOnlySingleTableCompactionWorkerOperator(FileStoreTable table, String commitUser) {
-        super(table, commitUser);
+    private AppendOnlySingleTableCompactionWorkerOperator(
+            StreamOperatorParameters<Committable> parameters,
+            FileStoreTable table,
+            String commitUser) {
+        super(parameters, table, commitUser);
     }
 
     @Override
     public void processElement(StreamRecord<UnawareAppendCompactionTask> element) throws Exception {
         this.unawareBucketCompactor.processElement(element.getValue());
+    }
+
+    /** {@link StreamOperatorFactory} of {@link AppendOnlySingleTableCompactionWorkerOperator}. */
+    public static class Factory
+            extends AppendCompactWorkerOperator.Factory<UnawareAppendCompactionTask> {
+
+        public Factory(FileStoreTable table, String initialCommitUser) {
+            super(table, initialCommitUser);
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T extends StreamOperator<Committable>> T createStreamOperator(
+                StreamOperatorParameters<Committable> parameters) {
+            return (T)
+                    new AppendOnlySingleTableCompactionWorkerOperator(
+                            parameters, table, commitUser);
+        }
+
+        @Override
+        @SuppressWarnings("rawtypes")
+        public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
+            return AppendOnlySingleTableCompactionWorkerOperator.class;
+        }
     }
 }

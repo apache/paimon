@@ -26,9 +26,13 @@ import org.apache.paimon.options.Options;
 import org.apache.flink.runtime.memory.MemoryManager;
 import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
+import org.apache.flink.streaming.api.operators.AbstractStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
+import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.Output;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.StreamTask;
 
@@ -51,8 +55,9 @@ public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOpera
     private final Options options;
     private boolean endOfInput = false;
 
-    public PrepareCommitOperator(Options options) {
+    public PrepareCommitOperator(StreamOperatorParameters<OUT> parameters, Options options) {
         this.options = options;
+        setup(parameters.getContainingTask(), parameters.getStreamConfig(), parameters.getOutput());
     }
 
     @Override
@@ -101,4 +106,14 @@ public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOpera
 
     protected abstract List<OUT> prepareCommit(boolean waitCompaction, long checkpointId)
             throws IOException;
+
+    protected abstract static class Factory<IN, OUT> extends AbstractStreamOperatorFactory<OUT>
+            implements OneInputStreamOperatorFactory<IN, OUT> {
+        protected final Options options;
+
+        protected Factory(Options options) {
+            this.options = options;
+            this.chainingStrategy = ChainingStrategy.ALWAYS;
+        }
+    }
 }

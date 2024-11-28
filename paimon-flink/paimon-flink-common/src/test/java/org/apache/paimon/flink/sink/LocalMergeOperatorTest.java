@@ -151,7 +151,7 @@ class LocalMergeOperatorTest {
                         Collections.singletonList("f0"),
                         options,
                         null);
-        operator = new LocalMergeOperator(schema);
+        operator = new LocalMergeOperator.Factory(schema).createStreamOperator(null);
         operator.open();
         assertThat(operator.merger()).isInstanceOf(HashMapLocalMerger.class);
     }

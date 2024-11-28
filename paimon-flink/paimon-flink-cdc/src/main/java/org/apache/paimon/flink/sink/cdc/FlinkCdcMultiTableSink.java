@@ -41,7 +41,7 @@ import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
-import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 
 import javax.annotation.Nullable;
 
@@ -137,9 +137,10 @@ public class FlinkCdcMultiTableSink implements Serializable {
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
-    protected OneInputStreamOperator<CdcMultiplexRecord, MultiTableCommittable> createWriteOperator(
-            StoreSinkWrite.WithWriteBufferProvider writeProvider, String commitUser) {
-        return new CdcRecordStoreMultiWriteOperator(
+    protected OneInputStreamOperatorFactory<CdcMultiplexRecord, MultiTableCommittable>
+            createWriteOperator(
+                    StoreSinkWrite.WithWriteBufferProvider writeProvider, String commitUser) {
+        return new CdcRecordStoreMultiWriteOperator.Factory(
                 catalogLoader, writeProvider, commitUser, new Options());
     }
 

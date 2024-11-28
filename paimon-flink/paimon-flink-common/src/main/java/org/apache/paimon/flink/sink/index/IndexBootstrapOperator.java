@@ -27,7 +27,13 @@ import org.apache.paimon.utils.SerializableFunction;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
+import org.apache.flink.streaming.api.operators.AbstractStreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 /** Operator for {@link IndexBootstrap}. */
@@ -39,7 +45,7 @@ public class IndexBootstrapOperator<T> extends AbstractStreamOperator<Tuple2<Key
     private final IndexBootstrap bootstrap;
     private final SerializableFunction<InternalRow, T> converter;
 
-    public IndexBootstrapOperator(
+    private IndexBootstrapOperator(
             IndexBootstrap bootstrap, SerializableFunction<InternalRow, T> converter) {
         this.bootstrap = bootstrap;
         this.converter = converter;
@@ -62,5 +68,31 @@ public class IndexBootstrapOperator<T> extends AbstractStreamOperator<Tuple2<Key
     private void collect(InternalRow row) {
         output.collect(
                 new StreamRecord<>(new Tuple2<>(KeyPartOrRow.KEY_PART, converter.apply(row))));
+    }
+
+    /** {@link StreamOperatorFactory} of {@link IndexBootstrapOperator}. */
+    public static class Factory<T> extends AbstractStreamOperatorFactory<Tuple2<KeyPartOrRow, T>>
+            implements OneInputStreamOperatorFactory<T, Tuple2<KeyPartOrRow, T>> {
+        private final IndexBootstrap bootstrap;
+        private final SerializableFunction<InternalRow, T> converter;
+
+        public Factory(IndexBootstrap bootstrap, SerializableFunction<InternalRow, T> converter) {
+            this.chainingStrategy = ChainingStrategy.ALWAYS;
+            this.bootstrap = bootstrap;
+            this.converter = converter;
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <OP extends StreamOperator<Tuple2<KeyPartOrRow, T>>> OP createStreamOperator(
+                StreamOperatorParameters<Tuple2<KeyPartOrRow, T>> streamOperatorParameters) {
+            return (OP) new IndexBootstrapOperator<>(bootstrap, converter);
+        }
+
+        @Override
+        @SuppressWarnings("rawtypes")
+        public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
+            return IndexBootstrapOperator.class;
+        }
     }
 }

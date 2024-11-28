@@ -46,8 +46,10 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
 
 import org.apache.flink.streaming.api.graph.StreamConfig;
-import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.Output;
+import org.apache.flink.streaming.api.operators.StreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.StreamTask;
 
@@ -76,9 +78,33 @@ public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
     }
 
     @Override
-    protected OneInputStreamOperator<ManifestEntry, Committable> createWriteOperator(
+    protected OneInputStreamOperatorFactory<ManifestEntry, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new FileIndexModificationOperator(table.coreOptions().toConfiguration(), table);
+        return new FileIndexModificationOperatorFactory(
+                table.coreOptions().toConfiguration(), table);
+    }
+
+    private static class FileIndexModificationOperatorFactory
+            extends PrepareCommitOperator.Factory<ManifestEntry, Committable> {
+        private final FileStoreTable table;
+
+        public FileIndexModificationOperatorFactory(Options options, FileStoreTable table) {
+            super(options);
+            this.table = table;
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T extends StreamOperator<Committable>> T createStreamOperator(
+                StreamOperatorParameters<Committable> parameters) {
+            return (T) new FileIndexModificationOperator(parameters, options, table);
+        }
+
+        @Override
+        @SuppressWarnings("rawtypes")
+        public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
+            return FileIndexModificationOperator.class;
+        }
     }
 
     /** File index modification operator to rewrite file index. */
@@ -92,8 +118,11 @@ public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
         private transient FileIndexProcessor fileIndexProcessor;
         private transient List<CommitMessage> messages;
 
-        public FileIndexModificationOperator(Options options, FileStoreTable table) {
-            super(options);
+        private FileIndexModificationOperator(
+                StreamOperatorParameters<Committable> parameters,
+                Options options,
+                FileStoreTable table) {
+            super(parameters, options);
             this.table = table;
         }
 

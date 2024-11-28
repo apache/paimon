@@ -253,8 +253,8 @@ public class CdcRecordStoreWriteOperatorTest {
 
     private OneInputStreamOperatorTestHarness<CdcRecord, Committable> createTestHarness(
             FileStoreTable table) throws Exception {
-        CdcRecordStoreWriteOperator operator =
-                new CdcRecordStoreWriteOperator(
+        CdcRecordStoreWriteOperator.Factory operatorFactory =
+                new CdcRecordStoreWriteOperator.Factory(
                         table,
                         (t, commitUser, state, ioManager, memoryPool, metricGroup) ->
                                 new StoreSinkWriteImpl(
@@ -272,7 +272,7 @@ public class CdcRecordStoreWriteOperatorTest {
         TypeSerializer<Committable> outputSerializer =
                 new CommittableTypeInfo().createSerializer(new ExecutionConfig());
         OneInputStreamOperatorTestHarness<CdcRecord, Committable> harness =
-                new OneInputStreamOperatorTestHarness<>(operator, inputSerializer);
+                new OneInputStreamOperatorTestHarness<>(operatorFactory, inputSerializer);
         harness.setup(outputSerializer);
         return harness;
     }
