@@ -54,31 +54,6 @@ import static org.apache.flink.table.descriptors.Schema.SCHEMA;
  */
 public class FlinkCatalogPropertiesUtil {
 
-    public static Map<String, String> serializeNonPhysicalColumns(
-            Map<String, Integer> indexMap, List<TableColumn> nonPhysicalColumns) {
-        Map<String, String> serialized = new HashMap<>();
-        for (TableColumn c : nonPhysicalColumns) {
-            int index = indexMap.get(c.getName());
-            serialized.put(compoundKey(SCHEMA, index, NAME), c.getName());
-            serialized.put(
-                    compoundKey(SCHEMA, index, DATA_TYPE),
-                    c.getType().getLogicalType().asSerializableString());
-            if (c instanceof TableColumn.ComputedColumn) {
-                TableColumn.ComputedColumn computedColumn = (TableColumn.ComputedColumn) c;
-                serialized.put(compoundKey(SCHEMA, index, EXPR), computedColumn.getExpression());
-            } else {
-                TableColumn.MetadataColumn metadataColumn = (TableColumn.MetadataColumn) c;
-                serialized.put(
-                        compoundKey(SCHEMA, index, METADATA),
-                        metadataColumn.getMetadataAlias().orElse(metadataColumn.getName()));
-                serialized.put(
-                        compoundKey(SCHEMA, index, VIRTUAL),
-                        Boolean.toString(metadataColumn.isVirtual()));
-            }
-        }
-        return serialized;
-    }
-
     /** Serialize non-physical columns of new api. */
     public static Map<String, String> serializeNonPhysicalNewColumns(ResolvedSchema schema) {
         List<Column> nonPhysicalColumns =
@@ -117,22 +92,6 @@ public class FlinkCatalogPropertiesUtil {
             }
         }
         return serialized;
-    }
-
-    public static Map<String, String> serializeWatermarkSpec(WatermarkSpec watermarkSpec) {
-        Map<String, String> serializedWatermarkSpec = new HashMap<>();
-        String watermarkPrefix = compoundKey(SCHEMA, WATERMARK, 0);
-        serializedWatermarkSpec.put(
-                compoundKey(watermarkPrefix, WATERMARK_ROWTIME),
-                watermarkSpec.getRowtimeAttribute());
-        serializedWatermarkSpec.put(
-                compoundKey(watermarkPrefix, WATERMARK_STRATEGY_EXPR),
-                watermarkSpec.getWatermarkExpr());
-        serializedWatermarkSpec.put(
-                compoundKey(watermarkPrefix, WATERMARK_STRATEGY_DATA_TYPE),
-                watermarkSpec.getWatermarkExprOutputType().getLogicalType().asSerializableString());
-
-        return serializedWatermarkSpec;
     }
 
     public static Map<String, String> serializeNewWatermarkSpec(

@@ -23,10 +23,18 @@ import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.TableColumn;
 import org.apache.flink.table.api.WatermarkSpec;
+import org.apache.flink.table.catalog.Column;
+import org.apache.flink.table.catalog.ResolvedSchema;
+import org.apache.flink.table.expressions.Expression;
+import org.apache.flink.table.expressions.ExpressionVisitor;
+import org.apache.flink.table.expressions.ResolvedExpression;
+import org.apache.flink.table.expressions.SqlCallExpression;
+import org.apache.flink.table.types.DataType;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -49,18 +57,24 @@ public class FlinkCatalogPropertiesUtilTest {
 
     @Test
     public void testSerDeNonPhysicalColumns() {
-        Map<String, Integer> indexMap = new HashMap<>();
-        indexMap.put("comp", 2);
-        indexMap.put("meta1", 3);
-        indexMap.put("meta2", 5);
         List<TableColumn> columns = new ArrayList<>();
         columns.add(TableColumn.computed("comp", DataTypes.INT(), "`k` * 2"));
         columns.add(TableColumn.metadata("meta1", DataTypes.VARCHAR(10)));
         columns.add(TableColumn.metadata("meta2", DataTypes.BIGINT().notNull(), "price", true));
 
+        List<Column> resolvedColumns = new ArrayList<>();
+        resolvedColumns.add(Column.physical("phy1", DataTypes.INT()));
+        resolvedColumns.add(Column.physical("phy2", DataTypes.INT()));
+        resolvedColumns.add(
+                Column.computed("comp", new TestResolvedExpression("`k` * 2", DataTypes.INT())));
+        resolvedColumns.add(Column.metadata("meta1", DataTypes.VARCHAR(10), null, false));
+        resolvedColumns.add(Column.physical("phy3", DataTypes.INT()));
+        resolvedColumns.add(Column.metadata("meta2", DataTypes.BIGINT().notNull(), "price", true));
+
         // validate serialization
         Map<String, String> serialized =
-                FlinkCatalogPropertiesUtil.serializeNonPhysicalColumns(indexMap, columns);
+                FlinkCatalogPropertiesUtil.serializeNonPhysicalNewColumns(
+                        new ResolvedSchema(resolvedColumns, Collections.emptyList(), null));
 
         Map<String, String> expected = new HashMap<>();
         expected.put(compoundKey(SCHEMA, 2, NAME), "comp");
@@ -86,21 +100,19 @@ public class FlinkCatalogPropertiesUtilTest {
         deserialized.add(FlinkCatalogPropertiesUtil.deserializeNonPhysicalColumn(serialized, 5));
 
         assertThat(deserialized).isEqualTo(columns);
-
-        // validate that
     }
 
     @Test
     public void testSerDeWatermarkSpec() {
-        WatermarkSpec watermarkSpec =
-                new WatermarkSpec(
+        org.apache.flink.table.catalog.WatermarkSpec watermarkSpec =
+                org.apache.flink.table.catalog.WatermarkSpec.of(
                         "test_time",
-                        "`test_time` - INTERVAL '0.001' SECOND",
-                        DataTypes.TIMESTAMP(3));
+                        new TestResolvedExpression(
+                                "`test_time` - INTERVAL '0.001' SECOND", DataTypes.TIMESTAMP(3)));
 
         // validate serialization
         Map<String, String> serialized =
-                FlinkCatalogPropertiesUtil.serializeWatermarkSpec(watermarkSpec);
+                FlinkCatalogPropertiesUtil.serializeNewWatermarkSpec(watermarkSpec);
 
         Map<String, String> expected = new HashMap<>();
         String watermarkPrefix = compoundKey(SCHEMA, WATERMARK, 0);
@@ -115,7 +127,10 @@ public class FlinkCatalogPropertiesUtilTest {
         // validate serialization
         WatermarkSpec deserialized =
                 FlinkCatalogPropertiesUtil.deserializeWatermarkSpec(serialized);
-        assertThat(deserialized).isEqualTo(watermarkSpec);
+        assertThat(deserialized.getWatermarkExpr())
+                .isEqualTo(watermarkSpec.getWatermarkExpression().asSerializableString());
+        assertThat(deserialized.getRowtimeAttribute())
+                .isEqualTo(watermarkSpec.getRowtimeAttribute());
     }
 
     @Test
@@ -149,5 +164,45 @@ public class FlinkCatalogPropertiesUtilTest {
                         FlinkCatalogPropertiesUtil.nonPhysicalColumnsCount(
                                 oldStyleOptions, Arrays.asList("phy1", "phy2")))
                 .isEqualTo(3);
+    }
+
+    private static class TestResolvedExpression implements ResolvedExpression {
+        private final String name;
+        private final DataType outputDataType;
+
+        private TestResolvedExpression(String name, DataType outputDataType) {
+            this.name = name;
+            this.outputDataType = outputDataType;
+        }
+
+        @Override
+        public DataType getOutputDataType() {
+            return outputDataType;
+        }
+
+        @Override
+        public List<ResolvedExpression> getResolvedChildren() {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public String asSummaryString() {
+            return new SqlCallExpression(name).asSummaryString();
+        }
+
+        @Override
+        public String asSerializableString() {
+            return name;
+        }
+
+        @Override
+        public List<Expression> getChildren() {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public <R> R accept(ExpressionVisitor<R> expressionVisitor) {
+            return null;
+        }
     }
 }
