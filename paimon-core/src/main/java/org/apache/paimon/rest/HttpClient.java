@@ -52,7 +52,7 @@ public class HttpClient implements RESTClient {
     private final ObjectMapper mapper;
     private final ErrorHandler errorHandler;
 
-    private static final String thread_name = "REST-CATALOG-HTTP-CLIENT-THREAD-POOL";
+    private static final String THREAD_NAME = "REST-CATALOG-HTTP-CLIENT-THREAD-POOL";
     private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
 
     public HttpClient(HttpClientOptions httpClientOptions) {
@@ -127,19 +127,15 @@ public class HttpClient implements RESTClient {
     private static OkHttpClient createHttpClient(HttpClientOptions httpClientOptions) {
         BlockingQueue<Runnable> workQueue = new SynchronousQueue<>();
         ExecutorService executorService =
-                createCachedThreadPool(httpClientOptions.threadPoolSize(), thread_name, workQueue);
+                createCachedThreadPool(httpClientOptions.threadPoolSize(), THREAD_NAME, workQueue);
 
         OkHttpClient.Builder builder =
                 new OkHttpClient.Builder()
                         .dispatcher(new Dispatcher(executorService))
                         .retryOnConnectionFailure(true)
                         .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT));
-        if (httpClientOptions.connectTimeout().isPresent()) {
-            builder.connectTimeout(httpClientOptions.connectTimeout().get());
-        }
-        if (httpClientOptions.readTimeout().isPresent()) {
-            builder.readTimeout(httpClientOptions.readTimeout().get());
-        }
+        httpClientOptions.connectTimeout().ifPresent(builder::connectTimeout);
+        httpClientOptions.readTimeout().ifPresent(builder::readTimeout);
 
         return builder.build();
     }
