@@ -186,7 +186,8 @@ public class RESTCatalog implements Catalog {
     @VisibleForTesting
     Map<String, String> fetchOptionsFromServer(
             Map<String, String> headers, Map<String, String> clientProperties) {
-        ConfigResponse response = client.get(ResourcePaths.config(), ConfigResponse.class, headers);
+        ConfigResponse response =
+                client.get(ResourcePaths.V1_CONFIG, ConfigResponse.class, headers);
         return response.merge(clientProperties);
     }
 

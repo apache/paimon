@@ -23,7 +23,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 import java.time.Duration;
 import java.util.Optional;
 
-/** HTTP client build parameter. */
+/** Options for Http Client. */
 public class HttpClientOptions {
 
     private final String uri;

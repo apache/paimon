@@ -18,11 +18,8 @@
 
 package org.apache.paimon.rest;
 
-import java.util.StringJoiner;
-
 /** Resource paths for REST catalog. */
 public class ResourcePaths {
-    private static final StringJoiner SLASH = new StringJoiner("/");
     public static final String V1_CONFIG = "/api/v1/config";
 
     public static ResourcePaths forCatalogProperties(String prefix) {
@@ -33,9 +30,5 @@ public class ResourcePaths {
 
     public ResourcePaths(String prefix) {
         this.prefix = prefix;
-    }
-
-    public static String config() {
-        return SLASH.add("api").add("v1").add("config").toString();
     }
 }
