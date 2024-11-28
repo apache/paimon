@@ -59,7 +59,7 @@ public class ThreadPoolUtils {
     }
 
     /**
-     * Create a thread pool with max thread number and user define queue. Inactive threads will
+     * Create a thread pool with max thread number and define queue. Inactive threads will
      * automatically exit.
      */
     public static ThreadPoolExecutor createCachedThreadPool(
