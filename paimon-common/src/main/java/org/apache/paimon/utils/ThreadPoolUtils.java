@@ -47,7 +47,13 @@ import static org.apache.paimon.utils.ThreadUtils.newDaemonThreadFactory;
 /** Utils for thread pool. */
 public class ThreadPoolUtils {
 
-    /** Create a thread pool with max thread number and default queue. */
+    /**
+     * Create a thread pool with max thread number. Inactive threads will automatically exit.
+     *
+     * <p>The {@link Executors#newCachedThreadPool} cannot limit max thread number. Non-core threads
+     * must be used with {@link SynchronousQueue}, but synchronous queue will be blocked when there
+     * is max thread number.
+     */
     public static ThreadPoolExecutor createCachedThreadPool(int threadNum, String namePrefix) {
         return createCachedThreadPool(threadNum, namePrefix, new LinkedBlockingQueue<>());
     }
@@ -55,10 +61,6 @@ public class ThreadPoolUtils {
     /**
      * Create a thread pool with max thread number and user define queue. Inactive threads will
      * automatically exit.
-     *
-     * <p>The {@link Executors#newCachedThreadPool} cannot limit max thread number. Non-core threads
-     * must be used with {@link SynchronousQueue}, but synchronous queue will be blocked when there
-     * is max thread number.
      */
     public static ThreadPoolExecutor createCachedThreadPool(
             int threadNum, String namePrefix, BlockingQueue<Runnable> workQueue) {
