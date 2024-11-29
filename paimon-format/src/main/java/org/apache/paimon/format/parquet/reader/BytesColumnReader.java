@@ -23,7 +23,6 @@ import org.apache.paimon.data.columnar.writable.WritableIntVector;
 
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReadStore;
-import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.schema.PrimitiveType;
 
 import java.io.IOException;
@@ -87,7 +86,8 @@ public class BytesColumnReader extends AbstractColumnReader<WritableBytesVector>
                     break;
                 case PACKED:
                     for (int i = 0; i < n; ++i) {
-                        if (runLenDecoder.currentBuffer[runLenDecoder.currentBufferIdx++] == maxDefLevel) {
+                        if (runLenDecoder.currentBuffer[runLenDecoder.currentBufferIdx++]
+                                == maxDefLevel) {
                             skipBinary(1);
                         }
                     }
@@ -98,7 +98,7 @@ public class BytesColumnReader extends AbstractColumnReader<WritableBytesVector>
         }
     }
 
-    private void skipBinary(int num){
+    private void skipBinary(int num) {
         for (int i = 0; i < num; i++) {
             int len = readDataBuffer(4).getInt();
             skipDataBuffer(len);

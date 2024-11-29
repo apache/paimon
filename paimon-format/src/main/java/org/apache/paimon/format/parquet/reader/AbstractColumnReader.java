@@ -28,7 +28,12 @@ import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.Dictionary;
 import org.apache.parquet.column.Encoding;
 import org.apache.parquet.column.impl.ColumnReaderImpl;
-import org.apache.parquet.column.page.*;
+import org.apache.parquet.column.page.DataPage;
+import org.apache.parquet.column.page.DataPageV1;
+import org.apache.parquet.column.page.DataPageV2;
+import org.apache.parquet.column.page.DictionaryPage;
+import org.apache.parquet.column.page.PageReadStore;
+import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.column.values.ValuesReader;
 import org.apache.parquet.io.ParquetDecodingException;
 import org.apache.parquet.schema.PrimitiveType;
@@ -65,9 +70,11 @@ public abstract class AbstractColumnReader<VECTOR extends WritableColumnVector>
     private boolean isCurrentPageDictionaryEncoded;
 
     /** Total values in the current page. */
-//    private int pageValueCount;
+    //    private int pageValueCount;
 
-    /** Helper struct to track intermediate states while reading Parquet pages in the column chunk.*/
+    /**
+     * Helper struct to track intermediate states while reading Parquet pages in the column chunk.
+     */
     private final ParquetReadState readState;
 
     /*
@@ -147,13 +154,14 @@ public abstract class AbstractColumnReader<VECTOR extends WritableColumnVector>
             if (readState.valuesToReadInPage == 0) {
                 int pageValueCount = readPage();
                 if (pageValueCount < 0) {
-                    // we've read all the pages; this could happen when we're reading a repeated list and we
+                    // we've read all the pages; this could happen when we're reading a repeated
+                    // list and we
                     // don't know where the list will end until we've seen all the pages.
                     break;
                 }
             }
 
-            if (readState.isFinished()){
+            if (readState.isFinished()) {
                 break;
             }
 
@@ -166,38 +174,45 @@ public abstract class AbstractColumnReader<VECTOR extends WritableColumnVector>
             long rangeStart = readState.currentRangeStart();
             long rangeEnd = readState.currentRangeEnd();
 
-            if (pageRowId < rangeStart){
-                int toSkip = (int)(rangeStart - pageRowId);
-                if (toSkip >= leftInPage) {  // drop page
+            if (pageRowId < rangeStart) {
+                int toSkip = (int) (rangeStart - pageRowId);
+                if (toSkip >= leftInPage) { // drop page
                     pageRowId += leftInPage;
                     leftInPage = 0;
-                }else {
+                } else {
                     if (isCurrentPageDictionaryEncoded) {
-                        runLenDecoder.skipDictionaryIds(toSkip, maxDefLevel, this.dictionaryIdsDecoder);
+                        runLenDecoder.skipDictionaryIds(
+                                toSkip, maxDefLevel, this.dictionaryIdsDecoder);
                         pageRowId += toSkip;
                         leftInPage -= toSkip;
-                    }else{
+                    } else {
                         skipBatch(toSkip);
                         pageRowId += toSkip;
                         leftInPage -= toSkip;
                     }
                 }
-            }else if (pageRowId > rangeEnd){
+            } else if (pageRowId > rangeEnd) {
                 readState.nextRange();
-            }else{
+            } else {
                 long start = pageRowId;
-                long end = Math.min(rangeEnd, pageRowId + readBatch -1);
-                int num  = (int) (end - start +1);
+                long end = Math.min(rangeEnd, pageRowId + readBatch - 1);
+                int num = (int) (end - start + 1);
 
                 if (isCurrentPageDictionaryEncoded) {
                     // Read and decode dictionary ids.
                     runLenDecoder.readDictionaryIds(
-                            num, dictionaryIds, vector, rowId, maxDefLevel, this.dictionaryIdsDecoder);
+                            num,
+                            dictionaryIds,
+                            vector,
+                            rowId,
+                            maxDefLevel,
+                            this.dictionaryIdsDecoder);
 
                     if (vector.hasDictionary() || (rowId == 0 && supportLazyDecode())) {
                         // Column vector supports lazy decoding of dictionary values so just set the
                         // dictionary.
-                        // We can't do this if rowId != 0 AND the column doesn't have a dictionary (i.e.
+                        // We can't do this if rowId != 0 AND the column doesn't have a dictionary
+                        // (i.e.
                         // some
                         // non-dictionary encoded values have already been added).
                         vector.setDictionary(new ParquetDictionary(dictionary));
@@ -206,7 +221,8 @@ public abstract class AbstractColumnReader<VECTOR extends WritableColumnVector>
                     }
                 } else {
                     if (vector.hasDictionary() && rowId != 0) {
-                        // This batch already has dictionary encoded values but this new page is not.
+                        // This batch already has dictionary encoded values but this new page is
+                        // not.
                         // The batch
                         // does not support a mix of dictionary and not so we will decode the
                         // dictionary.
@@ -219,7 +235,6 @@ public abstract class AbstractColumnReader<VECTOR extends WritableColumnVector>
                 pageRowId += num;
                 leftInPage -= num;
                 rowId += num;
-
             }
             readState.rowsToReadInBatch = leftInBatch;
             readState.valuesToReadInPage = leftInPage;
@@ -234,25 +249,27 @@ public abstract class AbstractColumnReader<VECTOR extends WritableColumnVector>
         }
         long pageFirstRowIndex = page.getFirstRowIndex().orElse(0L);
 
-        int pageValueCount =  page.accept(new DataPage.Visitor<Integer>() {
-            @Override
-            public Integer visit(DataPageV1 dataPageV1) {
-                try {
-                    return readPageV1(dataPageV1);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-            }
+        int pageValueCount =
+                page.accept(
+                        new DataPage.Visitor<Integer>() {
+                            @Override
+                            public Integer visit(DataPageV1 dataPageV1) {
+                                try {
+                                    return readPageV1(dataPageV1);
+                                } catch (IOException e) {
+                                    throw new RuntimeException(e);
+                                }
+                            }
 
-            @Override
-            public Integer visit(DataPageV2 dataPageV2) {
-                try {
-                    return readPageV2(dataPageV2);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-        });
+                            @Override
+                            public Integer visit(DataPageV2 dataPageV2) {
+                                try {
+                                    return readPageV2(dataPageV2);
+                                } catch (IOException e) {
+                                    throw new RuntimeException(e);
+                                }
+                            }
+                        });
         readState.resetForNewPage(pageValueCount, pageFirstRowIndex);
         return pageValueCount;
     }
@@ -332,8 +349,7 @@ public abstract class AbstractColumnReader<VECTOR extends WritableColumnVector>
         afterReadPage();
     }
 
-
-    final void skipDataBuffer(int length){
+    final void skipDataBuffer(int length) {
         try {
             dataInputStream.skipFully(length);
         } catch (IOException e) {

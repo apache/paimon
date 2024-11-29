@@ -23,7 +23,6 @@ import org.apache.paimon.data.columnar.writable.WritableIntVector;
 
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReadStore;
-import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.schema.PrimitiveType;
 
 import java.io.IOException;
@@ -99,7 +98,7 @@ public class DoubleColumnReader extends AbstractColumnReader<WritableDoubleVecto
         }
     }
 
-    private void skipDouble(int num){
+    private void skipDouble(int num) {
         skipDataBuffer(8 * num);
     }
 

@@ -23,7 +23,6 @@ import org.apache.paimon.data.columnar.writable.WritableIntVector;
 
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReadStore;
-import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.schema.PrimitiveType;
 
 import java.io.IOException;
@@ -71,7 +70,6 @@ public class FloatColumnReader extends AbstractColumnReader<WritableFloatVector>
         }
     }
 
-
     @Override
     protected void skipBatch(int num) {
         int left = num;
@@ -100,10 +98,9 @@ public class FloatColumnReader extends AbstractColumnReader<WritableFloatVector>
         }
     }
 
-    private void skipFloat(int num){
+    private void skipFloat(int num) {
         skipDataBuffer(4 * num);
     }
-
 
     @Override
     protected void readBatchFromDictionaryIds(

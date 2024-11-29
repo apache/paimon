@@ -23,7 +23,6 @@ import org.apache.paimon.data.columnar.writable.WritableIntVector;
 
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReadStore;
-import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.schema.PrimitiveType;
 
 import java.io.IOException;
@@ -32,7 +31,8 @@ import java.nio.ByteBuffer;
 /** Byte {@link ColumnReader}. Using INT32 to store byte, so just cast int to byte. */
 public class ByteColumnReader extends AbstractColumnReader<WritableByteVector> {
 
-    public ByteColumnReader(ColumnDescriptor descriptor, PageReadStore pageReadStore) throws IOException {
+    public ByteColumnReader(ColumnDescriptor descriptor, PageReadStore pageReadStore)
+            throws IOException {
         super(descriptor, pageReadStore);
         checkTypeName(PrimitiveType.PrimitiveTypeName.INT32);
     }

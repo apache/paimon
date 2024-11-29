@@ -23,7 +23,6 @@ import org.apache.paimon.data.columnar.writable.WritableLongVector;
 
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReadStore;
-import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.schema.PrimitiveType;
 
 import java.io.IOException;
@@ -32,7 +31,8 @@ import java.nio.ByteBuffer;
 /** Long {@link ColumnReader}. */
 public class LongColumnReader extends AbstractColumnReader<WritableLongVector> {
 
-    public LongColumnReader(ColumnDescriptor descriptor, PageReadStore pageReadStore) throws IOException {
+    public LongColumnReader(ColumnDescriptor descriptor, PageReadStore pageReadStore)
+            throws IOException {
         super(descriptor, pageReadStore);
         checkTypeName(PrimitiveType.PrimitiveTypeName.INT64);
     }
@@ -98,7 +98,7 @@ public class LongColumnReader extends AbstractColumnReader<WritableLongVector> {
         }
     }
 
-    private void skipValue(int num){
+    private void skipValue(int num) {
         skipDataBuffer(num * 8);
     }
 

@@ -23,7 +23,6 @@ import org.apache.paimon.data.columnar.writable.WritableShortVector;
 
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReadStore;
-import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.schema.PrimitiveType;
 
 import java.io.IOException;
@@ -100,7 +99,7 @@ public class ShortColumnReader extends AbstractColumnReader<WritableShortVector>
         }
     }
 
-    private void skipShot(int num){
+    private void skipShot(int num) {
         skipDataBuffer(4 * num);
     }
 

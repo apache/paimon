@@ -194,10 +194,7 @@ final class RunLengthDecoder {
         }
     }
 
-    void skipDictionaryIds(
-            int total,
-            int level,
-            RunLengthDecoder data) {
+    void skipDictionaryIds(int total, int level, RunLengthDecoder data) {
         int left = total;
         while (left > 0) {
             if (this.currentCount == 0) {
