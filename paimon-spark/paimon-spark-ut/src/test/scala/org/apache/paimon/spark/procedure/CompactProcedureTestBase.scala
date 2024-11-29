@@ -39,6 +39,56 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
 
   import testImplicits._
 
+  // ----------------------- Minor Compact -----------------------
+
+  test("Paimon Procedure: compact aware bucket pk table with minor compact strategy") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (id INT, value STRING, pt STRING)
+                   |TBLPROPERTIES ('primary-key'='id, pt', 'bucket'='1', 'write-only'='true')
+                   |PARTITIONED BY (pt)
+                   |""".stripMargin)
+
+      val table = loadTable("T")
+
+      spark.sql(s"INSERT INTO T VALUES (1, 'a', 'p1'), (2, 'b', 'p2')")
+      spark.sql(s"INSERT INTO T VALUES (3, 'c', 'p1'), (4, 'd', 'p2')")
+
+      Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.APPEND)).isTrue
+      Assertions.assertThat(lastSnapshotId(table)).isEqualTo(2)
+
+      spark.sql(
+        "CALL sys.compact(table => 'T', compact_strategy => 'minor'," +
+          "options => 'num-sorted-run.compaction-trigger=3')")
+
+      // Due to the limitation of parameter 'num-sorted-run.compaction-trigger' = 3, so compact is not
+      // performed.
+      Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.APPEND)).isTrue
+      Assertions.assertThat(lastSnapshotId(table)).isEqualTo(2)
+
+      // Make par-p1 has 3 datafile and par-p2 has 2 datafile, so par-p2 will not be picked out to
+      // compact.
+      spark.sql(s"INSERT INTO T VALUES (1, 'a', 'p1')")
+
+      spark.sql(
+        "CALL sys.compact(table => 'T', compact_strategy => 'minor'," +
+          "options => 'num-sorted-run.compaction-trigger=3')")
+
+      Assertions.assertThat(lastSnapshotId(table)).isEqualTo(4)
+      Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
+
+      val splits = table.newSnapshotReader.read.dataSplits
+      splits.forEach(
+        split => {
+          Assertions
+            .assertThat(split.dataFiles.size)
+            .isEqualTo(if (split.partition().getString(0).toString == "p2") 2 else 1)
+        })
+    }
+  }
+
+  // ----------------------- Sort Compact -----------------------
+
   test("Paimon Procedure: sort compact") {
     failAfter(streamingTimeout) {
       withTempDir {

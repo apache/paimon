@@ -57,11 +57,15 @@ public class CombinedTableCompactorSink implements Serializable {
 
     private final Catalog.Loader catalogLoader;
     private final boolean ignorePreviousFiles;
+    private final boolean fullCompaction;
+
     private final Options options;
 
-    public CombinedTableCompactorSink(Catalog.Loader catalogLoader, Options options) {
+    public CombinedTableCompactorSink(
+            Catalog.Loader catalogLoader, Options options, boolean fullCompaction) {
         this.catalogLoader = catalogLoader;
         this.ignorePreviousFiles = false;
+        this.fullCompaction = fullCompaction;
         this.options = options;
     }
 
@@ -104,7 +108,10 @@ public class CombinedTableCompactorSink implements Serializable {
                                 String.format("%s-%s", "Multi-Bucket-Table", WRITER_NAME),
                                 new MultiTableCommittableTypeInfo(),
                                 combinedMultiComacptionWriteOperator(
-                                        env.getCheckpointConfig(), isStreaming, commitUser))
+                                        env.getCheckpointConfig(),
+                                        isStreaming,
+                                        fullCompaction,
+                                        commitUser))
                         .setParallelism(awareBucketTableSource.getParallelism());
 
         SingleOutputStreamOperator<MultiTableCommittable> unawareBucketTableRewriter =
@@ -168,13 +175,17 @@ public class CombinedTableCompactorSink implements Serializable {
     // TODO:refactor FlinkSink to adopt this sink
     protected OneInputStreamOperator<RowData, MultiTableCommittable>
             combinedMultiComacptionWriteOperator(
-                    CheckpointConfig checkpointConfig, boolean isStreaming, String commitUser) {
+                    CheckpointConfig checkpointConfig,
+                    boolean isStreaming,
+                    boolean fullCompaction,
+                    String commitUser) {
         return new MultiTablesStoreCompactOperator(
                 catalogLoader,
                 commitUser,
                 checkpointConfig,
                 isStreaming,
                 ignorePreviousFiles,
+                fullCompaction,
                 options);
     }
 

@@ -132,7 +132,7 @@ public class CompactorSinkITCase extends AbstractTestBase {
                         .withContinuousMode(false)
                         .withPartitionPredicate(predicate)
                         .build();
-        new CompactorSinkBuilder(table).withFullCompaction(true).withInput(source).build();
+        new CompactorSinkBuilder(table, true).withInput(source).build();
         env.execute();
 
         snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
@@ -181,8 +181,8 @@ public class CompactorSinkITCase extends AbstractTestBase {
                                                 FlinkConnectorOptions.SINK_PARALLELISM.key(),
                                                 String.valueOf(sinkParalellism));
                                     }
-                                }))
-                .withFullCompaction(false)
+                                }),
+                        false)
                 .withInput(source)
                 .build();
 
@@ -275,7 +275,13 @@ public class CompactorSinkITCase extends AbstractTestBase {
     protected MultiTablesStoreCompactOperator createMultiTablesCompactOperator(
             Catalog.Loader catalogLoader) throws Exception {
         return new MultiTablesStoreCompactOperator(
-                catalogLoader, commitUser, new CheckpointConfig(), false, false, new Options());
+                catalogLoader,
+                commitUser,
+                new CheckpointConfig(),
+                false,
+                false,
+                true,
+                new Options());
     }
 
     private static byte[] partition(String dt, int hh) {

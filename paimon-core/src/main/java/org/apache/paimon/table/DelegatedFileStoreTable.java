@@ -131,6 +131,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void setStatsCache(Cache<String, Statistics> cache) {
+        wrapped.setStatsCache(cache);
+    }
+
+    @Override
     public TableSchema schema() {
         return wrapped.schema();
     }
