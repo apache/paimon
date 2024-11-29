@@ -18,9 +18,9 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.shade.com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.beans.ConstructorProperties;
 
