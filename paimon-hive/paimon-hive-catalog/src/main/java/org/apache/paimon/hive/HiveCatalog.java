@@ -610,8 +610,7 @@ public class HiveCatalog extends AbstractCatalog {
                                     lockFactory().orElse(null),
                                     lockContext().orElse(null),
                                     identifier),
-                            metastoreClientFactory(identifier, tableMeta.schema()).orElse(null),
-                            lineageMetaFactory));
+                            metastoreClientFactory(identifier, tableMeta.schema()).orElse(null)));
         } catch (TableNotExistException ignore) {
         }
 
