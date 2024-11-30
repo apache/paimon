@@ -30,6 +30,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Queue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -54,13 +55,22 @@ public class ThreadPoolUtils {
      * is max thread number.
      */
     public static ThreadPoolExecutor createCachedThreadPool(int threadNum, String namePrefix) {
+        return createCachedThreadPool(threadNum, namePrefix, new LinkedBlockingQueue<>());
+    }
+
+    /**
+     * Create a thread pool with max thread number and define queue. Inactive threads will
+     * automatically exit.
+     */
+    public static ThreadPoolExecutor createCachedThreadPool(
+            int threadNum, String namePrefix, BlockingQueue<Runnable> workQueue) {
         ThreadPoolExecutor executor =
                 new ThreadPoolExecutor(
                         threadNum,
                         threadNum,
                         1,
                         TimeUnit.MINUTES,
-                        new LinkedBlockingQueue<>(),
+                        workQueue,
                         newDaemonThreadFactory(namePrefix));
         executor.allowCoreThreadTimeOut(true);
         return executor;
@@ -110,7 +120,9 @@ public class ThreadPoolUtils {
                                 if (stack.isEmpty()) {
                                     return;
                                 }
-                                activeList = randomlyExecute(executor, processor, stack.poll());
+                                activeList =
+                                        randomlyExecuteSequentialReturn(
+                                                executor, processor, stack.poll());
                             }
                         }
                     }
@@ -132,7 +144,7 @@ public class ThreadPoolUtils {
         awaitAllFutures(futures);
     }
 
-    public static <U, T> Iterator<T> randomlyExecute(
+    public static <U, T> Iterator<T> randomlyExecuteSequentialReturn(
             ExecutorService executor, Function<U, List<T>> processor, Collection<U> input) {
         List<Future<List<T>>> futures = new ArrayList<>(input.size());
         ClassLoader cl = Thread.currentThread().getContextClassLoader();

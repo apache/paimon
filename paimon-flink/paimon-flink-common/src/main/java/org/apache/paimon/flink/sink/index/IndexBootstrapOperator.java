@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink.index;
 import org.apache.paimon.crosspartition.IndexBootstrap;
 import org.apache.paimon.crosspartition.KeyPartOrRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.utils.SerializableFunction;
 
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -50,8 +51,8 @@ public class IndexBootstrapOperator<T> extends AbstractStreamOperator<Tuple2<Key
     public void initializeState(StateInitializationContext context) throws Exception {
         super.initializeState(context);
         bootstrap.bootstrap(
-                getRuntimeContext().getNumberOfParallelSubtasks(),
-                getRuntimeContext().getIndexOfThisSubtask(),
+                RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext()),
+                RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext()),
                 this::collect);
     }
 

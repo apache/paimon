@@ -46,7 +46,6 @@ import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.util.DataFormatConverters;
@@ -178,7 +177,7 @@ public class FlinkSourceBuilder {
         if (limit != null) {
             readBuilder.withLimit(limit.intValue());
         }
-        return readBuilder;
+        return readBuilder.dropStats();
     }
 
     private DataStream<RowData> buildStaticFileSource() {
@@ -331,30 +330,25 @@ public class FlinkSourceBuilder {
         checkArgument(
                 checkpointConfig.isCheckpointingEnabled(),
                 "The align mode of paimon source is only supported when checkpoint enabled. Please set "
-                        + ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL.key()
-                        + "larger than 0");
+                        + "execution.checkpointing.interval larger than 0");
         checkArgument(
                 checkpointConfig.getMaxConcurrentCheckpoints() == 1,
                 "The align mode of paimon source supports at most one ongoing checkpoint at the same time. Please set "
-                        + ExecutionCheckpointingOptions.MAX_CONCURRENT_CHECKPOINTS.key()
-                        + " to 1");
+                        + "execution.checkpointing.max-concurrent-checkpoints to 1");
         checkArgument(
                 checkpointConfig.getCheckpointTimeout()
                         > conf.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_TIMEOUT)
                                 .toMillis(),
                 "The align mode of paimon source requires that the timeout of checkpoint is greater than the timeout of the source's snapshot alignment. Please increase "
-                        + ExecutionCheckpointingOptions.CHECKPOINTING_TIMEOUT.key()
-                        + " or decrease "
+                        + "execution.checkpointing.timeout or decrease "
                         + FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_TIMEOUT.key());
         checkArgument(
                 !env.getCheckpointConfig().isUnalignedCheckpointsEnabled(),
                 "The align mode of paimon source currently does not support unaligned checkpoints. Please set "
-                        + ExecutionCheckpointingOptions.ENABLE_UNALIGNED.key()
-                        + " to false.");
+                        + "execution.checkpointing.unaligned.enabled to false.");
         checkArgument(
                 env.getCheckpointConfig().getCheckpointingMode() == CheckpointingMode.EXACTLY_ONCE,
                 "The align mode of paimon source currently only supports EXACTLY_ONCE checkpoint mode. Please set "
-                        + ExecutionCheckpointingOptions.CHECKPOINTING_MODE.key()
-                        + " to exactly-once");
+                        + "execution.checkpointing.mode to exactly-once");
     }
 }

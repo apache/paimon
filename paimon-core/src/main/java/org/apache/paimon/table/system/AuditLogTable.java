@@ -39,6 +39,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateReplaceVisitor;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -188,6 +189,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public SchemaManager schemaManager() {
+        return wrapped.schemaManager();
+    }
+
+    @Override
     public TagManager tagManager() {
         return wrapped.tagManager();
     }
@@ -320,6 +326,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader enableValueFilter() {
+            wrapped.enableValueFilter();
+            return this;
+        }
+
+        @Override
         public SnapshotReader withManifestEntryFilter(Filter<ManifestEntry> filter) {
             wrapped.withManifestEntryFilter(filter);
             return this;
@@ -339,6 +351,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public SnapshotReader withDataFileNameFilter(Filter<String> fileNameFilter) {
             wrapped.withDataFileNameFilter(fileNameFilter);
+            return this;
+        }
+
+        @Override
+        public SnapshotReader dropStats() {
+            wrapped.dropStats();
             return this;
         }
 

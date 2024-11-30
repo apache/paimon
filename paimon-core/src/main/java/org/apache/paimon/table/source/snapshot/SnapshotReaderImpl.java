@@ -235,6 +235,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public SnapshotReader enableValueFilter() {
+        scan.enableValueFilter();
+        return this;
+    }
+
+    @Override
     public SnapshotReader withManifestEntryFilter(Filter<ManifestEntry> filter) {
         scan.withManifestEntryFilter(filter);
         return this;
@@ -261,6 +267,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public SnapshotReader withDataFileNameFilter(Filter<String> fileNameFilter) {
         scan.withDataFileNameFilter(fileNameFilter);
+        return this;
+    }
+
+    @Override
+    public SnapshotReader dropStats() {
+        scan.dropStats();
         return this;
     }
 

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.runtime.state.StateInitializationContext;
@@ -129,7 +130,9 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
         super.initializeState(context);
 
         Preconditions.checkArgument(
-                !forceSingleParallelism || getRuntimeContext().getNumberOfParallelSubtasks() == 1,
+                !forceSingleParallelism
+                        || RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext())
+                                == 1,
                 "Committer Operator parallelism in paimon MUST be one.");
 
         this.currentWatermark = Long.MIN_VALUE;

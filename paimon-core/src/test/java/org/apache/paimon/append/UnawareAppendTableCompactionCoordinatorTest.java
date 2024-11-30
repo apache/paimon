@@ -29,6 +29,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -43,7 +44,9 @@ import java.util.UUID;
 
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.apache.paimon.stats.StatsTestUtils.newSimpleStats;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link UnawareAppendTableCompactionCoordinator}. */
 public class UnawareAppendTableCompactionCoordinatorTest {
@@ -133,6 +136,14 @@ public class UnawareAppendTableCompactionCoordinatorTest {
         // check whether age goes to zero again
         assertThat(compactionCoordinator.partitionCompactCoordinators.get(partition).age)
                 .isEqualTo(0);
+    }
+
+    @Test
+    public void testBatchScanEmptyTable() {
+        compactionCoordinator =
+                new UnawareAppendTableCompactionCoordinator(appendOnlyFileStoreTable, false);
+        assertThatThrownBy(() -> compactionCoordinator.scan())
+                .satisfies(anyCauseMatches(EndOfScanException.class));
     }
 
     private void assertTasks(List<DataFileMeta> files, int taskNum) {

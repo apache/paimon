@@ -18,25 +18,28 @@
 
 package org.apache.paimon.spark.extensions
 
-import org.apache.paimon.spark.catalyst.analysis.{PaimonAnalysis, PaimonDeleteTable, PaimonIncompatiblePHRRules, PaimonIncompatibleResolutionRules, PaimonMergeInto, PaimonPostHocResolutionRules, PaimonProcedureResolver, PaimonUpdateTable}
+import org.apache.paimon.spark.catalyst.analysis.{PaimonAnalysis, PaimonDeleteTable, PaimonIncompatiblePHRRules, PaimonIncompatibleResolutionRules, PaimonMergeInto, PaimonPostHocResolutionRules, PaimonProcedureResolver, PaimonUpdateTable, PaimonViewResolver}
 import org.apache.paimon.spark.catalyst.optimizer.{EvalSubqueriesForDeleteTable, MergePaimonScalarSubqueries}
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions
 import org.apache.paimon.spark.execution.PaimonStrategy
 import org.apache.paimon.spark.execution.adaptive.DisableUnnecessaryPaimonBucketedScan
 
 import org.apache.spark.sql.SparkSessionExtensions
-import org.apache.spark.sql.catalyst.parser.extensions.PaimonSparkSqlExtensionsParser
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 /** Spark session extension to extends the syntax and adds the rules. */
 class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
 
   override def apply(extensions: SparkSessionExtensions): Unit = {
     // parser extensions
-    extensions.injectParser { case (_, parser) => new PaimonSparkSqlExtensionsParser(parser) }
+    extensions.injectParser {
+      case (_, parser) => SparkShimLoader.getSparkShim.createSparkParser(parser)
+    }
 
     // analyzer extensions
     extensions.injectResolutionRule(spark => new PaimonAnalysis(spark))
     extensions.injectResolutionRule(spark => PaimonProcedureResolver(spark))
+    extensions.injectResolutionRule(spark => PaimonViewResolver(spark))
     extensions.injectResolutionRule(spark => PaimonIncompatibleResolutionRules(spark))
 
     extensions.injectPostHocResolutionRule(spark => PaimonPostHocResolutionRules(spark))

@@ -24,6 +24,7 @@ import org.apache.paimon.flink.compact.MultiTableScanBase;
 import org.apache.paimon.flink.compact.MultiUnawareBucketTableScan;
 import org.apache.paimon.flink.sink.MultiTableCompactionTaskTypeInfo;
 
+import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -55,7 +56,16 @@ public class CombinedUnawareStreamingSourceFunction
         this.monitorInterval = monitorInterval;
     }
 
-    @Override
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
+     */
+    public void open(OpenContext openContext) throws Exception {
+        open(new Configuration());
+    }
+
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
+     */
     public void open(Configuration parameters) throws Exception {
         super.open(parameters);
         tableScan =

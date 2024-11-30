@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.util;
 
 import org.apache.paimon.utils.FileIOUtils;
+import org.apache.paimon.utils.TimeUtils;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.dag.Transformation;
@@ -29,7 +30,6 @@ import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.runtime.client.JobStatusMessage;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.streaming.api.CheckpointingMode;
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
@@ -164,6 +164,11 @@ public class AbstractTestBase {
             return this;
         }
 
+        public TableEnvironmentBuilder setString(String key, String value) {
+            conf.setString(key, value);
+            return this;
+        }
+
         public TableEnvironmentBuilder setConf(Configuration conf) {
             this.conf.addAll(conf);
             return this;
@@ -182,9 +187,10 @@ public class AbstractTestBase {
                 if (checkpointIntervalMs != null) {
                     tEnv.getConfig()
                             .getConfiguration()
-                            .set(
-                                    ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL,
-                                    Duration.ofMillis(checkpointIntervalMs));
+                            .setString(
+                                    "execution.checkpointing.interval",
+                                    TimeUtils.formatWithHighestUnit(
+                                            Duration.ofMillis(checkpointIntervalMs)));
                 }
             } else {
                 tEnv =

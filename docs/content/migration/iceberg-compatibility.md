@@ -29,8 +29,6 @@ under the License.
 Paimon supports generating Iceberg compatible metadata,
 so that Paimon tables can be consumed directly by Iceberg readers.
 
-## Enable Iceberg Compatibility
-
 Set the following table options, so that Paimon tables can generate Iceberg compatible metadata.
 
 <table class="table table-bordered">
@@ -66,7 +64,7 @@ so that all tables can be visited as an Iceberg warehouse.
 For Iceberg Java API users, you might consider setting `'metadata.iceberg.storage' = 'table-location'`,
 so you can visit each table with its table path.
 
-## Example: Query Paimon Append Only Tables on Flink/Spark with Iceberg Connector
+## Append Tables
 
 Let's walk through a simple example, where we query Paimon tables with Iceberg connectors in Flink and Spark.
 Before trying out this example, make sure that your compute engine already supports Iceberg.
@@ -200,7 +198,7 @@ germany hamburg
 
 {{< /tabs >}}
 
-## Example: Query Paimon Primary Key Tables on Flink/Spark with Iceberg Connector
+## Primary Key Tables
 
 {{< tabs "paimon-primary-key-table" >}}
 
@@ -300,8 +298,6 @@ SELECT * FROM iceberg_catalog.`default`.orders WHERE status = 'COMPLETED';
 
 {{< /tabs >}}
 
-### Timeliness
-
 Paimon primary key tables organize data files as LSM trees, so data files must be merged in memory before querying.
 However, Iceberg readers are not able to merge data files, so they can only query data files on the highest level of LSM trees.
 Data files on the highest level are produced by the full compaction process.
@@ -338,7 +334,7 @@ You can configure the following table option, so that Paimon is forced to perfor
 Note that full compaction is a resource-consuming process, so the value of this table option should not be too small.
 We recommend full compaction to be performed once or twice per hour.
 
-## Access Paimon Table from Iceberg Hive Catalog
+## Hive Catalog
 
 When creating Paimon table, set `'metadata.iceberg.storage' = 'hive-catalog'`.
 This option value not only store Iceberg metadata like hadoop-catalog, but also create Iceberg external table in Hive.
@@ -378,7 +374,7 @@ you also need to set some (or all) of the following table options when creating 
     </tbody>
 </table>
 
-## Example: Query Paimon Append Only Tables on Trino with Iceberg Connector
+## Trino Iceberg
 
 In this example, we use Trino Iceberg connector to access Paimon table through Iceberg Hive catalog.
 Before trying out this example, make sure that you have configured Trino Iceberg connector.
@@ -473,7 +469,7 @@ Paimon Iceberg compatibility currently supports the following data types.
 
 *: `TIMESTAMP` and `TIMESTAMP_LTZ` type only support precision from 4 to 6
 
-## Other Related Table Options
+## Table Options
 
 <table class="table table-bordered">
     <thead>

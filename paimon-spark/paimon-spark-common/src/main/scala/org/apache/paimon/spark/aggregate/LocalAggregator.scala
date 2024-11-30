@@ -20,7 +20,8 @@ package org.apache.paimon.spark.aggregate
 
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.manifest.PartitionEntry
-import org.apache.paimon.spark.{SparkInternalRow, SparkTypeUtils}
+import org.apache.paimon.spark.SparkTypeUtils
+import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.table.{DataTable, Table}
 import org.apache.paimon.utils.{InternalRowUtils, ProjectedRow}
 
@@ -104,7 +105,7 @@ class LocalAggregator(table: Table) {
       ProjectedRow.from(requiredGroupByIndexMapping.toArray).replaceRow(partitionRow)
     // `ProjectedRow` does not support `hashCode`, so do a deep copy
     val genericRow = InternalRowUtils.copyInternalRow(projectedRow, partitionType)
-    new SparkInternalRow(partitionType).replace(genericRow)
+    SparkInternalRow.create(partitionType).replace(genericRow)
   }
 
   def update(partitionEntry: PartitionEntry): Unit = {

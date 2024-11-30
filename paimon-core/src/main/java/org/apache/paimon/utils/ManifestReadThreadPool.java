@@ -54,9 +54,9 @@ public class ManifestReadThreadPool {
     }
 
     /** This method aims to parallel process tasks with randomly but return values sequentially. */
-    public static <T, U> Iterator<T> randomlyExecute(
+    public static <T, U> Iterator<T> randomlyExecuteSequentialReturn(
             Function<U, List<T>> processor, List<U> input, @Nullable Integer threadNum) {
         ThreadPoolExecutor executor = getExecutorService(threadNum);
-        return ThreadPoolUtils.randomlyExecute(executor, processor, input);
+        return ThreadPoolUtils.randomlyExecuteSequentialReturn(executor, processor, input);
     }
 }

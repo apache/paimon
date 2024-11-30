@@ -211,18 +211,5 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     suggestedFileSize,
                     cache);
         }
-
-        public ObjectsFile<SimpleFileEntry> createSimpleFileEntryReader() {
-            RowType entryType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
-            return new ObjectsFile<>(
-                    fileIO,
-                    new SimpleFileEntrySerializer(),
-                    entryType,
-                    fileFormat.createReaderFactory(entryType),
-                    fileFormat.createWriterFactory(entryType),
-                    compression,
-                    pathFactory.manifestFileFactory(),
-                    cache);
-        }
     }
 }

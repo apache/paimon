@@ -25,6 +25,7 @@ import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
@@ -32,7 +33,9 @@ import org.apache.paimon.utils.Preconditions;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.function.Function;
+import java.util.stream.IntStream;
 
 /**
  * A {@link SingleFileWriter} which also produces statistics for each written field.
@@ -44,6 +47,8 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
 
     @Nullable private final SimpleStatsExtractor simpleStatsExtractor;
     @Nullable private SimpleStatsCollector simpleStatsCollector = null;
+    @Nullable private SimpleColStats[] noneStats = null;
+    private final boolean isStatsDisabled;
 
     public StatsCollectingSingleFileWriter(
             FileIO fileIO,
@@ -63,6 +68,15 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
         Preconditions.checkArgument(
                 statsCollectors.length == writeSchema.getFieldCount(),
                 "The stats collector is not aligned to write schema.");
+        this.isStatsDisabled =
+                Arrays.stream(SimpleColStatsCollector.create(statsCollectors))
+                        .allMatch(p -> p instanceof NoneSimpleColStatsCollector);
+        if (isStatsDisabled) {
+            this.noneStats =
+                    IntStream.range(0, statsCollectors.length)
+                            .mapToObj(i -> SimpleColStats.NONE)
+                            .toArray(SimpleColStats[]::new);
+        }
     }
 
     @Override
@@ -85,7 +99,11 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
     public SimpleColStats[] fieldStats() throws IOException {
         Preconditions.checkState(closed, "Cannot access metric unless the writer is closed.");
         if (simpleStatsExtractor != null) {
-            return simpleStatsExtractor.extract(fileIO, path);
+            if (isStatsDisabled) {
+                return noneStats;
+            } else {
+                return simpleStatsExtractor.extract(fileIO, path);
+            }
         } else {
             return simpleStatsCollector.extract();
         }
