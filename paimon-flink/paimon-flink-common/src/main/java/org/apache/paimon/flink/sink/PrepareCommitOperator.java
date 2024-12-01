@@ -32,6 +32,7 @@ import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.Output;
+import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.StreamTask;
@@ -107,6 +108,7 @@ public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOpera
     protected abstract List<OUT> prepareCommit(boolean waitCompaction, long checkpointId)
             throws IOException;
 
+    /** {@link StreamOperatorFactory} of {@link PrepareCommitOperator}. */
     protected abstract static class Factory<IN, OUT> extends AbstractStreamOperatorFactory<OUT>
             implements OneInputStreamOperatorFactory<IN, OUT> {
         protected final Options options;

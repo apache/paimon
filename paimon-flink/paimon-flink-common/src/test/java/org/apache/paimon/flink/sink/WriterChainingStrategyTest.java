@@ -39,6 +39,9 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Tests for {@link org.apache.flink.streaming.api.operators.ChainingStrategy} of writer operators.
+ */
 public class WriterChainingStrategyTest {
     private static final String TABLE_NAME = "paimon_table";
 

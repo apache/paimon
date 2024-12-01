@@ -27,6 +27,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 
+import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -106,6 +107,7 @@ public abstract class AppendCompactWorkerOperator<IN>
         }
     }
 
+    /** {@link StreamOperatorFactory} of {@link AppendCompactWorkerOperator}. */
     protected abstract static class Factory<IN>
             extends PrepareCommitOperator.Factory<IN, Committable> {
         protected final FileStoreTable table;

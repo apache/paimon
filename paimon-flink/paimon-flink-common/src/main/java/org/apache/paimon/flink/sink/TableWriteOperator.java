@@ -28,6 +28,7 @@ import org.apache.paimon.table.sink.ChannelComputer;
 
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
+import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.RecordAttributes;
 
@@ -131,6 +132,7 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
         return write;
     }
 
+    /** {@link StreamOperatorFactory} of {@link TableWriteOperator}. */
     protected abstract static class Factory<IN>
             extends PrepareCommitOperator.Factory<IN, Committable> {
         protected final FileStoreTable table;
