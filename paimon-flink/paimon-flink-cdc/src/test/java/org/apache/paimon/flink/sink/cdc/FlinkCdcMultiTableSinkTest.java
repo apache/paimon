@@ -60,7 +60,6 @@ public class FlinkCdcMultiTableSinkTest {
                         () -> FlinkCatalogFactory.createPaimonCatalog(new Options()),
                         FlinkConnectorOptions.SINK_COMMITTER_CPU.defaultValue(),
                         null,
-                        true,
                         UUID.randomUUID().toString());
         DataStreamSink<?> dataStreamSink = sink.sinkFrom(input);
 

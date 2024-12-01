@@ -18,8 +18,8 @@
 
 package org.apache.paimon.rest.responses;
 
-import org.apache.paimon.shade.com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.beans.ConstructorProperties;
 import java.io.PrintWriter;

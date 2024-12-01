@@ -16,41 +16,45 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.source;
+package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.operators.AbstractStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
-import org.apache.flink.types.Either;
 
-/** Factory of {@link AppendBypassCoordinateOperator}. */
-public class AppendBypassCoordinateOperatorFactory<CommitT>
-        extends AbstractStreamOperatorFactory<Either<CommitT, UnawareAppendCompactionTask>>
-        implements OneInputStreamOperatorFactory<
-                CommitT, Either<CommitT, UnawareAppendCompactionTask>> {
+/**
+ * {@link org.apache.flink.streaming.api.operators.StreamOperatorFactory} for {@link
+ * BatchWriteGeneratorTagOperator}.
+ */
+public class BatchWriteGeneratorTagOperatorFactory<CommitT, GlobalCommitT>
+        extends AbstractStreamOperatorFactory<CommitT>
+        implements OneInputStreamOperatorFactory<CommitT, CommitT> {
+    private final CommitterOperatorFactory<CommitT, GlobalCommitT> commitOperatorFactory;
 
-    private final FileStoreTable table;
+    protected final FileStoreTable table;
 
-    public AppendBypassCoordinateOperatorFactory(FileStoreTable table) {
+    public BatchWriteGeneratorTagOperatorFactory(
+            CommitterOperatorFactory<CommitT, GlobalCommitT> commitOperatorFactory,
+            FileStoreTable table) {
         this.table = table;
+        this.commitOperatorFactory = commitOperatorFactory;
     }
 
     @Override
-    public <T extends StreamOperator<Either<CommitT, UnawareAppendCompactionTask>>>
-            T createStreamOperator(
-                    StreamOperatorParameters<Either<CommitT, UnawareAppendCompactionTask>>
-                            parameters) {
-        AppendBypassCoordinateOperator<CommitT> operator =
-                new AppendBypassCoordinateOperator<>(parameters, table, processingTimeService);
-        return (T) operator;
+    @SuppressWarnings("unchecked")
+    public <T extends StreamOperator<CommitT>> T createStreamOperator(
+            StreamOperatorParameters<CommitT> parameters) {
+        return (T)
+                new BatchWriteGeneratorTagOperator<>(
+                        commitOperatorFactory.createStreamOperator(parameters), table);
     }
 
     @Override
+    @SuppressWarnings("rawtypes")
     public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
-        return AppendBypassCoordinateOperator.class;
+        return BatchWriteGeneratorTagOperator.class;
     }
 }

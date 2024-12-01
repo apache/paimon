@@ -32,13 +32,13 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
-import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.api.operators.InternalTimerService;
-import org.apache.flink.streaming.api.operators.Output;
+import org.apache.flink.streaming.api.operators.StreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
-import org.apache.flink.streaming.runtime.tasks.StreamTask;
 import org.apache.flink.streaming.util.functions.StreamingFunctionUtils;
 
 import javax.annotation.Nullable;
@@ -61,21 +61,14 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
     /** We listen to this ourselves because we don't have an {@link InternalTimerService}. */
     private long currentWatermark = Long.MIN_VALUE;
 
-    public RowDataStoreWriteOperator(
+    protected RowDataStoreWriteOperator(
+            StreamOperatorParameters<Committable> parameters,
             FileStoreTable table,
             @Nullable LogSinkFunction logSinkFunction,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
-        super(table, storeSinkWriteProvider, initialCommitUser);
+        super(parameters, table, storeSinkWriteProvider, initialCommitUser);
         this.logSinkFunction = logSinkFunction;
-    }
-
-    @Override
-    public void setup(
-            StreamTask<?, ?> containingTask,
-            StreamConfig config,
-            Output<StreamRecord<Committable>> output) {
-        super.setup(containingTask, config, output);
         if (logSinkFunction != null) {
             FunctionUtils.setFunctionRuntimeContext(logSinkFunction, getRuntimeContext());
         }
@@ -247,6 +240,40 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
         @Override
         public Long timestamp() {
             return timestamp;
+        }
+    }
+
+    /** {@link StreamOperatorFactory} of {@link RowDataStoreWriteOperator}. */
+    public static class Factory extends TableWriteOperator.Factory<InternalRow> {
+
+        @Nullable private final LogSinkFunction logSinkFunction;
+
+        public Factory(
+                FileStoreTable table,
+                @Nullable LogSinkFunction logSinkFunction,
+                StoreSinkWrite.Provider storeSinkWriteProvider,
+                String initialCommitUser) {
+            super(table, storeSinkWriteProvider, initialCommitUser);
+            this.logSinkFunction = logSinkFunction;
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T extends StreamOperator<Committable>> T createStreamOperator(
+                StreamOperatorParameters<Committable> parameters) {
+            return (T)
+                    new RowDataStoreWriteOperator(
+                            parameters,
+                            table,
+                            logSinkFunction,
+                            storeSinkWriteProvider,
+                            initialCommitUser);
+        }
+
+        @Override
+        @SuppressWarnings("rawtypes")
+        public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
+            return RowDataStoreWriteOperator.class;
         }
     }
 }

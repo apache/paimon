@@ -21,11 +21,11 @@ package org.apache.paimon.rest.responses;
 import org.apache.paimon.rest.RESTResponse;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.paimon.shade.com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.beans.ConstructorProperties;
 import java.util.Map;

@@ -27,6 +27,8 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 
+import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,8 +55,11 @@ public abstract class AppendCompactWorkerOperator<IN>
 
     private transient ExecutorService lazyCompactExecutor;
 
-    public AppendCompactWorkerOperator(FileStoreTable table, String commitUser) {
-        super(Options.fromMap(table.options()));
+    public AppendCompactWorkerOperator(
+            StreamOperatorParameters<Committable> parameters,
+            FileStoreTable table,
+            String commitUser) {
+        super(parameters, Options.fromMap(table.options()));
         this.table = table;
         this.commitUser = commitUser;
     }
@@ -99,6 +104,19 @@ public abstract class AppendCompactWorkerOperator<IN>
                         "Executors shutdown timeout, there may be some files aren't deleted correctly");
             }
             this.unawareBucketCompactor.close();
+        }
+    }
+
+    /** {@link StreamOperatorFactory} of {@link AppendCompactWorkerOperator}. */
+    protected abstract static class Factory<IN>
+            extends PrepareCommitOperator.Factory<IN, Committable> {
+        protected final FileStoreTable table;
+        protected final String commitUser;
+
+        protected Factory(FileStoreTable table, String commitUser) {
+            super(Options.fromMap(table.options()));
+            this.table = table;
+            this.commitUser = commitUser;
         }
     }
 }

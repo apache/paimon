@@ -33,6 +33,9 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
+import org.apache.flink.streaming.api.operators.StreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 
@@ -76,7 +79,8 @@ public class MultiTablesStoreCompactOperator
     protected Map<Identifier, StoreSinkWrite> writes;
     protected String commitUser;
 
-    public MultiTablesStoreCompactOperator(
+    private MultiTablesStoreCompactOperator(
+            StreamOperatorParameters<MultiTableCommittable> parameters,
             Catalog.Loader catalogLoader,
             String initialCommitUser,
             CheckpointConfig checkpointConfig,
@@ -84,7 +88,7 @@ public class MultiTablesStoreCompactOperator
             boolean ignorePreviousFiles,
             boolean fullCompaction,
             Options options) {
-        super(options);
+        super(parameters, options);
         this.catalogLoader = catalogLoader;
         this.initialCommitUser = initialCommitUser;
         this.checkpointConfig = checkpointConfig;
@@ -315,5 +319,55 @@ public class MultiTablesStoreCompactOperator
                         isStreaming,
                         memoryPool,
                         metricGroup);
+    }
+
+    /** {@link StreamOperatorFactory} of {@link MultiTablesStoreCompactOperator}. */
+    public static class Factory
+            extends PrepareCommitOperator.Factory<RowData, MultiTableCommittable> {
+        private final Catalog.Loader catalogLoader;
+        private final CheckpointConfig checkpointConfig;
+        private final boolean isStreaming;
+        private final boolean ignorePreviousFiles;
+        private final boolean fullCompaction;
+        private final String initialCommitUser;
+
+        public Factory(
+                Catalog.Loader catalogLoader,
+                String initialCommitUser,
+                CheckpointConfig checkpointConfig,
+                boolean isStreaming,
+                boolean ignorePreviousFiles,
+                boolean fullCompaction,
+                Options options) {
+            super(options);
+            this.catalogLoader = catalogLoader;
+            this.initialCommitUser = initialCommitUser;
+            this.checkpointConfig = checkpointConfig;
+            this.isStreaming = isStreaming;
+            this.ignorePreviousFiles = ignorePreviousFiles;
+            this.fullCompaction = fullCompaction;
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T extends StreamOperator<MultiTableCommittable>> T createStreamOperator(
+                StreamOperatorParameters<MultiTableCommittable> parameters) {
+            return (T)
+                    new MultiTablesStoreCompactOperator(
+                            parameters,
+                            catalogLoader,
+                            initialCommitUser,
+                            checkpointConfig,
+                            isStreaming,
+                            ignorePreviousFiles,
+                            fullCompaction,
+                            options);
+        }
+
+        @Override
+        @SuppressWarnings("rawtypes")
+        public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
+            return MultiTablesStoreCompactOperator.class;
+        }
     }
 }

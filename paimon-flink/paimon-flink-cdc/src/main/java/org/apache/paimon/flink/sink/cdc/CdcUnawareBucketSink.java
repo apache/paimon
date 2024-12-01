@@ -24,7 +24,7 @@ import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 
 import javax.annotation.Nullable;
 
@@ -42,9 +42,9 @@ public class CdcUnawareBucketSink extends FlinkWriteSink<CdcRecord> {
     }
 
     @Override
-    protected OneInputStreamOperator<CdcRecord, Committable> createWriteOperator(
+    protected OneInputStreamOperatorFactory<CdcRecord, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new CdcUnawareBucketWriteOperator(table, writeProvider, commitUser);
+        return new CdcUnawareBucketWriteOperator.Factory(table, writeProvider, commitUser);
     }
 
     @Override

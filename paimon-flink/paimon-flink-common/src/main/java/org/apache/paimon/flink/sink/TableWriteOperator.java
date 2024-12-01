@@ -28,6 +28,8 @@ import org.apache.paimon.table.sink.ChannelComputer;
 
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
+import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.RecordAttributes;
 
 import java.io.IOException;
@@ -45,10 +47,11 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     protected transient StoreSinkWrite write;
 
     public TableWriteOperator(
+            StreamOperatorParameters<Committable> parameters,
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
-        super(Options.fromMap(table.options()));
+        super(parameters, Options.fromMap(table.options()));
         this.table = table;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
         this.initialCommitUser = initialCommitUser;
@@ -127,5 +130,23 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     @VisibleForTesting
     public StoreSinkWrite getWrite() {
         return write;
+    }
+
+    /** {@link StreamOperatorFactory} of {@link TableWriteOperator}. */
+    protected abstract static class Factory<IN>
+            extends PrepareCommitOperator.Factory<IN, Committable> {
+        protected final FileStoreTable table;
+        protected final StoreSinkWrite.Provider storeSinkWriteProvider;
+        protected final String initialCommitUser;
+
+        protected Factory(
+                FileStoreTable table,
+                StoreSinkWrite.Provider storeSinkWriteProvider,
+                String initialCommitUser) {
+            super(Options.fromMap(table.options()));
+            this.table = table;
+            this.storeSinkWriteProvider = storeSinkWriteProvider;
+            this.initialCommitUser = initialCommitUser;
+        }
     }
 }
