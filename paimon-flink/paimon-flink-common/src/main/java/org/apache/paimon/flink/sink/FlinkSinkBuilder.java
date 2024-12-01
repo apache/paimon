@@ -222,7 +222,7 @@ public class FlinkSinkBuilder {
                             .transform(
                                     "local merge",
                                     input.getType(),
-                                    new LocalMergeOperator(table.schema()))
+                                    new LocalMergeOperator.Factory(table.schema()))
                             .setParallelism(input.getParallelism());
         }
 

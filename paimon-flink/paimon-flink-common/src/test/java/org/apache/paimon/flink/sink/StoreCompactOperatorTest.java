@@ -48,8 +48,8 @@ public class StoreCompactOperatorTest extends TableTestBase {
 
         CompactRememberStoreWrite compactRememberStoreWrite =
                 new CompactRememberStoreWrite(streamingMode);
-        StoreCompactOperator operator =
-                new StoreCompactOperator(
+        StoreCompactOperator.Factory operatorFactory =
+                new StoreCompactOperator.Factory(
                         getTableDefault(),
                         (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
                                 compactRememberStoreWrite,
@@ -59,7 +59,7 @@ public class StoreCompactOperatorTest extends TableTestBase {
         TypeSerializer<Committable> serializer =
                 new CommittableTypeInfo().createSerializer(new ExecutionConfig());
         OneInputStreamOperatorTestHarness<RowData, Committable> harness =
-                new OneInputStreamOperatorTestHarness<>(operator);
+                new OneInputStreamOperatorTestHarness<>(operatorFactory);
         harness.setup(serializer);
         harness.initializeEmptyState();
         harness.open();
@@ -70,7 +70,7 @@ public class StoreCompactOperatorTest extends TableTestBase {
         harness.processElement(new StreamRecord<>(data(1)));
         harness.processElement(new StreamRecord<>(data(2)));
 
-        operator.prepareCommit(true, 1);
+        ((StoreCompactOperator) harness.getOneInputOperator()).prepareCommit(true, 1);
         Assertions.assertThat(compactRememberStoreWrite.compactTime).isEqualTo(3);
     }
 

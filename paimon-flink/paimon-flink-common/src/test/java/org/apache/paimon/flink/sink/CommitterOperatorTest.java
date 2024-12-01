@@ -51,10 +51,13 @@ import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.state.StateInitializationContext;
-import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.util.AbstractStreamOperatorTestHarness;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
+import org.apache.flink.util.Preconditions;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -259,8 +262,8 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         // 3. Check whether success
         List<String> actual = new ArrayList<>();
 
-        OneInputStreamOperator<Committable, Committable> operator =
-                createCommitterOperator(
+        OneInputStreamOperatorFactory<Committable, Committable> operatorFactory =
+                createCommitterOperatorFactory(
                         table,
                         initialCommitUser,
                         new NoopCommittableStateManager(),
@@ -274,7 +277,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                         });
 
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness1 =
-                createTestHarness(operator);
+                createTestHarness(operatorFactory);
         testHarness1.initializeState(snapshot);
         testHarness1.close();
 
@@ -315,10 +318,11 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     public void testCommitInputEnd() throws Exception {
         FileStoreTable table = createFileStoreTable();
         String commitUser = UUID.randomUUID().toString();
-        OneInputStreamOperator<Committable, Committable> operator =
-                createCommitterOperator(table, commitUser, new NoopCommittableStateManager());
+        OneInputStreamOperatorFactory<Committable, Committable> operatorFactory =
+                createCommitterOperatorFactory(
+                        table, commitUser, new NoopCommittableStateManager());
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
-                createTestHarness(operator);
+                createTestHarness(operatorFactory);
         testHarness.open();
         Assertions.assertThatCode(
                         () -> {
@@ -378,10 +382,10 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                         })
                 .doesNotThrowAnyException();
 
-        if (operator instanceof CommitterOperator) {
+        if (operatorFactory instanceof CommitterOperator) {
             Assertions.assertThat(
                             ((ManifestCommittable)
-                                            ((CommitterOperator) operator)
+                                            ((CommitterOperator) operatorFactory)
                                                     .committablesPerCheckpoint.get(Long.MAX_VALUE))
                                     .fileCommittables()
                                     .size())
@@ -604,14 +608,14 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     public void testCommitMetrics() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
-        OneInputStreamOperator<Committable, Committable> operator =
-                createCommitterOperator(
+        OneInputStreamOperatorFactory<Committable, Committable> operatorFactory =
+                createCommitterOperatorFactory(
                         table,
                         null,
                         new RestoreAndFailCommittableStateManager<>(
                                 ManifestCommittableSerializer::new));
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
-                createTestHarness(operator);
+                createTestHarness(operatorFactory);
         testHarness.open();
         long timestamp = 0;
         StreamTableWrite write =
@@ -627,7 +631,9 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         testHarness.notifyOfCompletedCheckpoint(cpId);
 
         MetricGroup commitMetricGroup =
-                operator.getMetricGroup()
+                testHarness
+                        .getOneInputOperator()
+                        .getMetricGroup()
                         .addGroup("paimon")
                         .addGroup("table", table.name())
                         .addGroup("commit");
@@ -685,10 +691,11 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     public void testParallelism() throws Exception {
         FileStoreTable table = createFileStoreTable();
         String commitUser = UUID.randomUUID().toString();
-        OneInputStreamOperator<Committable, Committable> operator =
-                createCommitterOperator(table, commitUser, new NoopCommittableStateManager());
+        OneInputStreamOperatorFactory<Committable, Committable> operatorFactory =
+                createCommitterOperatorFactory(
+                        table, commitUser, new NoopCommittableStateManager());
         try (OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
-                createTestHarness(operator, 10, 10, 3)) {
+                createTestHarness(operatorFactory, 10, 10, 3)) {
             Assertions.assertThatCode(testHarness::open)
                     .hasMessage("Committer Operator parallelism in paimon MUST be one.");
         }
@@ -700,13 +707,13 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
 
     protected OneInputStreamOperatorTestHarness<Committable, Committable>
             createRecoverableTestHarness(FileStoreTable table) throws Exception {
-        OneInputStreamOperator<Committable, Committable> operator =
-                createCommitterOperator(
+        OneInputStreamOperatorFactory<Committable, Committable> operatorFactory =
+                createCommitterOperatorFactory(
                         table,
                         null,
                         new RestoreAndFailCommittableStateManager<>(
                                 ManifestCommittableSerializer::new));
-        return createTestHarness(operator);
+        return createTestHarness(operatorFactory);
     }
 
     private OneInputStreamOperatorTestHarness<Committable, Committable> createLossyTestHarness(
@@ -716,18 +723,20 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
 
     private OneInputStreamOperatorTestHarness<Committable, Committable> createLossyTestHarness(
             FileStoreTable table, String commitUser) throws Exception {
-        OneInputStreamOperator<Committable, Committable> operator =
-                createCommitterOperator(table, commitUser, new NoopCommittableStateManager());
-        return createTestHarness(operator);
+        OneInputStreamOperatorFactory<Committable, Committable> operatorFactory =
+                createCommitterOperatorFactory(
+                        table, commitUser, new NoopCommittableStateManager());
+        return createTestHarness(operatorFactory);
     }
 
     private OneInputStreamOperatorTestHarness<Committable, Committable> createTestHarness(
-            OneInputStreamOperator<Committable, Committable> operator) throws Exception {
-        return createTestHarness(operator, 1, 1, 0);
+            OneInputStreamOperatorFactory<Committable, Committable> operatorFactory)
+            throws Exception {
+        return createTestHarness(operatorFactory, 1, 1, 0);
     }
 
     private OneInputStreamOperatorTestHarness<Committable, Committable> createTestHarness(
-            OneInputStreamOperator<Committable, Committable> operator,
+            OneInputStreamOperatorFactory<Committable, Committable> operatorFactory,
             int maxParallelism,
             int parallelism,
             int subTaskIndex)
@@ -736,22 +745,23 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                 new CommittableTypeInfo().createSerializer(new ExecutionConfig());
         OneInputStreamOperatorTestHarness<Committable, Committable> harness =
                 new OneInputStreamOperatorTestHarness<>(
-                        operator,
+                        operatorFactory,
                         maxParallelism,
                         parallelism,
                         subTaskIndex,
-                        serializer,
                         new OperatorID());
+        harness.getStreamConfig().setupNetworkInputs(Preconditions.checkNotNull(serializer));
+        harness.getStreamConfig().serializeAllConfigs();
         harness.setup(serializer);
         return harness;
     }
 
-    protected OneInputStreamOperator<Committable, Committable> createCommitterOperator(
-            FileStoreTable table,
-            String commitUser,
-            CommittableStateManager<ManifestCommittable> committableStateManager) {
-        return new CommitterOperator<>(
-                true,
+    protected OneInputStreamOperatorFactory<Committable, Committable>
+            createCommitterOperatorFactory(
+                    FileStoreTable table,
+                    String commitUser,
+                    CommittableStateManager<ManifestCommittable> committableStateManager) {
+        return new CommitterOperatorFactory<>(
                 true,
                 true,
                 commitUser == null ? initialCommitUser : commitUser,
@@ -765,13 +775,13 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                 committableStateManager);
     }
 
-    protected OneInputStreamOperator<Committable, Committable> createCommitterOperator(
-            FileStoreTable table,
-            String commitUser,
-            CommittableStateManager<ManifestCommittable> committableStateManager,
-            ThrowingConsumer<StateInitializationContext, Exception> initializeFunction) {
-        return new CommitterOperator<Committable, ManifestCommittable>(
-                true,
+    protected OneInputStreamOperatorFactory<Committable, Committable>
+            createCommitterOperatorFactory(
+                    FileStoreTable table,
+                    String commitUser,
+                    CommittableStateManager<ManifestCommittable> committableStateManager,
+                    ThrowingConsumer<StateInitializationContext, Exception> initializeFunction) {
+        return new CommitterOperatorFactory<Committable, ManifestCommittable>(
                 true,
                 true,
                 commitUser == null ? initialCommitUser : commitUser,
@@ -784,8 +794,24 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                 context),
                 committableStateManager) {
             @Override
-            public void initializeState(StateInitializationContext context) throws Exception {
-                initializeFunction.accept(context);
+            @SuppressWarnings("unchecked")
+            public <T extends StreamOperator<Committable>> T createStreamOperator(
+                    StreamOperatorParameters<Committable> parameters) {
+                return (T)
+                        new CommitterOperator<Committable, ManifestCommittable>(
+                                parameters,
+                                streamingCheckpointEnabled,
+                                forceSingleParallelism,
+                                initialCommitUser,
+                                committerFactory,
+                                committableStateManager,
+                                endInputWatermark) {
+                            @Override
+                            public void initializeState(StateInitializationContext context)
+                                    throws Exception {
+                                initializeFunction.accept(context);
+                            }
+                        };
             }
         };
     }

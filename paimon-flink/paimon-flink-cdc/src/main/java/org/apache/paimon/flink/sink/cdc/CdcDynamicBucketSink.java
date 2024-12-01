@@ -25,7 +25,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 
 /** {@link CdcDynamicBucketSinkBase} for {@link CdcRecord}. */
 public class CdcDynamicBucketSink extends CdcDynamicBucketSinkBase<CdcRecord> {
@@ -42,8 +42,8 @@ public class CdcDynamicBucketSink extends CdcDynamicBucketSinkBase<CdcRecord> {
     }
 
     @Override
-    protected OneInputStreamOperator<Tuple2<CdcRecord, Integer>, Committable> createWriteOperator(
-            StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new CdcDynamicBucketWriteOperator(table, writeProvider, commitUser);
+    protected OneInputStreamOperatorFactory<Tuple2<CdcRecord, Integer>, Committable>
+            createWriteOperatorFactory(StoreSinkWrite.Provider writeProvider, String commitUser) {
+        return new CdcDynamicBucketWriteOperator.Factory(table, writeProvider, commitUser);
     }
 }
