@@ -46,9 +46,12 @@ public class IndexBootstrapOperator<T> extends AbstractStreamOperator<Tuple2<Key
     private final SerializableFunction<InternalRow, T> converter;
 
     private IndexBootstrapOperator(
-            IndexBootstrap bootstrap, SerializableFunction<InternalRow, T> converter) {
+            StreamOperatorParameters<Tuple2<KeyPartOrRow, T>> parameters,
+            IndexBootstrap bootstrap,
+            SerializableFunction<InternalRow, T> converter) {
         this.bootstrap = bootstrap;
         this.converter = converter;
+        setup(parameters.getContainingTask(), parameters.getStreamConfig(), parameters.getOutput());
     }
 
     @Override
@@ -85,8 +88,8 @@ public class IndexBootstrapOperator<T> extends AbstractStreamOperator<Tuple2<Key
         @Override
         @SuppressWarnings("unchecked")
         public <OP extends StreamOperator<Tuple2<KeyPartOrRow, T>>> OP createStreamOperator(
-                StreamOperatorParameters<Tuple2<KeyPartOrRow, T>> streamOperatorParameters) {
-            return (OP) new IndexBootstrapOperator<>(bootstrap, converter);
+                StreamOperatorParameters<Tuple2<KeyPartOrRow, T>> parameters) {
+            return (OP) new IndexBootstrapOperator<>(parameters, bootstrap, converter);
         }
 
         @Override

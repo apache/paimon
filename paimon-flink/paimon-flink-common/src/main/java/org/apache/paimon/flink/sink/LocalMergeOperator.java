@@ -81,12 +81,14 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
 
     private transient boolean endOfInput;
 
-    private LocalMergeOperator(TableSchema schema) {
+    private LocalMergeOperator(
+            StreamOperatorParameters<InternalRow> parameters, TableSchema schema) {
         Preconditions.checkArgument(
                 schema.primaryKeys().size() > 0,
                 "LocalMergeOperator currently only support tables with primary keys");
         this.schema = schema;
         this.ignoreDelete = CoreOptions.fromMap(schema.options()).ignoreDelete();
+        setup(parameters.getContainingTask(), parameters.getStreamConfig(), parameters.getOutput());
     }
 
     @Override
@@ -253,8 +255,8 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
         @Override
         @SuppressWarnings("unchecked")
         public <T extends StreamOperator<InternalRow>> T createStreamOperator(
-                StreamOperatorParameters<InternalRow> streamOperatorParameters) {
-            return (T) new LocalMergeOperator(schema);
+                StreamOperatorParameters<InternalRow> parameters) {
+            return (T) new LocalMergeOperator(parameters, schema);
         }
 
         @Override
