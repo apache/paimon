@@ -78,6 +78,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for Iceberg compatibility. */
 public class IcebergCompatibilityTest {
@@ -309,10 +310,20 @@ public class IcebergCompatibilityTest {
         assertThat(manifestFile.compression()).isEqualTo("gzip");
 
         Set<String> usingManifests = new HashSet<>();
-        for (IcebergManifestFileMeta fileMeta :
-                manifestList.read(new Path(metadata.currentSnapshot().manifestList()).getName())) {
+        String manifestListFile = new Path(metadata.currentSnapshot().manifestList()).getName();
+        for (IcebergManifestFileMeta fileMeta : manifestList.read(manifestListFile)) {
             usingManifests.add(fileMeta.manifestPath());
         }
+
+        IcebergManifestList legacyManifestList =
+                IcebergManifestList.create(
+                        table.copy(
+                                Collections.singletonMap(
+                                        IcebergOptions.MANIFEST_LEGACY_VERSION.key(), "true")),
+                        pathFactory);
+        assertThatThrownBy(() -> legacyManifestList.read(manifestListFile))
+                .rootCause()
+                .isInstanceOf(NullPointerException.class);
 
         Set<String> unusedFiles = new HashSet<>();
         for (int i = 0; i < 2; i++) {
