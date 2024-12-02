@@ -77,6 +77,13 @@ public class IcebergOptions {
                             "gzip") // some Iceberg reader cannot support zstd, for example DuckDB
                     .withDescription("Compression for Iceberg manifest files.");
 
+    public static final ConfigOption<Boolean> MANIFEST_LEGACY_VERSION =
+            key("metadata.iceberg.manifest-legacy-version")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Should use the legacy manifest version to generate Iceberg's 1.4 manifest files.");
+
     /** Where to store Iceberg metadata. */
     public enum StorageType implements DescribedEnum {
         DISABLED("disabled", "Disable Iceberg compatibility support."),
