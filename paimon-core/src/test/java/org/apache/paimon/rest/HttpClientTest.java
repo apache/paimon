@@ -18,7 +18,8 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
+import org.apache.paimon.rest.auth.AuthUtil;
+
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import okhttp3.mockwebserver.MockResponse;
@@ -33,8 +34,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.rest.RESTCatalog.AUTH_HEADER;
-import static org.apache.paimon.rest.RESTCatalog.AUTH_HEADER_VALUE_FORMAT;
 import static org.junit.Assert.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -70,7 +69,7 @@ public class HttpClientTest {
         mockResponseData = new MockRESTData(MOCK_PATH);
         mockResponseDataStr = objectMapper.writeValueAsString(mockResponseData);
         httpClient = new HttpClient(httpClientOptions);
-        headers = ImmutableMap.of(AUTH_HEADER, String.format(AUTH_HEADER_VALUE_FORMAT, TOKEN));
+        headers = AuthUtil.authHeaders(TOKEN);
     }
 
     @After
