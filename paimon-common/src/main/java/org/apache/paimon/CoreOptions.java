@@ -1101,7 +1101,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Boolean> METADATA_STATS_DENSE_STORE =
             key("metadata.stats-dense-store")
                     .booleanType()
-                    .defaultValue(false)
+                    .defaultValue(true)
                     .withDescription(
                             Description.builder()
                                     .text(
@@ -1110,8 +1110,8 @@ public class CoreOptions implements Serializable {
                                                     + " none statistic mode is set.")
                                     .linebreak()
                                     .text(
-                                            "Note, when this mode is enabled, the Paimon sdk in reading engine requires"
-                                                    + " at least version 0.9.1 or 1.0.0 or higher.")
+                                            "Note, when this mode is enabled with 'metadata.stats-mode:none', the Paimon sdk in"
+                                                    + " reading engine requires at least version 0.9.1 or 1.0.0 or higher.")
                                     .build());
 
     public static final ConfigOption<String> COMMIT_CALLBACKS =

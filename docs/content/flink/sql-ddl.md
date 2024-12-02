@@ -203,8 +203,8 @@ Paimon will automatically collect the statistics of the data file for speeding u
 The statistics collector mode can be configured by `'metadata.stats-mode'`, by default is `'truncate(16)'`.
 You can configure the field level by setting `'fields.{field_name}.stats-mode'`.
 
-For the stats mode of `none`, we suggest that you configure `metadata.stats-dense-store` = `true`, which will
-significantly reduce the storage size of the manifest.
+For the stats mode of `none`, by default `metadata.stats-dense-store` is `true`, which will significantly reduce the
+storage size of the manifest. But the Paimon sdk in reading engine requires at least version 0.9.1 or 1.0.0 or higher.
 
 ### Field Default Value
 
