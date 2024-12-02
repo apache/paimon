@@ -27,6 +27,7 @@ import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.auth.AuthConfig;
+import org.apache.paimon.rest.auth.AuthOptions;
 import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.AuthUtil;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -54,8 +55,9 @@ public class RESTCatalog implements Catalog {
     private Map<String, String> baseHeader;
     // a lazy thread pool for token refresh
     private AuthSession catalogAuth = null;
+    private String tokenFilePath = null;
     private volatile ScheduledExecutorService refreshExecutor = null;
-    private boolean keepTokenRefreshed = true;
+    private boolean keepTokenRefreshed;
 
     private static final ObjectMapper objectMapper = RESTObjectMapper.create();
 
@@ -64,7 +66,6 @@ public class RESTCatalog implements Catalog {
             throw new IllegalArgumentException("Can not config warehouse in RESTCatalog.");
         }
         String uri = options.get(RESTCatalogOptions.URI);
-        token = options.get(RESTCatalogOptions.TOKEN);
         Optional<Duration> connectTimeout =
                 options.getOptional(RESTCatalogOptions.CONNECTION_TIMEOUT);
         Optional<Duration> readTimeout = options.getOptional(RESTCatalogOptions.READ_TIMEOUT);
@@ -78,6 +79,8 @@ public class RESTCatalog implements Catalog {
                         threadPoolSize,
                         DefaultErrorHandler.getInstance());
         this.client = new HttpClient(httpClientOptions);
+        token = options.get(RESTCatalogOptions.TOKEN);
+        this.keepTokenRefreshed = options.get(AuthOptions.TOKEN_REFRESH_ENABLED);
         Map<String, String> authHeaders = AuthUtil.authHeaders(token);
         Map<String, String> initHeaders =
                 RESTUtil.merge(configHeaders(options.toMap()), authHeaders);
@@ -86,16 +89,18 @@ public class RESTCatalog implements Catalog {
         this.resourcePaths =
                 ResourcePaths.forCatalogProperties(
                         this.options.get(RESTCatalogInternalOptions.PREFIX));
-        this.keepTokenRefreshed = false;
+        long tokenExpireInMills = options.get(AuthOptions.TOKEN_EXPIRES_IN).toMillis();
+        long tokenExpireAtMills = System.currentTimeMillis() + tokenExpireInMills;
+        this.tokenFilePath = options.get(AuthOptions.TOKEN_FILE_PATH);
         this.catalogAuth =
-                AuthSession.fromAccessToken(
-                        client,
+                AuthSession.fromTokenPath(
+                        tokenFilePath,
                         tokenRefreshExecutor(),
-                        token,
                         this.baseHeader,
                         // todo: update,fix null value
-                        new AuthConfig(token, keepTokenRefreshed, null, null),
-                        null);
+                        new AuthConfig(
+                                token, keepTokenRefreshed, tokenExpireAtMills, tokenExpireInMills),
+                        tokenExpireAtMills);
     }
 
     @Override
@@ -212,7 +217,7 @@ public class RESTCatalog implements Catalog {
     }
 
     private Map<String, String> headers() {
-        catalogAuth.refresh(client);
+        catalogAuth.refresh(this.tokenFilePath);
         return catalogAuth.getHeaders();
     }
 

@@ -23,18 +23,18 @@ import org.apache.paimon.options.ConfigOptions;
 
 import java.time.Duration;
 
-/** Auth options. */
+/** Options for REST Catalog Auth. */
 public class AuthOptions {
     public static final ConfigOption<String> TOKEN =
             ConfigOptions.key("token")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog auth token.");
-    public static final ConfigOption<Duration> TOKEN_EXPIRES =
-            ConfigOptions.key("token-expires")
+    public static final ConfigOption<Duration> TOKEN_EXPIRES_IN =
+            ConfigOptions.key("token-expires-in")
                     .durationType()
                     .defaultValue(Duration.ofHours(1))
-                    .withDescription("REST Catalog auth token expires duration.");
+                    .withDescription("REST Catalog auth token expires in.");
     public static final ConfigOption<Boolean> TOKEN_REFRESH_ENABLED =
             ConfigOptions.key("token-refresh-enabled")
                     .booleanType()

@@ -18,10 +18,13 @@
 
 package org.apache.paimon.rest.auth;
 
-import org.apache.paimon.rest.RESTClient;
 import org.apache.paimon.rest.RESTUtil;
 import org.apache.paimon.utils.Pair;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.Map;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -41,10 +44,9 @@ public class AuthSession {
         this.config = config;
     }
 
-    public static AuthSession fromAccessToken(
-            RESTClient client,
+    public static AuthSession fromTokenPath(
+            String tokeFilePath,
             ScheduledExecutorService executor,
-            String token,
             Map<String, String> headers,
             AuthConfig config,
             Long defaultExpiresAtMillis) {
@@ -54,7 +56,7 @@ public class AuthSession {
         Long expiresAtMillis = session.config.expiresAtMillis();
 
         if (null != expiresAtMillis && expiresAtMillis <= startTimeMillis) {
-            Pair<Long, TimeUnit> expiration = session.refresh(client);
+            Pair<Long, TimeUnit> expiration = session.refresh(tokeFilePath);
             // if expiration is non-null, then token refresh was successful
             if (expiration != null) {
                 if (null != config.expiresAtMillis()) {
@@ -73,7 +75,7 @@ public class AuthSession {
         }
 
         if (null != executor && null != expiresAtMillis) {
-            scheduleTokenRefresh(client, executor, session, expiresAtMillis);
+            scheduleTokenRefresh(tokeFilePath, executor, session, expiresAtMillis);
         }
 
         return session;
@@ -84,7 +86,7 @@ public class AuthSession {
     }
 
     private static void scheduleTokenRefresh(
-            RESTClient client,
+            String tokeFilePath,
             ScheduledExecutorService executor,
             AuthSession session,
             long expiresAtMillis) {
@@ -99,31 +101,27 @@ public class AuthSession {
         executor.schedule(
                 () -> {
                     long refreshStartTime = System.currentTimeMillis();
-                    Pair<Long, TimeUnit> expiration = session.refresh(client);
+                    Pair<Long, TimeUnit> expiration = session.refresh(tokeFilePath);
                     if (expiration != null) {
                         scheduleTokenRefresh(
-                                client, executor, session, refreshStartTime + expiration.getKey());
+                                tokeFilePath,
+                                executor,
+                                session,
+                                refreshStartTime + expiration.getKey());
                     }
                 },
                 timeToWait,
                 TimeUnit.MILLISECONDS);
     }
 
-    public Pair<Long, TimeUnit> refresh(RESTClient client) {
+    public Pair<Long, TimeUnit> refresh(String tokenFilePath) {
         if (config.token() != null && config.keepRefreshed()) {
-            long startTimeMillis = System.currentTimeMillis();
-            AuthConfig authConfig = refreshExpiredToken(client);
+            AuthConfig authConfig = refreshExpiredToken(tokenFilePath, System.currentTimeMillis());
             boolean isSuccessful = authConfig.token() != null;
             if (!isSuccessful) {
                 return null;
             }
-            long expiresAtMillis = startTimeMillis + authConfig.expiresInMills();
-            this.config =
-                    new AuthConfig(
-                            authConfig.token(),
-                            config.keepRefreshed(),
-                            expiresAtMillis,
-                            authConfig.expiresInMills());
+            this.config = authConfig;
             Map<String, String> currentHeaders = this.headers;
             this.headers = RESTUtil.merge(currentHeaders, authHeaders(config.token()));
 
@@ -135,8 +133,17 @@ public class AuthSession {
         return null;
     }
 
-    private AuthConfig refreshExpiredToken(RESTClient client) {
-        // todo: update the token
-        return new AuthConfig("token", config.keepRefreshed(), null, this.config.expiresInMills());
+    private AuthConfig refreshExpiredToken(String tokenFilePath, long startTimeMillis) {
+        try {
+            // todo: handle exception
+            String token =
+                    new String(
+                            Files.readAllBytes(Paths.get(tokenFilePath)), StandardCharsets.UTF_8);
+            long expiresAtMillis = startTimeMillis + this.config.expiresInMills();
+            return new AuthConfig(
+                    token, config.keepRefreshed(), expiresAtMillis, this.config.expiresInMills());
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 }
