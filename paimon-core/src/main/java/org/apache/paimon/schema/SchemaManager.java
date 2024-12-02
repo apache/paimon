@@ -261,7 +261,8 @@ public class SchemaManager implements Serializable {
 
     /** Update {@link SchemaChange}s. */
     public TableSchema commitChanges(List<SchemaChange> changes)
-            throws Catalog.TableNotExistException, Catalog.ColumnAlreadyExistException,
+            throws Catalog.TableNotExistException,
+                    Catalog.ColumnAlreadyExistException,
                     Catalog.ColumnNotExistException {
         SnapshotManager snapshotManager = new SnapshotManager(fileIO, tableRoot, branch);
         boolean hasSnapshots = (snapshotManager.latestSnapshotId() != null);
@@ -639,9 +640,10 @@ public class SchemaManager implements Serializable {
 
                 String fullFieldName =
                         String.join(".", Arrays.asList(updateFieldNames).subList(0, depth + 1));
-                List<DataField> nestedFields =
-                        new ArrayList<>(extractRowType(field.type(), fullFieldName).getFields());
-                updateIntermediateColumn(nestedFields, depth + 1);
+                List<DataField> nestedFields = new ArrayList<>();
+                int newDepth =
+                        depth + extractRowDataFields(field.type(), fullFieldName, nestedFields);
+                updateIntermediateColumn(nestedFields, newDepth);
                 newFields.set(
                         i,
                         new DataField(
@@ -657,14 +659,22 @@ public class SchemaManager implements Serializable {
                     String.join(".", Arrays.asList(updateFieldNames).subList(0, depth + 1)));
         }
 
-        private RowType extractRowType(DataType type, String fullFieldName) {
+        private int extractRowDataFields(
+                DataType type, String fullFieldName, List<DataField> nestedFields) {
             switch (type.getTypeRoot()) {
                 case ROW:
-                    return (RowType) type;
+                    nestedFields.addAll(((RowType) type).getFields());
+                    return 1;
                 case ARRAY:
-                    return extractRowType(((ArrayType) type).getElementType(), fullFieldName);
+                    return extractRowDataFields(
+                                    ((ArrayType) type).getElementType(),
+                                    fullFieldName,
+                                    nestedFields)
+                            + 1;
                 case MAP:
-                    return extractRowType(((MapType) type).getValueType(), fullFieldName);
+                    return extractRowDataFields(
+                                    ((MapType) type).getValueType(), fullFieldName, nestedFields)
+                            + 1;
                 default:
                     throw new IllegalArgumentException(
                             fullFieldName + " is not a structured type.");
