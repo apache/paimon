@@ -141,7 +141,7 @@ public class DataCatalogTable implements CatalogTable {
     public CatalogBaseTable copy() {
         return new DataCatalogTable(
                 table,
-                Schema.newBuilder().fromSchema(schema).build(),
+                schema,
                 new ArrayList<>(getPartitionKeys()),
                 new HashMap<>(getOptions()),
                 getComment(),
@@ -152,7 +152,7 @@ public class DataCatalogTable implements CatalogTable {
     public CatalogTable copy(Map<String, String> options) {
         return new DataCatalogTable(
                 table,
-                Schema.newBuilder().fromSchema(schema).build(),
+                schema,
                 getPartitionKeys(),
                 options,
                 getComment(),
