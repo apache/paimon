@@ -55,7 +55,6 @@ public class RESTCatalog implements Catalog {
     private Map<String, String> baseHeader;
     // a lazy thread pool for token refresh
     private AuthSession catalogAuth = null;
-    private String tokenFilePath = null;
     private volatile ScheduledExecutorService refreshExecutor = null;
     private boolean keepTokenRefreshed;
 
@@ -89,18 +88,25 @@ public class RESTCatalog implements Catalog {
         this.resourcePaths =
                 ResourcePaths.forCatalogProperties(
                         this.options.get(RESTCatalogInternalOptions.PREFIX));
-        long tokenExpireInMills = options.get(AuthOptions.TOKEN_EXPIRES_IN).toMillis();
-        long tokenExpireAtMills = System.currentTimeMillis() + tokenExpireInMills;
-        this.tokenFilePath = options.get(AuthOptions.TOKEN_FILE_PATH);
-        this.catalogAuth =
-                AuthSession.fromTokenPath(
-                        tokenFilePath,
-                        tokenRefreshExecutor(),
-                        this.baseHeader,
-                        // todo: update,fix null value
-                        new AuthConfig(
-                                token, keepTokenRefreshed, tokenExpireAtMills, tokenExpireInMills),
-                        tokenExpireAtMills);
+        this.catalogAuth = new AuthSession(this.baseHeader, null);
+        if (options.getOptional(AuthOptions.TOKEN_FILE_PATH).isPresent()) {
+            long tokenExpireInMills = options.get(AuthOptions.TOKEN_EXPIRES_IN).toMillis();
+            String tokenFilePath = options.getOptional(AuthOptions.TOKEN_FILE_PATH).orElse(null);
+            long tokenExpireAtMills = System.currentTimeMillis() + tokenExpireInMills;
+            this.catalogAuth =
+                    AuthSession.fromTokenPath(
+                            tokenFilePath,
+                            tokenRefreshExecutor(),
+                            this.baseHeader,
+                            // todo: update,fix null value
+                            new AuthConfig(
+                                    token,
+                                    tokenFilePath,
+                                    keepTokenRefreshed,
+                                    tokenExpireAtMills,
+                                    tokenExpireInMills),
+                            tokenExpireAtMills);
+        }
     }
 
     @Override
@@ -217,7 +223,7 @@ public class RESTCatalog implements Catalog {
     }
 
     private Map<String, String> headers() {
-        catalogAuth.refresh(this.tokenFilePath);
+        catalogAuth.refresh();
         return catalogAuth.getHeaders();
     }
 

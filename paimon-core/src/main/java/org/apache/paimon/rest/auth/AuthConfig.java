@@ -23,16 +23,19 @@ import javax.annotation.Nullable;
 /** Auth options. */
 public class AuthConfig {
     private final @Nullable String token;
+    private final @Nullable String tokenFilePath;
     private final Boolean keepRefreshed;
     private final @Nullable Long expiresAtMillis;
     private final @Nullable Long expiresInMills;
 
     public AuthConfig(
             @Nullable String token,
+            @Nullable String tokenFilePath,
             boolean keepRefreshed,
             Long expiresAtMillis,
             Long expiresInMills) {
         this.token = token;
+        this.tokenFilePath = tokenFilePath;
         this.keepRefreshed = keepRefreshed;
         this.expiresAtMillis = expiresAtMillis;
         this.expiresInMills = expiresInMills;
@@ -41,6 +44,11 @@ public class AuthConfig {
     @Nullable
     public String token() {
         return token;
+    }
+
+    @Nullable
+    public String tokenFilePath() {
+        return tokenFilePath;
     }
 
     public boolean keepRefreshed() {

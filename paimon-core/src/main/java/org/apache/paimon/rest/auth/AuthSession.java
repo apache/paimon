@@ -114,7 +114,11 @@ public class AuthSession {
                 TimeUnit.MILLISECONDS);
     }
 
-    public Pair<Long, TimeUnit> refresh(String tokenFilePath) {
+    public Pair<Long, TimeUnit> refresh() {
+        return refresh(config.tokenFilePath());
+    }
+
+    private Pair<Long, TimeUnit> refresh(String tokenFilePath) {
         if (config.token() != null && config.keepRefreshed()) {
             AuthConfig authConfig = refreshExpiredToken(tokenFilePath, System.currentTimeMillis());
             boolean isSuccessful = authConfig.token() != null;
@@ -141,7 +145,11 @@ public class AuthSession {
                             Files.readAllBytes(Paths.get(tokenFilePath)), StandardCharsets.UTF_8);
             long expiresAtMillis = startTimeMillis + this.config.expiresInMills();
             return new AuthConfig(
-                    token, config.keepRefreshed(), expiresAtMillis, this.config.expiresInMills());
+                    token,
+                    config.tokenFilePath(),
+                    config.keepRefreshed(),
+                    expiresAtMillis,
+                    this.config.expiresInMills());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
