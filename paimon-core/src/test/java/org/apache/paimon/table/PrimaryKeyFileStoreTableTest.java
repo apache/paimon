@@ -811,6 +811,65 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
+    public void testDeletionVectorsWithParquetFilter() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(BUCKET, 1);
+                            conf.set(DELETION_VECTORS_ENABLED, true);
+                            conf.set(FILE_FORMAT, "parquet");
+                            conf.set("parquet.block.size", "1048576");
+                            conf.set("parquet.page.size", "1024");
+                        });
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+
+        BatchTableWrite write =
+                (BatchTableWrite)
+                        writeBuilder
+                                .newWrite()
+                                .withIOManager(new IOManagerImpl(tempDir.toString()));
+
+        for (int i = 0; i < 2000; i++) {
+            write.write(rowData(i, i, i * 100L));
+        }
+
+        List<CommitMessage> messages = write.prepareCommit();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(messages);
+        write =
+                (BatchTableWrite)
+                        writeBuilder
+                                .newWrite()
+                                .withIOManager(new IOManagerImpl(tempDir.toString()));
+        for (int i = 1000; i < 2000; i++) {
+            write.write(rowDataWithKind(RowKind.DELETE, i, i, i * 100L));
+        }
+
+        messages = write.prepareCommit();
+        commit = writeBuilder.newCommit();
+        commit.commit(messages);
+
+        PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+
+        for (int i = 500; i < 510; i++) {
+            TableRead read = table.newRead().withFilter(builder.equal(0, i)).executeFilter();
+            assertThat(getResult(read, splits, BATCH_ROW_TO_STRING))
+                    .isEqualTo(
+                            Arrays.asList(
+                                    String.format(
+                                            "%d|%d|%d|binary|varbinary|mapKey:mapVal|multiset",
+                                            i, i, i * 100l)));
+        }
+
+        for (int i = 1500; i < 1510; i++) {
+            TableRead read = table.newRead().withFilter(builder.equal(0, i)).executeFilter();
+            assertThat(getResult(read, splits, BATCH_ROW_TO_STRING)).isEmpty();
+        }
+    }
+
+    @Test
     public void testDeletionVectorsWithFileIndexInMeta() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(

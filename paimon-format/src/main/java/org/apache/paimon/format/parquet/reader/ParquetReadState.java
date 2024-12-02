@@ -45,7 +45,7 @@ public class ParquetReadState {
     int valuesToReadInPage;
     int rowsToReadInBatch;
 
-    ParquetReadState(PrimitiveIterator.OfLong rowIndexes) {
+    public ParquetReadState(PrimitiveIterator.OfLong rowIndexes) {
         this.rowRanges = constructRanges(rowIndexes);
         nextRange();
     }
@@ -95,21 +95,29 @@ public class ParquetReadState {
     }
 
     /** Returns the start index of the current row range. */
-    long currentRangeStart() {
+    public long currentRangeStart() {
         return currentRange.start;
     }
 
     /** Returns the end index of the current row range. */
-    long currentRangeEnd() {
+    public long currentRangeEnd() {
         return currentRange.end;
     }
 
-    boolean isFinished() {
+    public boolean isFinished() {
         return this.currentRange.equals(this.END_ROW_RANGE);
     }
 
+    public boolean isMaxRange() {
+        return this.currentRange.equals(this.MAX_ROW_RANGE);
+    }
+
+    public RowRange getCurrentRange() {
+        return currentRange;
+    }
+
     /** Advance to the next range. */
-    void nextRange() {
+    public void nextRange() {
         if (rowRanges == null) {
             currentRange = MAX_ROW_RANGE;
         } else if (!rowRanges.hasNext()) {
@@ -120,7 +128,7 @@ public class ParquetReadState {
     }
 
     /** Helper struct to represent a range of row indexes `[start, end]`. */
-    private static class RowRange {
+    public static class RowRange {
         final long start;
         final long end;
 
