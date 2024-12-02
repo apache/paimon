@@ -229,6 +229,10 @@ public class IcebergDataField {
                                 simpleType.substring(
                                         simpleType.indexOf("(") + 1, simpleType.indexOf(")")));
                 return new BinaryType(required, fixedLength);
+            case "uuid":
+                // https://iceberg.apache.org/spec/?h=vector#primitive-types
+                // uuid should use 16-byte fixed
+                return new BinaryType(required, 16);
             case "decimal":
                 int precision =
                         Integer.parseInt(
