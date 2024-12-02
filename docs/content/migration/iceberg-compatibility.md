@@ -395,7 +395,7 @@ you also need to set some (or all) of the following table options when creating 
 ## AWS Glue Catalog
 
 You can use Hive Catalog to connect AWS Glue metastore, you can use set `'metadata.iceberg.hive-client-class'` to
-`'com.amazonaws.glue.catalog.metastore.AWSGlueDataCatalogHiveClient'`.
+`'com.amazonaws.glue.catalog.metastore.AWSCatalogMetastoreClient'`.
 
 ## AWS Athena
 
