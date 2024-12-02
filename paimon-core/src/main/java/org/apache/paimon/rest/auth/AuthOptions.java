@@ -18,40 +18,31 @@
 
 package org.apache.paimon.rest.auth;
 
-import javax.annotation.Nullable;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
+
+import java.time.Duration;
 
 /** Auth options. */
 public class AuthOptions {
-    private final @Nullable String token;
-    private final Boolean keepRefreshed;
-    private final @Nullable Long expiresAtMillis;
-    private final @Nullable Long expiresInMills;
-
-    public AuthOptions(
-            @Nullable String token,
-            boolean keepRefreshed,
-            Long expiresAtMillis,
-            Long expiresInMills) {
-        this.token = token;
-        this.keepRefreshed = keepRefreshed;
-        this.expiresAtMillis = expiresAtMillis;
-        this.expiresInMills = expiresInMills;
-    }
-
-    @Nullable
-    public String token() {
-        return token;
-    }
-
-    public boolean keepRefreshed() {
-        return keepRefreshed;
-    }
-
-    public Long expiresAtMillis() {
-        return expiresAtMillis;
-    }
-
-    public Long expiresInMills() {
-        return expiresInMills;
-    }
+    public static final ConfigOption<String> TOKEN =
+            ConfigOptions.key("token")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth token.");
+    public static final ConfigOption<Duration> TOKEN_EXPIRES =
+            ConfigOptions.key("token-expires")
+                    .durationType()
+                    .defaultValue(Duration.ofHours(1))
+                    .withDescription("REST Catalog auth token expires duration.");
+    public static final ConfigOption<Boolean> TOKEN_REFRESH_ENABLED =
+            ConfigOptions.key("token-refresh-enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("REST Catalog auth token refresh enable.");
+    public static final ConfigOption<String> TOKEN_FILE_PATH =
+            ConfigOptions.key("token-file-path")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth token file path.");
 }
