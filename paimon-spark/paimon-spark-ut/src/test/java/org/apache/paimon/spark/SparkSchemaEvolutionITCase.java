@@ -791,6 +791,89 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @ParameterizedTest()
     @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testAddAndDropNestedColumnInArray(String formatType) {
+        String tableName = "testAddNestedColumnTable";
+        spark.sql(
+                "CREATE TABLE paimon.default."
+                        + tableName
+                        + " (k INT NOT NULL, v ARRAY<STRUCT<f1: STRING, f2: INT>>) "
+                        + "TBLPROPERTIES ('bucket' = '1', 'primary-key' = 'k', 'file.format' = '"
+                        + formatType
+                        + "')");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, ARRAY(STRUCT('apple', 100), STRUCT('banana', 101))), "
+                        + "(2, ARRAY(STRUCT('cat', 200), STRUCT('dog', 201)))");
+        assertThat(
+                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
+                                .stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder(
+                        "[1,WrappedArray([apple,100], [banana,101])]",
+                        "[2,WrappedArray([cat,200], [dog,201])]");
+
+        spark.sql(
+                "ALTER TABLE paimon.default."
+                        + tableName
+                        + " ADD COLUMN v.element.f3 STRING AFTER f2");
+        spark.sql("ALTER TABLE paimon.default." + tableName + " DROP COLUMN v.element.f1");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, ARRAY(STRUCT(110, 'APPLE'), STRUCT(111, 'BANANA'))), "
+                        + "(3, ARRAY(STRUCT(310, 'FLOWER')))");
+        assertThat(
+                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
+                                .stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder(
+                        "[1,WrappedArray([110,APPLE], [111,BANANA])]",
+                        "[2,WrappedArray([200,null], [201,null])]",
+                        "[3,WrappedArray([310,FLOWER])]");
+    }
+
+    @ParameterizedTest()
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testAddAndDropNestedColumnInMap(String formatType) {
+        String tableName = "testAddNestedColumnTable";
+        spark.sql(
+                "CREATE TABLE paimon.default."
+                        + tableName
+                        + " (k INT NOT NULL, v MAP<INT, STRUCT<f1: STRING, f2: INT>>) "
+                        + "TBLPROPERTIES ('bucket' = '1', 'primary-key' = 'k', 'file.format' = '"
+                        + formatType
+                        + "')");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, MAP(10, STRUCT('apple', 100), 20, STRUCT('banana', 101))), "
+                        + "(2, MAP(10, STRUCT('cat', 200), 20, STRUCT('dog', 201)))");
+        assertThat(
+                        spark.sql("SELECT k, v[10].f1, v[10].f2 FROM paimon.default." + tableName)
+                                .collectAsList().stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder("[1,apple,100]", "[2,cat,200]");
+
+        spark.sql(
+                "ALTER TABLE paimon.default."
+                        + tableName
+                        + " ADD COLUMN v.value.f3 STRING AFTER f2");
+        spark.sql("ALTER TABLE paimon.default." + tableName + " DROP COLUMN v.value.f1");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, MAP(10, STRUCT(110, 'APPLE'), 20, STRUCT(111, 'BANANA'))), "
+                        + "(3, MAP(10, STRUCT(310, 'FLOWER')))");
+        assertThat(
+                        spark.sql("SELECT k, v[10].f2, v[10].f3 FROM paimon.default." + tableName)
+                                .collectAsList().stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder("[1,110,APPLE]", "[2,200,null]", "[3,310,FLOWER]");
+    }
+
+    @ParameterizedTest()
+    @ValueSource(strings = {"orc", "avro", "parquet"})
     public void testRenameNestedColumn(String formatType) {
         String tableName = "testRenameNestedColumnTable";
         spark.sql(
@@ -816,6 +899,67 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                                 .collectAsList().stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder("[apple,1]", "[banana,2]");
+    }
+
+    @ParameterizedTest()
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testRenameNestedColumnInArray(String formatType) {
+        String tableName = "testRenameNestedColumnTable";
+        spark.sql(
+                "CREATE TABLE paimon.default."
+                        + tableName
+                        + " (k INT NOT NULL, v ARRAY<STRUCT<f1: STRING, f2: INT>>) "
+                        + "TBLPROPERTIES ('file.format' = '"
+                        + formatType
+                        + "')");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, ARRAY(STRUCT('apple', 100), STRUCT('banana', 101))), "
+                        + "(2, ARRAY(STRUCT('cat', 200), STRUCT('dog', 201)))");
+        assertThat(
+                        spark.sql("SELECT v[0].f1, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder("[apple,1]", "[cat,2]");
+
+        spark.sql(
+                "ALTER TABLE paimon.default." + tableName + " RENAME COLUMN v.element.f1 to f100");
+        assertThat(
+                        spark.sql("SELECT v[0].f100, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder("[apple,1]", "[cat,2]");
+    }
+
+    @ParameterizedTest()
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testRenameNestedColumnInMap(String formatType) {
+        String tableName = "testRenameNestedColumnTable";
+        spark.sql(
+                "CREATE TABLE paimon.default."
+                        + tableName
+                        + " (k INT NOT NULL, v MAP<INT, STRUCT<f1: STRING, f2: INT>>) "
+                        + "TBLPROPERTIES ('file.format' = '"
+                        + formatType
+                        + "')");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, MAP(10, STRUCT('apple', 100), 20, STRUCT('banana', 101))), "
+                        + "(2, MAP(10, STRUCT('cat', 200), 20, STRUCT('dog', 201)))");
+        assertThat(
+                        spark.sql("SELECT v[10].f1, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder("[apple,1]", "[cat,2]");
+
+        spark.sql("ALTER TABLE paimon.default." + tableName + " RENAME COLUMN v.value.f1 to f100");
+        assertThat(
+                        spark.sql("SELECT v[10].f100, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder("[apple,1]", "[cat,2]");
     }
 
     @ParameterizedTest()
@@ -849,5 +993,85 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                                 .collectAsList().stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder("[101,1]", "[200,2]", "[3000000000000,3]");
+    }
+
+    @ParameterizedTest()
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testUpdateNestedColumnTypeInArray(String formatType) {
+        String tableName = "testRenameNestedColumnTable";
+        spark.sql(
+                "CREATE TABLE paimon.default."
+                        + tableName
+                        + " (k INT NOT NULL, v ARRAY<STRUCT<f1: STRING, f2: INT>>) "
+                        + "TBLPROPERTIES ('bucket' = '1', 'primary-key' = 'k', 'file.format' = '"
+                        + formatType
+                        + "')");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, ARRAY(STRUCT('apple', 100), STRUCT('banana', 101))), "
+                        + "(2, ARRAY(STRUCT('cat', 200), STRUCT('dog', 201)))");
+        assertThat(
+                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
+                                .stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder(
+                        "[1,WrappedArray([apple,100], [banana,101])]",
+                        "[2,WrappedArray([cat,200], [dog,201])]");
+
+        spark.sql(
+                "ALTER TABLE paimon.default."
+                        + tableName
+                        + " CHANGE COLUMN v.element.f2 f2 BIGINT");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, ARRAY(STRUCT('APPLE', 1000000000000), STRUCT('BANANA', 111))), "
+                        + "(3, ARRAY(STRUCT('FLOWER', 3000000000000)))");
+        assertThat(
+                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
+                                .stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder(
+                        "[1,WrappedArray([APPLE,1000000000000], [BANANA,111])]",
+                        "[2,WrappedArray([cat,200], [dog,201])]",
+                        "[3,WrappedArray([FLOWER,3000000000000])]");
+    }
+
+    @ParameterizedTest()
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testUpdateNestedColumnTypeInMap(String formatType) {
+        String tableName = "testRenameNestedColumnTable";
+        spark.sql(
+                "CREATE TABLE paimon.default."
+                        + tableName
+                        + " (k INT NOT NULL, v MAP<INT, STRUCT<f1: STRING, f2: INT>>) "
+                        + "TBLPROPERTIES ('bucket' = '1', 'primary-key' = 'k', 'file.format' = '"
+                        + formatType
+                        + "')");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, MAP(10, STRUCT('apple', 100), 20, STRUCT('banana', 101))), "
+                        + "(2, MAP(10, STRUCT('cat', 200), 20, STRUCT('dog', 201)))");
+        assertThat(
+                        spark.sql("SELECT k, v[10].f1, v[10].f2 FROM paimon.default." + tableName)
+                                .collectAsList().stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder("[1,apple,100]", "[2,cat,200]");
+
+        spark.sql(
+                "ALTER TABLE paimon.default." + tableName + " CHANGE COLUMN v.value.f2 f2 BIGINT");
+        spark.sql(
+                "INSERT INTO paimon.default."
+                        + tableName
+                        + " VALUES (1, MAP(10, STRUCT('APPLE', 1000000000000), 20, STRUCT('BANANA', 111))), "
+                        + "(3, MAP(10, STRUCT('FLOWER', 3000000000000)))");
+        assertThat(
+                        spark.sql("SELECT k, v[10].f1, v[10].f2 FROM paimon.default." + tableName)
+                                .collectAsList().stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder(
+                        "[1,APPLE,1000000000000]", "[2,cat,200]", "[3,FLOWER,3000000000000]");
     }
 }

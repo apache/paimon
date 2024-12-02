@@ -756,8 +756,11 @@ public class FlinkCatalog extends AbstractCatalog {
                     "Column %s can only be updated to array type, and cannot be updated to %s type",
                     joinedNames,
                     newType);
+            List<String> fullFieldNames = new ArrayList<>(fieldNames);
+            // add a dummy column name indicating the element of array
+            fullFieldNames.add("element");
             generateNestedColumnUpdates(
-                    fieldNames,
+                    fullFieldNames,
                     ((org.apache.paimon.types.ArrayType) oldType).getElementType(),
                     ((org.apache.paimon.types.ArrayType) newType).getElementType(),
                     schemaChanges);
@@ -775,8 +778,11 @@ public class FlinkCatalog extends AbstractCatalog {
                     joinedNames,
                     oldMapType.getKeyType(),
                     newMapType.getKeyType());
+            List<String> fullFieldNames = new ArrayList<>(fieldNames);
+            // add a dummy column name indicating the value of map
+            fullFieldNames.add("value");
             generateNestedColumnUpdates(
-                    fieldNames,
+                    fullFieldNames,
                     oldMapType.getValueType(),
                     newMapType.getValueType(),
                     schemaChanges);
