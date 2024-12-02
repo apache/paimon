@@ -18,10 +18,12 @@
 
 package org.apache.paimon.iceberg.manifest;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.iceberg.IcebergPathFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -51,19 +53,24 @@ public class IcebergManifestList extends ObjectsFile<IcebergManifestFileMeta> {
                 null);
     }
 
+    @VisibleForTesting
+    public String compression() {
+        return compression;
+    }
+
     public static IcebergManifestList create(FileStoreTable table, IcebergPathFactory pathFactory) {
-        Options manifestListAvroOptions = Options.fromMap(table.options());
+        Options avroOptions = Options.fromMap(table.options());
         // https://github.com/apache/iceberg/blob/main/core/src/main/java/org/apache/iceberg/ManifestLists.java
-        manifestListAvroOptions.set(
+        avroOptions.set(
                 "avro.row-name-mapping",
                 "org.apache.paimon.avro.generated.record:manifest_file,"
                         + "manifest_file_partitions:r508");
-        FileFormat manifestListAvro = FileFormat.fromIdentifier("avro", manifestListAvroOptions);
+        FileFormat manifestListAvro = FileFormat.fromIdentifier("avro", avroOptions);
         return new IcebergManifestList(
                 table.fileIO(),
                 manifestListAvro.createReaderFactory(IcebergManifestFileMeta.schema()),
                 manifestListAvro.createWriterFactory(IcebergManifestFileMeta.schema()),
-                table.coreOptions().manifestCompression(),
+                avroOptions.get(IcebergOptions.MANIFEST_COMPRESSION),
                 pathFactory.manifestListFactory());
     }
 }

@@ -70,6 +70,13 @@ public class IcebergOptions {
                     .noDefaultValue()
                     .withDescription("hadoop-conf-dir for Iceberg Hive catalog.");
 
+    public static final ConfigOption<String> MANIFEST_COMPRESSION =
+            key("metadata.iceberg.manifest-compression")
+                    .stringType()
+                    .defaultValue(
+                            "gzip") // some Iceberg reader cannot support zstd, for example DuckDB
+                    .withDescription("Compression for Iceberg manifest files.");
+
     /** Where to store Iceberg metadata. */
     public enum StorageType implements DescribedEnum {
         DISABLED("disabled", "Disable Iceberg compatibility support."),
