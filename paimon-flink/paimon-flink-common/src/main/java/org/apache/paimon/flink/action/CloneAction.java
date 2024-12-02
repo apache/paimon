@@ -32,7 +32,7 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
+import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -141,7 +141,7 @@ public class CloneAction extends ActionBase {
                                 new SnapshotHintOperator(targetCatalogConfig))
                         .setParallelism(parallelism);
 
-        snapshotHintOperator.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
+        snapshotHintOperator.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
     @Override

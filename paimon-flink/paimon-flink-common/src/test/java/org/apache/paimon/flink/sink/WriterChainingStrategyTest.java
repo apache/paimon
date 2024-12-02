@@ -173,7 +173,7 @@ public class WriterChainingStrategyTest {
 
         List<JobVertex> vertices = new ArrayList<>();
         env.getStreamGraph().getJobGraph().getVertices().forEach(vertices::add);
-        JobVertex vertex = findVertex(vertices, "Writer");
+        JobVertex vertex = findVertex(vertices, "Writer(write-only)");
 
         if (isWriterChainedWithUpstream) {
             assertThat(vertex.toString()).contains("Source");
