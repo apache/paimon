@@ -338,10 +338,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                 .contains("'bucket-key' = 'a,b_'");
 
         List<String> actual =
-                spark
-                        .sql("SELECT * FROM test_rename_bucket_key_table where b_ = 'bbb'")
-                        .collectAsList()
-                        .stream()
+                spark.sql("SELECT * FROM test_rename_bucket_key_table where b_ = 'bbb'")
+                        .collectAsList().stream()
                         .map(Row::toString)
                         .collect(Collectors.toList());
 
@@ -647,10 +645,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         "[31,32,33.0,34,35,36]",
                         "[37,38,39.0,40,41,42]");
         assertThat(
-                        table
-                                .select("e", "a", "ff", "d", "b")
-                                .filter("b>10L")
-                                .collectAsList()
+                        table.select("e", "a", "ff", "d", "b").filter("b>10L").collectAsList()
                                 .stream()
                                 .map(Row::toString)
                                 .collect(Collectors.toList()))
@@ -662,11 +657,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         "[36,31,33.0,34,32]",
                         "[42,37,39.0,40,38]");
         assertThat(
-                        table
-                                .select("e", "a", "ff", "d", "b")
-                                .filter("b>10 and e is not null")
-                                .collectAsList()
-                                .stream()
+                        table.select("e", "a", "ff", "d", "b").filter("b>10 and e is not null")
+                                .collectAsList().stream()
                                 .map(Row::toString)
                                 .collect(Collectors.toList()))
                 .containsExactlyInAnyOrder("[36,31,33.0,34,32]", "[42,37,39.0,40,38]");
@@ -732,17 +724,13 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + tableName
                         + " VALUES (1, STRUCT(10, STRUCT('apple', 100))), (2, STRUCT(20, STRUCT('banana', 200)))");
         assertThat(
-                        spark
-                                .sql("SELECT * FROM paimon.default." + tableName)
-                                .collectAsList()
+                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
                                 .stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder("[1,[10,[apple,100]]]", "[2,[20,[banana,200]]]");
         assertThat(
-                        spark
-                                .sql("SELECT v.f2.f1, k FROM paimon.default." + tableName)
-                                .collectAsList()
-                                .stream()
+                        spark.sql("SELECT v.f2.f1, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder("[apple,1]", "[banana,2]");
 
@@ -753,9 +741,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + tableName
                         + " VALUES (1, STRUCT(11, STRUCT('APPLE', 101, 1001), 'one')), (3, STRUCT(31, STRUCT('CHERRY', 301, 3001), 'three'))");
         assertThat(
-                        spark
-                                .sql("SELECT * FROM paimon.default." + tableName)
-                                .collectAsList()
+                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
                                 .stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder(
@@ -763,10 +749,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         "[2,[20,[banana,200,null],null]]",
                         "[3,[31,[CHERRY,301,3001],three]]");
         assertThat(
-                        spark
-                                .sql("SELECT v.f2.f2, v.f3, k FROM paimon.default." + tableName)
-                                .collectAsList()
-                                .stream()
+                        spark.sql("SELECT v.f2.f2, v.f3, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder("[101,one,1]", "[200,null,2]", "[301,three,3]");
 
@@ -776,9 +760,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + tableName
                         + " VALUES (1, STRUCT(12, STRUCT(102, 1002), 'one')), (4, STRUCT(42, STRUCT(402, 4002), 'four'))");
         assertThat(
-                        spark
-                                .sql("SELECT * FROM paimon.default." + tableName)
-                                .collectAsList()
+                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
                                 .stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder(
@@ -796,9 +778,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + tableName
                         + " VALUES (1, STRUCT(13, STRUCT(103, 100.03, 1003), 'one')), (5, STRUCT(53, STRUCT(503, 500.03, 5003), 'five'))");
         assertThat(
-                        spark
-                                .sql("SELECT * FROM paimon.default." + tableName)
-                                .collectAsList()
+                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
                                 .stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder(
@@ -826,9 +806,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + " VALUES (1, ARRAY(STRUCT('apple', 100), STRUCT('banana', 101))), "
                         + "(2, ARRAY(STRUCT('cat', 200), STRUCT('dog', 201)))");
         assertThat(
-                        spark
-                                .sql("SELECT * FROM paimon.default." + tableName)
-                                .collectAsList()
+                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
                                 .stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder(
@@ -846,9 +824,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + " VALUES (1, ARRAY(STRUCT(110, 'APPLE'), STRUCT(111, 'BANANA'))), "
                         + "(3, ARRAY(STRUCT(310, 'FLOWER')))");
         assertThat(
-                        spark
-                                .sql("SELECT * FROM paimon.default." + tableName)
-                                .collectAsList()
+                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
                                 .stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder(
@@ -874,12 +850,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + " VALUES (1, MAP(10, STRUCT('apple', 100), 20, STRUCT('banana', 101))), "
                         + "(2, MAP(10, STRUCT('cat', 200), 20, STRUCT('dog', 201)))");
         assertThat(
-                        spark
-                                .sql(
-                                        "SELECT k, v[10].f1, v[10].f2 FROM paimon.default."
-                                                + tableName)
-                                .collectAsList()
-                                .stream()
+                        spark.sql("SELECT k, v[10].f1, v[10].f2 FROM paimon.default." + tableName)
+                                .collectAsList().stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder("[1,apple,100]", "[2,cat,200]");
 
@@ -894,12 +866,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + " VALUES (1, MAP(10, STRUCT(110, 'APPLE'), 20, STRUCT(111, 'BANANA'))), "
                         + "(3, MAP(10, STRUCT(310, 'FLOWER')))");
         assertThat(
-                        spark
-                                .sql(
-                                        "SELECT k, v[10].f2, v[10].f3 FROM paimon.default."
-                                                + tableName)
-                                .collectAsList()
-                                .stream()
+                        spark.sql("SELECT k, v[10].f2, v[10].f3 FROM paimon.default." + tableName)
+                                .collectAsList().stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder("[1,110,APPLE]", "[2,200,null]", "[3,310,FLOWER]");
     }
@@ -920,19 +888,15 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + tableName
                         + " VALUES (1, STRUCT(10, STRUCT('apple', 100))), (2, STRUCT(20, STRUCT('banana', 200)))");
         assertThat(
-                        spark
-                                .sql("SELECT v.f2.f1, k FROM paimon.default." + tableName)
-                                .collectAsList()
-                                .stream()
+                        spark.sql("SELECT v.f2.f1, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder("[apple,1]", "[banana,2]");
 
         spark.sql("ALTER TABLE paimon.default." + tableName + " RENAME COLUMN v.f2.f1 to f100");
         assertThat(
-                        spark
-                                .sql("SELECT v.f2.f100, k FROM paimon.default." + tableName)
-                                .collectAsList()
-                                .stream()
+                        spark.sql("SELECT v.f2.f100, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder("[apple,1]", "[banana,2]");
     }
@@ -954,20 +918,16 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + " VALUES (1, ARRAY(STRUCT('apple', 100), STRUCT('banana', 101))), "
                         + "(2, ARRAY(STRUCT('cat', 200), STRUCT('dog', 201)))");
         assertThat(
-                        spark
-                                .sql("SELECT v[0].f1, k FROM paimon.default." + tableName)
-                                .collectAsList()
-                                .stream()
+                        spark.sql("SELECT v[0].f1, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder("[apple,1]", "[cat,2]");
 
         spark.sql(
                 "ALTER TABLE paimon.default." + tableName + " RENAME COLUMN v.element.f1 to f100");
         assertThat(
-                        spark
-                                .sql("SELECT v[0].f100, k FROM paimon.default." + tableName)
-                                .collectAsList()
-                                .stream()
+                        spark.sql("SELECT v[0].f100, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder("[apple,1]", "[cat,2]");
     }
@@ -989,19 +949,15 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + " VALUES (1, MAP(10, STRUCT('apple', 100), 20, STRUCT('banana', 101))), "
                         + "(2, MAP(10, STRUCT('cat', 200), 20, STRUCT('dog', 201)))");
         assertThat(
-                        spark
-                                .sql("SELECT v[10].f1, k FROM paimon.default." + tableName)
-                                .collectAsList()
-                                .stream()
+                        spark.sql("SELECT v[10].f1, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder("[apple,1]", "[cat,2]");
 
         spark.sql("ALTER TABLE paimon.default." + tableName + " RENAME COLUMN v.value.f1 to f100");
         assertThat(
-                        spark
-                                .sql("SELECT v[10].f100, k FROM paimon.default." + tableName)
-                                .collectAsList()
-                                .stream()
+                        spark.sql("SELECT v[10].f100, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder("[apple,1]", "[cat,2]");
     }
@@ -1022,10 +978,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + tableName
                         + " VALUES (1, STRUCT(10, STRUCT('apple', 100))), (2, STRUCT(20, STRUCT('banana', 200)))");
         assertThat(
-                        spark
-                                .sql("SELECT v.f2.f2, k FROM paimon.default." + tableName)
-                                .collectAsList()
-                                .stream()
+                        spark.sql("SELECT v.f2.f2, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder("[100,1]", "[200,2]");
 
@@ -1035,10 +989,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + tableName
                         + " VALUES (1, STRUCT(11, STRUCT('APPLE', 101))), (3, STRUCT(31, STRUCT('CHERRY', 3000000000000)))");
         assertThat(
-                        spark
-                                .sql("SELECT v.f2.f2, k FROM paimon.default." + tableName)
-                                .collectAsList()
-                                .stream()
+                        spark.sql("SELECT v.f2.f2, k FROM paimon.default." + tableName)
+                                .collectAsList().stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder("[101,1]", "[200,2]", "[3000000000000,3]");
     }
@@ -1060,9 +1012,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + " VALUES (1, ARRAY(STRUCT('apple', 100), STRUCT('banana', 101))), "
                         + "(2, ARRAY(STRUCT('cat', 200), STRUCT('dog', 201)))");
         assertThat(
-                        spark
-                                .sql("SELECT * FROM paimon.default." + tableName)
-                                .collectAsList()
+                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
                                 .stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder(
@@ -1079,9 +1029,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + " VALUES (1, ARRAY(STRUCT('APPLE', 1000000000000), STRUCT('BANANA', 111))), "
                         + "(3, ARRAY(STRUCT('FLOWER', 3000000000000)))");
         assertThat(
-                        spark
-                                .sql("SELECT * FROM paimon.default." + tableName)
-                                .collectAsList()
+                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
                                 .stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder(
@@ -1107,12 +1055,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + " VALUES (1, MAP(10, STRUCT('apple', 100), 20, STRUCT('banana', 101))), "
                         + "(2, MAP(10, STRUCT('cat', 200), 20, STRUCT('dog', 201)))");
         assertThat(
-                        spark
-                                .sql(
-                                        "SELECT k, v[10].f1, v[10].f2 FROM paimon.default."
-                                                + tableName)
-                                .collectAsList()
-                                .stream()
+                        spark.sql("SELECT k, v[10].f1, v[10].f2 FROM paimon.default." + tableName)
+                                .collectAsList().stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder("[1,apple,100]", "[2,cat,200]");
 
@@ -1124,12 +1068,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + " VALUES (1, MAP(10, STRUCT('APPLE', 1000000000000), 20, STRUCT('BANANA', 111))), "
                         + "(3, MAP(10, STRUCT('FLOWER', 3000000000000)))");
         assertThat(
-                        spark
-                                .sql(
-                                        "SELECT k, v[10].f1, v[10].f2 FROM paimon.default."
-                                                + tableName)
-                                .collectAsList()
-                                .stream()
+                        spark.sql("SELECT k, v[10].f1, v[10].f2 FROM paimon.default." + tableName)
+                                .collectAsList().stream()
                                 .map(Row::toString))
                 .containsExactlyInAnyOrder(
                         "[1,APPLE,1000000000000]", "[2,cat,200]", "[3,FLOWER,3000000000000]");
