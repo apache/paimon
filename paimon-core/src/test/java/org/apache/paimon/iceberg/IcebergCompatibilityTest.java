@@ -30,6 +30,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.iceberg.manifest.IcebergManifestFile;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta;
 import org.apache.paimon.iceberg.manifest.IcebergManifestList;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
@@ -302,6 +303,11 @@ public class IcebergCompatibilityTest {
         IcebergPathFactory pathFactory =
                 new IcebergPathFactory(new Path(table.location(), "metadata"));
         IcebergManifestList manifestList = IcebergManifestList.create(table, pathFactory);
+        assertThat(manifestList.compression()).isEqualTo("gzip");
+
+        IcebergManifestFile manifestFile = IcebergManifestFile.create(table, pathFactory);
+        assertThat(manifestFile.compression()).isEqualTo("gzip");
+
         Set<String> usingManifests = new HashSet<>();
         for (IcebergManifestFileMeta fileMeta :
                 manifestList.read(new Path(metadata.currentSnapshot().manifestList()).getName())) {
