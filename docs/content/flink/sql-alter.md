@@ -79,7 +79,7 @@ If you use object storage, such as S3 or OSS, please use this syntax carefully, 
 The following SQL adds two columns `c1` and `c2` to table `my_table`.
 
 {{< hint info >}}
-Flink SQL does not support adding nested columns. To add a column in a row type, see [Changing Column Type](#changing-column-type).
+To add a column in a row type, see [Changing Column Type](#changing-column-type).
 {{< /hint >}}
 
 ```sql
@@ -104,7 +104,7 @@ ALTER TABLE my_table DROP (c1, c2);
 ```
 
 {{< hint info >}}
-Flink SQL does not support dropping nested columns. To drop a column in a row type, see [Changing Column Type](#changing-column-type).
+To drop a column in a row type, see [Changing Column Type](#changing-column-type).
 {{< /hint >}}
 
 ## Dropping Partitions
