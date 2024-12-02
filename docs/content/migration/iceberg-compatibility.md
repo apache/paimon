@@ -383,8 +383,19 @@ you also need to set some (or all) of the following table options when creating 
       <td>Boolean</td>
       <td>Should use the legacy manifest version to generate Iceberg's 1.4 manifest files.</td>
     </tr>
+    <tr>
+      <td><h5>metadata.iceberg.hive-client-class</h5></td>
+      <td style="word-wrap: break-word;">org.apache.hadoop.hive.metastore.HiveMetaStoreClient</td>
+      <td>String</td>
+      <td>Hive client class name for Iceberg Hive Catalog.</td>
+    </tr>
     </tbody>
 </table>
+
+## AWS Glue Catalog
+
+You can use Hive Catalog to connect AWS Glue metastore, you can use set `'metadata.iceberg.hive-client-class'` to
+`'com.amazonaws.glue.catalog.metastore.AWSCatalogMetastoreClient'`.
 
 ## AWS Athena
 
