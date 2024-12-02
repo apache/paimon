@@ -35,6 +35,7 @@ import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 
+import static org.apache.paimon.CoreOptions.METADATA_STATS_DENSE_STORE;
 import static org.apache.paimon.CoreOptions.METADATA_STATS_MODE;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -42,10 +43,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class StatsTableTest extends TableTestBase {
 
     @Test
-    public void testPartitionStats() throws Exception {
+    public void testPartitionStatsNotDense() throws Exception {
         Identifier identifier = identifier("T");
         Options options = new Options();
         options.set(METADATA_STATS_MODE, "NONE");
+        options.set(METADATA_STATS_DENSE_STORE, false);
         options.set(CoreOptions.BUCKET, 1);
         Schema schema =
                 Schema.newBuilder()
@@ -89,5 +91,53 @@ public class StatsTableTest extends TableTestBase {
         assertThat(recordStats.maxValues().isNullAt(0)).isTrue();
         assertThat(recordStats.maxValues().isNullAt(1)).isTrue();
         assertThat(recordStats.maxValues().isNullAt(2)).isTrue();
+    }
+
+    @Test
+    public void testPartitionStatsDenseMode() throws Exception {
+        Identifier identifier = identifier("T");
+        Options options = new Options();
+        options.set(METADATA_STATS_MODE, "NONE");
+        options.set(CoreOptions.BUCKET, 1);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .partitionKeys("pt")
+                        .primaryKey("pk", "pt")
+                        .options(options.toMap())
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        Table table = catalog.getTable(identifier);
+
+        write(
+                table,
+                GenericRow.of(1, 1, 1),
+                GenericRow.of(1, 2, 1),
+                GenericRow.of(1, 3, 1),
+                GenericRow.of(2, 1, 1));
+
+        FileStoreTable storeTable = (FileStoreTable) table;
+        FileStore<?> store = storeTable.store();
+        String manifestListFile = storeTable.snapshotManager().latestSnapshot().deltaManifestList();
+
+        ManifestList manifestList = store.manifestListFactory().create();
+        ManifestFileMeta manifest = manifestList.read(manifestListFile).get(0);
+
+        // should have partition stats
+        SimpleStats partitionStats = manifest.partitionStats();
+        assertThat(partitionStats.minValues().getInt(0)).isEqualTo(1);
+        assertThat(partitionStats.maxValues().getInt(0)).isEqualTo(2);
+
+        // should not have record stats because of NONE mode
+        ManifestFile manifestFile = store.manifestFileFactory().create();
+        DataFileMeta file =
+                manifestFile.read(manifest.fileName(), manifest.fileSize()).get(0).file();
+        SimpleStats recordStats = file.valueStats();
+        assertThat(file.valueStatsCols()).isEmpty();
+        assertThat(recordStats.minValues().getFieldCount()).isEqualTo(0);
+        assertThat(recordStats.maxValues().getFieldCount()).isEqualTo(0);
+        assertThat(recordStats.nullCounts().size()).isEqualTo(0);
     }
 }
