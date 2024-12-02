@@ -230,7 +230,6 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     public void testBatchFilter(boolean statsDenseStore) throws Exception {
         Consumer<Options> optionsSetter =
                 options -> {
-                    options.set(CoreOptions.METADATA_STATS_DENSE_STORE, statsDenseStore);
                     if (statsDenseStore) {
                         options.set(CoreOptions.METADATA_STATS_MODE, "none");
                         options.set("fields.b.stats-mode", "full");

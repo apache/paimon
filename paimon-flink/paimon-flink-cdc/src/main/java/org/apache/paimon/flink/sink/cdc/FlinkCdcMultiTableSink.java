@@ -40,7 +40,7 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
+import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 
 import javax.annotation.Nullable;
@@ -134,7 +134,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
                                         createCommittableStateManager()))
                         .setParallelism(input.getParallelism());
         configureGlobalCommitter(committed, commitCpuCores, commitHeapMemory);
-        return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
+        return committed.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
     protected OneInputStreamOperatorFactory<CdcMultiplexRecord, MultiTableCommittable>

@@ -371,8 +371,25 @@ you also need to set some (or all) of the following table options when creating 
       <td>String</td>
       <td>hadoop-conf-dir for Iceberg Hive catalog.</td>
     </tr>
+    <tr>
+      <td><h5>metadata.iceberg.manifest-compression</h5></td>
+      <td style="word-wrap: break-word;">gzip</td>
+      <td>String</td>
+      <td>Compression for Iceberg manifest files.</td>
+    </tr>
+    <tr>
+      <td><h5>metadata.iceberg.manifest-legacy-version</h5></td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>Should use the legacy manifest version to generate Iceberg's 1.4 manifest files.</td>
+    </tr>
     </tbody>
 </table>
+
+## AWS Athena
+
+AWS Athena may use old manifest reader to read Iceberg manifest by names, we should let Paimon producing legacy Iceberg
+manifest list file, you can enable: `'metadata.iceberg.manifest-legacy-version'`.
 
 ## Trino Iceberg
 
