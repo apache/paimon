@@ -860,7 +860,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                             Arrays.asList(
                                     String.format(
                                             "%d|%d|%d|binary|varbinary|mapKey:mapVal|multiset",
-                                            i, i, i * 100l)));
+                                            i, i, i * 100L)));
         }
 
         for (int i = 1500; i < 1510; i++) {
