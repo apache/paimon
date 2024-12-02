@@ -34,9 +34,9 @@ public class AuthSession {
     private static final long MAX_REFRESH_WINDOW_MILLIS = 300_000; // 5 minutes
     private static final long MIN_REFRESH_WAIT_MILLIS = 10;
     private volatile Map<String, String> headers;
-    private volatile AuthConfig config;
+    private volatile AuthOptions config;
 
-    public AuthSession(Map<String, String> headers, AuthConfig config) {
+    public AuthSession(Map<String, String> headers, AuthOptions config) {
         this.headers = headers;
         this.config = config;
     }
@@ -46,7 +46,7 @@ public class AuthSession {
             ScheduledExecutorService executor,
             String token,
             Map<String, String> headers,
-            AuthConfig config,
+            AuthOptions config,
             Long defaultExpiresAtMillis) {
         AuthSession session = new AuthSession(headers, config);
 
@@ -112,31 +112,31 @@ public class AuthSession {
     public Pair<Long, TimeUnit> refresh(RESTClient client) {
         if (config.token() != null && config.keepRefreshed()) {
             long startTimeMillis = System.currentTimeMillis();
-            AuthConfig authConfig = refreshExpiredToken(client);
-            boolean isSuccessful = authConfig.token() != null;
+            AuthOptions authOptions = refreshExpiredToken(client);
+            boolean isSuccessful = authOptions.token() != null;
             if (!isSuccessful) {
                 return null;
             }
-            long expiresAtMillis = startTimeMillis + authConfig.expiresInMills();
+            long expiresAtMillis = startTimeMillis + authOptions.expiresInMills();
             this.config =
-                    new AuthConfig(
-                            authConfig.token(),
+                    new AuthOptions(
+                            authOptions.token(),
                             config.keepRefreshed(),
                             expiresAtMillis,
-                            authConfig.expiresInMills());
+                            authOptions.expiresInMills());
             Map<String, String> currentHeaders = this.headers;
             this.headers = RESTUtil.merge(currentHeaders, authHeaders(config.token()));
 
-            if (authConfig.expiresInMills() != null) {
-                return Pair.of(authConfig.expiresInMills(), TimeUnit.SECONDS);
+            if (authOptions.expiresInMills() != null) {
+                return Pair.of(authOptions.expiresInMills(), TimeUnit.SECONDS);
             }
         }
 
         return null;
     }
 
-    private AuthConfig refreshExpiredToken(RESTClient client) {
+    private AuthOptions refreshExpiredToken(RESTClient client) {
         // todo: update the token
-        return new AuthConfig("token", config.keepRefreshed(), null, this.config.expiresInMills());
+        return new AuthOptions("token", config.keepRefreshed(), null, this.config.expiresInMills());
     }
 }

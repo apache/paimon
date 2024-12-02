@@ -22,6 +22,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import java.util.Map;
 
+/** Auth util. */
 public class AuthUtil {
     private static final String AUTHORIZATION_HEADER = "Authorization";
     private static final String BEARER_PREFIX = "Bearer ";

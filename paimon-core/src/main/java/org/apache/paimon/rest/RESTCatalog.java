@@ -26,7 +26,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.rest.auth.AuthConfig;
+import org.apache.paimon.rest.auth.AuthOptions;
 import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.AuthUtil;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -94,7 +94,7 @@ public class RESTCatalog implements Catalog {
                         token,
                         this.baseHeader,
                         // todo: update,fix null value
-                        new AuthConfig(token, keepTokenRefreshed, null, null),
+                        new AuthOptions(token, keepTokenRefreshed, null, null),
                         null);
     }
 

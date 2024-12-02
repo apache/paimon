@@ -20,13 +20,14 @@ package org.apache.paimon.rest.auth;
 
 import javax.annotation.Nullable;
 
-public class AuthConfig {
+/** Auth options. */
+public class AuthOptions {
     private final @Nullable String token;
     private final Boolean keepRefreshed;
     private final @Nullable Long expiresAtMillis;
     private final @Nullable Long expiresInMills;
 
-    public AuthConfig(
+    public AuthOptions(
             @Nullable String token,
             boolean keepRefreshed,
             Long expiresAtMillis,
