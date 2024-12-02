@@ -72,6 +72,7 @@ public abstract class CacheBuilder {
                     org.apache.paimon.shade.guava30.com.google.common.cache.CacheBuilder
                             .newBuilder()
                             .weigher(CacheBuilder::weigh)
+                            .concurrencyLevel(1)
                             .maximumWeight(memorySize.getBytes())
                             .removalListener(this::onRemoval)
                             .build());
