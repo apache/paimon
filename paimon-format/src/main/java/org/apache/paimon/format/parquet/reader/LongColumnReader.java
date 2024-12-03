@@ -22,7 +22,7 @@ import org.apache.paimon.data.columnar.writable.WritableIntVector;
 import org.apache.paimon.data.columnar.writable.WritableLongVector;
 
 import org.apache.parquet.column.ColumnDescriptor;
-import org.apache.parquet.column.page.PageReader;
+import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.schema.PrimitiveType;
 
 import java.io.IOException;
@@ -31,8 +31,9 @@ import java.nio.ByteBuffer;
 /** Long {@link ColumnReader}. */
 public class LongColumnReader extends AbstractColumnReader<WritableLongVector> {
 
-    public LongColumnReader(ColumnDescriptor descriptor, PageReader pageReader) throws IOException {
-        super(descriptor, pageReader);
+    public LongColumnReader(ColumnDescriptor descriptor, PageReadStore pageReadStore)
+            throws IOException {
+        super(descriptor, pageReadStore);
         checkTypeName(PrimitiveType.PrimitiveTypeName.INT64);
     }
 
@@ -67,6 +68,38 @@ public class LongColumnReader extends AbstractColumnReader<WritableLongVector> {
             left -= n;
             runLenDecoder.currentCount -= n;
         }
+    }
+
+    @Override
+    protected void skipBatch(int num) {
+        int left = num;
+        while (left > 0) {
+            if (runLenDecoder.currentCount == 0) {
+                runLenDecoder.readNextGroup();
+            }
+            int n = Math.min(left, runLenDecoder.currentCount);
+            switch (runLenDecoder.mode) {
+                case RLE:
+                    if (runLenDecoder.currentValue == maxDefLevel) {
+                        skipValue(n);
+                    }
+                    break;
+                case PACKED:
+                    for (int i = 0; i < n; ++i) {
+                        if (runLenDecoder.currentBuffer[runLenDecoder.currentBufferIdx++]
+                                == maxDefLevel) {
+                            skipValue(1);
+                        }
+                    }
+                    break;
+            }
+            left -= n;
+            runLenDecoder.currentCount -= n;
+        }
+    }
+
+    private void skipValue(int num) {
+        skipDataBuffer(num * 8);
     }
 
     @Override
