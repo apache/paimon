@@ -278,7 +278,7 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
             reader =
                     new NestedPrimitiveColumnReader(
                             descriptor,
-                            pages.getPageReader(descriptor),
+                            pages,
                             isUtcTimestamp,
                             descriptor.getPrimitiveType(),
                             field.getType(),

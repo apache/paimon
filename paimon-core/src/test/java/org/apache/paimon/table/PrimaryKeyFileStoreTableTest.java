@@ -84,6 +84,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
@@ -824,6 +825,68 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 "1|2|400|binary|varbinary|mapKey:mapVal|multiset",
                                 "1|3|200|binary|varbinary|mapKey:mapVal|multiset",
                                 "1|4|500|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
+    public void testDeletionVectorsWithParquetFilter() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(BUCKET, 1);
+                            conf.set(DELETION_VECTORS_ENABLED, true);
+                            conf.set(FILE_FORMAT, "parquet");
+                            conf.set("parquet.block.size", "1048576");
+                            conf.set("parquet.page.size", "1024");
+                        });
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+
+        BatchTableWrite write =
+                (BatchTableWrite)
+                        writeBuilder
+                                .newWrite()
+                                .withIOManager(new IOManagerImpl(tempDir.toString()));
+
+        for (int i = 0; i < 200000; i++) {
+            write.write(rowData(1, i, i * 100L));
+        }
+
+        List<CommitMessage> messages = write.prepareCommit();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(messages);
+        write =
+                (BatchTableWrite)
+                        writeBuilder
+                                .newWrite()
+                                .withIOManager(new IOManagerImpl(tempDir.toString()));
+        for (int i = 180000; i < 200000; i++) {
+            write.write(rowDataWithKind(RowKind.DELETE, 1, i, i * 100L));
+        }
+
+        messages = write.prepareCommit();
+        commit = writeBuilder.newCommit();
+        commit.commit(messages);
+
+        PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        Random random = new Random();
+
+        for (int i = 0; i < 10; i++) {
+            int value = random.nextInt(180000);
+            TableRead read = table.newRead().withFilter(builder.equal(1, value)).executeFilter();
+            assertThat(getResult(read, splits, BATCH_ROW_TO_STRING))
+                    .isEqualTo(
+                            Arrays.asList(
+                                    String.format(
+                                            "%d|%d|%d|binary|varbinary|mapKey:mapVal|multiset",
+                                            1, value, value * 100L)));
+        }
+
+        for (int i = 0; i < 10; i++) {
+            int value = 180000 + random.nextInt(20000);
+            TableRead read = table.newRead().withFilter(builder.equal(1, value)).executeFilter();
+            assertThat(getResult(read, splits, BATCH_ROW_TO_STRING)).isEmpty();
+        }
     }
 
     @Test
