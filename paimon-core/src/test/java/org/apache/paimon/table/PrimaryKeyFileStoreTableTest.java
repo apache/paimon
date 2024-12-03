@@ -100,6 +100,7 @@ import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
+import static org.apache.paimon.CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD;
 import static org.apache.paimon.CoreOptions.LOOKUP_LOCAL_FILE_TYPE;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.MergeEngine;
@@ -926,6 +927,92 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
+    public void testDeletionVectorsWithBitmapFileIndexInFile() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(BUCKET, 1);
+                            conf.set(DELETION_VECTORS_ENABLED, true);
+                            conf.set(TARGET_FILE_SIZE, MemorySize.ofBytes(1));
+                            conf.set(FILE_INDEX_IN_MANIFEST_THRESHOLD, MemorySize.ofBytes(1));
+                            conf.set("file-index.bitmap.columns", "b");
+                        });
+
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 1, 300L));
+        write.write(rowData(1, 2, 400L));
+        write.write(rowData(1, 3, 100L));
+        write.write(rowData(1, 4, 100L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(rowData(1, 1, 100L));
+        write.write(rowData(1, 2, 100L));
+        write.write(rowData(1, 3, 300L));
+        write.write(rowData(1, 5, 100L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        write.write(rowData(1, 4, 200L));
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(2);
+        TableRead read = table.newRead().withFilter(builder.equal(2, 100L));
+        assertThat(getResult(read, splits, BATCH_ROW_TO_STRING))
+                .hasSameElementsAs(
+                        Arrays.asList(
+                                "1|1|100|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|2|100|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|5|100|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
+    public void testDeletionVectorsWithBitmapFileIndexInMeta() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(BUCKET, 1);
+                            conf.set(DELETION_VECTORS_ENABLED, true);
+                            conf.set(TARGET_FILE_SIZE, MemorySize.ofBytes(1));
+                            conf.set(FILE_INDEX_IN_MANIFEST_THRESHOLD, MemorySize.ofMebiBytes(1));
+                            conf.set("file-index.bitmap.columns", "b");
+                        });
+
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 1, 300L));
+        write.write(rowData(1, 2, 400L));
+        write.write(rowData(1, 3, 100L));
+        write.write(rowData(1, 4, 100L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(rowData(1, 1, 100L));
+        write.write(rowData(1, 2, 100L));
+        write.write(rowData(1, 3, 300L));
+        write.write(rowData(1, 5, 100L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        write.write(rowData(1, 4, 200L));
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(2);
+        TableRead read = table.newRead().withFilter(builder.equal(2, 100L));
+        assertThat(getResult(read, splits, BATCH_ROW_TO_STRING))
+                .hasSameElementsAs(
+                        Arrays.asList(
+                                "1|1|100|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|2|100|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|5|100|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
     public void testWithShardFirstRow() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
@@ -1184,6 +1271,90 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         commit.commit(4, write.prepareCommit(true, 4));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
         assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 2, 2]");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testPartialUpdateRemoveRecordOnSequenceGroup() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT()
+                        },
+                        new String[] {"pt", "a", "b", "seq1", "c", "d", "seq2"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set("merge-engine", "partial-update");
+                            options.set("fields.seq1.sequence-group", "b");
+                            options.set("fields.seq2.sequence-group", "c,d");
+                            options.set("partial-update.remove-record-on-sequence-group", "seq2");
+                        },
+                        rowType);
+        FileStoreTable wrongTable =
+                createFileStoreTable(
+                        options -> {
+                            options.set("merge-engine", "partial-update");
+                            options.set("fields.seq1.sequence-group", "b");
+                            options.set("fields.seq2.sequence-group", "c,d");
+                            options.set("partial-update.remove-record-on-sequence-group", "b");
+                        },
+                        rowType);
+        Function<InternalRow, String> rowToString = row -> internalRowToString(row, rowType);
+
+        assertThatThrownBy(() -> wrongTable.newWrite(""))
+                .hasMessageContaining(
+                        "field 'b' defined in 'partial-update.remove-record-on-sequence-group' option must be part of sequence groups");
+
+        SnapshotReader snapshotReader = table.newSnapshotReader();
+        TableRead read = table.newRead();
+        StreamTableWrite write = table.newWrite("");
+        StreamTableCommit commit = table.newCommit("");
+        // 1. Inserts
+        write.write(GenericRow.of(1, 1, 10, 1, 20, 20, 1));
+        write.write(GenericRow.of(1, 1, 11, 2, 25, 25, 0));
+        write.write(GenericRow.of(1, 1, 12, 1, 29, 29, 2));
+        commit.commit(0, write.prepareCommit(true, 0));
+        List<String> result =
+                getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 11, 2, 29, 29, 2]");
+
+        // 2. Update Before
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 11, 2, 29, 29, 2));
+        commit.commit(1, write.prepareCommit(true, 1));
+        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, NULL, 2, NULL, NULL, 2]");
+
+        // 3. Update After
+        write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 1, 11, 2, 30, 30, 3));
+        commit.commit(2, write.prepareCommit(true, 2));
+        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 11, 2, 30, 30, 3]");
+
+        // 4. Retracts
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 12, 3, 30, 30, 2));
+        commit.commit(3, write.prepareCommit(true, 3));
+        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, NULL, 3, 30, 30, 3]");
+
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 12, 2, 30, 31, 5));
+        commit.commit(4, write.prepareCommit(true, 4));
+        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result).isEmpty();
+
+        // 5. Inserts
+        write.write(GenericRow.of(1, 1, 11, 2, 30, 31, 6));
+        commit.commit(5, write.prepareCommit(true, 5));
+        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 11, 2, 30, 31, 6]");
 
         write.close();
         commit.close();
