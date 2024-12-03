@@ -22,7 +22,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.HiveCatalog;
-import org.apache.paimon.hive.HiveCatalogFactory;
+import org.apache.paimon.hive.HiveCatalogOptions;
 import org.apache.paimon.hive.HiveTypeUtils;
 import org.apache.paimon.hive.pool.CachedClientPool;
 import org.apache.paimon.options.Options;
@@ -100,7 +100,7 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
                 new CachedClientPool(
                         hiveConf,
                         options,
-                        HiveCatalogFactory.METASTORE_CLIENT_CLASS.defaultValue());
+                        HiveCatalogOptions.METASTORE_CLIENT_CLASS.defaultValue());
     }
 
     @Override

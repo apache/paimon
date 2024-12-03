@@ -65,5 +65,12 @@ If you don't want to access the location by the filesystem of hive when using a 
 you can set this option to true.
 </td>
         </tr>
+        <tr>
+            <td><h5>metastore.client.class</h5></td>
+            <td style="word-wrap: break-word;">"org.apache.hadoop.hive.metastore.HiveMetaStoreClient"</td>
+            <td>String</td>
+            <td>Class name of Hive metastore client.
+NOTE: This class must directly implements org.apache.hadoop.hive.metastore.IMetaStoreClient.</td>
+        </tr>
     </tbody>
 </table>
