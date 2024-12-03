@@ -23,33 +23,55 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 
 import org.apache.flink.table.api.Schema;
-import org.apache.flink.table.api.TableColumn;
-import org.apache.flink.table.api.TableSchema;
-import org.apache.flink.table.api.constraints.UniqueConstraint;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogTable;
-import org.apache.flink.table.catalog.CatalogTableImpl;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
-/** A {@link CatalogTableImpl} to wrap {@link FileStoreTable}. */
-public class DataCatalogTable extends CatalogTableImpl {
+import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.util.Preconditions.checkNotNull;
+
+/** A {@link CatalogTable} to wrap {@link FileStoreTable}. */
+public class DataCatalogTable implements CatalogTable {
+    // Schema of the table (column names and types)
+    private final Schema schema;
+
+    // Partition keys if this is a partitioned table. It's an empty set if the table is not
+    // partitioned
+    private final List<String> partitionKeys;
+
+    // Properties of the table
+    private final Map<String, String> options;
+
+    // Comment of the table
+    private final String comment;
 
     private final Table table;
     private final Map<String, String> nonPhysicalColumnComments;
 
     public DataCatalogTable(
             Table table,
-            TableSchema tableSchema,
+            Schema resolvedSchema,
             List<String> partitionKeys,
-            Map<String, String> properties,
+            Map<String, String> options,
             String comment,
             Map<String, String> nonPhysicalColumnComments) {
-        super(tableSchema, partitionKeys, properties, comment);
+        this.schema = resolvedSchema;
+        this.partitionKeys = checkNotNull(partitionKeys, "partitionKeys cannot be null");
+        this.options = checkNotNull(options, "options cannot be null");
+
+        checkArgument(
+                options.entrySet().stream()
+                        .allMatch(e -> e.getKey() != null && e.getValue() != null),
+                "properties cannot have null keys or values");
+
+        this.comment = comment;
+
         this.table = table;
         this.nonPhysicalColumnComments = nonPhysicalColumnComments;
     }
@@ -66,32 +88,30 @@ public class DataCatalogTable extends CatalogTableImpl {
                         .filter(dataField -> dataField.description() != null)
                         .collect(Collectors.toMap(DataField::name, DataField::description));
 
-        return toSchema(getSchema(), columnComments);
+        return toSchema(schema, columnComments);
     }
 
-    /** Copied from {@link TableSchema#toSchema(Map)} to support versions lower than 1.17. */
-    private Schema toSchema(TableSchema tableSchema, Map<String, String> comments) {
+    private Schema toSchema(Schema tableSchema, Map<String, String> comments) {
         final Schema.Builder builder = Schema.newBuilder();
-
         tableSchema
-                .getTableColumns()
+                .getColumns()
                 .forEach(
                         column -> {
-                            if (column instanceof TableColumn.PhysicalColumn) {
-                                final TableColumn.PhysicalColumn c =
-                                        (TableColumn.PhysicalColumn) column;
-                                builder.column(c.getName(), c.getType());
-                            } else if (column instanceof TableColumn.MetadataColumn) {
-                                final TableColumn.MetadataColumn c =
-                                        (TableColumn.MetadataColumn) column;
+                            if (column instanceof Schema.UnresolvedPhysicalColumn) {
+                                final Schema.UnresolvedPhysicalColumn c =
+                                        (Schema.UnresolvedPhysicalColumn) column;
+                                builder.column(c.getName(), c.getDataType());
+                            } else if (column instanceof Schema.UnresolvedMetadataColumn) {
+                                final Schema.UnresolvedMetadataColumn c =
+                                        (Schema.UnresolvedMetadataColumn) column;
                                 builder.columnByMetadata(
                                         c.getName(),
-                                        c.getType(),
-                                        c.getMetadataAlias().orElse(null),
+                                        c.getDataType(),
+                                        c.getMetadataKey(),
                                         c.isVirtual());
-                            } else if (column instanceof TableColumn.ComputedColumn) {
-                                final TableColumn.ComputedColumn c =
-                                        (TableColumn.ComputedColumn) column;
+                            } else if (column instanceof Schema.UnresolvedComputedColumn) {
+                                final Schema.UnresolvedComputedColumn c =
+                                        (Schema.UnresolvedComputedColumn) column;
                                 builder.columnByExpression(c.getName(), c.getExpression());
                             } else {
                                 throw new IllegalArgumentException(
@@ -104,19 +124,16 @@ public class DataCatalogTable extends CatalogTableImpl {
                                 builder.withComment(nonPhysicalColumnComments.get(colName));
                             }
                         });
-
         tableSchema
                 .getWatermarkSpecs()
                 .forEach(
                         spec ->
                                 builder.watermark(
-                                        spec.getRowtimeAttribute(), spec.getWatermarkExpr()));
-
+                                        spec.getColumnName(), spec.getWatermarkExpression()));
         if (tableSchema.getPrimaryKey().isPresent()) {
-            UniqueConstraint primaryKey = tableSchema.getPrimaryKey().get();
-            builder.primaryKeyNamed(primaryKey.getName(), primaryKey.getColumns());
+            Schema.UnresolvedPrimaryKey primaryKey = tableSchema.getPrimaryKey().get();
+            builder.primaryKeyNamed(primaryKey.getConstraintName(), primaryKey.getColumnNames());
         }
-
         return builder.build();
     }
 
@@ -124,7 +141,7 @@ public class DataCatalogTable extends CatalogTableImpl {
     public CatalogBaseTable copy() {
         return new DataCatalogTable(
                 table,
-                getSchema().copy(),
+                schema,
                 new ArrayList<>(getPartitionKeys()),
                 new HashMap<>(getOptions()),
                 getComment(),
@@ -135,10 +152,40 @@ public class DataCatalogTable extends CatalogTableImpl {
     public CatalogTable copy(Map<String, String> options) {
         return new DataCatalogTable(
                 table,
-                getSchema(),
+                schema,
                 getPartitionKeys(),
                 options,
                 getComment(),
                 nonPhysicalColumnComments);
+    }
+
+    @Override
+    public Optional<String> getDescription() {
+        return Optional.of(getComment());
+    }
+
+    @Override
+    public Optional<String> getDetailedDescription() {
+        return Optional.of("This is a catalog table in an im-memory catalog");
+    }
+
+    @Override
+    public boolean isPartitioned() {
+        return !partitionKeys.isEmpty();
+    }
+
+    @Override
+    public List<String> getPartitionKeys() {
+        return partitionKeys;
+    }
+
+    @Override
+    public Map<String, String> getOptions() {
+        return options;
+    }
+
+    @Override
+    public String getComment() {
+        return comment != null ? comment : "";
     }
 }

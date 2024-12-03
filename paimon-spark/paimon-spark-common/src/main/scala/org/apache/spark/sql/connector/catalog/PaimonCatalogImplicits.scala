@@ -16,14 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.iceberg;
+package org.apache.spark.sql.connector.catalog
 
-import org.apache.paimon.hive.CreateFailHiveMetaStoreClient;
+object PaimonCatalogImplicits {
 
-/** IT cases for {@link IcebergHiveMetadataCommitter} in Hive 3.1. */
-public class IcebergHive31MetadataCommitterITCase extends IcebergHiveMetadataCommitterITCaseBase {
-    @Override
-    protected String createFailHiveMetaStoreClient() {
-        return CreateFailHiveMetaStoreClient.class.getName();
-    }
+  import CatalogV2Implicits._
+
+  implicit class PaimonCatalogHelper(plugin: CatalogPlugin) extends CatalogHelper(plugin)
+
+  implicit class PaimonNamespaceHelper(namespace: Array[String]) extends NamespaceHelper(namespace)
+
+//  implicit class PaimonTableHelper(table: Table) extends TableHelper(table)
 }

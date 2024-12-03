@@ -891,7 +891,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<LookupLocalFileType> LOOKUP_LOCAL_FILE_TYPE =
             key("lookup.local-file-type")
                     .enumType(LookupLocalFileType.class)
-                    .defaultValue(LookupLocalFileType.HASH)
+                    .defaultValue(LookupLocalFileType.SORT)
                     .withDescription("The local file type for lookup.");
 
     public static final ConfigOption<Float> LOOKUP_HASH_LOAD_FACTOR =

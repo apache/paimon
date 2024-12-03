@@ -22,7 +22,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.HiveCatalog;
-import org.apache.paimon.hive.HiveCatalogOptions;
 import org.apache.paimon.hive.HiveTypeUtils;
 import org.apache.paimon.hive.pool.CachedClientPool;
 import org.apache.paimon.options.Options;
@@ -48,6 +47,8 @@ import javax.annotation.Nullable;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.iceberg.AbstractIcebergCommitCallback.catalogDatabasePath;
 
 /**
  * {@link IcebergMetadataCommitter} to commit Iceberg metadata to Hive metastore, so the table can
@@ -98,9 +99,7 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
 
         this.clients =
                 new CachedClientPool(
-                        hiveConf,
-                        options,
-                        HiveCatalogOptions.METASTORE_CLIENT_CLASS.defaultValue());
+                        hiveConf, options, options.getString(IcebergOptions.HIVE_CLIENT_CLASS));
     }
 
     @Override
@@ -158,6 +157,7 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
     private void createDatabase(String databaseName) throws Exception {
         Database database = new Database();
         database.setName(databaseName);
+        database.setLocationUri(catalogDatabasePath(table).toString());
         clients.execute(client -> client.createDatabase(database));
     }
 

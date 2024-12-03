@@ -16,14 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.iceberg;
+package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.hive.CreateFailHiveMetaStoreClient;
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.rules.Rule
 
-/** IT cases for {@link IcebergHiveMetadataCommitter} in Hive 3.1. */
-public class IcebergHive31MetadataCommitterITCase extends IcebergHiveMetadataCommitterITCaseBase {
-    @Override
-    protected String createFailHiveMetaStoreClient() {
-        return CreateFailHiveMetaStoreClient.class.getName();
-    }
+case class Spark4ResolutionRules(session: SparkSession) extends Rule[LogicalPlan] {
+  override def apply(plan: LogicalPlan): LogicalPlan = plan
 }

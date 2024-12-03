@@ -28,6 +28,7 @@ import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.parquet.reader.ColumnReader;
 import org.apache.paimon.format.parquet.reader.ParquetDecimalVector;
+import org.apache.paimon.format.parquet.reader.ParquetReadState;
 import org.apache.paimon.format.parquet.reader.ParquetTimestampVector;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.fs.Path;
@@ -130,7 +131,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 buildFieldsList(projectedType.getFields(), projectedType.getFieldNames(), columnIO);
 
         return new ParquetReader(
-                reader, requestedSchema, reader.getRecordCount(), poolOfBatches, fields);
+                reader, requestedSchema, reader.getFilteredRecordCount(), poolOfBatches, fields);
     }
 
     private void setReadOptions(ParquetReadOptions.Builder builder) {
@@ -336,6 +337,10 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
         private long nextRowPosition;
 
+        private ParquetReadState currentRowGroupReadState;
+
+        private long currentRowGroupFirstRowIndex;
+
         /**
          * For each request column, the reader to read this column. This is NULL if this column is
          * missing from the file, in which case we populate the attribute with NULL.
@@ -359,6 +364,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             this.totalCountLoadedSoFar = 0;
             this.currentRowPosition = 0;
             this.nextRowPosition = 0;
+            this.currentRowGroupFirstRowIndex = 0;
             this.fields = fields;
         }
 
@@ -390,7 +396,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 currentRowPosition = nextRowPosition;
             }
 
-            int num = (int) Math.min(batchSize, totalCountLoadedSoFar - rowsReturned);
+            int num = getBachSize();
+
             for (int i = 0; i < columnReaders.length; ++i) {
                 if (columnReaders[i] == null) {
                     batch.writableVectors[i].fillWithNulls();
@@ -400,13 +407,13 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 }
             }
             rowsReturned += num;
-            nextRowPosition = currentRowPosition + num;
+            nextRowPosition = getNextRowPosition(num);
             batch.columnarBatch.setNumRows(num);
             return true;
         }
 
         private void readNextRowGroup() throws IOException {
-            PageReadStore rowGroup = reader.readNextRowGroup();
+            PageReadStore rowGroup = reader.readNextFilteredRowGroup();
             if (rowGroup == null) {
                 throw new IOException(
                         "expecting more rows but reached last block. Read "
@@ -414,6 +421,9 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                                 + " out of "
                                 + totalRowCount);
             }
+
+            this.currentRowGroupReadState =
+                    new ParquetReadState(rowGroup.getRowIndexes().orElse(null));
 
             List<Type> types = requestedSchema.getFields();
             columnReaders = new ColumnReader[types.size()];
@@ -429,15 +439,59 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                                     0);
                 }
             }
+
             totalCountLoadedSoFar += rowGroup.getRowCount();
-            if (rowGroup.getRowIndexOffset().isPresent()) {
-                currentRowPosition = rowGroup.getRowIndexOffset().get();
+
+            if (rowGroup.getRowIndexOffset().isPresent()) { // filter
+                currentRowGroupFirstRowIndex = rowGroup.getRowIndexOffset().get();
+                long pageIndex = 0;
+                if (!this.currentRowGroupReadState.isMaxRange()) {
+                    pageIndex = this.currentRowGroupReadState.currentRangeStart();
+                }
+                currentRowPosition = currentRowGroupFirstRowIndex + pageIndex;
             } else {
                 if (reader.rowGroupsFiltered()) {
                     throw new RuntimeException(
                             "There is a bug, rowIndexOffset must be present when row groups are filtered.");
                 }
+                currentRowGroupFirstRowIndex = nextRowPosition;
                 currentRowPosition = nextRowPosition;
+            }
+        }
+
+        private int getBachSize() throws IOException {
+
+            long rangeBatchSize = Long.MAX_VALUE;
+            if (this.currentRowGroupReadState.isFinished()) {
+                throw new IOException(
+                        "expecting more rows but reached last page block. Read "
+                                + rowsReturned
+                                + " out of "
+                                + totalRowCount);
+            } else if (!this.currentRowGroupReadState.isMaxRange()) {
+                long pageIndex = this.currentRowPosition - this.currentRowGroupFirstRowIndex;
+                rangeBatchSize = this.currentRowGroupReadState.currentRangeEnd() - pageIndex + 1;
+            }
+
+            return (int)
+                    Math.min(
+                            batchSize,
+                            Math.min(rangeBatchSize, totalCountLoadedSoFar - rowsReturned));
+        }
+
+        private long getNextRowPosition(int num) {
+            if (this.currentRowGroupReadState.isMaxRange()) {
+                return this.currentRowPosition + num;
+            } else {
+                long pageIndex = this.currentRowPosition - this.currentRowGroupFirstRowIndex;
+                long nextIndex = pageIndex + num;
+
+                if (this.currentRowGroupReadState.currentRangeEnd() < nextIndex) {
+                    this.currentRowGroupReadState.nextRange();
+                    nextIndex = this.currentRowGroupReadState.currentRangeStart();
+                }
+
+                return nextIndex;
             }
         }
 
