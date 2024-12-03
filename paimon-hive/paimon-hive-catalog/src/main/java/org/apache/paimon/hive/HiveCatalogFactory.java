@@ -21,22 +21,11 @@ package org.apache.paimon.hive;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
-import org.apache.paimon.options.ConfigOption;
-import org.apache.paimon.options.ConfigOptions;
 
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 
 /** Factory to create {@link HiveCatalog}. */
 public class HiveCatalogFactory implements CatalogFactory {
-
-    public static final ConfigOption<String> METASTORE_CLIENT_CLASS =
-            ConfigOptions.key("metastore.client.class")
-                    .stringType()
-                    .defaultValue("org.apache.hadoop.hive.metastore.HiveMetaStoreClient")
-                    .withDescription(
-                            "Class name of Hive metastore client.\n"
-                                    + "NOTE: This class must directly implements "
-                                    + "org.apache.hadoop.hive.metastore.IMetaStoreClient.");
 
     @Override
     public String identifier() {
