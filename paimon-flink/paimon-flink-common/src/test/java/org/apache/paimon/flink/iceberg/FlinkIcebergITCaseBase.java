@@ -404,6 +404,59 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                 .containsExactlyInAnyOrder(Row.of("munich"), Row.of("cologne"));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "parquet", "avro"})
+    public void testNestedTypes(String format) throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().parallelism(2).build();
+        tEnv.executeSql(
+                "CREATE CATALOG paimon WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql(
+                "CREATE TABLE paimon.`default`.T (\n"
+                        + "  k INT,\n"
+                        + "  v MAP<INT, ARRAY<ROW(f1 STRING, f2 INT)>>\n"
+                        + ") WITH (\n"
+                        + "  'metadata.iceberg.storage' = 'hadoop-catalog',\n"
+                        + "  'file.format' = '"
+                        + format
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql(
+                        "INSERT INTO paimon.`default`.T VALUES "
+                                + "(1, MAP[10, ARRAY[ROW('apple', 100), ROW('banana', 101)], 20, ARRAY[ROW('cat', 102), ROW('dog', 103)]]), "
+                                + "(2, MAP[10, ARRAY[ROW('cherry', 200), ROW('pear', 201)], 20, ARRAY[ROW('tiger', 202), ROW('wolf', 203)]])")
+                .await();
+
+        tEnv.executeSql(
+                "CREATE CATALOG iceberg WITH (\n"
+                        + "  'type' = 'iceberg',\n"
+                        + "  'catalog-type' = 'hadoop',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "/iceberg',\n"
+                        + "  'cache-enabled' = 'false'\n"
+                        + ")");
+        assertThat(collect(tEnv.executeSql("SELECT k, v[10] FROM iceberg.`default`.T")))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, new Row[] {Row.of("apple", 100), Row.of("banana", 101)}),
+                        Row.of(2, new Row[] {Row.of("cherry", 200), Row.of("pear", 201)}));
+
+        tEnv.executeSql(
+                        "INSERT INTO paimon.`default`.T VALUES "
+                                + "(3, MAP[10, ARRAY[ROW('mango', 300), ROW('watermelon', 301)], 20, ARRAY[ROW('rabbit', 302), ROW('lion', 303)]])")
+                .await();
+        assertThat(
+                        collect(
+                                tEnv.executeSql(
+                                        "SELECT k, v[10][2].f1 FROM iceberg.`default`.T WHERE v[20][1].f2 > 200")))
+                .containsExactlyInAnyOrder(Row.of(2, "pear"), Row.of(3, "watermelon"));
+    }
+
     private List<Row> collect(TableResult result) throws Exception {
         List<Row> rows = new ArrayList<>();
         try (CloseableIterator<Row> it = result.collect()) {

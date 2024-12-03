@@ -25,6 +25,8 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManagerImpl;
@@ -43,6 +45,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
@@ -528,6 +531,56 @@ public class IcebergCompatibilityTest {
                                     Record::toString))
                     .isEmpty();
         }
+    }
+
+    @Test
+    public void testNestedTypes() throws Exception {
+        RowType innerType =
+                RowType.of(
+                        new DataField(2, "f1", DataTypes.STRING()),
+                        new DataField(3, "f2", DataTypes.INT()));
+        RowType rowType =
+                RowType.of(
+                        new DataField(0, "k", DataTypes.INT()),
+                        new DataField(
+                                1,
+                                "v",
+                                DataTypes.MAP(DataTypes.INT(), DataTypes.ARRAY(innerType))));
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        Map<Integer, GenericArray> map1 = new HashMap<>();
+        map1.put(
+                10,
+                new GenericArray(
+                        new GenericRow[] {
+                            GenericRow.of(BinaryString.fromString("apple"), 100),
+                            GenericRow.of(BinaryString.fromString("banana"), 101)
+                        }));
+        write.write(GenericRow.of(1, new GenericMap(map1)));
+
+        Map<Integer, GenericArray> map2 = new HashMap<>();
+        map2.put(
+                20,
+                new GenericArray(
+                        new GenericRow[] {
+                            GenericRow.of(BinaryString.fromString("cherry"), 200),
+                            GenericRow.of(BinaryString.fromString("pear"), 201)
+                        }));
+        write.write(GenericRow.of(2, new GenericMap(map2)));
+
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder(
+                        "Record(1, {10=[Record(apple, 100), Record(banana, 101)]})",
+                        "Record(2, {20=[Record(cherry, 200), Record(pear, 201)]})");
     }
 
     // ------------------------------------------------------------------------
