@@ -18,6 +18,7 @@
 
 package org.apache.spark.sql.paimon.shims
 
+import org.apache.paimon.spark.catalyst.analysis.Spark3ResolutionRules
 import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark3SqlExtensionsParser
 import org.apache.paimon.spark.data.{Spark3ArrayData, Spark3InternalRow, SparkArrayData, SparkInternalRow}
 import org.apache.paimon.types.{DataType, RowType}
@@ -25,7 +26,8 @@ import org.apache.paimon.types.{DataType, RowType}
 import org.apache.spark.sql.{Column, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.Aggregate
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, LogicalPlan}
+import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.types.StructType
@@ -36,6 +38,10 @@ class Spark3Shim extends SparkShim {
 
   override def createSparkParser(delegate: ParserInterface): ParserInterface = {
     new PaimonSpark3SqlExtensionsParser(delegate)
+  }
+
+  override def createCustomResolution(spark: SparkSession): Rule[LogicalPlan] = {
+    Spark3ResolutionRules(spark)
   }
 
   override def createSparkInternalRow(rowType: RowType): SparkInternalRow = {

@@ -96,6 +96,17 @@ SHOW PARTITIONS my_table;
 SHOW PARTITIONS my_table PARTITION (dt=20230817);
 ```
 
+## Show Table Extended
+The SHOW TABLE EXTENDED statement is used to list table or partition information.
+
+```sql
+-- Lists tables that satisfy regular expressions
+SHOW TABLE EXTENDED IN db_name LIKE 'test*';
+
+-- Lists the specified partition information for the table
+SHOW TABLE EXTENDED IN db_name LIKE 'table_name' PARTITION(pt = '2024');
+```
+
 ## Analyze table
 
 The ANALYZE TABLE statement collects statistics about the table, that are to be used by the query optimizer to find a better query execution plan.
