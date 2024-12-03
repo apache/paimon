@@ -304,10 +304,10 @@ public class IcebergCompatibilityTest {
         IcebergPathFactory pathFactory =
                 new IcebergPathFactory(new Path(table.location(), "metadata"));
         IcebergManifestList manifestList = IcebergManifestList.create(table, pathFactory);
-        assertThat(manifestList.compression()).isEqualTo("gzip");
+        assertThat(manifestList.compression()).isEqualTo("snappy");
 
         IcebergManifestFile manifestFile = IcebergManifestFile.create(table, pathFactory);
-        assertThat(manifestFile.compression()).isEqualTo("gzip");
+        assertThat(manifestFile.compression()).isEqualTo("snappy");
 
         Set<String> usingManifests = new HashSet<>();
         String manifestListFile = new Path(metadata.currentSnapshot().manifestList()).getName();
