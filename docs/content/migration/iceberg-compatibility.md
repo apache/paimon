@@ -373,7 +373,7 @@ you also need to set some (or all) of the following table options when creating 
     </tr>
     <tr>
       <td><h5>metadata.iceberg.manifest-compression</h5></td>
-      <td style="word-wrap: break-word;">gzip</td>
+      <td style="word-wrap: break-word;">snappy</td>
       <td>String</td>
       <td>Compression for Iceberg manifest files.</td>
     </tr>
