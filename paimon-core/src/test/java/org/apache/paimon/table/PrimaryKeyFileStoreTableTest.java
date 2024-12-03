@@ -76,14 +76,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.nio.file.Files;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
@@ -830,8 +823,8 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 .newWrite()
                                 .withIOManager(new IOManagerImpl(tempDir.toString()));
 
-        for (int i = 0; i < 2000; i++) {
-            write.write(rowData(i, i, i * 100L));
+        for (int i = 0; i < 200000; i++) {
+            write.write(rowData(1, i, i * 100L));
         }
 
         List<CommitMessage> messages = write.prepareCommit();
@@ -842,8 +835,8 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                         writeBuilder
                                 .newWrite()
                                 .withIOManager(new IOManagerImpl(tempDir.toString()));
-        for (int i = 1000; i < 2000; i++) {
-            write.write(rowDataWithKind(RowKind.DELETE, i, i, i * 100L));
+        for (int i = 180000; i < 200000; i++) {
+            write.write(rowDataWithKind(RowKind.DELETE, 1, i, i * 100L));
         }
 
         messages = write.prepareCommit();
@@ -852,19 +845,22 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
         List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        Random random = new Random();
 
-        for (int i = 500; i < 510; i++) {
-            TableRead read = table.newRead().withFilter(builder.equal(0, i)).executeFilter();
+        for (int i = 0; i < 10; i++) {
+            int value = random.nextInt(180000);
+            TableRead read = table.newRead().withFilter(builder.equal(1, value)).executeFilter();
             assertThat(getResult(read, splits, BATCH_ROW_TO_STRING))
                     .isEqualTo(
                             Arrays.asList(
                                     String.format(
                                             "%d|%d|%d|binary|varbinary|mapKey:mapVal|multiset",
-                                            i, i, i * 100L)));
+                                            1, value, value * 100L)));
         }
 
-        for (int i = 1500; i < 1510; i++) {
-            TableRead read = table.newRead().withFilter(builder.equal(0, i)).executeFilter();
+        for (int i = 0; i < 10; i++) {
+            int value = 180000 + random.nextInt(20000);
+            TableRead read = table.newRead().withFilter(builder.equal(1, value)).executeFilter();
             assertThat(getResult(read, splits, BATCH_ROW_TO_STRING)).isEmpty();
         }
     }
