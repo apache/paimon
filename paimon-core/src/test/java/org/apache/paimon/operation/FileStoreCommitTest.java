@@ -950,6 +950,7 @@ public class FileStoreCommitTest {
     @Test
     public void testDropStatsForOverwrite() throws Exception {
         TestFileStore store = createStore(false);
+        store.options().toConfiguration().set(CoreOptions.MANIFEST_DELETE_FILE_DROP_STATS, true);
 
         List<KeyValue> keyValues = generateDataList(1);
         BinaryRow partition = gen.getPartition(keyValues.get(0));

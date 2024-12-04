@@ -381,7 +381,9 @@ public class UnawareAppendTableCompactionCoordinator {
                 snapshotReader.withFilter(filter);
             }
             // drop stats to reduce memory
-            snapshotReader.dropStats();
+            if (table.coreOptions().manifestDeleteFileDropStats()) {
+                snapshotReader.dropStats();
+            }
             this.streamingMode = isStreaming;
         }
 

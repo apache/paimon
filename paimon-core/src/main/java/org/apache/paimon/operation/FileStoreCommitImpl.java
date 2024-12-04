@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
@@ -146,6 +147,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             String tableName,
             String commitUser,
             RowType partitionType,
+            CoreOptions options,
             String partitionDefaultName,
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
@@ -176,8 +178,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.manifestFile = manifestFileFactory.create();
         this.manifestList = manifestListFactory.create();
         this.indexManifestFile = indexManifestFileFactory.create();
+        this.scan = scan;
         // Stats in DELETE Manifest Entries is useless
-        this.scan = scan.dropStats();
+        if (options.manifestDeleteFileDropStats()) {
+            this.scan.dropStats();
+        }
         this.numBucket = numBucket;
         this.manifestTargetSize = manifestTargetSize;
         this.manifestFullCompactionSize = manifestFullCompactionSize;
