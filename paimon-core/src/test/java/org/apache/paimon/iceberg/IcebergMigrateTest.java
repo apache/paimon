@@ -46,7 +46,6 @@ import org.apache.iceberg.data.parquet.GenericParquetWriter;
 import org.apache.iceberg.deletes.EqualityDeleteWriter;
 import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.hadoop.HadoopCatalog;
-import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.io.DataWriter;
 import org.apache.iceberg.io.OutputFile;
 import org.apache.iceberg.orc.ORC;
@@ -69,7 +68,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -311,9 +309,8 @@ public class IcebergMigrateTest {
             writeRecordsToIceberg(icebergTable, format, records2);
         }
 
-        //        testDeleteColumn(icebergTable, format, isPartitioned);
-        //        testAddColumn(icebergTable, format, isPartitioned);
-        testRenameColumn(icebergTable, format, isPartitioned);
+        // TODO: currently only support schema evolution of deleting columns
+        testDeleteColumn(icebergTable, format, isPartitioned);
     }
 
     private void testDeleteColumn(Table icebergTable, String format, boolean isPartitioned)
@@ -359,98 +356,6 @@ public class IcebergMigrateTest {
                                         "Record(2, 20240101, 01)",
                                         "Record(3, 20240101, 00)",
                                         "Record(4, 20240101, 00)")
-                                .collect(Collectors.toList()));
-    }
-
-    private void testAddColumn(Table icebergTable, String format, boolean isPartitioned)
-            throws Exception {
-        icebergTable.updateSchema().addColumn("v2", Types.IntegerType.get()).commit();
-        Schema newIceSchema = icebergTable.schema();
-        List<GenericRecord> addedRecords =
-                Stream.of(
-                                toIcebergRecord(newIceSchema, 3, 3, "20240101", "00", 3),
-                                toIcebergRecord(newIceSchema, 4, 4, "20240101", "00", 3))
-                        .collect(Collectors.toList());
-        if (isPartitioned) {
-            writeRecordsToIceberg(icebergTable, format, addedRecords, "20240101", "00");
-        } else {
-            writeRecordsToIceberg(icebergTable, format, addedRecords);
-        }
-
-        CatalogContext context = CatalogContext.create(new Path(paiTempDir.toString()));
-        context.options().set(CACHE_ENABLED, false);
-        Catalog catalog = CatalogFactory.createCatalog(context);
-        IcebergMigrator icebergMigrator =
-                new IcebergMigrator(
-                        catalog,
-                        new Path(icebergTable.location(), "metadata"),
-                        paiDatabase,
-                        paiTable,
-                        false,
-                        1);
-        icebergMigrator.executeMigrate();
-
-        FileStoreTable paimonTable =
-                (FileStoreTable) catalog.getTable(Identifier.create(paiDatabase, paiTable));
-        List<String> paiResults = getPaimonResult(paimonTable);
-        assertThat(
-                        paiResults.stream()
-                                .map(row -> String.format("Record(%s)", row))
-                                .collect(Collectors.toList()))
-                .hasSameElementsAs(
-                        Stream.of(
-                                        "Record(1, 1, 20240101, 00, NULL)",
-                                        "Record(2, 2, 20240101, 00, NULL)",
-                                        "Record(1, 1, 20240101, 01, NULL)",
-                                        "Record(2, 2, 20240101, 01, NULL)",
-                                        "Record(3, 3, 20240101, 00, 3)",
-                                        "Record(4, 4, 20240101, 00, 3)")
-                                .collect(Collectors.toList()));
-    }
-
-    private void testRenameColumn(Table icebergTable, String format, boolean isPartitioned)
-            throws Exception {
-        icebergTable.updateSchema().renameColumn("v", "v2").commit();
-        Schema newIceSchema = icebergTable.schema();
-        List<GenericRecord> addedRecords =
-                Stream.of(
-                                toIcebergRecord(newIceSchema, 3, 3, "20240101", "00"),
-                                toIcebergRecord(newIceSchema, 4, 4, "20240101", "00"))
-                        .collect(Collectors.toList());
-        if (isPartitioned) {
-            writeRecordsToIceberg(icebergTable, format, addedRecords, "20240101", "00");
-        } else {
-            writeRecordsToIceberg(icebergTable, format, addedRecords);
-        }
-
-        CatalogContext context = CatalogContext.create(new Path(paiTempDir.toString()));
-        context.options().set(CACHE_ENABLED, false);
-        Catalog catalog = CatalogFactory.createCatalog(context);
-        IcebergMigrator icebergMigrator =
-                new IcebergMigrator(
-                        catalog,
-                        new Path(icebergTable.location(), "metadata"),
-                        paiDatabase,
-                        paiTable,
-                        false,
-                        1);
-        icebergMigrator.executeMigrate();
-
-        FileStoreTable paimonTable =
-                (FileStoreTable) catalog.getTable(Identifier.create(paiDatabase, paiTable));
-        List<String> paiResults = getPaimonResult(paimonTable);
-        assertThat(
-                        paiResults.stream()
-                                .map(row -> String.format("Record(%s)", row))
-                                .collect(Collectors.toList()))
-                .hasSameElementsAs(
-                        Stream.of(
-                                        "Record(1, 1, 20240101, 00)",
-                                        "Record(2, 2, 20240101, 00)",
-                                        "Record(1, 1, 20240101, 01)",
-                                        "Record(2, 2, 20240101, 01)",
-                                        "Record(3, 3, 20240101, 00)",
-                                        "Record(4, 4, 20240101, 00)")
                                 .collect(Collectors.toList()));
     }
 
@@ -551,6 +456,7 @@ public class IcebergMigrateTest {
                                 icebergTable,
                                 partitionValues[0],
                                 partitionValues[1]);
+        // TODO: currently only support "parquet" format
         switch (format) {
             case "parquet":
                 return Parquet.writeData(file)
@@ -581,7 +487,7 @@ public class IcebergMigrateTest {
         }
     }
 
-    private DataFile writeRecordsToIceberg(
+    private void writeRecordsToIceberg(
             Table icebergTable,
             String format,
             List<GenericRecord> records,
@@ -601,7 +507,6 @@ public class IcebergMigrateTest {
         }
         DataFile dataFile = dataWriter.toDataFile();
         icebergTable.newAppend().appendFile(dataFile).commit();
-        return dataFile;
     }
 
     private void writeEqualityDeleteFile(
@@ -667,23 +572,5 @@ public class IcebergMigrateTest {
                                             row, paimonTable.rowType())));
             return result;
         }
-    }
-
-    private List<String> getIcebergResult(
-            Function<Table, CloseableIterable<Record>> query,
-            Function<Record, String> icebergRecordToString)
-            throws Exception {
-        HadoopCatalog icebergCatalog =
-                new HadoopCatalog(new Configuration(), iceTempDir.toString());
-        TableIdentifier icebergIdentifier = TableIdentifier.of(iceDatabase, iceTable);
-        org.apache.iceberg.Table icebergTable = icebergCatalog.loadTable(icebergIdentifier);
-
-        CloseableIterable<Record> result = query.apply(icebergTable);
-        List<String> actual = new ArrayList<>();
-        for (Record record : result) {
-            actual.add(icebergRecordToString.apply(record));
-        }
-        result.close();
-        return actual;
     }
 }
