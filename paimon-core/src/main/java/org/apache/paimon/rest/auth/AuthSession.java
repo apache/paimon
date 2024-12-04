@@ -49,9 +49,7 @@ public class AuthSession {
         long startTimeMillis = System.currentTimeMillis();
         Optional<Long> expiresAtMillisOpt = credentialsProvider.expiresAtMillis();
 
-        if (expiresAtMillisOpt.isPresent()
-                && null != expiresAtMillisOpt.get()
-                && expiresAtMillisOpt.get() <= startTimeMillis) {
+        if (expiresAtMillisOpt.isPresent() && expiresAtMillisOpt.get() <= startTimeMillis) {
             Pair<Long, TimeUnit> expiration = session.refresh();
 
             // if expiration is non-null, then token refresh was successful

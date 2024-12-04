@@ -50,7 +50,6 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 /** A catalog implementation for REST. */
 public class RESTCatalog implements Catalog {
     private RESTClient client;
-    private String token;
     private ResourcePaths resourcePaths;
     private Map<String, String> options;
     private Map<String, String> baseHeader;
@@ -79,24 +78,18 @@ public class RESTCatalog implements Catalog {
                         threadPoolSize,
                         DefaultErrorHandler.getInstance());
         this.client = new HttpClient(httpClientOptions);
-        token = options.get(RESTCatalogOptions.TOKEN);
-        this.keepTokenRefreshed = options.get(AuthOptions.TOKEN_REFRESH_ENABLED);
-        // todo: update
-        CredentialsProvider credentialsProvider = new BearTokenCredentialsProvider(token);
-        Map<String, String> authHeaders = credentialsProvider.authHeader();
-        Map<String, String> initHeaders =
-                RESTUtil.merge(configHeaders(options.toMap()), authHeaders);
-        this.options = fetchOptionsFromServer(initHeaders, options.toMap());
-        this.baseHeader = configHeaders(this.options());
-        this.resourcePaths =
-                ResourcePaths.forCatalogProperties(
-                        this.options.get(RESTCatalogInternalOptions.PREFIX));
-        this.catalogAuth = new AuthSession(this.baseHeader, null);
-        if (options.getOptional(AuthOptions.TOKEN_FILE_PATH).isPresent()) {
+        this.baseHeader = configHeaders(options.toMap());
+        // todo: support create CredentialsProvider by conf
+        if (options.getOptional(RESTCatalogOptions.TOKEN).isPresent()) {
+            CredentialsProvider credentialsProvider =
+                    new BearTokenCredentialsProvider(options.get(RESTCatalogOptions.TOKEN));
+            this.catalogAuth = new AuthSession(this.baseHeader, credentialsProvider);
+        } else if (options.getOptional(AuthOptions.TOKEN_FILE_PATH).isPresent()) {
+            this.keepTokenRefreshed = options.get(AuthOptions.TOKEN_REFRESH_ENABLED);
             long tokenExpireInMills = options.get(AuthOptions.TOKEN_EXPIRES_IN).toMillis();
             String tokenFilePath = options.getOptional(AuthOptions.TOKEN_FILE_PATH).orElse(null);
             long tokenExpireAtMills = System.currentTimeMillis() + tokenExpireInMills;
-            credentialsProvider =
+            CredentialsProvider credentialsProvider =
                     new BearTokenFileCredentialsProvider(
                             tokenFilePath,
                             keepTokenRefreshed,
@@ -108,6 +101,16 @@ public class RESTCatalog implements Catalog {
                             this.baseHeader,
                             credentialsProvider,
                             tokenExpireAtMills);
+        }
+        if (this.catalogAuth != null) {
+            Map<String, String> initHeaders =
+                    RESTUtil.merge(configHeaders(options.toMap()), this.catalogAuth.getHeaders());
+            this.options = fetchOptionsFromServer(initHeaders, options.toMap());
+            this.resourcePaths =
+                    ResourcePaths.forCatalogProperties(
+                            this.options.get(RESTCatalogInternalOptions.PREFIX));
+        } else {
+            throw new IllegalArgumentException("No auth provider provided.");
         }
     }
 
