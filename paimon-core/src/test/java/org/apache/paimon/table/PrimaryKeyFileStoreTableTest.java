@@ -812,6 +812,27 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     @Test
     public void testDeletionVectorsWithParquetFilter() throws Exception {
+        // RowGroup record range [pk] :
+        //
+        // RowGroup-0 :  [0-93421)
+        // RowGroup-1 :  [93421-187794)
+        // RowGroup-2 :  [187794-200000)
+        //
+        // ColumnPage record count :
+        //
+        // col-0 : 300
+        // col-1 : 200
+        // col-2 : 300
+        // col-3 : 300
+        // col-4 : 300
+        // col-5 : 200
+        // col-6 : 100
+        // col-7 : 100
+        // col-8 : 100
+        // col-9 : 100
+        // col-10 : 100
+        // col-11 : 300
+
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
@@ -821,6 +842,8 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                             conf.set("parquet.block.size", "1048576");
                             conf.set("parquet.page.size", "1024");
                         });
+
+        System.out.println(((AbstractFileStoreTable) table).path);
 
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
 
@@ -842,7 +865,11 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                         writeBuilder
                                 .newWrite()
                                 .withIOManager(new IOManagerImpl(tempDir.toString()));
-        for (int i = 180000; i < 200000; i++) {
+        for (int i = 110000; i < 115000; i++) {
+            write.write(rowDataWithKind(RowKind.DELETE, 1, i, i * 100L));
+        }
+
+        for (int i = 130000; i < 135000; i++) {
             write.write(rowDataWithKind(RowKind.DELETE, 1, i, i * 100L));
         }
 
@@ -854,8 +881,10 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
         Random random = new Random();
 
+        // point filter
+
         for (int i = 0; i < 10; i++) {
-            int value = random.nextInt(180000);
+            int value = random.nextInt(110000);
             TableRead read = table.newRead().withFilter(builder.equal(1, value)).executeFilter();
             assertThat(getResult(read, splits, BATCH_ROW_TO_STRING))
                     .isEqualTo(
@@ -866,10 +895,38 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         }
 
         for (int i = 0; i < 10; i++) {
-            int value = 180000 + random.nextInt(20000);
+            int value = 130000 + random.nextInt(5000);
             TableRead read = table.newRead().withFilter(builder.equal(1, value)).executeFilter();
             assertThat(getResult(read, splits, BATCH_ROW_TO_STRING)).isEmpty();
         }
+
+        TableRead tableRead =
+                table.newRead()
+                        .withFilter(
+                                PredicateBuilder.and(
+                                        builder.greaterOrEqual(1, 100000),
+                                        builder.lessThan(1, 150000)))
+                        .executeFilter();
+
+        List<String> result = getResult(tableRead, splits, BATCH_ROW_TO_STRING);
+
+        assertThat(result.size()).isEqualTo(40000); // filter 10000
+
+        assertThat(result)
+                .doesNotContain("1|110000|11000000|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(result)
+                .doesNotContain("1|114999|11499900|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(result)
+                .doesNotContain("1|130000|13000000|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(result)
+                .doesNotContain("1|134999|13499900|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(result).contains("1|100000|10000000|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(result).contains("1|149999|14999900|binary|varbinary|mapKey:mapVal|multiset");
+
+        assertThat(result).contains("1|101099|10109900|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(result).contains("1|115000|11500000|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(result).contains("1|129999|12999900|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(result).contains("1|135000|13500000|binary|varbinary|mapKey:mapVal|multiset");
     }
 
     @Test
