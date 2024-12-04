@@ -491,7 +491,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                     nextIndex = this.currentRowGroupReadState.currentRangeStart();
                 }
 
-                return nextIndex;
+                return this.currentRowGroupFirstRowIndex + nextIndex;
             }
         }
 
