@@ -843,8 +843,6 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                             conf.set("parquet.page.size", "1024");
                         });
 
-        System.out.println(((AbstractFileStoreTable) table).path);
-
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
 
         BatchTableWrite write =
