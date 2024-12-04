@@ -479,21 +479,24 @@ SELECT * FROM animals WHERE class = 'mammal';
 
 Paimon Iceberg compatibility currently supports the following data types.
 
-| Paimon Data Type  | Iceberg Data Type |
-|-------------------|-------------------|
-| `BOOLEAN`         | `boolean`         |
-| `INT`             | `int`             |
-| `BIGINT`          | `long`            |
-| `FLOAT`           | `float`           |
-| `DOUBLE`          | `double`          |
-| `DECIMAL`         | `decimal`         |
-| `CHAR`            | `string`          |
-| `VARCHAR`         | `string`          |
-| `BINARY`          | `binary`          |
-| `VARBINARY`       | `binary`          |
-| `DATE`            | `date`            |
-| `TIMESTAMP`*      | `timestamp`       |
-| `TIMESTAMP_LTZ`*  | `timestamptz`     |
+| Paimon Data Type | Iceberg Data Type |
+|------------------|-------------------|
+| `BOOLEAN`        | `boolean`         |
+| `INT`            | `int`             |
+| `BIGINT`         | `long`            |
+| `FLOAT`          | `float`           |
+| `DOUBLE`         | `double`          |
+| `DECIMAL`        | `decimal`         |
+| `CHAR`           | `string`          |
+| `VARCHAR`        | `string`          |
+| `BINARY`         | `binary`          |
+| `VARBINARY`      | `binary`          |
+| `DATE`           | `date`            |
+| `TIMESTAMP`*     | `timestamp`       |
+| `TIMESTAMP_LTZ`* | `timestamptz`     |
+| `ARRAY`          | `list`            |
+| `MAP`            | `map`             |
+| `ROW`            | `struct`          |
 
 *: `TIMESTAMP` and `TIMESTAMP_LTZ` type only support precision from 4 to 6
 

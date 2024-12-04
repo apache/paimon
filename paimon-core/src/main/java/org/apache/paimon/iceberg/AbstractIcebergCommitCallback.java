@@ -295,7 +295,8 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                             rawFile.rowCount(),
                             rawFile.fileSize(),
                             schemaCache.get(paimonFileMeta.schemaId()),
-                            paimonFileMeta.valueStats());
+                            paimonFileMeta.valueStats(),
+                            paimonFileMeta.valueStatsCols());
             result.add(
                     new IcebergManifestEntry(
                             IcebergManifestEntry.Status.ADDED,
@@ -509,7 +510,8 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                                                     paimonFileMeta.rowCount(),
                                                     paimonFileMeta.fileSize(),
                                                     schemaCache.get(paimonFileMeta.schemaId()),
-                                                    paimonFileMeta.valueStats());
+                                                    paimonFileMeta.valueStats(),
+                                                    paimonFileMeta.valueStatsCols());
                                     return new IcebergManifestEntry(
                                             IcebergManifestEntry.Status.ADDED,
                                             currentSnapshotId,
