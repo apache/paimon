@@ -28,6 +28,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManagerImpl;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFile;
@@ -281,9 +282,10 @@ public class IcebergCompatibilityTest {
         write.write(GenericRow.of(2, 20));
         commit.commit(1, write.prepareCommit(false, 1));
         assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(1L);
+        FileIO fileIO = table.fileIO();
         IcebergMetadata metadata =
                 IcebergMetadata.fromPath(
-                        table.fileIO(), new Path(table.location(), "metadata/v1.metadata.json"));
+                        fileIO, new Path(table.location(), "metadata/v1.metadata.json"));
         assertThat(metadata.snapshots()).hasSize(1);
         assertThat(metadata.currentSnapshotId()).isEqualTo(1);
 
@@ -294,7 +296,7 @@ public class IcebergCompatibilityTest {
         assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(3L);
         metadata =
                 IcebergMetadata.fromPath(
-                        table.fileIO(), new Path(table.location(), "metadata/v3.metadata.json"));
+                        fileIO, new Path(table.location(), "metadata/v3.metadata.json"));
         assertThat(metadata.snapshots()).hasSize(3);
         assertThat(metadata.currentSnapshotId()).isEqualTo(3);
 
@@ -304,15 +306,25 @@ public class IcebergCompatibilityTest {
         IcebergPathFactory pathFactory =
                 new IcebergPathFactory(new Path(table.location(), "metadata"));
         IcebergManifestList manifestList = IcebergManifestList.create(table, pathFactory);
-        assertThat(manifestList.compression()).isEqualTo("gzip");
+        assertThat(manifestList.compression()).isEqualTo("snappy");
 
         IcebergManifestFile manifestFile = IcebergManifestFile.create(table, pathFactory);
-        assertThat(manifestFile.compression()).isEqualTo("gzip");
+        assertThat(manifestFile.compression()).isEqualTo("snappy");
 
         Set<String> usingManifests = new HashSet<>();
         String manifestListFile = new Path(metadata.currentSnapshot().manifestList()).getName();
+
+        assertThat(fileIO.readFileUtf8(new Path(pathFactory.metadataDirectory(), manifestListFile)))
+                .contains("snappy");
+
         for (IcebergManifestFileMeta fileMeta : manifestList.read(manifestListFile)) {
             usingManifests.add(fileMeta.manifestPath());
+            assertThat(
+                            fileIO.readFileUtf8(
+                                    new Path(
+                                            pathFactory.metadataDirectory(),
+                                            fileMeta.manifestPath())))
+                    .contains("snappy");
         }
 
         IcebergManifestList legacyManifestList =
@@ -345,7 +357,7 @@ public class IcebergCompatibilityTest {
         assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(5L);
         metadata =
                 IcebergMetadata.fromPath(
-                        table.fileIO(), new Path(table.location(), "metadata/v5.metadata.json"));
+                        fileIO, new Path(table.location(), "metadata/v5.metadata.json"));
         assertThat(metadata.snapshots()).hasSize(3);
         assertThat(metadata.currentSnapshotId()).isEqualTo(5);
 
@@ -358,7 +370,7 @@ public class IcebergCompatibilityTest {
         }
 
         for (String path : unusedFiles) {
-            assertThat(table.fileIO().exists(new Path(path))).isFalse();
+            assertThat(fileIO.exists(new Path(path))).isFalse();
         }
 
         // Test all existing Iceberg snapshots are valid.
