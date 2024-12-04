@@ -18,7 +18,8 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.rest.auth.AuthUtil;
+import org.apache.paimon.rest.auth.BearTokenCredentialsProvider;
+import org.apache.paimon.rest.auth.CredentialsProvider;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -69,7 +70,8 @@ public class HttpClientTest {
         mockResponseData = new MockRESTData(MOCK_PATH);
         mockResponseDataStr = objectMapper.writeValueAsString(mockResponseData);
         httpClient = new HttpClient(httpClientOptions);
-        headers = AuthUtil.authHeaders(TOKEN);
+        CredentialsProvider credentialsProvider = new BearTokenCredentialsProvider(TOKEN);
+        headers = credentialsProvider.authHeader();
     }
 
     @After

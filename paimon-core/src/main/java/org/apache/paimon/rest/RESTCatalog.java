@@ -29,7 +29,8 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.auth.AuthConfig;
 import org.apache.paimon.rest.auth.AuthOptions;
 import org.apache.paimon.rest.auth.AuthSession;
-import org.apache.paimon.rest.auth.AuthUtil;
+import org.apache.paimon.rest.auth.BearTokenCredentialsProvider;
+import org.apache.paimon.rest.auth.CredentialsProvider;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -80,7 +81,9 @@ public class RESTCatalog implements Catalog {
         this.client = new HttpClient(httpClientOptions);
         token = options.get(RESTCatalogOptions.TOKEN);
         this.keepTokenRefreshed = options.get(AuthOptions.TOKEN_REFRESH_ENABLED);
-        Map<String, String> authHeaders = AuthUtil.authHeaders(token);
+        // todo: update
+        CredentialsProvider credentialsProvider = new BearTokenCredentialsProvider(token);
+        Map<String, String> authHeaders = credentialsProvider.authHeader();
         Map<String, String> initHeaders =
                 RESTUtil.merge(configHeaders(options.toMap()), authHeaders);
         this.options = fetchOptionsFromServer(initHeaders, options.toMap());

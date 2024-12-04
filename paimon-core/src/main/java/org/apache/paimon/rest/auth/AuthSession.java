@@ -29,8 +29,6 @@ import java.util.Map;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-import static org.apache.paimon.rest.auth.AuthUtil.authHeaders;
-
 /** Auth session. */
 public class AuthSession {
     private static int tokenRefreshNumRetries = 5;
@@ -127,7 +125,11 @@ public class AuthSession {
             }
             this.config = authConfig;
             Map<String, String> currentHeaders = this.headers;
-            this.headers = RESTUtil.merge(currentHeaders, authHeaders(config.token()));
+            // todo: fixme
+            this.headers =
+                    RESTUtil.merge(
+                            currentHeaders,
+                            new BearTokenCredentialsProvider(authConfig.token()).authHeader());
 
             if (authConfig.expiresInMills() != null) {
                 return Pair.of(authConfig.expiresInMills(), TimeUnit.SECONDS);

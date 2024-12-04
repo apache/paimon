@@ -18,20 +18,35 @@
 
 package org.apache.paimon.rest.auth;
 
+import org.apache.paimon.utils.StringUtils;
+
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import java.util.Map;
 
-/** Auth util. */
-public class AuthUtil {
+/** credentials provider for bear token. */
+public class BearTokenCredentialsProvider implements CredentialsProvider {
+
     private static final String AUTHORIZATION_HEADER = "Authorization";
     private static final String BEARER_PREFIX = "Bearer ";
 
-    public static Map<String, String> authHeaders(String token) {
-        if (token != null) {
-            return ImmutableMap.of(AUTHORIZATION_HEADER, BEARER_PREFIX + token);
+    private final String token;
+
+    public BearTokenCredentialsProvider(String token) {
+        if (StringUtils.isNullOrWhitespaceOnly(token)) {
+            throw new IllegalArgumentException("token is null");
         } else {
-            return ImmutableMap.of();
+            this.token = token;
         }
+    }
+
+    @Override
+    public Map<String, String> authHeader() {
+        return ImmutableMap.of(AUTHORIZATION_HEADER, BEARER_PREFIX + token);
+    }
+
+    @Override
+    public void refresh() {
+        // do nothing
     }
 }
