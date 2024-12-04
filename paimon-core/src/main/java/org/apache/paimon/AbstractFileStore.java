@@ -218,6 +218,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 tableName,
                 commitUser,
                 partitionType,
+                options,
                 options.partitionDefaultName(),
                 pathFactory(),
                 snapshotManager(),

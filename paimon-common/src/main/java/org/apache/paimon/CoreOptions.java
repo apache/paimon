@@ -1426,6 +1426,14 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("The object location for object table.");
 
+    public static final ConfigOption<Boolean> MANIFEST_DELETE_FILE_DROP_STATS =
+            key("manifest.delete-file-drop-stats")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "For DELETE manifest entry in manifest file, drop stats to reduce memory and storage."
+                                    + " Default value is false only for compatibility of old reader.");
+
     @ExcludeFromDocumentation("Only used internally to support materialized table")
     public static final ConfigOption<String> MATERIALIZED_TABLE_DEFINITION_QUERY =
             key("materialized-table.definition-query")
@@ -1945,6 +1953,10 @@ public class CoreOptions implements Serializable {
 
     public boolean needLookup() {
         return lookupStrategy().needLookup;
+    }
+
+    public boolean manifestDeleteFileDropStats() {
+        return options.get(MANIFEST_DELETE_FILE_DROP_STATS);
     }
 
     public LookupStrategy lookupStrategy() {
