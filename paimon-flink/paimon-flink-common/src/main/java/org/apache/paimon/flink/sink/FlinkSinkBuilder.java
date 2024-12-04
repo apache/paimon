@@ -271,7 +271,8 @@ public class FlinkSinkBuilder {
                 && table.partitionKeys().isEmpty()) {
             // For non-partitioned table, if the bucketNums is less than job parallelism.
             LOG.warn(
-                    "For non-partitioned table, the writerOperator's parallelism will be set to bucketNums if the bucketNums is less than inputOperator's parallelism.");
+                    "For non-partitioned table, if bucketNums is less than the parallelism of inputOperator,"
+                            + " then the parallelism of writerOperator will be set to bucketNums.");
             parallelism = bucketNums;
         }
         DataStream<InternalRow> partitioned =
