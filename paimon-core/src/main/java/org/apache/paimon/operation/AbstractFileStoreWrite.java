@@ -102,7 +102,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             boolean legacyPartitionName) {
         this.snapshotManager = snapshotManager;
         // Statistic is useless in writer
-        this.scan = scan.dropStats();
+        this.scan = scan == null ? null : scan.dropStats();
         this.indexFactory = indexFactory;
         this.dvMaintainerFactory = dvMaintainerFactory;
         this.totalBuckets = totalBuckets;
