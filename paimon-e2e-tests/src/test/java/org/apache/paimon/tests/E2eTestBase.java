@@ -111,7 +111,8 @@ public abstract class E2eTestBase {
             for (String s : kafkaServices) {
                 environment.withLogConsumer(s + "-1", new Slf4jLogConsumer(LOG));
             }
-            environment.waitingFor("kafka-1", buildWaitStrategy(".*Recorded new controller.*", 2));
+            environment.waitingFor(
+                    "kafka-1", buildWaitStrategy(".*Recorded new ZK controller.*", 2));
         }
         if (withHive) {
             List<String> hiveServices =
