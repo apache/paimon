@@ -58,7 +58,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
-/** doc. */
+/** migrate hive table to paimon table. */
 public class IcebergMigrator implements Migrator {
     private static final Logger LOG = LoggerFactory.getLogger(IcebergMigrator.class);
     private static final String VERSION_HINT_FILENAME = "version-hint.text";
