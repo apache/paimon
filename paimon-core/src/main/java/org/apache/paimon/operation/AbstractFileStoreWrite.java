@@ -101,7 +101,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             int writerNumberMax,
             boolean legacyPartitionName) {
         this.snapshotManager = snapshotManager;
-        this.scan = scan;
+        // Statistic is useless in writer
+        this.scan = scan.dropStats();
         this.indexFactory = indexFactory;
         this.dvMaintainerFactory = dvMaintainerFactory;
         this.totalBuckets = totalBuckets;
