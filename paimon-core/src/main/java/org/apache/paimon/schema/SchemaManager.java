@@ -208,24 +208,16 @@ public class SchemaManager implements Serializable {
         return createTable(schema, false);
     }
 
-    public TableSchema createTable(Schema schema, boolean ignoreIfExistsSame) throws Exception {
+    public TableSchema createTable(Schema schema, boolean externalTable) throws Exception {
         while (true) {
             Optional<TableSchema> latest = latest();
             if (latest.isPresent()) {
-                TableSchema oldSchema = latest.get();
-                boolean isSame =
-                        Objects.equals(oldSchema.fields(), schema.fields())
-                                && Objects.equals(oldSchema.partitionKeys(), schema.partitionKeys())
-                                && Objects.equals(oldSchema.primaryKeys(), schema.primaryKeys())
-                                && Objects.equals(oldSchema.options(), schema.options());
-                if (ignoreIfExistsSame && isSame) {
-                    return oldSchema;
+                if (externalTable) {
+                    return mergeSchemaForExternalTable(latest.get(), schema);
+                } else {
+                    throw new IllegalStateException(
+                            "Schema in filesystem exists, creation is not allowed.");
                 }
-
-                throw new IllegalStateException(
-                        "Schema in filesystem exists, please use updating,"
-                                + " latest schema is: "
-                                + oldSchema);
             }
 
             List<DataField> fields = schema.fields();
@@ -251,6 +243,41 @@ public class SchemaManager implements Serializable {
             if (success) {
                 return newSchema;
             }
+        }
+    }
+
+    private TableSchema mergeSchemaForExternalTable(TableSchema oldSchema, Schema newSchema)
+            throws Exception {
+        // When creating an external table, if the table already exists in the location, we can
+        // choose not to specify the schema.
+        if (newSchema.fields().isEmpty()
+                // When the schema is explicitly specified, we need check for consistency.
+                || (Objects.equals(oldSchema.fields(), newSchema.fields())
+                        && Objects.equals(oldSchema.partitionKeys(), newSchema.partitionKeys())
+                        && Objects.equals(oldSchema.primaryKeys(), newSchema.primaryKeys()))) {
+            // Multi-engine access is a very common scenario for external table, and different
+            // engines may have their own specific options, therefore, we allow option changes here.
+            List<SchemaChange> changes = new ArrayList<>();
+            newSchema
+                    .options()
+                    .forEach(
+                            (key, value) -> {
+                                if (!oldSchema.options().containsKey(key)
+                                        || !Objects.equals(oldSchema.options().get(key), value)) {
+                                    changes.add(SchemaChange.setOption(key, value));
+                                }
+                            });
+            if (changes.isEmpty()) {
+                return oldSchema;
+            } else {
+                return commitChanges(changes);
+            }
+        } else {
+            throw new RuntimeException(
+                    "New schema is not compatible with old schema, new schema: "
+                            + newSchema
+                            + ", old schema: "
+                            + oldSchema);
         }
     }
 

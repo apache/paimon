@@ -720,11 +720,7 @@ public class HiveCatalog extends AbstractCatalog {
         try {
             tableSchema = schemaManager(identifier, location).createTable(schema, externalTable);
         } catch (Exception e) {
-            throw new RuntimeException(
-                    "Failed to commit changes of table "
-                            + identifier.getFullName()
-                            + " to underlying files.",
-                    e);
+            throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
         }
 
         try {
@@ -735,7 +731,9 @@ public class HiveCatalog extends AbstractCatalog {
                                             identifier, tableSchema, location, externalTable)));
         } catch (Exception e) {
             try {
-                fileIO.deleteDirectoryQuietly(location);
+                if (!externalTable) {
+                    fileIO.deleteDirectoryQuietly(location);
+                }
             } catch (Exception ee) {
                 LOG.error("Delete directory[{}] fail for table {}", location, identifier, ee);
             }
