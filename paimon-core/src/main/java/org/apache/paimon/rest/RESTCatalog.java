@@ -26,10 +26,10 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.rest.auth.AuthConfig;
 import org.apache.paimon.rest.auth.AuthOptions;
 import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.BearTokenCredentialsProvider;
+import org.apache.paimon.rest.auth.BearTokenFileCredentialsProvider;
 import org.apache.paimon.rest.auth.CredentialsProvider;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
@@ -96,18 +96,17 @@ public class RESTCatalog implements Catalog {
             long tokenExpireInMills = options.get(AuthOptions.TOKEN_EXPIRES_IN).toMillis();
             String tokenFilePath = options.getOptional(AuthOptions.TOKEN_FILE_PATH).orElse(null);
             long tokenExpireAtMills = System.currentTimeMillis() + tokenExpireInMills;
+            credentialsProvider =
+                    new BearTokenFileCredentialsProvider(
+                            tokenFilePath,
+                            keepTokenRefreshed,
+                            tokenExpireAtMills,
+                            tokenExpireInMills);
             this.catalogAuth =
                     AuthSession.fromTokenPath(
-                            tokenFilePath,
                             tokenRefreshExecutor(),
                             this.baseHeader,
-                            // todo: update,fix null value
-                            new AuthConfig(
-                                    token,
-                                    tokenFilePath,
-                                    keepTokenRefreshed,
-                                    tokenExpireAtMills,
-                                    tokenExpireInMills),
+                            credentialsProvider,
                             tokenExpireAtMills);
         }
     }

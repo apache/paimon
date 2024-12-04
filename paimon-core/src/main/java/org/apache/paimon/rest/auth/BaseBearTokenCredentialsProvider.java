@@ -18,28 +18,19 @@
 
 package org.apache.paimon.rest.auth;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
+
 import java.util.Map;
-import java.util.Optional;
 
-/** Credentials provider. */
-public interface CredentialsProvider {
-    Map<String, String> authHeader();
+/** Base bear token credentials provider. */
+public abstract class BaseBearTokenCredentialsProvider implements CredentialsProvider {
+    private static final String AUTHORIZATION_HEADER = "Authorization";
+    private static final String BEARER_PREFIX = "Bearer ";
 
-    boolean refresh();
-
-    default boolean supportRefresh() {
-        return false;
+    @Override
+    public Map<String, String> authHeader() {
+        return ImmutableMap.of(AUTHORIZATION_HEADER, BEARER_PREFIX + token());
     }
 
-    default boolean keepRefreshed() {
-        return false;
-    }
-
-    default Optional<Long> expiresAtMillis() {
-        return Optional.empty();
-    }
-
-    default Optional<Long> expiresInMills() {
-        return Optional.empty();
-    }
+    abstract String token();
 }
