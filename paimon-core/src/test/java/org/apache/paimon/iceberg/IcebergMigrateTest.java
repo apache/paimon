@@ -75,7 +75,7 @@ import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** doc. */
+/** Tests for {@link IcebergMigrator}. */
 public class IcebergMigrateTest {
     @TempDir java.nio.file.Path iceTempDir;
     @TempDir java.nio.file.Path paiTempDir;
