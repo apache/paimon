@@ -18,7 +18,6 @@
 
 package org.apache.paimon.iceberg.manifest;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -111,7 +110,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
     }
 
     public List<IcebergManifestFileMeta> rollingWrite(
-            Iterator<IcebergManifestEntry> entries, long sequenceNumber) throws IOException {
+            Iterator<IcebergManifestEntry> entries, long sequenceNumber) {
         RollingFileWriter<IcebergManifestEntry, IcebergManifestFileMeta> writer =
                 new RollingFileWriter<>(
                         () -> createWriter(sequenceNumber), targetFileSize.getBytes());
@@ -127,10 +126,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
     public SingleFileWriter<IcebergManifestEntry, IcebergManifestFileMeta> createWriter(
             long sequenceNumber) {
         return new IcebergManifestEntryWriter(
-                writerFactory,
-                pathFactory.newPath(),
-                CoreOptions.FILE_COMPRESSION.defaultValue(),
-                sequenceNumber);
+                writerFactory, pathFactory.newPath(), compression, sequenceNumber);
     }
 
     private class IcebergManifestEntryWriter
