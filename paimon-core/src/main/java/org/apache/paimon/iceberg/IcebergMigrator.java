@@ -83,6 +83,7 @@ public class IcebergMigrator implements Migrator {
             Path icebergMetaPath,
             String paimonDatabaseName,
             String paimonTableNameame,
+            boolean ignoreDelete,
             Integer parallelism) {
         this.paimonCatalog = paimonCatalog;
         this.paimonFileIO = paimonCatalog.fileIO();
@@ -94,6 +95,7 @@ public class IcebergMigrator implements Migrator {
         this.icebergMetadata =
                 IcebergMetadata.fromPath(
                         paimonFileIO, icebergPathFactory.toMetadataPath(icebergNewestSnapshotId));
+        this.ignoreDelete = ignoreDelete;
 
         this.executor = createCachedThreadPool(parallelism, "ICEBERG_MIGRATOR");
     }
