@@ -326,13 +326,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 spark.sql(
                   s"CREATE TABLE external_tbl (id INT) USING paimon LOCATION '$expertTbLocation'")
                 checkAnswer(spark.sql("SELECT * FROM external_tbl"), Row(1))
-                assert(
-                  loadTable("paimon_db", "external_tbl")
-                    .location()
-                    .toString
-                    .split(':')
-                    .apply(1)
-                    .equals(expertTbLocation))
+                assert(getActualTableLocation("paimon_db", "external_tbl").equals(expertTbLocation))
 
                 // create managed table
                 spark.sql(s"CREATE TABLE managed_tbl (id INT) USING paimon")
@@ -373,12 +367,8 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 spark.sql("ALTER TABLE external_tbl RENAME TO external_tbl_renamed")
                 checkAnswer(spark.sql("SELECT * FROM external_tbl_renamed"), Row(1))
                 assert(
-                  loadTable("paimon_db", "external_tbl_renamed")
-                    .location()
-                    .toString
-                    .split(':')
-                    .apply(1)
-                    .equals(expertTbLocation))
+                  getActualTableLocation("paimon_db", "external_tbl_renamed").equals(
+                    expertTbLocation))
 
                 // create managed table
                 spark.sql(s"CREATE TABLE managed_tbl (id INT) USING paimon")
@@ -389,12 +379,55 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 spark.sql("ALTER TABLE managed_tbl RENAME TO managed_tbl_renamed")
                 checkAnswer(spark.sql("SELECT * FROM managed_tbl_renamed"), Row(1))
                 assert(
-                  !loadTable("paimon_db", "managed_tbl_renamed")
-                    .location()
-                    .toString
-                    .split(':')
-                    .apply(1)
-                    .equals(managedTbLocation.toString))
+                  !getActualTableLocation("paimon_db", "managed_tbl_renamed").equals(
+                    managedTbLocation.toString))
+              }
+            }
+        }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: create external table without schema") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        spark.sql(s"USE $catalogName")
+        withTempDir {
+          tbLocation =>
+            withDatabase("paimon_db") {
+              spark.sql(s"CREATE DATABASE IF NOT EXISTS paimon_db")
+              spark.sql(s"USE paimon_db")
+              withTable("t1", "t2", "t3", "t4", "t5") {
+                val expertTbLocation = tbLocation.getCanonicalPath
+                spark.sql(s"""
+                             |CREATE TABLE t1 (id INT, pt INT) USING paimon
+                             |PARTITIONED BY (pt)
+                             |TBLPROPERTIES('primary-key' = 'id', 'k1' = 'v1')
+                             |LOCATION '$expertTbLocation'
+                             |""".stripMargin)
+                spark.sql("INSERT INTO t1 VALUES (1, 1)")
+
+                // create table without schema
+                spark.sql(s"CREATE TABLE t2 USING paimon LOCATION '$expertTbLocation'")
+                checkAnswer(spark.sql("SELECT * FROM t2"), Row(1, 1))
+                assert(getActualTableLocation("paimon_db", "t2").equals(expertTbLocation))
+
+                // create table with wrong schema
+                intercept[Exception] {
+                  spark.sql(
+                    s"CREATE TABLE t3 (fake_col INT) USING paimon LOCATION '$expertTbLocation'")
+                }
+
+                // create table with exists props
+                spark.sql(
+                  s"CREATE TABLE t4 USING paimon TBLPROPERTIES ('k1' = 'v1') LOCATION '$expertTbLocation'")
+                checkAnswer(spark.sql("SELECT * FROM t4"), Row(1, 1))
+                assert(getActualTableLocation("paimon_db", "t4").equals(expertTbLocation))
+
+                // create table with new props
+                intercept[Exception] {
+                  spark.sql(
+                    s"CREATE TABLE t5 USING paimon TBLPROPERTIES ('k2' = 'v2') LOCATION '$expertTbLocation'")
+                }
               }
             }
         }
@@ -444,5 +477,9 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
       .map { case Array(key, value) => (key, value) }
       .toMap
     tableProps("path").split(":")(1)
+  }
+
+  def getActualTableLocation(dbName: String, tblName: String): String = {
+    loadTable(dbName, tblName).location().toString.split(':').apply(1)
   }
 }

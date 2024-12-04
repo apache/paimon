@@ -75,7 +75,6 @@ import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 import static org.apache.paimon.spark.util.OptionUtils.copyWithSQLConf;
 import static org.apache.paimon.spark.utils.CatalogUtils.checkNamespace;
 import static org.apache.paimon.spark.utils.CatalogUtils.toIdentifier;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Spark {@link TableCatalog} for paimon. */
 public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, SupportView {
@@ -298,26 +297,8 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
             Map<String, String> properties)
             throws TableAlreadyExistsException, NoSuchNamespaceException {
         try {
-            String provider = properties.get(TableCatalog.PROP_PROVIDER);
-            if ((!usePaimon(provider))
-                    && SparkSource.FORMAT_NAMES().contains(provider.toLowerCase())) {
-                Map<String, String> newProperties = new HashMap<>(properties);
-                newProperties.put(TYPE.key(), FORMAT_TABLE.toString());
-                newProperties.put(FILE_FORMAT.key(), provider.toLowerCase());
-                catalog.createTable(
-                        toIdentifier(ident),
-                        toInitialSchema(schema, partitions, newProperties),
-                        false);
-            } else {
-                checkArgument(
-                        usePaimon(provider),
-                        "SparkCatalog can only create paimon table, but current provider is %s",
-                        provider);
-                catalog.createTable(
-                        toIdentifier(ident),
-                        toInitialSchema(schema, partitions, properties),
-                        false);
-            }
+            catalog.createTable(
+                    toIdentifier(ident), toInitialSchema(schema, partitions, properties), false);
             return loadTable(ident);
         } catch (Catalog.TableAlreadyExistException e) {
             throw new TableAlreadyExistsException(ident);
@@ -406,9 +387,12 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
     private Schema toInitialSchema(
             StructType schema, Transform[] partitions, Map<String, String> properties) {
         Map<String, String> normalizedProperties = new HashMap<>(properties);
-        if (!normalizedProperties.containsKey(TableCatalog.PROP_PROVIDER)) {
-            normalizedProperties.put(TableCatalog.PROP_PROVIDER, SparkSource.NAME());
+        String provider = properties.get(TableCatalog.PROP_PROVIDER);
+        if (!usePaimon(provider) && SparkSource.FORMAT_NAMES().contains(provider.toLowerCase())) {
+            normalizedProperties.put(TYPE.key(), FORMAT_TABLE.toString());
+            normalizedProperties.put(FILE_FORMAT.key(), provider.toLowerCase());
         }
+        normalizedProperties.remove(TableCatalog.PROP_PROVIDER);
         normalizedProperties.remove(PRIMARY_KEY_IDENTIFIER);
         normalizedProperties.remove(TableCatalog.PROP_COMMENT);
         if (normalizedProperties.containsKey(TableCatalog.PROP_LOCATION)) {
