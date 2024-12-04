@@ -33,9 +33,9 @@ import org.apache.paimon.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Converter for array of {@link SimpleColStats}. */
 public class SimpleStatsEvolution {
@@ -53,7 +53,7 @@ public class SimpleStatsEvolution {
         this.fieldNames = rowType.getFieldNames();
         this.indexMapping = indexMapping;
         this.castFieldGetters = castFieldGetters;
-        this.indexMappings = new HashMap<>();
+        this.indexMappings = new ConcurrentHashMap<>();
     }
 
     public Result evolution(
