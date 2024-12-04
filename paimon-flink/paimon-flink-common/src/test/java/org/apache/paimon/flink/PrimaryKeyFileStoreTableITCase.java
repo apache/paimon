@@ -110,7 +110,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                                 try {
                                     Thread.sleep(1000);
                                     if (client.getJobStatus().get().isGloballyTerminalState()) {
-                                        break;
+                                        return;
                                     }
                                 } catch (Exception e) {
                                     client.cancel();
