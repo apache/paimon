@@ -419,7 +419,8 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
         tEnv.executeSql(
                 "CREATE TABLE paimon.`default`.T (\n"
                         + "  k INT,\n"
-                        + "  v MAP<INT, ARRAY<ROW(f1 STRING, f2 INT)>>\n"
+                        + "  v MAP<INT, ARRAY<ROW(f1 STRING, f2 INT)>>,\n"
+                        + "  v2 BIGINT\n"
                         + ") WITH (\n"
                         + "  'metadata.iceberg.storage' = 'hadoop-catalog',\n"
                         + "  'file.format' = '"
@@ -428,8 +429,8 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                         + ")");
         tEnv.executeSql(
                         "INSERT INTO paimon.`default`.T VALUES "
-                                + "(1, MAP[10, ARRAY[ROW('apple', 100), ROW('banana', 101)], 20, ARRAY[ROW('cat', 102), ROW('dog', 103)]]), "
-                                + "(2, MAP[10, ARRAY[ROW('cherry', 200), ROW('pear', 201)], 20, ARRAY[ROW('tiger', 202), ROW('wolf', 203)]])")
+                                + "(1, MAP[10, ARRAY[ROW('apple', 100), ROW('banana', 101)], 20, ARRAY[ROW('cat', 102), ROW('dog', 103)]], 1000), "
+                                + "(2, MAP[10, ARRAY[ROW('cherry', 200), ROW('pear', 201)], 20, ARRAY[ROW('tiger', 202), ROW('wolf', 203)]], 2000)")
                 .await();
 
         tEnv.executeSql(
@@ -441,20 +442,21 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                         + "/iceberg',\n"
                         + "  'cache-enabled' = 'false'\n"
                         + ")");
-        assertThat(collect(tEnv.executeSql("SELECT k, v[10] FROM iceberg.`default`.T")))
+        assertThat(collect(tEnv.executeSql("SELECT k, v[10], v2 FROM iceberg.`default`.T")))
                 .containsExactlyInAnyOrder(
-                        Row.of(1, new Row[] {Row.of("apple", 100), Row.of("banana", 101)}),
-                        Row.of(2, new Row[] {Row.of("cherry", 200), Row.of("pear", 201)}));
+                        Row.of(1, new Row[] {Row.of("apple", 100), Row.of("banana", 101)}, 1000L),
+                        Row.of(2, new Row[] {Row.of("cherry", 200), Row.of("pear", 201)}, 2000L));
 
         tEnv.executeSql(
                         "INSERT INTO paimon.`default`.T VALUES "
-                                + "(3, MAP[10, ARRAY[ROW('mango', 300), ROW('watermelon', 301)], 20, ARRAY[ROW('rabbit', 302), ROW('lion', 303)]])")
+                                + "(3, MAP[10, ARRAY[ROW('mango', 300), ROW('watermelon', 301)], 20, ARRAY[ROW('rabbit', 302), ROW('lion', 303)]], 3000)")
                 .await();
         assertThat(
                         collect(
                                 tEnv.executeSql(
-                                        "SELECT k, v[10][2].f1 FROM iceberg.`default`.T WHERE v[20][1].f2 > 200")))
-                .containsExactlyInAnyOrder(Row.of(2, "pear"), Row.of(3, "watermelon"));
+                                        "SELECT k, v[10][2].f1, v2 FROM iceberg.`default`.T WHERE v[20][1].f2 > 200")))
+                .containsExactlyInAnyOrder(
+                        Row.of(2, "pear", 2000L), Row.of(3, "watermelon", 3000L));
     }
 
     private List<Row> collect(TableResult result) throws Exception {
