@@ -83,7 +83,7 @@ public class QueryFileMonitor extends RichSourceFunction<InternalRow> {
      */
     public void open(Configuration parameters) throws Exception {
         FileMonitorTable monitorTable = new FileMonitorTable((FileStoreTable) table);
-        ReadBuilder readBuilder = monitorTable.newReadBuilder();
+        ReadBuilder readBuilder = monitorTable.newReadBuilder().dropStats();
         this.scan = readBuilder.newStreamScan();
         this.read = readBuilder.newRead();
     }

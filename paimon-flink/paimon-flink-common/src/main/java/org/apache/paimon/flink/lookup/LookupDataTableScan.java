@@ -59,6 +59,7 @@ public class LookupDataTableScan extends DataTableStreamScan {
                 defaultValueAssigner);
         this.startupMode = options.startupMode();
         this.lookupScanMode = lookupScanMode;
+        dropStats();
     }
 
     @Override

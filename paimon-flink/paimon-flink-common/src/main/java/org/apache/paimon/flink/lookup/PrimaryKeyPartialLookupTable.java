@@ -207,6 +207,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
             this.scan =
                     table.newReadBuilder()
+                            .dropStats()
                             .withFilter(filter)
                             .withBucketFilter(
                                     requireCachedBucketIds == null
