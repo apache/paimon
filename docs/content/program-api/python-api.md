@@ -166,6 +166,8 @@ schema = Schema(
 )
 ```
 
+See [Data Types]({{< ref "python-api#data-types" >}}) for all supported `pyarrow-to-paimon` data types mapping. 
+
 Second, if you have some Pandas data, the `pa_schema` can be extracted from `DataFrame`:
 
 ```python
@@ -217,7 +219,15 @@ table = catalog.get_table('database_name.table_name')
 
 ## Batch Read
 
-The reading is divided into Scan Plan and Read Splits stages. A `ReadBuilder` is used to create utils for these stages.
+### Set Read Parallelism
+
+TableRead interface provides parallelly reading for multiple splits. You can set `'max-workers': 'N'` in `catalog_options`
+to set thread numbers for reading splits. `max-workers` is 1 by default, that means TableRead will read splits sequentially
+if you doesn't set `max-workers`.
+
+### Get ReadBuilder and Perform pushdown
+
+A `ReadBuilder` is used to build reading utils and perform filter and projection pushdown.
 
 ```python
 table = catalog.get_table('database_name.table_name')
@@ -241,25 +251,7 @@ predicate_5 = predicate_builder.and_predicates([predicate3, predicate4])
 read_builder = read_builder.with_filter(predicate_5)
 ```
 
-
-| Predicate kind        | Predicate method                              | 
-|:----------------------|:----------------------------------------------|
-| p1 and p2             | PredicateBuilder.and_predicates([p1, p2])     |
-| p1 or p2              | PredicateBuilder.or_predicates([p1, p2])      |
-| f = literal           | PredicateBuilder.equal(f, literal)            |
-| f != literal          | PredicateBuilder.not_equal(f, literal)        |
-| f < literal           | PredicateBuilder.less_than(f, literal)        |
-| f <= literal          | PredicateBuilder.less_or_equal(f, literal)    |
-| f > literal           | PredicateBuilder.greater_than(f, literal)     |
-| f >= literal          | PredicateBuilder.greater_or_equal(f, literal) |
-| f is null             | PredicateBuilder.is_null(f)                   |
-| f is not null         | PredicateBuilder.is_not_null(f)               |
-| f.startswith(literal) | PredicateBuilder.startswith(f, literal)       |
-| f.endswith(literal)   | PredicateBuilder.endswith(f, literal)         |
-| f.contains(literal)   | PredicateBuilder.contains(f, literal)         |
-| f is in [l1, l2]      | PredicateBuilder.is_in(f, [l1, l2])           |
-| f is not in [l1, l2]  | PredicateBuilder.is_not_in(f, [l1, l2])       |
-| lower <= f <= upper   | PredicateBuilder.between(f, lower, upper)     |
+See [Predicate]({{< ref "python-api#predicate" >}}) for all supported filters and building methods.
 
 You can also pushdown projection by `ReadBuilder`:
 
@@ -268,16 +260,20 @@ You can also pushdown projection by `ReadBuilder`:
 read_builder = read_builder.with_projection(['f3', 'f2'])
 ```
 
-Then you can scan plan:
+### Scan Plan
+
+Then you can step into Scan Plan stage to get `splits`:
 
 ```python
 table_scan = read_builder.new_scan()
 splits = table_scan.splits()
 ```
 
+### Read Splits
+
 Finally, you can read data from the `splits` to various data format.
 
-### Apache Arrow
+#### Apache Arrow
 
 This requires `pyarrow` to be installed.
 
@@ -300,7 +296,7 @@ You can also read data into a `pyarrow.RecordBatchReader` and iterate record bat
 
 ```python
 table_read = read_builder.new_read()
-for batch in table_read.to_arrow_batch_reader(splits)
+for batch in table_read.to_arrow_batch_reader(splits):
     print(batch)
 
 # pyarrow.RecordBatch
@@ -311,7 +307,7 @@ for batch in table_read.to_arrow_batch_reader(splits)
 # f1: ["a","b","c"]
 ```
 
-### Pandas
+#### Pandas
 
 This requires `pandas` to be installed.
 
@@ -330,11 +326,11 @@ print(df)
 # ...
 ```
 
-### DuckDB
+#### DuckDB
 
 This requires `duckdb` to be installed.
 
-You can convert the splits into a in-memory DuckDB table and query it:
+You can convert the splits into an in-memory DuckDB table and query it:
 
 ```python
 table_read = read_builder.new_read()
@@ -353,7 +349,7 @@ print(duckdb_con.query("SELECT * FROM duckdb_table WHERE f0 = 1").fetchdf())
 # 0   1  a
 ```
 
-### Ray
+#### Ray
 
 This requires `ray` to be installed.
 
@@ -380,7 +376,7 @@ print(ray_dataset.to_pandas())
 
 ## Batch Write
 
-Paimon table write is Two-Phase Commit, you can write many times, but once committed, no more data can be write.
+Paimon table write is Two-Phase Commit, you can write many times, but once committed, no more data can be written.
 
 {{< hint warning >}}
 Currently, Python SDK doesn't support writing primary key table with `bucket=-1`.
@@ -438,3 +434,25 @@ write_builder.overwrite({'dt': '2024-01-01'})
 | pyarrow.float64()                        | DOUBLE   |
 | pyarrow.string()                         | STRING   |
 | pyarrow.boolean()                        | BOOLEAN  |
+
+## Predicate
+
+| Predicate kind        | Predicate method                              | 
+|:----------------------|:----------------------------------------------|
+| p1 and p2             | PredicateBuilder.and_predicates([p1, p2])     |
+| p1 or p2              | PredicateBuilder.or_predicates([p1, p2])      |
+| f = literal           | PredicateBuilder.equal(f, literal)            |
+| f != literal          | PredicateBuilder.not_equal(f, literal)        |
+| f < literal           | PredicateBuilder.less_than(f, literal)        |
+| f <= literal          | PredicateBuilder.less_or_equal(f, literal)    |
+| f > literal           | PredicateBuilder.greater_than(f, literal)     |
+| f >= literal          | PredicateBuilder.greater_or_equal(f, literal) |
+| f is null             | PredicateBuilder.is_null(f)                   |
+| f is not null         | PredicateBuilder.is_not_null(f)               |
+| f.startswith(literal) | PredicateBuilder.startswith(f, literal)       |
+| f.endswith(literal)   | PredicateBuilder.endswith(f, literal)         |
+| f.contains(literal)   | PredicateBuilder.contains(f, literal)         |
+| f is in [l1, l2]      | PredicateBuilder.is_in(f, [l1, l2])           |
+| f is not in [l1, l2]  | PredicateBuilder.is_not_in(f, [l1, l2])       |
+| lower <= f <= upper   | PredicateBuilder.between(f, lower, upper)     |
+
