@@ -111,7 +111,6 @@ public class IcebergMigrator implements Migrator {
         try {
             FileStoreTable paimonTable = (FileStoreTable) paimonCatalog.getTable(paimonIdentifier);
 
-            // TODO: IcebergManifestFile.create() is suitable here?
             IcebergManifestFile manifestFile =
                     IcebergManifestFile.create(paimonTable, icebergPathFactory);
             IcebergManifestList manifestList =
@@ -186,6 +185,7 @@ public class IcebergMigrator implements Migrator {
             }
             try (BatchTableCommit commit = paimonTable.newBatchWriteBuilder().newCommit()) {
                 commit.commit(new ArrayList<>(commitMessages));
+                LOG.info("paimon commit success! Iceberg data files has been migrated to paimon.");
             }
         } catch (Exception e) {
             paimonCatalog.dropTable(paimonIdentifier, true);
