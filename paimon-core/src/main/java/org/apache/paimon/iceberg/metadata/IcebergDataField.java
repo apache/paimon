@@ -206,51 +206,61 @@ public class IcebergDataField {
                 !simpleType.contains("(")
                         ? simpleType
                         : simpleType.substring(0, simpleType.indexOf("("));
+        String delimiter = "(";
+        if (type.contains("[")) {
+            delimiter = "[";
+        }
+        String typePrefix =
+                !type.contains(delimiter) ? type : type.substring(0, type.indexOf(delimiter));
         switch (typePrefix) {
             case "boolean":
-                return new BooleanType(required);
+                return new BooleanType(!required);
             case "int":
-                return new IntType(required);
+                return new IntType(!required);
             case "long":
-                return new BigIntType(required);
+                return new BigIntType(!required);
             case "float":
-                return new FloatType(required);
+                return new FloatType(!required);
             case "double":
-                return new DoubleType(required);
+                return new DoubleType(!required);
             case "date":
-                return new DateType(required);
+                return new DateType(!required);
             case "string":
-                return new VarCharType(required, VarCharType.MAX_LENGTH);
+                return new VarCharType(!required, VarCharType.MAX_LENGTH);
             case "binary":
-                return new VarBinaryType(required, VarBinaryType.MAX_LENGTH);
+                return new VarBinaryType(!required, VarBinaryType.MAX_LENGTH);
             case "fixed":
                 int fixedLength =
                         Integer.parseInt(
                                 simpleType.substring(
                                         simpleType.indexOf("(") + 1, simpleType.indexOf(")")));
                 return new BinaryType(required, fixedLength);
+                        Integer.parseInt(type.substring(type.indexOf("[") + 1, type.indexOf("]")));
+                return new BinaryType(!required, fixedLength);
             case "uuid":
                 // https://iceberg.apache.org/spec/?h=vector#primitive-types
                 // uuid should use 16-byte fixed
-                return new BinaryType(required, 16);
+                return new BinaryType(!required, 16);
             case "decimal":
                 int precision =
                         Integer.parseInt(
                                 simpleType.substring(
                                         simpleType.indexOf("(") + 1, simpleType.indexOf(",")));
                 int scale =
+                        Integer.parseInt(type.substring(type.indexOf(",") + 2, type.indexOf(")")));
+                return new DecimalType(!required, precision, scale);
                         Integer.parseInt(
                                 simpleType.substring(
                                         simpleType.indexOf(",") + 1, simpleType.indexOf(")")));
                 return new DecimalType(required, precision, scale);
             case "timestamp":
-                return new TimestampType(required, 6);
+                return new TimestampType(!required, 6);
             case "timestamptz":
-                return new LocalZonedTimestampType(required, 6);
-            case "timestamp_ns":
-                return new TimestampType(required, 9);
-            case "timestamptz_ns":
-                return new LocalZonedTimestampType(required, 9);
+                return new LocalZonedTimestampType(!required, 6);
+            case "timestamp_ns": // iceberg v3 format
+                return new TimestampType(!required, 9);
+            case "timestamptz_ns": // iceberg v3 format
+                return new LocalZonedTimestampType(!required, 9);
             default:
                 throw new UnsupportedOperationException("Unsupported data type: " + type);
         }
