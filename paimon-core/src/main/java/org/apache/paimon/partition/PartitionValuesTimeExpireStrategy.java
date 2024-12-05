@@ -81,21 +81,32 @@ public class PartitionValuesTimeExpireStrategy extends PartitionExpireStrategy {
                 LocalDateTime partTime = timeExtractor.extract(partitionKeys, Arrays.asList(array));
                 return expireDateTime.isAfter(partTime);
             } catch (DateTimeParseException e) {
-                String partitionInfo =
-                        IntStream.range(0, partitionKeys.size())
-                                .mapToObj(i -> partitionKeys.get(i) + ":" + array[i])
-                                .collect(Collectors.joining(","));
                 LOG.warn(
                         "Can't extract datetime from partition {}. If you want to configure partition expiration, please:\n"
                                 + "  1. Check the expiration configuration.\n"
                                 + "  2. Manually delete the partition using the drop-partition command if the partition"
                                 + " value is non-date formatted.\n"
                                 + "  3. Use '{}' expiration strategy by set '{}', which supports non-date formatted partition.",
-                        partitionInfo,
+                        formatPartitionInfo(array),
+                        CoreOptions.PartitionExpireStrategy.UPDATE_TIME,
+                        CoreOptions.PARTITION_EXPIRATION_STRATEGY.key());
+                return false;
+            } catch (NullPointerException e) {
+                // there might exist NULL partition value
+                LOG.warn(
+                        "This partition {} cannot be expired because it contains null value. "
+                                + "You can try to drop it manually or use '{}' expiration strategy by set '{}'.",
+                        formatPartitionInfo(array),
                         CoreOptions.PartitionExpireStrategy.UPDATE_TIME,
                         CoreOptions.PARTITION_EXPIRATION_STRATEGY.key());
                 return false;
             }
+        }
+
+        private String formatPartitionInfo(Object[] array) {
+            return IntStream.range(0, partitionKeys.size())
+                    .mapToObj(i -> partitionKeys.get(i) + ":" + array[i])
+                    .collect(Collectors.joining(","));
         }
 
         @Override

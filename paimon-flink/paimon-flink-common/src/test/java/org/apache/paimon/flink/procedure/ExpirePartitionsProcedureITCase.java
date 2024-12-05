@@ -402,6 +402,19 @@ public class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder("4:2024-06-03:01:00", "Never-expire:9999-09-09:99:99");
     }
 
+    @Test
+    public void testNullPartitionExpire() {
+        sql("CREATE TABLE T (k INT, ds STRING) PARTITIONED BY (ds);");
+        sql("INSERT INTO T VALUES (1, CAST (NULL AS STRING))");
+        assertThat(
+                        callExpirePartitions(
+                                "CALL sys.expire_partitions("
+                                        + "`table` => 'default.T'"
+                                        + ", expiration_time => '1 d'"
+                                        + ", timestamp_formatter => 'yyyyMMdd')"))
+                .containsExactly("No expired partitions.");
+    }
+
     /** Return a list of expired partitions. */
     public List<String> callExpirePartitions(String callSql) {
         return sql(callSql).stream()
