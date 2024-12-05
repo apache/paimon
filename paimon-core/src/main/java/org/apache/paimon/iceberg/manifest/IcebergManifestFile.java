@@ -19,7 +19,6 @@
 package org.apache.paimon.iceberg.manifest;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
