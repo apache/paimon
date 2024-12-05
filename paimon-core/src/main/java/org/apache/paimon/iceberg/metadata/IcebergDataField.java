@@ -199,19 +199,16 @@ public class IcebergDataField {
         }
     }
 
-    // TODO: two datatype("uuid", "unknown") has not been processed
     public DataType getDataType() {
         String simpleType = type.toString();
-        String typePrefix =
-                !simpleType.contains("(")
-                        ? simpleType
-                        : simpleType.substring(0, simpleType.indexOf("("));
         String delimiter = "(";
-        if (type.contains("[")) {
+        if (simpleType.contains("[")) {
             delimiter = "[";
         }
         String typePrefix =
-                !type.contains(delimiter) ? type : type.substring(0, type.indexOf(delimiter));
+                !simpleType.contains(delimiter)
+                        ? simpleType
+                        : simpleType.substring(0, simpleType.indexOf(delimiter));
         switch (typePrefix) {
             case "boolean":
                 return new BooleanType(!required);
@@ -233,9 +230,7 @@ public class IcebergDataField {
                 int fixedLength =
                         Integer.parseInt(
                                 simpleType.substring(
-                                        simpleType.indexOf("(") + 1, simpleType.indexOf(")")));
-                return new BinaryType(required, fixedLength);
-                        Integer.parseInt(type.substring(type.indexOf("[") + 1, type.indexOf("]")));
+                                        simpleType.indexOf("[") + 1, simpleType.indexOf("]")));
                 return new BinaryType(!required, fixedLength);
             case "uuid":
                 // https://iceberg.apache.org/spec/?h=vector#primitive-types
@@ -247,12 +242,10 @@ public class IcebergDataField {
                                 simpleType.substring(
                                         simpleType.indexOf("(") + 1, simpleType.indexOf(",")));
                 int scale =
-                        Integer.parseInt(type.substring(type.indexOf(",") + 2, type.indexOf(")")));
-                return new DecimalType(!required, precision, scale);
                         Integer.parseInt(
                                 simpleType.substring(
-                                        simpleType.indexOf(",") + 1, simpleType.indexOf(")")));
-                return new DecimalType(required, precision, scale);
+                                        simpleType.indexOf(",") + 2, simpleType.indexOf(")")));
+                return new DecimalType(!required, precision, scale);
             case "timestamp":
                 return new TimestampType(!required, 6);
             case "timestamptz":
