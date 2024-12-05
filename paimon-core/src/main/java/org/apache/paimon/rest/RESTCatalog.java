@@ -37,7 +37,6 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 
 import org.apache.paimon.shade.guava30.com.google.common.annotations.VisibleForTesting;
-import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.Duration;
@@ -45,7 +44,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
+
+import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
 /** A catalog implementation for REST. */
 public class RESTCatalog implements Catalog {
@@ -80,9 +80,9 @@ public class RESTCatalog implements Catalog {
         this.client = new HttpClient(httpClientOptions);
         this.baseHeader = configHeaders(options.toMap());
         // todo: support create CredentialsProvider by conf
-        if (options.getOptional(RESTCatalogOptions.TOKEN).isPresent()) {
+        if (options.getOptional(AuthOptions.TOKEN).isPresent()) {
             CredentialsProvider credentialsProvider =
-                    new BearTokenCredentialsProvider(options.get(RESTCatalogOptions.TOKEN));
+                    new BearTokenCredentialsProvider(options.get(AuthOptions.TOKEN));
             this.catalogAuth = new AuthSession(this.baseHeader, credentialsProvider);
         } else if (options.getOptional(AuthOptions.TOKEN_FILE_PATH).isPresent()) {
             this.keepTokenRefreshed = options.get(AuthOptions.TOKEN_REFRESH_ENABLED);
@@ -102,16 +102,16 @@ public class RESTCatalog implements Catalog {
                             credentialsProvider,
                             tokenExpireAtMills);
         }
+        Map<String, String> configHeaders = configHeaders(options.toMap());
+        Map<String, String> initHeaders = configHeaders;
         if (this.catalogAuth != null) {
-            Map<String, String> initHeaders =
+            initHeaders =
                     RESTUtil.merge(configHeaders(options.toMap()), this.catalogAuth.getHeaders());
-            this.options = fetchOptionsFromServer(initHeaders, options.toMap());
-            this.resourcePaths =
-                    ResourcePaths.forCatalogProperties(
-                            this.options.get(RESTCatalogInternalOptions.PREFIX));
-        } else {
-            throw new IllegalArgumentException("No auth provider provided.");
         }
+        this.options = fetchOptionsFromServer(initHeaders, options.toMap());
+        this.resourcePaths =
+                ResourcePaths.forCatalogProperties(
+                        this.options.get(RESTCatalogInternalOptions.PREFIX));
     }
 
     @Override
@@ -228,7 +228,6 @@ public class RESTCatalog implements Catalog {
     }
 
     private Map<String, String> headers() {
-        catalogAuth.refresh();
         return catalogAuth.getHeaders();
     }
 
@@ -240,14 +239,7 @@ public class RESTCatalog implements Catalog {
         if (refreshExecutor == null) {
             synchronized (this) {
                 if (refreshExecutor == null) {
-                    this.refreshExecutor =
-                            // todo: move to ThreadPoolUtil
-                            new ScheduledThreadPoolExecutor(
-                                    1,
-                                    new ThreadFactoryBuilder()
-                                            .setDaemon(true)
-                                            .setNameFormat("token-refresh-thread")
-                                            .build());
+                    this.refreshExecutor = createScheduledThreadPool(1, "token-refresh-thread");
                 }
             }
         }

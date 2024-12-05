@@ -30,11 +30,6 @@ public class RESTCatalogOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog server's uri.");
-    public static final ConfigOption<String> TOKEN =
-            ConfigOptions.key("token")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("REST Catalog server's auth token.");
     public static final ConfigOption<Duration> CONNECTION_TIMEOUT =
             ConfigOptions.key("rest.client.connection-timeout")
                     .durationType()
