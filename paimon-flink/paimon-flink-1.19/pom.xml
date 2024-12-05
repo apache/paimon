@@ -120,6 +120,12 @@ under the License.
             <artifactId>iceberg-flink-${iceberg.flink.version}</artifactId>
             <version>${iceberg.version}</version>
             <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <artifactId>parquet-hadoop</artifactId>
+                    <groupId>org.apache.parquet</groupId>
+                </exclusion>
+            </exclusions>
         </dependency>
     </dependencies>
 
