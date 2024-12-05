@@ -54,9 +54,11 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
     private transient IOManager ioManager;
 
     private transient FileStoreSourceReaderMetrics sourceReaderMetrics;
-    // we create our own gauge for currentEmitEventTimeLag, because this operator is not a FLIP-27
+    // we create our own gauge for currentEmitEventTimeLag and sourceIdleTime, because this operator
+    // is not a FLIP-27
     // source and Flink can't automatically calculate this metric
     private transient long emitEventTimeLag = FileStoreSourceReaderMetrics.UNDEFINED;
+    private transient long idleStartTime = FileStoreSourceReaderMetrics.UNDEFINED;
     private transient Counter numRecordsIn;
 
     public ReadOperator(ReadBuilder readBuilder) {
@@ -69,6 +71,7 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
 
         this.sourceReaderMetrics = new FileStoreSourceReaderMetrics(getMetricGroup());
         getMetricGroup().gauge(MetricNames.CURRENT_EMIT_EVENT_TIME_LAG, () -> emitEventTimeLag);
+        getMetricGroup().gauge(MetricNames.SOURCE_IDLE_TIME, this::getIdleTime);
         this.numRecordsIn =
                 InternalSourceReaderMetricGroup.wrap(getMetricGroup())
                         .getIOMetricGroup()
@@ -83,7 +86,7 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
         this.read = readBuilder.newRead().withIOManager(ioManager);
         this.reuseRow = new FlinkRowData(null);
         this.reuseRecord = new StreamRecord<>(reuseRow);
-        this.sourceReaderMetrics.idlingStarted();
+        this.idlingStarted();
     }
 
     @Override
@@ -95,6 +98,8 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
                         .earliestFileCreationEpochMillis()
                         .orElse(FileStoreSourceReaderMetrics.UNDEFINED);
         sourceReaderMetrics.recordSnapshotUpdate(eventTime);
+        // update idleStartTime when reading a new split
+        idleStartTime = FileStoreSourceReaderMetrics.UNDEFINED;
 
         boolean firstRecord = true;
         try (CloseableIterator<InternalRow> iterator =
@@ -114,7 +119,8 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
                 output.collect(reuseRecord);
             }
         }
-        sourceReaderMetrics.idlingStarted();
+        // start idle when data sending is completed
+        this.idlingStarted();
     }
 
     @Override
@@ -123,5 +129,19 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
         if (ioManager != null) {
             ioManager.close();
         }
+    }
+
+    private void idlingStarted() {
+        if (!isIdling()) {
+            idleStartTime = System.currentTimeMillis();
+        }
+    }
+
+    private boolean isIdling() {
+        return idleStartTime != FileStoreSourceReaderMetrics.UNDEFINED;
+    }
+
+    private long getIdleTime() {
+        return isIdling() ? System.currentTimeMillis() - idleStartTime : 0;
     }
 }

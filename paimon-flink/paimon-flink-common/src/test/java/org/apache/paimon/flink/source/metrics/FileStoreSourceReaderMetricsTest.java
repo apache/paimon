@@ -52,28 +52,4 @@ class FileStoreSourceReaderMetricsTest {
         assertThat(sourceReaderMetrics.getFetchTimeLag())
                 .isNotEqualTo(FileStoreSourceReaderMetrics.UNDEFINED);
     }
-
-    @Test
-    public void testSourceIdleTimeUpdated() throws InterruptedException {
-        MetricListener metricListener = new MetricListener();
-        final FileStoreSourceReaderMetrics sourceReaderMetrics =
-                new FileStoreSourceReaderMetrics(metricListener.getMetricGroup());
-
-        assertThat(sourceReaderMetrics.getIdleTime()).isEqualTo(0L);
-
-        // idle start
-        sourceReaderMetrics.idlingStarted();
-        Thread.sleep(10L);
-        assertThat(sourceReaderMetrics.getIdleTime()).isGreaterThan(9L);
-
-        // non-idle
-        sourceReaderMetrics.recordSnapshotUpdate(123);
-        Thread.sleep(10L);
-        assertThat(sourceReaderMetrics.getIdleTime()).isEqualTo(0L);
-
-        // idle start
-        sourceReaderMetrics.idlingStarted();
-        Thread.sleep(10L);
-        assertThat(sourceReaderMetrics.getIdleTime()).isGreaterThan(9L);
-    }
 }
