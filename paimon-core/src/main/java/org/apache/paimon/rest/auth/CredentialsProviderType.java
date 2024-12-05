@@ -17,6 +17,7 @@
  */
 
 package org.apache.paimon.rest.auth;
+
 /** Credentials provider type. */
 public enum CredentialsProviderType {
     BEAR_TOKEN,
