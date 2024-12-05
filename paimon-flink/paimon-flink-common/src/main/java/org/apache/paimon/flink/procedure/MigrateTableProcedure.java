@@ -20,19 +20,16 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.TableMigrationUtils;
+import org.apache.paimon.migrate.Migrator;
 import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /** Migrate procedure to migrate hive table to paimon table. */
 public class MigrateTableProcedure extends ProcedureBase {
-
-    private static final Logger LOG = LoggerFactory.getLogger(MigrateTableProcedure.class);
 
     private static final String PAIMON_SUFFIX = "_paimon_";
 
@@ -49,37 +46,42 @@ public class MigrateTableProcedure extends ProcedureBase {
                 @ArgumentHint(
                         name = "parallelism",
                         type = @DataTypeHint("Integer"),
-                        isOptional = true)
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "iceberg_options",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
             })
     public String[] call(
             ProcedureContext procedureContext,
             String connector,
             String sourceTablePath,
             String properties,
-            Integer parallelism)
+            Integer parallelism,
+            String icebergOptions)
             throws Exception {
         properties = notnull(properties);
+        icebergOptions = notnull(icebergOptions);
 
         String targetPaimonTablePath = sourceTablePath + PAIMON_SUFFIX;
 
-        Identifier sourceTableId = Identifier.fromString(sourceTablePath);
         Identifier targetTableId = Identifier.fromString(targetPaimonTablePath);
 
         Integer p = parallelism == null ? Runtime.getRuntime().availableProcessors() : parallelism;
 
-        TableMigrationUtils.getImporter(
+        Migrator migrator =
+                TableMigrationUtils.getImporter(
                         connector,
                         catalog,
-                        sourceTableId.getDatabaseName(),
-                        sourceTableId.getObjectName(),
+                        sourceTablePath,
                         targetTableId.getDatabaseName(),
                         targetTableId.getObjectName(),
                         p,
-                        ParameterUtils.parseCommaSeparatedKeyValues(properties))
-                .executeMigrate();
+                        ParameterUtils.parseCommaSeparatedKeyValues(properties),
+                        ParameterUtils.parseCommaSeparatedKeyValues(icebergOptions));
+        migrator.executeMigrate();
 
-        LOG.info("Last step: rename " + targetTableId + " to " + sourceTableId);
-        catalog.renameTable(targetTableId, sourceTableId, false);
+        migrator.renameTable(false);
         return new String[] {"Success"};
     }
 }

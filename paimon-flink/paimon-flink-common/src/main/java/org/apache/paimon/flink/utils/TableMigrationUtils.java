@@ -20,9 +20,13 @@ package org.apache.paimon.flink.utils;
 
 import org.apache.paimon.catalog.CachingCatalog;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.hive.migrate.HiveMigrator;
+import org.apache.paimon.iceberg.IcebergMigrator;
 import org.apache.paimon.migrate.Migrator;
+import org.apache.paimon.options.Options;
 
 import java.util.List;
 import java.util.Map;
@@ -33,14 +37,15 @@ public class TableMigrationUtils {
     public static Migrator getImporter(
             String connector,
             Catalog catalog,
-            String sourceDatabase,
-            String sourceTableName,
+            String sourceIdentifier,
             String targetDatabase,
             String targetTableName,
             Integer parallelism,
-            Map<String, String> options) {
+            Map<String, String> options,
+            Map<String, String> icebergOptions) {
         switch (connector) {
             case "hive":
+                Identifier identifier = Identifier.fromString(sourceIdentifier);
                 if (catalog instanceof CachingCatalog) {
                     catalog = ((CachingCatalog) catalog).wrapped();
                 }
@@ -49,12 +54,20 @@ public class TableMigrationUtils {
                 }
                 return new HiveMigrator(
                         (HiveCatalog) catalog,
-                        sourceDatabase,
-                        sourceTableName,
+                        identifier.getDatabaseName(),
+                        identifier.getTableName(),
                         targetDatabase,
                         targetTableName,
                         parallelism,
                         options);
+            case "iceberg":
+                return new IcebergMigrator(
+                        catalog,
+                        new Path(sourceIdentifier),
+                        targetDatabase,
+                        targetTableName,
+                        new Options(icebergOptions).getBoolean("ignore-delete-file", false),
+                        parallelism);
             default:
                 throw new UnsupportedOperationException("Don't support connector " + connector);
         }
