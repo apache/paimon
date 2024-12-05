@@ -20,10 +20,12 @@ package org.apache.paimon.spark.execution
 
 import org.apache.paimon.spark.catalog.SupportView
 import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
+import org.apache.paimon.view.View
 
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.catalog.CatalogTable
 import org.apache.spark.sql.catalyst.expressions.{Attribute, GenericInternalRow}
-import org.apache.spark.sql.catalyst.util.StringUtils
+import org.apache.spark.sql.catalyst.util.{escapeSingleQuotedString, quoteIfNeeded, StringUtils}
 import org.apache.spark.sql.connector.catalog.Identifier
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.unsafe.types.UTF8String
@@ -113,5 +115,118 @@ case class ShowPaimonViewsExec(
 
   override def simpleString(maxFields: Int): String = {
     s"ShowPaimonViewsExec: $namespace"
+  }
+}
+
+case class ShowCreatePaimonViewExec(output: Seq[Attribute], catalog: SupportView, ident: Identifier)
+  extends PaimonLeafV2CommandExec {
+
+  override protected def run(): Seq[InternalRow] = {
+    val view = catalog.loadView(ident)
+
+    val builder = new StringBuilder
+    builder ++= s"CREATE VIEW ${view.fullName()} "
+    showDataColumns(view, builder)
+    showComment(view, builder)
+    showProperties(view, builder)
+    builder ++= s"AS\n${view.query}\n"
+
+    Seq(new GenericInternalRow(values = Array(UTF8String.fromString(builder.toString))))
+  }
+
+  private def showDataColumns(view: View, builder: StringBuilder): Unit = {
+    if (view.rowType().getFields.size() > 0) {
+      val viewColumns = view.rowType().getFields.asScala.map {
+        f =>
+          val comment = if (f.description() != null) s" COMMENT '${f.description()}'" else ""
+          // view columns shouldn't have data type info
+          s"${quoteIfNeeded(f.name)}$comment"
+      }
+      builder ++= concatByMultiLines(viewColumns)
+    }
+  }
+
+  private def showComment(view: View, builder: StringBuilder): Unit = {
+    if (view.comment().isPresent) {
+      builder ++= s"COMMENT '${view.comment().get()}'\n"
+    }
+  }
+
+  private def showProperties(view: View, builder: StringBuilder): Unit = {
+    if (!view.options().isEmpty) {
+      val props = view.options().asScala.toSeq.sortBy(_._1).map {
+        case (key, value) =>
+          s"'${escapeSingleQuotedString(key)}' = '${escapeSingleQuotedString(value)}'"
+      }
+      builder ++= s"TBLPROPERTIES ${concatByMultiLines(props)}"
+    }
+  }
+
+  private def concatByMultiLines(iter: Iterable[String]): String = {
+    iter.mkString("(\n  ", ",\n  ", ")\n")
+  }
+
+  override def simpleString(maxFields: Int): String = {
+    s"ShowCreatePaimonViewExec: $ident"
+  }
+}
+
+case class DescribePaimonViewExec(
+    output: Seq[Attribute],
+    catalog: SupportView,
+    ident: Identifier,
+    isExtended: Boolean)
+  extends PaimonLeafV2CommandExec {
+
+  override protected def run(): Seq[InternalRow] = {
+    val rows = new ArrayBuffer[InternalRow]()
+    val view = catalog.loadView(ident)
+
+    describeColumns(view, rows)
+    if (isExtended) {
+      describeExtended(view, rows)
+    }
+
+    rows.toSeq
+  }
+
+  private def describeColumns(view: View, rows: ArrayBuffer[InternalRow]) = {
+    view
+      .rowType()
+      .getFields
+      .asScala
+      .map(f => rows += row(f.name(), f.`type`().toString, f.description()))
+  }
+
+  private def describeExtended(view: View, rows: ArrayBuffer[InternalRow]) = {
+    rows += row("", "", "")
+    rows += row("# Detailed View Information", "", "")
+    rows += row("Name", view.fullName(), "")
+    rows += row("Comment", view.comment().orElse(""), "")
+    rows += row("View Text", view.query, "")
+    rows += row(
+      "View Query Output Columns",
+      view.rowType().getFieldNames.asScala.mkString("[", ", ", "]"),
+      "")
+    rows += row(
+      "View Properties",
+      view
+        .options()
+        .asScala
+        .toSeq
+        .sortBy(_._1)
+        .map { case (k, v) => s"$k=$v" }
+        .mkString("[", ", ", "]"),
+      "")
+  }
+
+  private def row(s1: String, s2: String, s3: String): InternalRow = {
+    new GenericInternalRow(
+      values =
+        Array(UTF8String.fromString(s1), UTF8String.fromString(s2), UTF8String.fromString(s3)))
+  }
+
+  override def simpleString(maxFields: Int): String = {
+    s"DescribePaimonViewExec: $ident"
   }
 }
