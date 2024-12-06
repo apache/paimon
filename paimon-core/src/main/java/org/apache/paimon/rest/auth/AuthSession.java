@@ -35,8 +35,8 @@ public class AuthSession {
     private static final int TOKEN_REFRESH_NUM_RETRIES = 5;
     private static final long MAX_REFRESH_WINDOW_MILLIS = 300_000; // 5 minutes
     private static final long MIN_REFRESH_WAIT_MILLIS = 10;
-    private volatile Map<String, String> headers;
     private final CredentialsProvider credentialsProvider;
+    private volatile Map<String, String> headers;
 
     public AuthSession(Map<String, String> headers, CredentialsProvider credentialsProvider) {
         this.headers = headers;

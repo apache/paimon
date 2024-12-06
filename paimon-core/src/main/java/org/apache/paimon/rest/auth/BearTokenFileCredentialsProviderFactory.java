@@ -33,8 +33,7 @@ public class BearTokenFileCredentialsProviderFactory implements CredentialsProvi
         boolean keepTokenRefreshed = options.get(AuthOptions.TOKEN_REFRESH_ENABLED);
         long tokenExpireInMills = options.get(AuthOptions.TOKEN_EXPIRES_IN).toMillis();
         String tokenFilePath = options.getOptional(AuthOptions.TOKEN_FILE_PATH).orElse(null);
-        long tokenExpireAtMills = System.currentTimeMillis() + tokenExpireInMills;
         return new BearTokenFileCredentialsProvider(
-                tokenFilePath, keepTokenRefreshed, tokenExpireAtMills, tokenExpireInMills);
+                tokenFilePath, keepTokenRefreshed, -1L, tokenExpireInMills);
     }
 }
