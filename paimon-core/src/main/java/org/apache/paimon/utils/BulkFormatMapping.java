@@ -179,7 +179,7 @@ public class BulkFormatMapping {
                     readFilters);
         }
 
-        private Pair<int[], RowType> trimKeyFields(
+        static Pair<int[], RowType> trimKeyFields(
                 List<DataField> fieldsWithoutPartition, List<DataField> fields) {
             int[] map = new int[fieldsWithoutPartition.size()];
             List<DataField> trimmedFields = new ArrayList<>();
