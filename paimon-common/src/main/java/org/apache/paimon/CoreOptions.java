@@ -809,6 +809,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(Duration.ofHours(1))
                     .withDescription("The check interval of partition expiration.");
 
+    public static final ConfigOption<Integer> PARTITION_EXPIRATION_MAX_NUM =
+            key("partition.expiration-max-num")
+                    .intType()
+                    .defaultValue(100)
+                    .withDescription("The default deleted num of partition expiration.");
+
     public static final ConfigOption<String> PARTITION_TIMESTAMP_FORMATTER =
             key("partition.timestamp-formatter")
                     .stringType()
@@ -2124,6 +2130,10 @@ public class CoreOptions implements Serializable {
 
     public Duration partitionExpireCheckInterval() {
         return options.get(PARTITION_EXPIRATION_CHECK_INTERVAL);
+    }
+
+    public int partitionExpireMaxNum() {
+        return options.get(PARTITION_EXPIRATION_MAX_NUM);
     }
 
     public PartitionExpireStrategy partitionExpireStrategy() {
