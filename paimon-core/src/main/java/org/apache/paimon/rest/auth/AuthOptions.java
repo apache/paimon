@@ -46,7 +46,7 @@ public class AuthOptions {
                     .noDefaultValue()
                     .withDescription("REST Catalog auth token file path.");
     public static final ConfigOption<String> CREDENTIALS_PROVIDER =
-            ConfigOptions.key("credentials_provider")
+            ConfigOptions.key("credentials-provider")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog auth credentials provider.");
