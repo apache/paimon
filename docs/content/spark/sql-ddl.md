@@ -26,7 +26,7 @@ under the License.
 
 # SQL DDL
 
-## Catalog DDL
+## Catalog
 
 ### Create Catalog
 
@@ -120,7 +120,7 @@ spark-sql ... \
 USE paimon.default;
 ```
 
-## Table DDL
+## Table
 
 ### Create Table
 
@@ -214,12 +214,12 @@ CREATE TABLE my_table_all (
 CREATE TABLE my_table_all_as PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 'dt,hh') AS SELECT * FROM my_table_all;
 ```
 
-## View DDL
+## View
 
 Views are based on the result-set of an SQL query, when using `org.apache.paimon.spark.SparkCatalog`, views are managed by paimon itself. 
 And in this case, views are supported when the `metastore` type is `hive`, and temporary views are not supported yet.
 
-### Create or replace View
+### Create Or Replace View
 
 CREATE VIEW constructs a virtual table that has no physical data.
 
@@ -240,8 +240,8 @@ DROP VIEW removes the metadata associated with a specified view from the catalog
 DROP VIEW v1;
 ```
 
-## Tag DDL
-### Create or replace Tag
+## Tag
+### Create or Replace Tag
 Create or replace a tag syntax with the following options.
 - Create a tag with or without the snapshot id and time retention.
 - Create an existed tag is not failed if using `IF NOT EXISTS` syntax.
