@@ -508,4 +508,36 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
         ) :: Nil
     )
   }
+
+  test("Paimon Insert: insert with column list") {
+    sql("CREATE TABLE T (name String, student_id INT) PARTITIONED BY (address STRING)")
+
+    // insert with a column list
+    sql("INSERT INTO T (name, student_id, address) VALUES ('a', '1', 'Hangzhou')")
+    sql("INSERT INTO T (name) VALUES ('b')")
+    sql("INSERT INTO T (address, name) VALUES ('Hangzhou', 'c')")
+
+    // insert with both a partition spec and a column list
+    sql("INSERT INTO T PARTITION (address='Beijing') (name) VALUES ('d')")
+    sql("INSERT INTO T PARTITION (address='Hangzhou') (student_id, name) VALUES (5, 'e')")
+
+    checkAnswer(
+      sql("SELECT * FROM T ORDER BY name"),
+      Seq(
+        Row("a", 1, "Hangzhou"),
+        Row("b", null, null),
+        Row("c", null, "Hangzhou"),
+        Row("d", null, "Beijing"),
+        Row("e", 5, "Hangzhou"))
+    )
+
+    // insert overwrite with a column list
+    sql("INSERT OVERWRITE T (name, address) VALUES ('f', 'Shanghai')")
+    checkAnswer(sql("SELECT * FROM T ORDER BY name"), Row("f", null, "Shanghai"))
+
+    // insert overwrite with both a partition spec and a column list
+    sql(
+      "INSERT OVERWRITE T PARTITION (address='Shanghai') (name, student_id) VALUES ('g', 7)")
+    checkAnswer(sql("SELECT * FROM T ORDER BY name"), Row("g", 7, "Shanghai"))
+  }
 }
