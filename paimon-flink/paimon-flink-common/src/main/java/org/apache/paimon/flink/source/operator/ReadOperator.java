@@ -58,7 +58,7 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
     // is not a FLIP-27
     // source and Flink can't automatically calculate this metric
     private transient long emitEventTimeLag = FileStoreSourceReaderMetrics.UNDEFINED;
-    private transient long idleStartTime = FileStoreSourceReaderMetrics.UNDEFINED;
+    private transient long idleStartTime = FileStoreSourceReaderMetrics.ACTIVE;
     private transient Counter numRecordsIn;
 
     public ReadOperator(ReadBuilder readBuilder) {
@@ -99,7 +99,7 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
                         .orElse(FileStoreSourceReaderMetrics.UNDEFINED);
         sourceReaderMetrics.recordSnapshotUpdate(eventTime);
         // update idleStartTime when reading a new split
-        idleStartTime = FileStoreSourceReaderMetrics.UNDEFINED;
+        idleStartTime = FileStoreSourceReaderMetrics.ACTIVE;
 
         boolean firstRecord = true;
         try (CloseableIterator<InternalRow> iterator =
@@ -138,7 +138,7 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
     }
 
     private boolean isIdling() {
-        return idleStartTime != FileStoreSourceReaderMetrics.UNDEFINED;
+        return idleStartTime != FileStoreSourceReaderMetrics.ACTIVE;
     }
 
     private long getIdleTime() {
