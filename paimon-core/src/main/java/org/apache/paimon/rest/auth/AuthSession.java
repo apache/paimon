@@ -21,6 +21,9 @@ package org.apache.paimon.rest.auth;
 import org.apache.paimon.rest.RESTUtil;
 import org.apache.paimon.utils.Pair;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ScheduledExecutorService;
@@ -28,7 +31,8 @@ import java.util.concurrent.TimeUnit;
 
 /** Auth session. */
 public class AuthSession {
-    private static int tokenRefreshNumRetries = 5;
+    private static final Logger log = LoggerFactory.getLogger(AuthSession.class);
+    private static final int TOKEN_REFRESH_NUM_RETRIES = 5;
     private static final long MAX_REFRESH_WINDOW_MILLIS = 300_000; // 5 minutes
     private static final long MIN_REFRESH_WAIT_MILLIS = 10;
     private volatile Map<String, String> headers;
@@ -39,34 +43,32 @@ public class AuthSession {
         this.credentialsProvider = credentialsProvider;
     }
 
-    public static AuthSession fromTokenPath(
+    public static AuthSession fromRefreshCredentialsProvider(
             ScheduledExecutorService executor,
             Map<String, String> headers,
-            CredentialsProvider credentialsProvider,
-            Long defaultExpiresAtMillis) {
+            CredentialsProvider credentialsProvider) {
         AuthSession session = new AuthSession(headers, credentialsProvider);
 
         long startTimeMillis = System.currentTimeMillis();
         Optional<Long> expiresAtMillisOpt = credentialsProvider.expiresAtMillis();
 
         if (expiresAtMillisOpt.isPresent() && expiresAtMillisOpt.get() <= startTimeMillis) {
-            Pair<Long, TimeUnit> expiration = session.refresh();
+            Pair<Boolean, Long> refreshResult = session.refresh();
 
             // if expiration is non-null, then token refresh was successful
-            if (expiration != null) {
+            boolean isSuccessful = refreshResult.getKey();
+            if (isSuccessful) {
                 if (session.credentialsProvider.expiresAtMillis().isPresent()) {
                     // use the new expiration time from the refreshed token
                     expiresAtMillisOpt = session.credentialsProvider.expiresAtMillis();
                 } else {
                     // otherwise use the expiration time from the token response
-                    expiresAtMillisOpt = Optional.of(startTimeMillis + expiration.getKey());
+                    expiresAtMillisOpt = Optional.of(startTimeMillis + refreshResult.getValue());
                 }
             } else {
                 // token refresh failed, don't reattempt with the original expiration
                 expiresAtMillisOpt = Optional.empty();
             }
-        } else if (expiresAtMillisOpt.isPresent() && defaultExpiresAtMillis != null) {
-            expiresAtMillisOpt = Optional.of(defaultExpiresAtMillis);
         }
 
         if (null != executor && expiresAtMillisOpt.isPresent()) {
@@ -82,41 +84,59 @@ public class AuthSession {
 
     private static void scheduleTokenRefresh(
             ScheduledExecutorService executor, AuthSession session, long expiresAtMillis) {
-        long expiresInMillis = expiresAtMillis - System.currentTimeMillis();
-        // how much ahead of time to start the request to allow it to complete
-        long refreshWindowMillis = Math.min(expiresInMillis / 10, MAX_REFRESH_WINDOW_MILLIS);
-        // how much time to wait before expiration
-        long waitIntervalMillis = expiresInMillis - refreshWindowMillis;
-        // how much time to actually wait
-        long timeToWait = Math.max(waitIntervalMillis, MIN_REFRESH_WAIT_MILLIS);
-
-        executor.schedule(
-                () -> {
-                    long refreshStartTime = System.currentTimeMillis();
-                    Pair<Long, TimeUnit> expiration = session.refresh();
-                    if (expiration != null) {
-                        scheduleTokenRefresh(
-                                executor, session, refreshStartTime + expiration.getKey());
-                    }
-                },
-                timeToWait,
-                TimeUnit.MILLISECONDS);
+        scheduleTokenRefresh(executor, session, expiresAtMillis, 0);
     }
 
-    public Pair<Long, TimeUnit> refresh() {
-        if (this.credentialsProvider.supportRefresh() && this.credentialsProvider.keepRefreshed()) {
+    private static void scheduleTokenRefresh(
+            ScheduledExecutorService executor,
+            AuthSession session,
+            long expiresAtMillis,
+            int retryTimes) {
+        if (retryTimes < TOKEN_REFRESH_NUM_RETRIES) {
+            long expiresInMillis = expiresAtMillis - System.currentTimeMillis();
+            // how much ahead of time to start the request to allow it to complete
+            long refreshWindowMillis = Math.min(expiresInMillis / 10, MAX_REFRESH_WINDOW_MILLIS);
+            // how much time to wait before expiration
+            long waitIntervalMillis = expiresInMillis - refreshWindowMillis;
+            // how much time to actually wait
+            long timeToWait = Math.max(waitIntervalMillis, MIN_REFRESH_WAIT_MILLIS);
+
+            executor.schedule(
+                    () -> {
+                        long refreshStartTime = System.currentTimeMillis();
+                        Pair<Boolean, Long> refreshResult = session.refresh();
+                        boolean isSuccessful = refreshResult.getKey();
+                        if (isSuccessful) {
+                            scheduleTokenRefresh(
+                                    executor,
+                                    session,
+                                    refreshStartTime + refreshResult.getValue(),
+                                    0);
+                        } else {
+                            scheduleTokenRefresh(
+                                    executor, session, expiresAtMillis, retryTimes + 1);
+                        }
+                    },
+                    timeToWait,
+                    TimeUnit.MILLISECONDS);
+        } else {
+            log.warn("Failed to refresh token after {} retries.", TOKEN_REFRESH_NUM_RETRIES);
+        }
+    }
+
+    public Pair<Boolean, Long> refresh() {
+        if (this.credentialsProvider.supportRefresh()
+                && this.credentialsProvider.keepRefreshed()
+                && this.credentialsProvider.expiresInMills().isPresent()) {
             boolean isSuccessful = this.credentialsProvider.refresh();
             if (!isSuccessful) {
-                return null;
+                return Pair.of(false, 0L);
             }
             Map<String, String> currentHeaders = this.headers;
             this.headers = RESTUtil.merge(currentHeaders, this.credentialsProvider.authHeader());
-
-            if (credentialsProvider.expiresInMills().isPresent()) {
-                return Pair.of(credentialsProvider.expiresInMills().get(), TimeUnit.SECONDS);
-            }
+            return Pair.of(true, credentialsProvider.expiresInMills().get());
         }
 
-        return null;
+        return Pair.of(false, 0L);
     }
 }

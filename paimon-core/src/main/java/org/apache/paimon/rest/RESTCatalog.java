@@ -84,11 +84,8 @@ public class RESTCatalog implements Catalog {
         this.keepTokenRefreshed = options.get(AuthOptions.TOKEN_REFRESH_ENABLED);
         if (keepTokenRefreshed) {
             this.catalogAuth =
-                    AuthSession.fromTokenPath(
-                            tokenRefreshExecutor(),
-                            this.baseHeader,
-                            credentialsProvider,
-                            credentialsProvider.expiresAtMillis().get());
+                    AuthSession.fromRefreshCredentialsProvider(
+                            tokenRefreshExecutor(), this.baseHeader, credentialsProvider);
 
         } else {
             this.catalogAuth = new AuthSession(this.baseHeader, credentialsProvider);
