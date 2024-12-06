@@ -50,6 +50,7 @@ under the License.
         <reflections.version>0.9.8</reflections.version>
         <aws.version>1.12.319</aws.version>
         <iceberg.flink.version>1.19</iceberg.flink.version>
+        <iceberg.flink.dropwizard.version>1.19.0</iceberg.flink.dropwizard.version>
     </properties>
 
     <dependencies>
@@ -127,6 +128,20 @@ under the License.
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-test-utils</artifactId>
             <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-flink-${iceberg.flink.version}</artifactId>
+            <version>${iceberg.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-metrics-dropwizard</artifactId>
+            <version>${iceberg.flink.dropwizard.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
