@@ -42,14 +42,10 @@ public class BearTokenFileCredentialsProvider extends BaseBearTokenCredentialsPr
         this.token = getTokenFromFile();
     }
 
-    public BearTokenFileCredentialsProvider(
-            String tokenFilePath,
-            boolean keepRefreshed,
-            Long expiresAtMillis,
-            Long expiresInMills) {
+    public BearTokenFileCredentialsProvider(String tokenFilePath, Long expiresInMills) {
         this(tokenFilePath);
-        this.keepRefreshed = keepRefreshed;
-        this.expiresAtMillis = expiresAtMillis;
+        this.keepRefreshed = true;
+        this.expiresAtMillis = -1L;
         this.expiresInMills = expiresInMills;
     }
 

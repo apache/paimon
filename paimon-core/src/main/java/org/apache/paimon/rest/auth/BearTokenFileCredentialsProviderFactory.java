@@ -20,6 +20,9 @@ package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.options.Options;
 
+import static org.apache.paimon.rest.auth.AuthOptions.TOKEN_EXPIRES_IN;
+import static org.apache.paimon.rest.auth.AuthOptions.TOKEN_FILE_PATH;
+
 /** factory for create {@link BearTokenCredentialsProvider}. */
 public class BearTokenFileCredentialsProviderFactory implements CredentialsProviderFactory {
 
@@ -30,10 +33,21 @@ public class BearTokenFileCredentialsProviderFactory implements CredentialsProvi
 
     @Override
     public CredentialsProvider create(Options options) {
+        if (!options.getOptional(TOKEN_FILE_PATH).isPresent()) {
+            throw new IllegalArgumentException(TOKEN_FILE_PATH.key() + " is required");
+        }
+        String tokenFilePath = options.get(TOKEN_FILE_PATH);
         boolean keepTokenRefreshed = options.get(AuthOptions.TOKEN_REFRESH_ENABLED);
-        long tokenExpireInMills = options.get(AuthOptions.TOKEN_EXPIRES_IN).toMillis();
-        String tokenFilePath = options.getOptional(AuthOptions.TOKEN_FILE_PATH).orElse(null);
-        return new BearTokenFileCredentialsProvider(
-                tokenFilePath, keepTokenRefreshed, -1L, tokenExpireInMills);
+        if (keepTokenRefreshed) {
+            if (!options.getOptional(TOKEN_EXPIRES_IN).isPresent()) {
+                throw new IllegalArgumentException(
+                        TOKEN_EXPIRES_IN.key() + " is required when token refresh enabled");
+            }
+            long tokenExpireInMills = options.get(TOKEN_EXPIRES_IN).toMillis();
+            return new BearTokenFileCredentialsProvider(tokenFilePath, tokenExpireInMills);
+
+        } else {
+            return new BearTokenFileCredentialsProvider(tokenFilePath);
+        }
     }
 }

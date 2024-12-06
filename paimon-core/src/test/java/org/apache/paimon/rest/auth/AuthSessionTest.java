@@ -50,8 +50,7 @@ public class AuthSessionTest {
         Map<String, String> initialHeaders = new HashMap<>();
         long expiresInMillis = 1000L;
         CredentialsProvider credentialsProvider =
-                new BearTokenFileCredentialsProvider(
-                        tokenFile.getPath(), true, -1L, expiresInMillis);
+                new BearTokenFileCredentialsProvider(tokenFile.getPath(), expiresInMillis);
         ScheduledExecutorService executor =
                 ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token");
         AuthSession session =
@@ -77,8 +76,7 @@ public class AuthSessionTest {
         Map<String, String> initialHeaders = new HashMap<>();
         long expiresInMillis = 1000L;
         CredentialsProvider credentialsProvider =
-                new BearTokenFileCredentialsProvider(
-                        tokenFile.getPath(), true, -1L, expiresInMillis);
+                new BearTokenFileCredentialsProvider(tokenFile.getPath(), expiresInMillis);
         AuthSession session =
                 AuthSession.fromRefreshCredentialsProvider(
                         null, initialHeaders, credentialsProvider);
