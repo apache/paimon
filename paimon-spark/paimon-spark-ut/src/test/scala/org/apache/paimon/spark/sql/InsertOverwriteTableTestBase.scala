@@ -514,11 +514,24 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
 
     // insert with a column list
     sql("INSERT INTO T (name, student_id, address) VALUES ('a', '1', 'Hangzhou')")
-    sql("INSERT INTO T (name) VALUES ('b')")
-    sql("INSERT INTO T (address, name) VALUES ('Hangzhou', 'c')")
+    // Since Spark 3.4, INSERT INTO commands with explicit column lists comprising fewer columns than the target
+    // table will automatically add the corresponding default values for the remaining columns (or NULL for any column
+    // lacking an explicitly-assigned default value). In Spark 3.3 or earlier, these commands would have failed.
+    // See https://issues.apache.org/jira/browse/SPARK-42521
+    if (gteqSpark3_4) {
+      sql("INSERT INTO T (name) VALUES ('b')")
+      sql("INSERT INTO T (address, name) VALUES ('Hangzhou', 'c')")
+    } else {
+      sql("INSERT INTO T (name, student_id, address) VALUES ('b', null, null)")
+      sql("INSERT INTO T (name, student_id, address) VALUES ('c', null, 'Hangzhou')")
+    }
 
     // insert with both a partition spec and a column list
-    sql("INSERT INTO T PARTITION (address='Beijing') (name) VALUES ('d')")
+    if (gteqSpark3_4) {
+      sql("INSERT INTO T PARTITION (address='Beijing') (name) VALUES ('d')")
+    } else {
+      sql("INSERT INTO T PARTITION (address='Beijing') (name, student_id) VALUES ('d', null)")
+    }
     sql("INSERT INTO T PARTITION (address='Hangzhou') (student_id, name) VALUES (5, 'e')")
 
     checkAnswer(
@@ -532,11 +545,19 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
     )
 
     // insert overwrite with a column list
-    sql("INSERT OVERWRITE T (name, address) VALUES ('f', 'Shanghai')")
+    if (gteqSpark3_4) {
+      sql("INSERT OVERWRITE T (name, address) VALUES ('f', 'Shanghai')")
+    } else {
+      sql("INSERT OVERWRITE T (name, student_id, address) VALUES ('f', null, 'Shanghai')")
+    }
     checkAnswer(sql("SELECT * FROM T ORDER BY name"), Row("f", null, "Shanghai"))
 
     // insert overwrite with both a partition spec and a column list
-    sql("INSERT OVERWRITE T PARTITION (address='Shanghai') (name, student_id) VALUES ('g', 7)")
-    checkAnswer(sql("SELECT * FROM T ORDER BY name"), Row("g", 7, "Shanghai"))
+    if (gteqSpark3_4) {
+      sql("INSERT OVERWRITE T PARTITION (address='Shanghai') (name) VALUES ('g')")
+    } else {
+      sql("INSERT OVERWRITE T PARTITION (address='Shanghai') (name, student_id) VALUES ('g', null)")
+    }
+    checkAnswer(sql("SELECT * FROM T ORDER BY name"), Row("g", null, "Shanghai"))
   }
 }
