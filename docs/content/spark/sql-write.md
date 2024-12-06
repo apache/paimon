@@ -120,7 +120,17 @@ TRUNCATE TABLE my_table;
 
 ## Update Table
 
-spark supports update PrimitiveType and StructType, for example:
+Updates the column values for the rows that match a predicate. When no predicate is provided, update the column values for all rows. 
+
+Note:
+
+{{< hint info >}}
+
+Update primary key columns is not supported when the target table is a primary key table.
+
+{{< /hint >}}
+
+Spark supports update PrimitiveType and StructType, for example:
 
 ```sql
 -- Syntax
@@ -142,17 +152,22 @@ UPDATE t SET s.c2 = 'a_new' WHERE s.c1 = 1;
 
 ## Delete From Table
 
+Deletes the rows that match a predicate. When no predicate is provided, deletes all rows.
+
 ```sql
 DELETE FROM my_table WHERE currency = 'UNKNOWN';
 ```
 
 ## Merge Into Table
 
-Paimon currently supports Merge Into syntax in Spark 3+, which allow a set of updates, insertions and deletions based on a source table in a single commit.
+Merges a set of updates, insertions and deletions based on a source table into a target table.
 
-{{< hint into >}}
-1. In update clause, to update primary key columns is not supported.
-2. `WHEN NOT MATCHED BY SOURCE` syntax is not supported.
+Note:
+
+{{< hint info >}}
+
+In update clause, to update primary key columns is not supported when the target table is a primary key table.
+
 {{< /hint >}}
 
 **Example: One**
@@ -160,7 +175,6 @@ Paimon currently supports Merge Into syntax in Spark 3+, which allow a set of up
 This is a simple demo that, if a row exists in the target table update it, else insert it.
 
 ```sql
-
 -- Here both source and target tables have the same schema: (a INT, b INT, c STRING), and a is a primary key.
 
 MERGE INTO target
@@ -170,7 +184,6 @@ WHEN MATCHED THEN
 UPDATE SET *
 WHEN NOT MATCHED
 THEN INSERT *
-
 ```
 
 **Example: Two**
@@ -178,7 +191,6 @@ THEN INSERT *
 This is a demo with multiple, conditional clauses.
 
 ```sql
-
 -- Here both source and target tables have the same schema: (a INT, b INT, c STRING), and a is a primary key.
 
 MERGE INTO target
@@ -194,14 +206,11 @@ WHEN NOT MATCHED AND c > 'c9' THEN
    INSERT (a, b, c) VALUES (a, b * 1.1, c)      -- when not matched but meet the condition 3, then transform and insert this row;
 WHEN NOT MATCHED THEN
 INSERT *      -- when not matched, insert this row without any transformation;
-
 ```
 
 ## Streaming Write
 
 {{< hint info >}}
-
-Paimon currently supports Spark 3+ for streaming write.
 
 Paimon Structured Streaming only supports the two `append` and `complete` modes.
 
