@@ -118,6 +118,11 @@ public class SimpleFileEntry implements FileEntry {
     }
 
     @Override
+    public List<String> extraFiles() {
+        return extraFiles;
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (this == o) {
             return true;
