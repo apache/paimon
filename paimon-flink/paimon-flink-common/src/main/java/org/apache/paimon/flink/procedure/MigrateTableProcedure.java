@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.TableMigrationUtils;
 import org.apache.paimon.migrate.Migrator;
 import org.apache.paimon.utils.ParameterUtils;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
@@ -41,7 +42,10 @@ public class MigrateTableProcedure extends ProcedureBase {
     @ProcedureHint(
             argument = {
                 @ArgumentHint(name = "connector", type = @DataTypeHint("STRING")),
-                @ArgumentHint(name = "source_table", type = @DataTypeHint("STRING")),
+                @ArgumentHint(
+                        name = "source_table",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
                 @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true),
                 @ArgumentHint(
                         name = "parallelism",
@@ -63,22 +67,37 @@ public class MigrateTableProcedure extends ProcedureBase {
         properties = notnull(properties);
         icebergOptions = notnull(icebergOptions);
 
-        String targetPaimonTablePath = sourceTablePath + PAIMON_SUFFIX;
-
-        Identifier targetTableId = Identifier.fromString(targetPaimonTablePath);
-
         Integer p = parallelism == null ? Runtime.getRuntime().availableProcessors() : parallelism;
 
-        Migrator migrator =
-                TableMigrationUtils.getImporter(
-                        connector,
-                        catalog,
-                        sourceTablePath,
-                        targetTableId.getDatabaseName(),
-                        targetTableId.getObjectName(),
-                        p,
-                        ParameterUtils.parseCommaSeparatedKeyValues(properties),
-                        ParameterUtils.parseCommaSeparatedKeyValues(icebergOptions));
+        Migrator migrator;
+        switch (connector) {
+            case "hive":
+                Preconditions.checkArgument(
+                        sourceTablePath != null, "please set 'source_table' for hive migrator");
+                String targetPaimonTablePath = sourceTablePath + PAIMON_SUFFIX;
+                Identifier targetTableId = Identifier.fromString(targetPaimonTablePath);
+                migrator =
+                        TableMigrationUtils.getImporter(
+                                connector,
+                                catalog,
+                                sourceTablePath,
+                                targetTableId.getDatabaseName(),
+                                targetTableId.getObjectName(),
+                                p,
+                                ParameterUtils.parseCommaSeparatedKeyValues(properties));
+                break;
+            case "iceberg":
+                migrator =
+                        TableMigrationUtils.getIcebergImporter(
+                                catalog,
+                                p,
+                                ParameterUtils.parseCommaSeparatedKeyValues(properties),
+                                ParameterUtils.parseCommaSeparatedKeyValues(icebergOptions));
+                break;
+            default:
+                throw new UnsupportedOperationException("Don't support connector " + connector);
+        }
+
         migrator.executeMigrate();
 
         migrator.renameTable(false);

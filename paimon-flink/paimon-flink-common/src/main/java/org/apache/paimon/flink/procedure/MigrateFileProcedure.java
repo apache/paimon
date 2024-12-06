@@ -96,7 +96,6 @@ public class MigrateFileProcedure extends ProcedureBase {
                         targetTableId.getDatabaseName(),
                         targetTableId.getObjectName(),
                         parallelism,
-                        Collections.emptyMap(),
                         Collections.emptyMap());
         importer.deleteOriginTable(deleteOrigin);
         importer.executeMigrate();

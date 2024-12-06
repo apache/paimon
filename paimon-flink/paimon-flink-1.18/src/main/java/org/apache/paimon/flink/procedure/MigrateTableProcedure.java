@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.TableMigrationUtils;
 import org.apache.paimon.migrate.Migrator;
 import org.apache.paimon.utils.ParameterUtils;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
@@ -47,14 +48,12 @@ public class MigrateTableProcedure extends ProcedureBase {
             String sourceTablePath,
             String properties)
             throws Exception {
-
         return call(
                 procedureContext,
                 connector,
                 sourceTablePath,
                 properties,
-                Runtime.getRuntime().availableProcessors(),
-                "");
+                Runtime.getRuntime().availableProcessors());
     }
 
     public String[] call(
@@ -64,23 +63,7 @@ public class MigrateTableProcedure extends ProcedureBase {
             String properties,
             Integer parallelism)
             throws Exception {
-        return call(
-                procedureContext,
-                connector,
-                sourceTablePath,
-                properties,
-                Runtime.getRuntime().availableProcessors(),
-                "");
-    }
-
-    public String[] call(
-            ProcedureContext procedureContext,
-            String connector,
-            String sourceTablePath,
-            String properties,
-            Integer parallelism,
-            String icebergProperties)
-            throws Exception {
+        Preconditions.checkArgument(connector.equals("hive"));
         String targetPaimonTablePath = sourceTablePath + PAIMON_SUFFIX;
 
         Identifier targetTableId = Identifier.fromString(targetPaimonTablePath);
@@ -93,9 +76,29 @@ public class MigrateTableProcedure extends ProcedureBase {
                         targetTableId.getDatabaseName(),
                         targetTableId.getObjectName(),
                         parallelism,
-                        ParameterUtils.parseCommaSeparatedKeyValues(properties),
-                        ParameterUtils.parseCommaSeparatedKeyValues(icebergProperties));
+                        ParameterUtils.parseCommaSeparatedKeyValues(properties));
 
+        migrator.executeMigrate();
+
+        migrator.renameTable(false);
+        return new String[] {"Success"};
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext,
+            String connector,
+            String sourceTablePath,
+            String properties,
+            Integer parallelism,
+            String icebrgConf)
+            throws Exception {
+        Preconditions.checkArgument(connector.equals("iceberg"));
+        Migrator migrator =
+                TableMigrationUtils.getIcebergImporter(
+                        catalog,
+                        parallelism,
+                        ParameterUtils.parseCommaSeparatedKeyValues(properties),
+                        ParameterUtils.parseCommaSeparatedKeyValues(icebrgConf));
         migrator.executeMigrate();
 
         migrator.renameTable(false);

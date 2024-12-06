@@ -197,7 +197,10 @@ public class IcebergMigrator implements Migrator {
     public void deleteOriginTable(boolean delete) throws Exception {}
 
     @Override
-    public void renameTable(boolean ignoreIfNotExists) throws Exception {}
+    public void renameTable(boolean ignoreIfNotExists) throws Exception {
+        LOG.info("Last step: rename.");
+        LOG.info("Iceberg migrator do not rename table now.");
+    }
 
     public int getIcebergNewestSnapshotId() {
         Path versionHintPath =

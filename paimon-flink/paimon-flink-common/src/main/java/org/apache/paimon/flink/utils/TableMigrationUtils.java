@@ -27,6 +27,7 @@ import org.apache.paimon.hive.migrate.HiveMigrator;
 import org.apache.paimon.iceberg.IcebergMigrator;
 import org.apache.paimon.migrate.Migrator;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.Preconditions;
 
 import java.util.List;
 import java.util.Map;
@@ -41,8 +42,7 @@ public class TableMigrationUtils {
             String targetDatabase,
             String targetTableName,
             Integer parallelism,
-            Map<String, String> options,
-            Map<String, String> icebergOptions) {
+            Map<String, String> options) {
         switch (connector) {
             case "hive":
                 Identifier identifier = Identifier.fromString(sourceIdentifier);
@@ -60,17 +60,24 @@ public class TableMigrationUtils {
                         targetTableName,
                         parallelism,
                         options);
-            case "iceberg":
-                return new IcebergMigrator(
-                        catalog,
-                        new Path(sourceIdentifier),
-                        targetDatabase,
-                        targetTableName,
-                        new Options(icebergOptions).getBoolean("ignore-delete-file", false),
-                        parallelism);
             default:
                 throw new UnsupportedOperationException("Don't support connector " + connector);
         }
+    }
+
+    public static Migrator getIcebergImporter(
+            Catalog catalog,
+            Integer parallelism,
+            Map<String, String> options,
+            Map<String, String> icebergConf) {
+        checkIcebergRequiredConf(icebergConf);
+        return new IcebergMigrator(
+                catalog,
+                new Path(icebergConf.get("iceberg-meta-path")),
+                icebergConf.get("target-database"),
+                icebergConf.get("target-table"),
+                new Options(icebergConf).getBoolean("ignore-delete-file", false),
+                parallelism);
     }
 
     public static List<Migrator> getImporters(
@@ -92,5 +99,17 @@ public class TableMigrationUtils {
             default:
                 throw new UnsupportedOperationException("Don't support connector " + connector);
         }
+    }
+
+    private static void checkIcebergRequiredConf(Map<String, String> icebergConf) {
+        Preconditions.checkArgument(
+                icebergConf.containsKey("iceberg-meta-path"),
+                "please set required iceberg argument 'iceberg-meta-path'.");
+        Preconditions.checkArgument(
+                icebergConf.containsKey("target-database"),
+                "please set required iceberg argument 'target-database'.");
+        Preconditions.checkArgument(
+                icebergConf.containsKey("target-table"),
+                "please set required iceberg argument 'target-table'.");
     }
 }
