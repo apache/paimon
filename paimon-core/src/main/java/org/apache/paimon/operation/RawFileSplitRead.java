@@ -221,7 +221,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         formatReaderContext,
                         bulkFormatMapping.getIndexMapping(),
                         bulkFormatMapping.getCastMapping(),
-                        PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
+                        PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition),
+                        bulkFormatMapping.getTrimmedKeyMapping());
 
         if (fileIndexResult instanceof BitmapIndexResult) {
             fileRecordReader =

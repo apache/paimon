@@ -26,6 +26,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.schema.SchemaEvolutionUtil;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -35,11 +36,15 @@ import org.apache.paimon.types.RowType;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
+import static org.apache.paimon.table.SpecialFields.KEY_FIELD_ID_START;
 
 /** Class with index mapping and bulk format. */
 public class BulkFormatMapping {
@@ -47,6 +52,7 @@ public class BulkFormatMapping {
     @Nullable private final int[] indexMapping;
     @Nullable private final CastFieldGetter[] castMapping;
     @Nullable private final Pair<int[], RowType> partitionPair;
+    @Nullable private final int[] trimmedKeyMapping;
     private final FormatReaderFactory bulkFormat;
     private final TableSchema dataSchema;
     private final List<Predicate> dataFilters;
@@ -55,6 +61,7 @@ public class BulkFormatMapping {
             @Nullable int[] indexMapping,
             @Nullable CastFieldGetter[] castMapping,
             @Nullable Pair<int[], RowType> partitionPair,
+            @Nullable int[] trimmedKeyMapping,
             FormatReaderFactory bulkFormat,
             TableSchema dataSchema,
             List<Predicate> dataFilters) {
@@ -62,6 +69,7 @@ public class BulkFormatMapping {
         this.castMapping = castMapping;
         this.bulkFormat = bulkFormat;
         this.partitionPair = partitionPair;
+        this.trimmedKeyMapping = trimmedKeyMapping;
         this.dataSchema = dataSchema;
         this.dataFilters = dataFilters;
     }
@@ -79,6 +87,11 @@ public class BulkFormatMapping {
     @Nullable
     public Pair<int[], RowType> getPartitionPair() {
         return partitionPair;
+    }
+
+    @Nullable
+    public int[] getTrimmedKeyMapping() {
+        return trimmedKeyMapping;
     }
 
     public FormatReaderFactory getReaderFactory() {
@@ -112,11 +125,27 @@ public class BulkFormatMapping {
             this.filters = filters;
         }
 
+        /**
+         * There are three steps here to build BulkFormatMapping:
+         *
+         * <p>1. Calculate the readDataFields, which is what we intend to read from the data schema.
+         * Meanwhile, generate the indexCastMapping, which is used to map the index of the
+         * readDataFields to the index of the data schema.
+         *
+         * <p>2. We want read much fewer fields than readDataFields, so we kick out the partition
+         * fields. We generate the partitionMappingAndFieldsWithoutPartitionPair which helps reduce
+         * the real read fields and tell us how to map it back.
+         *
+         * <p>3. We still want read fewer fields, so we combine the _KEY_xxx fields to xxx fields.
+         * They are always the same, we just need to get once. We generate trimmedKeyPair to reduce
+         * the real read fields again, also it tells us how to map it back.
+         */
         public BulkFormatMapping build(
                 String formatIdentifier, TableSchema tableSchema, TableSchema dataSchema) {
 
-            List<DataField> readDataFields = readDataFields(dataSchema);
-
+            // extract the whole data fields in logic.
+            List<DataField> allDataFields = fieldsExtractor.apply(dataSchema);
+            List<DataField> readDataFields = readDataFields(allDataFields);
             // build index cast mapping
             IndexCastMapping indexCastMapping =
                     SchemaEvolutionUtil.createIndexCastMapping(readTableFields, readDataFields);
@@ -128,9 +157,12 @@ public class BulkFormatMapping {
             Pair<int[], RowType> partitionMapping =
                     partitionMappingAndFieldsWithoutPartitionPair.getLeft();
 
-            // build read row type
-            RowType readDataRowType =
-                    new RowType(partitionMappingAndFieldsWithoutPartitionPair.getRight());
+            List<DataField> fieldsWithoutPartition =
+                    partitionMappingAndFieldsWithoutPartitionPair.getRight();
+
+            // map from key fields reading to value fields reading
+            Pair<int[], RowType> trimmedKeyPair =
+                    trimKeyFields(fieldsWithoutPartition, allDataFields);
 
             // build read filters
             List<Predicate> readFilters = readFilters(filters, tableSchema, dataSchema);
@@ -139,17 +171,51 @@ public class BulkFormatMapping {
                     indexCastMapping.getIndexMapping(),
                     indexCastMapping.getCastMapping(),
                     partitionMapping,
+                    trimmedKeyPair.getLeft(),
                     formatDiscover
                             .discover(formatIdentifier)
-                            .createReaderFactory(readDataRowType, readFilters),
+                            .createReaderFactory(trimmedKeyPair.getRight(), readFilters),
                     dataSchema,
                     readFilters);
         }
 
-        private List<DataField> readDataFields(TableSchema dataSchema) {
-            List<DataField> dataFields = fieldsExtractor.apply(dataSchema);
+        private Pair<int[], RowType> trimKeyFields(
+                List<DataField> fieldsWithoutPartition, List<DataField> fields) {
+            int[] map = new int[fieldsWithoutPartition.size()];
+            List<DataField> trimmedFields = new ArrayList<>();
+            Map<Integer, DataField> fieldMap = new HashMap<>();
+            Map<Integer, Integer> positionMap = new HashMap<>();
+
+            for (DataField field : fields) {
+                fieldMap.put(field.id(), field);
+            }
+
+            AtomicInteger index = new AtomicInteger();
+            for (int i = 0; i < fieldsWithoutPartition.size(); i++) {
+                DataField field = fieldsWithoutPartition.get(i);
+                boolean keyField = SpecialFields.isKeyField(field.id());
+                int id = keyField ? field.id() - KEY_FIELD_ID_START : field.id();
+                // field in data schema
+                DataField f = fieldMap.get(id);
+
+                if (f != null) {
+                    if (positionMap.containsKey(id)) {
+                        map[i] = positionMap.get(id);
+                    } else {
+                        trimmedFields.add(keyField ? f : field);
+                        map[i] = positionMap.computeIfAbsent(id, k -> index.getAndIncrement());
+                    }
+                } else {
+                    throw new RuntimeException("Can't find field with id: " + id + " in fields.");
+                }
+            }
+
+            return Pair.of(map, new RowType(trimmedFields));
+        }
+
+        private List<DataField> readDataFields(List<DataField> allDataFields) {
             List<DataField> readDataFields = new ArrayList<>();
-            for (DataField dataField : dataFields) {
+            for (DataField dataField : allDataFields) {
                 readTableFields.stream()
                         .filter(f -> f.id() == dataField.id())
                         .findFirst()

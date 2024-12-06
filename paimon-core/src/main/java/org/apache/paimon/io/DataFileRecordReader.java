@@ -41,13 +41,15 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
     @Nullable private final int[] indexMapping;
     @Nullable private final PartitionInfo partitionInfo;
     @Nullable private final CastFieldGetter[] castMapping;
+    @Nullable private final int[] trimmedKeyMapping;
 
     public DataFileRecordReader(
             FormatReaderFactory readerFactory,
             FormatReaderFactory.Context context,
             @Nullable int[] indexMapping,
             @Nullable CastFieldGetter[] castMapping,
-            @Nullable PartitionInfo partitionInfo)
+            @Nullable PartitionInfo partitionInfo,
+            @Nullable int[] trimmedKeyMapping)
             throws IOException {
         try {
             this.reader = readerFactory.createReader(context);
@@ -58,6 +60,7 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         this.indexMapping = indexMapping;
         this.partitionInfo = partitionInfo;
         this.castMapping = castMapping;
+        this.trimmedKeyMapping = trimmedKeyMapping;
     }
 
     @Nullable
@@ -69,8 +72,14 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         }
 
         if (iterator instanceof ColumnarRowIterator) {
-            iterator = ((ColumnarRowIterator) iterator).mapping(partitionInfo, indexMapping);
+            iterator =
+                    ((ColumnarRowIterator) iterator)
+                            .mapping(trimmedKeyMapping, partitionInfo, indexMapping);
         } else {
+            if (trimmedKeyMapping != null) {
+                final ProjectedRow projectedRow = ProjectedRow.from(trimmedKeyMapping);
+                iterator = iterator.transform(projectedRow::replaceRow);
+            }
             if (partitionInfo != null) {
                 final PartitionSettedRow partitionSettedRow =
                         PartitionSettedRow.from(partitionInfo);
