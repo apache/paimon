@@ -28,6 +28,9 @@ import java.util.Optional;
 
 /** credentials provider for get bear token from file. */
 public class BearTokenFileCredentialsProvider extends BaseBearTokenCredentialsProvider {
+
+    public static final double EXPIRED_FACTOR = 0.4;
+
     private final String tokenFilePath;
     private String token;
     private boolean keepRefreshed = false;
@@ -74,6 +77,16 @@ public class BearTokenFileCredentialsProvider extends BaseBearTokenCredentialsPr
     @Override
     public boolean keepRefreshed() {
         return this.keepRefreshed;
+    }
+
+    @Override
+    public boolean willSoonExpire() {
+        if (keepRefreshed()) {
+            return expiresAtMillis().get() - System.currentTimeMillis()
+                    < expiresInMills().get() * EXPIRED_FACTOR;
+        } else {
+            return false;
+        }
     }
 
     @Override

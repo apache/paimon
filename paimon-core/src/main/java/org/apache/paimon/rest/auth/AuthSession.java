@@ -79,6 +79,9 @@ public class AuthSession {
     }
 
     public Map<String, String> getHeaders() {
+        if (this.credentialsProvider.keepRefreshed() && this.credentialsProvider.willSoonExpire()) {
+            refresh();
+        }
         return headers;
     }
 

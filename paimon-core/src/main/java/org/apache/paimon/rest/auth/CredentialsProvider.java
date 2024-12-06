@@ -35,6 +35,10 @@ public interface CredentialsProvider {
         return false;
     }
 
+    default boolean willSoonExpire() {
+        return false;
+    }
+
     default Optional<Long> expiresAtMillis() {
         return Optional.empty();
     }

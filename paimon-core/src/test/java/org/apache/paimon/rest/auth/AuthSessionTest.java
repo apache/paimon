@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest.auth;
 
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ThreadPoolUtils;
 
 import org.apache.commons.io.FileUtils;
@@ -43,9 +44,9 @@ public class AuthSessionTest {
     public void testRefreshBearTokenFileCredentialsProvider()
             throws IOException, InterruptedException {
         String fileName = "token";
-        File tokenFile = folder.newFile(fileName);
-        String token = UUID.randomUUID().toString();
-        FileUtils.writeStringToFile(tokenFile, token);
+        Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
+        String token = tokenFile2Token.getRight();
+        File tokenFile = tokenFile2Token.getLeft();
         Map<String, String> initialHeaders = new HashMap<>();
         long expiresInMillis = 1000L;
         CredentialsProvider credentialsProvider =
@@ -59,11 +60,46 @@ public class AuthSessionTest {
         Map<String, String> header = session.getHeaders();
         assertEquals(header.get("Authorization"), "Bearer " + token);
         tokenFile.delete();
-        tokenFile = folder.newFile(fileName);
-        token = UUID.randomUUID().toString();
-        FileUtils.writeStringToFile(tokenFile, token);
+        tokenFile2Token = generateTokenAndWriteToFile(fileName);
+        token = tokenFile2Token.getRight();
         Thread.sleep(expiresInMillis + 500L);
         header = session.getHeaders();
         assertEquals(header.get("Authorization"), "Bearer " + token);
+    }
+
+    @Test
+    public void testRefreshCredentialsProviderIsSoonExpire()
+            throws IOException, InterruptedException {
+        String fileName = "token";
+        Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
+        String token = tokenFile2Token.getRight();
+        File tokenFile = tokenFile2Token.getLeft();
+        Map<String, String> initialHeaders = new HashMap<>();
+        long expiresInMillis = 1000L;
+        CredentialsProvider credentialsProvider =
+                new BearTokenFileCredentialsProvider(
+                        tokenFile.getPath(), true, -1L, expiresInMillis);
+        AuthSession session =
+                AuthSession.fromRefreshCredentialsProvider(
+                        null, initialHeaders, credentialsProvider);
+        Map<String, String> header = session.getHeaders();
+        assertEquals(header.get("Authorization"), "Bearer " + token);
+        tokenFile.delete();
+        tokenFile2Token = generateTokenAndWriteToFile(fileName);
+        token = tokenFile2Token.getRight();
+        tokenFile = tokenFile2Token.getLeft();
+        FileUtils.writeStringToFile(tokenFile, token);
+        Thread.sleep(
+                (long) (expiresInMillis * (1 - BearTokenFileCredentialsProvider.EXPIRED_FACTOR))
+                        + 10L);
+        header = session.getHeaders();
+        assertEquals(header.get("Authorization"), "Bearer " + token);
+    }
+
+    private Pair<File, String> generateTokenAndWriteToFile(String fileName) throws IOException {
+        File tokenFile = folder.newFile(fileName);
+        String token = UUID.randomUUID().toString();
+        FileUtils.writeStringToFile(tokenFile, token);
+        return Pair.of(tokenFile, token);
     }
 }
