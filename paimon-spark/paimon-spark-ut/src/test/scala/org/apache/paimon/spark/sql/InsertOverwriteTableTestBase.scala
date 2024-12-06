@@ -536,8 +536,7 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
     checkAnswer(sql("SELECT * FROM T ORDER BY name"), Row("f", null, "Shanghai"))
 
     // insert overwrite with both a partition spec and a column list
-    sql(
-      "INSERT OVERWRITE T PARTITION (address='Shanghai') (name, student_id) VALUES ('g', 7)")
+    sql("INSERT OVERWRITE T PARTITION (address='Shanghai') (name, student_id) VALUES ('g', 7)")
     checkAnswer(sql("SELECT * FROM T ORDER BY name"), Row("g", 7, "Shanghai"))
   }
 }
