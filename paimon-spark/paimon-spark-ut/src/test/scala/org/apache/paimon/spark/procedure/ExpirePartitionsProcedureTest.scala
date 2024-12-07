@@ -23,6 +23,7 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
+import org.assertj.core.api.Assertions.assertThatThrownBy
 
 /** IT Case for [[ExpirePartitionsProcedure]]. */
 class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest {
@@ -605,6 +606,151 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
               spark.sql(
                 "CALL paimon.sys.expire_partitions(table => 'test.T', expiration_time => '1 d'" +
                   ", timestamp_formatter => 'yyyy-MM-dd')"),
+              Row("pt=2024-06-01") :: Row("pt=2024-06-02") :: Nil
+            )
+
+            checkAnswer(query(), Row("c", "2024-06-03") :: Row("Never-expire", "9999-09-09") :: Nil)
+
+          } finally {
+            stream.stop()
+          }
+      }
+    }
+  }
+
+  test(
+    "Paimon Procedure: expire partitions load table property first and then procedure parameter") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql(s"""
+                       |CREATE TABLE T (k STRING, pt STRING)
+                       |TBLPROPERTIES (
+                       |  'primary-key' = 'k,pt',
+                       |  'bucket' = '1',
+                       |  'write-only' = 'true',
+                       |  'partition.timestamp-formatter' = 'yyyy-MM-dd',
+                       |  'partition.expiration-max-num'='2')
+                       |PARTITIONED BY (pt)
+                       |""".stripMargin)
+          val location = loadTable("T").location().toString
+
+          val inputData = MemoryStream[(String, String)]
+          val stream = inputData
+            .toDS()
+            .toDF("k", "pt")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], _: Long) =>
+                batch.write.format("paimon").mode("append").save(location)
+            }
+            .start()
+
+          val query = () => spark.sql("SELECT * FROM T")
+
+          try {
+            // snapshot-1
+            inputData.addData(("a", "2024-06-01"))
+            stream.processAllAvailable()
+
+            // snapshot-2
+            inputData.addData(("b", "2024-06-02"))
+            stream.processAllAvailable()
+
+            // snapshot-3
+            inputData.addData(("c", "2024-06-03"))
+            stream.processAllAvailable()
+
+            // This partition never expires.
+            inputData.addData(("Never-expire", "9999-09-09"))
+            stream.processAllAvailable()
+
+            checkAnswer(
+              query(),
+              Row("a", "2024-06-01") :: Row("b", "2024-06-02") :: Row("c", "2024-06-03") :: Row(
+                "Never-expire",
+                "9999-09-09") :: Nil)
+
+            // no 'partition.expiration-time' value in table property or procedure parameter.
+            assertThatThrownBy(
+              () => spark.sql("CALL paimon.sys.expire_partitions(table => 'test.T')"))
+              .hasMessageContaining("The partition expiration time is must been required")
+
+            // 'partition.timestamp-formatter' value using table property.
+            // 'partition.expiration-time' value using procedure parameter.
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.expire_partitions(table => 'test.T', expiration_time => '1 d')"),
+              Row("pt=2024-06-01") :: Row("pt=2024-06-02") :: Nil
+            )
+
+            checkAnswer(query(), Row("c", "2024-06-03") :: Row("Never-expire", "9999-09-09") :: Nil)
+
+          } finally {
+            stream.stop()
+          }
+      }
+    }
+  }
+
+  test("Paimon Procedure: expire partitions add options parameter") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql(s"""
+                       |CREATE TABLE T (k STRING, pt STRING)
+                       |TBLPROPERTIES (
+                       |  'primary-key' = 'k,pt',
+                       |  'bucket' = '1')
+                       |PARTITIONED BY (pt)
+                       |""".stripMargin)
+          val location = loadTable("T").location().toString
+
+          val inputData = MemoryStream[(String, String)]
+          val stream = inputData
+            .toDS()
+            .toDF("k", "pt")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], _: Long) =>
+                batch.write.format("paimon").mode("append").save(location)
+            }
+            .start()
+
+          val query = () => spark.sql("SELECT * FROM T")
+
+          try {
+            // snapshot-1
+            inputData.addData(("a", "2024-06-01"))
+            stream.processAllAvailable()
+
+            // snapshot-2
+            inputData.addData(("b", "2024-06-02"))
+            stream.processAllAvailable()
+
+            // snapshot-3
+            inputData.addData(("c", "2024-06-03"))
+            stream.processAllAvailable()
+
+            // This partition never expires.
+            inputData.addData(("Never-expire", "9999-09-09"))
+            stream.processAllAvailable()
+
+            checkAnswer(
+              query(),
+              Row("a", "2024-06-01") :: Row("b", "2024-06-02") :: Row("c", "2024-06-03") :: Row(
+                "Never-expire",
+                "9999-09-09") :: Nil)
+
+            // set conf in options.
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.expire_partitions(table => 'test.T', " +
+                  "options => 'partition.expiration-time = 1d," +
+                  " partition.expiration-max-num = 2," +
+                  " partition.timestamp-formatter = yyyy-MM-dd')"),
               Row("pt=2024-06-01") :: Row("pt=2024-06-02") :: Nil
             )
 
