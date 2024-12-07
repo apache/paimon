@@ -148,7 +148,8 @@ class CreateTagFromTimestampProcedureTest extends PaimonSparkTestBase with Strea
 
             // make snapshot 1 expire.
             checkAnswer(
-              spark.sql("CALL paimon.sys.expire_snapshots(table => 'test.T', retain_max => 1)"),
+              spark.sql(
+                "CALL paimon.sys.expire_snapshots(table => 'test.T', retain_max => 1, retain_min => 1)"),
               Row(1) :: Nil)
 
             // create tag from timestamp that earlier than the expired snapshot 1.
