@@ -137,7 +137,7 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
                         database, tableName);
         ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(executeSQL(withOlderThan));
 
-        assertThat(actualDeleteFile).containsExactlyInAnyOrder(Row.of("2"));
+        assertThat(actualDeleteFile).containsExactlyInAnyOrder(Row.of("2"), Row.of("2"));
     }
 
     @Test

@@ -443,7 +443,7 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
         </tr>
         <tr>
             <td><h5>lookup.local-file-type</h5></td>
-            <td style="word-wrap: break-word;">hash</td>
+            <td style="word-wrap: break-word;">sort</td>
             <td><p>Enum</p></td>
             <td>The local file type for lookup.<br /><br />Possible values:<ul><li>"sort": Construct a sorted file for lookup.</li><li>"hash": Construct a hash file for lookup.</li></ul></td>
         </tr>
@@ -452,6 +452,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">"zstd"</td>
             <td>String</td>
             <td>Default file compression for manifest.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.delete-file-drop-stats</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>For DELETE manifest entry in manifest file, drop stats to reduce memory and storage. Default value is false only for compatibility of old reader.</td>
         </tr>
         <tr>
             <td><h5>manifest.format</h5></td>
@@ -485,9 +491,9 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
         </tr>
         <tr>
             <td><h5>metadata.stats-dense-store</h5></td>
-            <td style="word-wrap: break-word;">false</td>
+            <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
-            <td>Whether to store statistic densely in metadata (manifest files), which will significantly reduce the storage size of metadata when the none statistic mode is set.<br />Note, when this mode is enabled, the Paimon sdk in reading engine requires at least version 0.9.1 or 1.0.0 or higher.</td>
+            <td>Whether to store statistic densely in metadata (manifest files), which will significantly reduce the storage size of metadata when the none statistic mode is set.<br />Note, when this mode is enabled with 'metadata.stats-mode:none', the Paimon sdk in reading engine requires at least version 0.9.1 or 1.0.0 or higher.</td>
         </tr>
         <tr>
             <td><h5>metadata.stats-mode</h5></td>
@@ -561,7 +567,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>partial-update.remove-record-on-sequence-group</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Whether to remove the whole row in partial-update engine when -D records of specified sequence group are received.</td>
+            <td>When -D records of the given sequence groups are received, remove the whole row.</td>
         </tr>
         <tr>
             <td><h5>partition</h5></td>
@@ -586,6 +592,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">1 h</td>
             <td>Duration</td>
             <td>The check interval of partition expiration.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.expiration-max-num</h5></td>
+            <td style="word-wrap: break-word;">100</td>
+            <td>Integer</td>
+            <td>The default deleted num of partition expiration.</td>
         </tr>
         <tr>
             <td><h5>partition.expiration-strategy</h5></td>

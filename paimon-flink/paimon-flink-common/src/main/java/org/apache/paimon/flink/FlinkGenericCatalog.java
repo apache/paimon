@@ -48,7 +48,6 @@ import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.factories.Factory;
 import org.apache.flink.table.factories.FunctionDefinitionFactory;
-import org.apache.flink.table.factories.TableFactory;
 import org.apache.flink.table.procedures.Procedure;
 
 import java.util.List;
@@ -84,11 +83,6 @@ public class FlinkGenericCatalog extends AbstractCatalog {
     public Optional<Factory> getFactory() {
         return Optional.of(
                 new FlinkGenericTableFactory(paimon.getFactory().get(), flink.getFactory().get()));
-    }
-
-    @Override
-    public Optional<TableFactory> getTableFactory() {
-        return flink.getTableFactory();
     }
 
     @Override

@@ -18,17 +18,22 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
 
@@ -36,6 +41,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base IT cases for {@link CompactAction} and {@link CompactDatabaseAction} . */
 public class CompactActionITCaseBase extends ActionITCaseBase {
+
+    protected static final DataType[] FIELD_TYPES =
+            new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.STRING()};
+
+    protected static final RowType ROW_TYPE =
+            RowType.of(FIELD_TYPES, new String[] {"k", "v", "hh", "dt"});
 
     protected void validateResult(
             FileStoreTable table,
@@ -86,5 +97,30 @@ public class CompactActionITCaseBase extends ActionITCaseBase {
         }
         assertThat(files.size()).isEqualTo(fileNum);
         assertThat(count).isEqualTo(rowCount);
+    }
+
+    protected void checkLatestSnapshot(
+            FileStoreTable table, long snapshotId, Snapshot.CommitKind commitKind) {
+        SnapshotManager snapshotManager = table.snapshotManager();
+        Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
+        assertThat(snapshot.id()).isEqualTo(snapshotId);
+        assertThat(snapshot.commitKind()).isEqualTo(commitKind);
+    }
+
+    protected FileStoreTable prepareTable(
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            List<String> bucketKey,
+            Map<String, String> tableOptions)
+            throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(ROW_TYPE, partitionKeys, primaryKeys, bucketKey, tableOptions);
+
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = streamWriteBuilder.newWrite();
+        commit = streamWriteBuilder.newCommit();
+
+        return table;
     }
 }

@@ -645,11 +645,10 @@ class StoreMultiCommitterTest {
 
     private OneInputStreamOperatorTestHarness<MultiTableCommittable, MultiTableCommittable>
             createRecoverableTestHarness() throws Exception {
-        CommitterOperator<MultiTableCommittable, WrappedManifestCommittable> operator =
-                new CommitterOperator<>(
+        CommitterOperatorFactory<MultiTableCommittable, WrappedManifestCommittable> operator =
+                new CommitterOperatorFactory<>(
                         true,
                         false,
-                        true,
                         initialCommitUser,
                         context -> new StoreMultiCommitter(catalogLoader, context),
                         new RestoreAndFailCommittableStateManager<>(
@@ -659,11 +658,10 @@ class StoreMultiCommitterTest {
 
     private OneInputStreamOperatorTestHarness<MultiTableCommittable, MultiTableCommittable>
             createLossyTestHarness() throws Exception {
-        CommitterOperator<MultiTableCommittable, WrappedManifestCommittable> operator =
-                new CommitterOperator<>(
+        CommitterOperatorFactory<MultiTableCommittable, WrappedManifestCommittable> operator =
+                new CommitterOperatorFactory<>(
                         true,
                         false,
-                        true,
                         initialCommitUser,
                         context -> new StoreMultiCommitter(catalogLoader, context),
                         new CommittableStateManager<WrappedManifestCommittable>() {
@@ -682,12 +680,13 @@ class StoreMultiCommitterTest {
 
     private OneInputStreamOperatorTestHarness<MultiTableCommittable, MultiTableCommittable>
             createTestHarness(
-                    CommitterOperator<MultiTableCommittable, WrappedManifestCommittable> operator)
+                    CommitterOperatorFactory<MultiTableCommittable, WrappedManifestCommittable>
+                            operatorFactory)
                     throws Exception {
         TypeSerializer<MultiTableCommittable> serializer =
                 new MultiTableCommittableTypeInfo().createSerializer(new ExecutionConfig());
         OneInputStreamOperatorTestHarness<MultiTableCommittable, MultiTableCommittable> harness =
-                new OneInputStreamOperatorTestHarness<>(operator, serializer);
+                new OneInputStreamOperatorTestHarness<>(operatorFactory, serializer);
         harness.setup(serializer);
         return harness;
     }

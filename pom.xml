@@ -69,6 +69,7 @@ under the License.
         <module>paimon-test-utils</module>
         <module>paimon-arrow</module>
         <module>tools/ci/paimon-ci-tools</module>
+        <module>paimon-open-api</module>
     </modules>
 
     <properties>
@@ -114,6 +115,12 @@ under the License.
         <!-- TODO upgrade after connector releases x-1.19 version -->
         <test.flink.connector.kafka.version>3.0.1-1.18</test.flink.connector.kafka.version>
         <test.mysql.connector.java.version>8.0.27</test.mysql.connector.java.version>
+
+        <!-- spark profile properties-->
+        <paimon-sparkx-common>paimon-spark3-common</paimon-sparkx-common>
+        <paimon-spark-common.spark.version>3.5.3</paimon-spark-common.spark.version>
+        <test.spark.main.version>3.3</test.spark.main.version>
+        <test.spark.version>3.3.0</test.spark.version>
 
         <zstd-jni.version>1.5.5-11</zstd-jni.version>
         <janino.version>3.0.11</janino.version>

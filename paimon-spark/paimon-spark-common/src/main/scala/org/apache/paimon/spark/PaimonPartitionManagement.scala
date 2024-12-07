@@ -21,6 +21,7 @@ package org.apache.paimon.spark
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.metastore.MetastoreClient
 import org.apache.paimon.operation.FileStoreCommit
+import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
 import org.apache.paimon.types.RowType
@@ -99,7 +100,7 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
   }
 
   override def loadPartitionMetadata(ident: InternalRow): JMap[String, String] = {
-    throw new UnsupportedOperationException("Load partition is not supported")
+    Map.empty[String, String].asJava
   }
 
   override def listPartitionIdentifiers(
@@ -116,7 +117,7 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
         s"the partition schema '${partitionSchema.sql}'."
     )
     table.newReadBuilder.newScan.listPartitions.asScala
-      .map(binaryRow => SparkInternalRow.fromPaimon(binaryRow, partitionRowType))
+      .map(binaryRow => DataConverter.fromPaimon(binaryRow, partitionRowType))
       .filter(
         sparkInternalRow => {
           partitionCols.zipWithIndex

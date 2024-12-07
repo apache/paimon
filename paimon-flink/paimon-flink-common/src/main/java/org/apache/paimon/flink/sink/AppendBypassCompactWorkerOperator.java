@@ -21,7 +21,9 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.table.FileStoreTable;
 
-import org.apache.flink.streaming.api.operators.ChainingStrategy;
+import org.apache.flink.streaming.api.operators.StreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.types.Either;
 
@@ -29,9 +31,11 @@ import org.apache.flink.types.Either;
 public class AppendBypassCompactWorkerOperator
         extends AppendCompactWorkerOperator<Either<Committable, UnawareAppendCompactionTask>> {
 
-    public AppendBypassCompactWorkerOperator(FileStoreTable table, String commitUser) {
-        super(table, commitUser);
-        this.chainingStrategy = ChainingStrategy.HEAD;
+    private AppendBypassCompactWorkerOperator(
+            StreamOperatorParameters<Committable> parameters,
+            FileStoreTable table,
+            String commitUser) {
+        super(parameters, table, commitUser);
     }
 
     @Override
@@ -47,6 +51,29 @@ public class AppendBypassCompactWorkerOperator
             output.collect(new StreamRecord<>(element.getValue().left()));
         } else {
             unawareBucketCompactor.processElement(element.getValue().right());
+        }
+    }
+
+    /** {@link StreamOperatorFactory} of {@link AppendBypassCompactWorkerOperator}. */
+    public static class Factory
+            extends AppendCompactWorkerOperator.Factory<
+                    Either<Committable, UnawareAppendCompactionTask>> {
+
+        public Factory(FileStoreTable table, String initialCommitUser) {
+            super(table, initialCommitUser);
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T extends StreamOperator<Committable>> T createStreamOperator(
+                StreamOperatorParameters<Committable> parameters) {
+            return (T) new AppendBypassCompactWorkerOperator(parameters, table, commitUser);
+        }
+
+        @Override
+        @SuppressWarnings("rawtypes")
+        public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
+            return AppendBypassCompactWorkerOperator.class;
         }
     }
 }

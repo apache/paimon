@@ -27,12 +27,15 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
+import org.apache.paimon.operation.CleanOrphanFilesResult;
 import org.apache.paimon.operation.OrphanFilesClean;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SerializableConsumer;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
@@ -61,7 +64,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.api.common.typeinfo.BasicTypeInfo.LONG_TYPE_INFO;
 import static org.apache.flink.api.common.typeinfo.BasicTypeInfo.STRING_TYPE_INFO;
 import static org.apache.flink.util.Preconditions.checkState;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -81,7 +83,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
     }
 
     @Nullable
-    public DataStream<Long> doOrphanClean(StreamExecutionEnvironment env) {
+    public DataStream<CleanOrphanFilesResult> doOrphanClean(StreamExecutionEnvironment env) {
         Configuration flinkConf = new Configuration();
         flinkConf.set(ExecutionOptions.RUNTIME_MODE, RuntimeExecutionMode.BATCH);
         flinkConf.set(ExecutionOptions.SORT_INPUTS, false);
@@ -97,8 +99,12 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
 
         // snapshot and changelog files are the root of everything, so they are handled specially
         // here, and subsequently, we will not count their orphan files.
-        AtomicLong deletedInLocal = new AtomicLong(0);
-        cleanSnapshotDir(branches, p -> deletedInLocal.incrementAndGet());
+        AtomicLong deletedFilesCountInLocal = new AtomicLong(0);
+        AtomicLong deletedFilesLenInBytesInLocal = new AtomicLong(0);
+        cleanSnapshotDir(
+                branches,
+                path -> deletedFilesCountInLocal.incrementAndGet(),
+                deletedFilesLenInBytesInLocal::addAndGet);
 
         // branch and manifest file
         final OutputTag<Tuple2<String, String>> manifestOutputTag =
@@ -203,36 +209,45 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                         .map(Path::toUri)
                         .map(Object::toString)
                         .collect(Collectors.toList());
-        DataStream<String> candidates =
+        DataStream<Pair<String, Long>> candidates =
                 env.fromCollection(fileDirs)
                         .process(
-                                new ProcessFunction<String, String>() {
+                                new ProcessFunction<String, Pair<String, Long>>() {
                                     @Override
                                     public void processElement(
                                             String dir,
-                                            ProcessFunction<String, String>.Context ctx,
-                                            Collector<String> out) {
+                                            ProcessFunction<String, Pair<String, Long>>.Context ctx,
+                                            Collector<Pair<String, Long>> out) {
                                         for (FileStatus fileStatus :
                                                 tryBestListingDirs(new Path(dir))) {
                                             if (oldEnough(fileStatus)) {
                                                 out.collect(
-                                                        fileStatus.getPath().toUri().toString());
+                                                        Pair.of(
+                                                                fileStatus
+                                                                        .getPath()
+                                                                        .toUri()
+                                                                        .toString(),
+                                                                fileStatus.getLen()));
                                             }
                                         }
                                     }
                                 });
 
-        DataStream<Long> deleted =
+        DataStream<CleanOrphanFilesResult> deleted =
                 usedFiles
                         .keyBy(f -> f)
-                        .connect(candidates.keyBy(path -> new Path(path).getName()))
+                        .connect(
+                                candidates.keyBy(
+                                        pathAndSize -> new Path(pathAndSize.getKey()).getName()))
                         .transform(
                                 "files_join",
-                                LONG_TYPE_INFO,
-                                new BoundedTwoInputOperator<String, String, Long>() {
+                                TypeInformation.of(CleanOrphanFilesResult.class),
+                                new BoundedTwoInputOperator<
+                                        String, Pair<String, Long>, CleanOrphanFilesResult>() {
 
                                     private boolean buildEnd;
-                                    private long emitted;
+                                    private long emittedFilesCount;
+                                    private long emittedFilesLen;
 
                                     private final Set<String> used = new HashSet<>();
 
@@ -254,8 +269,15 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                             case 2:
                                                 checkState(buildEnd, "Should build ended.");
                                                 LOG.info("Finish probe phase.");
-                                                LOG.info("Clean files: {}", emitted);
-                                                output.collect(new StreamRecord<>(emitted));
+                                                LOG.info(
+                                                        "Clean files count : {}",
+                                                        emittedFilesCount);
+                                                LOG.info("Clean files size : {}", emittedFilesLen);
+                                                output.collect(
+                                                        new StreamRecord<>(
+                                                                new CleanOrphanFilesResult(
+                                                                        emittedFilesCount,
+                                                                        emittedFilesLen)));
                                                 break;
                                         }
                                     }
@@ -266,25 +288,34 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                     }
 
                                     @Override
-                                    public void processElement2(StreamRecord<String> element) {
+                                    public void processElement2(
+                                            StreamRecord<Pair<String, Long>> element) {
                                         checkState(buildEnd, "Should build ended.");
-                                        String value = element.getValue();
+                                        Pair<String, Long> fileInfo = element.getValue();
+                                        String value = fileInfo.getLeft();
                                         Path path = new Path(value);
                                         if (!used.contains(path.getName())) {
+                                            emittedFilesCount++;
+                                            emittedFilesLen += fileInfo.getRight();
                                             fileCleaner.accept(path);
                                             LOG.info("Dry clean: {}", path);
-                                            emitted++;
                                         }
                                     }
                                 });
 
-        if (deletedInLocal.get() != 0) {
-            deleted = deleted.union(env.fromElements(deletedInLocal.get()));
+        if (deletedFilesCountInLocal.get() != 0 || deletedFilesLenInBytesInLocal.get() != 0) {
+            deleted =
+                    deleted.union(
+                            env.fromElements(
+                                    new CleanOrphanFilesResult(
+                                            deletedFilesCountInLocal.get(),
+                                            deletedFilesLenInBytesInLocal.get())));
         }
+
         return deleted;
     }
 
-    public static long executeDatabaseOrphanFiles(
+    public static CleanOrphanFilesResult executeDatabaseOrphanFiles(
             StreamExecutionEnvironment env,
             Catalog catalog,
             long olderThanMillis,
@@ -293,12 +324,13 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
             String databaseName,
             @Nullable String tableName)
             throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
-        List<DataStream<Long>> orphanFilesCleans = new ArrayList<>();
         List<String> tableNames = Collections.singletonList(tableName);
         if (tableName == null || "*".equals(tableName)) {
             tableNames = catalog.listTables(databaseName);
         }
 
+        List<DataStream<CleanOrphanFilesResult>> orphanFilesCleans =
+                new ArrayList<>(tableNames.size());
         for (String t : tableNames) {
             Identifier identifier = new Identifier(databaseName, t);
             Table table = catalog.getTable(identifier);
@@ -307,7 +339,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                     "Only FileStoreTable supports remove-orphan-files action. The table type is '%s'.",
                     table.getClass().getName());
 
-            DataStream<Long> clean =
+            DataStream<CleanOrphanFilesResult> clean =
                     new FlinkOrphanFilesClean(
                                     (FileStoreTable) table,
                                     olderThanMillis,
@@ -319,8 +351,8 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
             }
         }
 
-        DataStream<Long> result = null;
-        for (DataStream<Long> clean : orphanFilesCleans) {
+        DataStream<CleanOrphanFilesResult> result = null;
+        for (DataStream<CleanOrphanFilesResult> clean : orphanFilesCleans) {
             if (result == null) {
                 result = clean;
             } else {
@@ -331,20 +363,24 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         return sum(result);
     }
 
-    private static long sum(DataStream<Long> deleted) {
-        long deleteCount = 0;
+    private static CleanOrphanFilesResult sum(DataStream<CleanOrphanFilesResult> deleted) {
+        long deletedFilesCount = 0;
+        long deletedFilesLenInBytes = 0;
         if (deleted != null) {
             try {
-                CloseableIterator<Long> iterator =
+                CloseableIterator<CleanOrphanFilesResult> iterator =
                         deleted.global().executeAndCollect("OrphanFilesClean");
                 while (iterator.hasNext()) {
-                    deleteCount += iterator.next();
+                    CleanOrphanFilesResult cleanOrphanFilesResult = iterator.next();
+                    deletedFilesCount += cleanOrphanFilesResult.getDeletedFileCount();
+                    deletedFilesLenInBytes +=
+                            cleanOrphanFilesResult.getDeletedFileTotalLenInBytes();
                 }
                 iterator.close();
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         }
-        return deleteCount;
+        return new CleanOrphanFilesResult(deletedFilesCount, deletedFilesLenInBytes);
     }
 }

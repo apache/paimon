@@ -738,13 +738,15 @@ public class SchemaManagerTest {
 
         SchemaChange addColumn =
                 SchemaChange.addColumn(
-                        new String[] {"v", "f3"},
+                        new String[] {"v", "element", "value", "f3"},
                         DataTypes.STRING(),
                         null,
                         SchemaChange.Move.first("f3"));
-        SchemaChange dropColumn = SchemaChange.dropColumn(new String[] {"v", "f2"});
+        SchemaChange dropColumn =
+                SchemaChange.dropColumn(new String[] {"v", "element", "value", "f2"});
         SchemaChange updateColumnType =
-                SchemaChange.updateColumnType(new String[] {"v", "f1"}, DataTypes.BIGINT(), false);
+                SchemaChange.updateColumnType(
+                        new String[] {"v", "element", "value", "f1"}, DataTypes.BIGINT(), false);
         manager.commitChanges(addColumn, dropColumn, updateColumnType);
 
         innerType =

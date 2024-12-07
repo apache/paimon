@@ -26,7 +26,6 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -41,13 +40,14 @@ public class ObjectRefresh {
 
     public static long refresh(ObjectTable table) throws Exception {
         String location = table.objectLocation();
-        FileStoreTable underlyingTable = table.underlyingTable();
-        FileIO fileIO = underlyingTable.fileIO();
 
+        // 1. collect all files for object table
         List<FileStatus> fileCollector = new ArrayList<>();
-        listAllFiles(fileIO, new Path(location), fileCollector);
+        listAllFiles(table.objectFileIO(), new Path(location), fileCollector);
 
-        BatchWriteBuilder writeBuilder = underlyingTable.newBatchWriteBuilder().withOverwrite();
+        // 2. write to underlying table
+        BatchWriteBuilder writeBuilder =
+                table.underlyingTable().newBatchWriteBuilder().withOverwrite();
         try (BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit()) {
             for (FileStatus file : fileCollector) {
@@ -78,6 +78,7 @@ public class ObjectRefresh {
     private static InternalRow toRow(FileStatus file) {
         return toRow(
                 file.getPath().toString(),
+                file.getPath().getParent().toString(),
                 file.getPath().getName(),
                 file.getLen(),
                 Timestamp.fromEpochMillis(file.getModificationTime()),

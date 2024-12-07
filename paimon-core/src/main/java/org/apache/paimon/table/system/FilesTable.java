@@ -143,8 +143,7 @@ public class FilesTable implements ReadonlyTable {
 
     @Override
     public InnerTableRead newRead() {
-        return new FilesRead(
-                new SchemaManager(storeTable.fileIO(), storeTable.location()), storeTable);
+        return new FilesRead(storeTable.schemaManager(), storeTable);
     }
 
     @Override

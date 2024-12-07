@@ -24,6 +24,8 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -74,16 +76,26 @@ public class SnapshotManager implements Serializable {
     private final FileIO fileIO;
     private final Path tablePath;
     private final String branch;
+    @Nullable private final Cache<Path, Snapshot> cache;
 
     public SnapshotManager(FileIO fileIO, Path tablePath) {
         this(fileIO, tablePath, DEFAULT_MAIN_BRANCH);
     }
 
     /** Specify the default branch for data writing. */
-    public SnapshotManager(FileIO fileIO, Path tablePath, String branchName) {
+    public SnapshotManager(FileIO fileIO, Path tablePath, @Nullable String branchName) {
+        this(fileIO, tablePath, branchName, null);
+    }
+
+    public SnapshotManager(
+            FileIO fileIO,
+            Path tablePath,
+            @Nullable String branchName,
+            @Nullable Cache<Path, Snapshot> cache) {
         this.fileIO = fileIO;
         this.tablePath = tablePath;
         this.branch = BranchManager.normalizeBranch(branchName);
+        this.cache = cache;
     }
 
     public SnapshotManager copyWithBranch(String branchName) {
@@ -120,20 +132,34 @@ public class SnapshotManager implements Serializable {
         return new Path(branchPath(tablePath, branch) + "/snapshot");
     }
 
+    public void invalidateCache() {
+        if (cache != null) {
+            cache.invalidateAll();
+        }
+    }
+
     public Snapshot snapshot(long snapshotId) {
-        Path snapshotPath = snapshotPath(snapshotId);
-        return Snapshot.fromPath(fileIO, snapshotPath);
+        Path path = snapshotPath(snapshotId);
+        Snapshot snapshot = cache == null ? null : cache.getIfPresent(path);
+        if (snapshot == null) {
+            snapshot = Snapshot.fromPath(fileIO, path);
+            if (cache != null) {
+                cache.put(path, snapshot);
+            }
+        }
+        return snapshot;
     }
 
     public Snapshot tryGetSnapshot(long snapshotId) throws FileNotFoundException {
-        try {
-            Path snapshotPath = snapshotPath(snapshotId);
-            return Snapshot.fromJson(fileIO.readFileUtf8(snapshotPath));
-        } catch (FileNotFoundException fileNotFoundException) {
-            throw fileNotFoundException;
-        } catch (IOException ioException) {
-            throw new RuntimeException(ioException);
+        Path path = snapshotPath(snapshotId);
+        Snapshot snapshot = cache == null ? null : cache.getIfPresent(path);
+        if (snapshot == null) {
+            snapshot = Snapshot.tryFromPath(fileIO, path);
+            if (cache != null) {
+                cache.put(path, snapshot);
+            }
         }
+        return snapshot;
     }
 
     public Changelog changelog(long snapshotId) {
@@ -486,11 +512,9 @@ public class SnapshotManager implements Serializable {
         collectSnapshots(
                 path -> {
                     try {
-                        snapshots.add(Snapshot.fromJson(fileIO.readFileUtf8(path)));
-                    } catch (IOException e) {
-                        if (!(e instanceof FileNotFoundException)) {
-                            throw new RuntimeException(e);
-                        }
+                        // do not pollution cache
+                        snapshots.add(Snapshot.tryFromPath(fileIO, path));
+                    } catch (FileNotFoundException ignored) {
                     }
                 },
                 paths);
@@ -539,15 +563,15 @@ public class SnapshotManager implements Serializable {
      * Try to get non snapshot files. If any error occurred, just ignore it and return an empty
      * result.
      */
-    public List<Path> tryGetNonSnapshotFiles(Predicate<FileStatus> fileStatusFilter) {
+    public List<Pair<Path, Long>> tryGetNonSnapshotFiles(Predicate<FileStatus> fileStatusFilter) {
         return listPathWithFilter(snapshotDirectory(), fileStatusFilter, nonSnapshotFileFilter());
     }
 
-    public List<Path> tryGetNonChangelogFiles(Predicate<FileStatus> fileStatusFilter) {
+    public List<Pair<Path, Long>> tryGetNonChangelogFiles(Predicate<FileStatus> fileStatusFilter) {
         return listPathWithFilter(changelogDirectory(), fileStatusFilter, nonChangelogFileFilter());
     }
 
-    private List<Path> listPathWithFilter(
+    private List<Pair<Path, Long>> listPathWithFilter(
             Path directory, Predicate<FileStatus> fileStatusFilter, Predicate<Path> fileFilter) {
         try {
             FileStatus[] statuses = fileIO.listStatus(directory);
@@ -557,8 +581,8 @@ public class SnapshotManager implements Serializable {
 
             return Arrays.stream(statuses)
                     .filter(fileStatusFilter)
-                    .map(FileStatus::getPath)
-                    .filter(fileFilter)
+                    .filter(status -> fileFilter.test(status.getPath()))
+                    .map(status -> Pair.of(status.getPath(), status.getLen()))
                     .collect(Collectors.toList());
         } catch (IOException ignored) {
             return Collections.emptyList();

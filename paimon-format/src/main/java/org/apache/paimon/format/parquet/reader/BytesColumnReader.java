@@ -22,7 +22,7 @@ import org.apache.paimon.data.columnar.writable.WritableBytesVector;
 import org.apache.paimon.data.columnar.writable.WritableIntVector;
 
 import org.apache.parquet.column.ColumnDescriptor;
-import org.apache.parquet.column.page.PageReader;
+import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.schema.PrimitiveType;
 
 import java.io.IOException;
@@ -31,9 +31,9 @@ import java.nio.ByteBuffer;
 /** Bytes {@link ColumnReader}. A int length and bytes data. */
 public class BytesColumnReader extends AbstractColumnReader<WritableBytesVector> {
 
-    public BytesColumnReader(ColumnDescriptor descriptor, PageReader pageReader)
+    public BytesColumnReader(ColumnDescriptor descriptor, PageReadStore pageReadStore)
             throws IOException {
-        super(descriptor, pageReader);
+        super(descriptor, pageReadStore);
         checkTypeName(PrimitiveType.PrimitiveTypeName.BINARY);
     }
 
@@ -67,6 +67,41 @@ public class BytesColumnReader extends AbstractColumnReader<WritableBytesVector>
             rowId += n;
             left -= n;
             runLenDecoder.currentCount -= n;
+        }
+    }
+
+    @Override
+    protected void skipBatch(int num) {
+        int left = num;
+        while (left > 0) {
+            if (runLenDecoder.currentCount == 0) {
+                runLenDecoder.readNextGroup();
+            }
+            int n = Math.min(left, runLenDecoder.currentCount);
+            switch (runLenDecoder.mode) {
+                case RLE:
+                    if (runLenDecoder.currentValue == maxDefLevel) {
+                        skipBinary(n);
+                    }
+                    break;
+                case PACKED:
+                    for (int i = 0; i < n; ++i) {
+                        if (runLenDecoder.currentBuffer[runLenDecoder.currentBufferIdx++]
+                                == maxDefLevel) {
+                            skipBinary(1);
+                        }
+                    }
+                    break;
+            }
+            left -= n;
+            runLenDecoder.currentCount -= n;
+        }
+    }
+
+    private void skipBinary(int num) {
+        for (int i = 0; i < num; i++) {
+            int len = readDataBuffer(4).getInt();
+            skipDataBuffer(len);
         }
     }
 

@@ -637,7 +637,7 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Whether to remove the whole row in partial-update engine when -D records of specified sequence group are received.");
+                            "When -D records of the given sequence groups are received, remove the whole row.");
 
     @Immutable
     public static final ConfigOption<String> ROWKIND_FIELD =
@@ -809,6 +809,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(Duration.ofHours(1))
                     .withDescription("The check interval of partition expiration.");
 
+    public static final ConfigOption<Integer> PARTITION_EXPIRATION_MAX_NUM =
+            key("partition.expiration-max-num")
+                    .intType()
+                    .defaultValue(100)
+                    .withDescription("The default deleted num of partition expiration.");
+
     public static final ConfigOption<String> PARTITION_TIMESTAMP_FORMATTER =
             key("partition.timestamp-formatter")
                     .stringType()
@@ -891,7 +897,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<LookupLocalFileType> LOOKUP_LOCAL_FILE_TYPE =
             key("lookup.local-file-type")
                     .enumType(LookupLocalFileType.class)
-                    .defaultValue(LookupLocalFileType.HASH)
+                    .defaultValue(LookupLocalFileType.SORT)
                     .withDescription("The local file type for lookup.");
 
     public static final ConfigOption<Float> LOOKUP_HASH_LOAD_FACTOR =
@@ -1101,7 +1107,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Boolean> METADATA_STATS_DENSE_STORE =
             key("metadata.stats-dense-store")
                     .booleanType()
-                    .defaultValue(false)
+                    .defaultValue(true)
                     .withDescription(
                             Description.builder()
                                     .text(
@@ -1110,8 +1116,8 @@ public class CoreOptions implements Serializable {
                                                     + " none statistic mode is set.")
                                     .linebreak()
                                     .text(
-                                            "Note, when this mode is enabled, the Paimon sdk in reading engine requires"
-                                                    + " at least version 0.9.1 or 1.0.0 or higher.")
+                                            "Note, when this mode is enabled with 'metadata.stats-mode:none', the Paimon sdk in"
+                                                    + " reading engine requires at least version 0.9.1 or 1.0.0 or higher.")
                                     .build());
 
     public static final ConfigOption<String> COMMIT_CALLBACKS =
@@ -1425,6 +1431,14 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("The object location for object table.");
+
+    public static final ConfigOption<Boolean> MANIFEST_DELETE_FILE_DROP_STATS =
+            key("manifest.delete-file-drop-stats")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "For DELETE manifest entry in manifest file, drop stats to reduce memory and storage."
+                                    + " Default value is false only for compatibility of old reader.");
 
     @ExcludeFromDocumentation("Only used internally to support materialized table")
     public static final ConfigOption<String> MATERIALIZED_TABLE_DEFINITION_QUERY =
@@ -1947,6 +1961,10 @@ public class CoreOptions implements Serializable {
         return lookupStrategy().needLookup;
     }
 
+    public boolean manifestDeleteFileDropStats() {
+        return options.get(MANIFEST_DELETE_FILE_DROP_STATS);
+    }
+
     public LookupStrategy lookupStrategy() {
         return LookupStrategy.from(
                 mergeEngine().equals(MergeEngine.FIRST_ROW),
@@ -2112,6 +2130,10 @@ public class CoreOptions implements Serializable {
 
     public Duration partitionExpireCheckInterval() {
         return options.get(PARTITION_EXPIRATION_CHECK_INTERVAL);
+    }
+
+    public int partitionExpireMaxNum() {
+        return options.get(PARTITION_EXPIRATION_MAX_NUM);
     }
 
     public PartitionExpireStrategy partitionExpireStrategy() {

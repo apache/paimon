@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactDeletionFile;
@@ -96,12 +97,19 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             @Nullable IndexMaintainer.Factory<T> indexFactory,
             @Nullable DeletionVectorsMaintainer.Factory dvMaintainerFactory,
             String tableName,
+            CoreOptions options,
             int totalBuckets,
             RowType partitionType,
             int writerNumberMax,
             boolean legacyPartitionName) {
         this.snapshotManager = snapshotManager;
         this.scan = scan;
+        // Statistic is useless in writer
+        if (options.manifestDeleteFileDropStats()) {
+            if (this.scan != null) {
+                this.scan.dropStats();
+            }
+        }
         this.indexFactory = indexFactory;
         this.dvMaintainerFactory = dvMaintainerFactory;
         this.totalBuckets = totalBuckets;

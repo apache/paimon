@@ -26,17 +26,30 @@ under the License.
 
 # SQL Write
 
-## Syntax
+## Insert Table
+
+The `INSERT` statement inserts new rows into a table or overwrites the existing data in the table. The inserted rows can be specified by value expressions or result from a query.
+
+**Syntax**
 
 ```sql
 INSERT { INTO | OVERWRITE } table_identifier [ part_spec ] [ column_list ] { value_expr | query };
 ```
+**Parameters**
 
-For more information, please check the syntax document:
+- **table_identifier**: Specifies a table name, which may be optionally qualified with a database name. 
 
-[Spark INSERT Statement](https://spark.apache.org/docs/latest/sql-ref-syntax-dml-insert-table.html)
+- **part_spec**: An optional parameter that specifies a comma-separated list of key and value pairs for partitions.
 
-## INSERT INTO
+- **column_list**: An optional parameter that specifies a comma-separated list of columns belonging to the table_identifier table. Spark will reorder the columns of the input query to match the table schema according to the specified column list.
+
+  Note: Since Spark 3.4, INSERT INTO commands with explicit column lists comprising fewer columns than the target table will automatically add the corresponding default values for the remaining columns (or NULL for any column lacking an explicitly-assigned default value). In Spark 3.3 or earlier, column_list's size must be equal to the target table's column size, otherwise these commands would have failed.
+
+- **value_expr** ( { value | NULL } [ , … ] ) [ , ( … ) ]: Specifies the values to be inserted. Either an explicitly specified value or a NULL can be inserted. A comma must be used to separate each value in the clause. More than one set of values can be specified to insert multiple rows.
+
+For more information, please check the syntax document: [Spark INSERT Statement](https://spark.apache.org/docs/latest/sql-ref-syntax-dml-insert-table.html)
+
+### Insert Into
 
 Use `INSERT INTO` to apply records and changes to tables.
 
@@ -44,15 +57,15 @@ Use `INSERT INTO` to apply records and changes to tables.
 INSERT INTO my_table SELECT ...
 ```
 
-## Overwriting the Whole Table
+### Insert Overwrite
 
-Use `INSERT OVERWRITE` to overwrite the whole unpartitioned table.
+Use `INSERT OVERWRITE` to overwrite the whole table.
 
 ```sql
 INSERT OVERWRITE my_table SELECT ...
 ```
 
-### Overwriting a Partition
+#### Insert Overwrite Partition
 
 Use `INSERT OVERWRITE` to overwrite a partition.
 
@@ -60,7 +73,7 @@ Use `INSERT OVERWRITE` to overwrite a partition.
 INSERT OVERWRITE my_table PARTITION (key1 = value1, key2 = value2, ...) SELECT ...
 ```
 
-### Dynamic Overwrite
+#### Dynamic Overwrite Partition
 
 Spark's default overwrite mode is `static` partition overwrite. To enable dynamic overwritten you need to set the Spark session configuration `spark.sql.sources.partitionOverwriteMode` to `dynamic`
 
@@ -97,13 +110,15 @@ SELECT * FROM my_table;
 */
 ```
 
-## Truncate tables
+## Truncate Table
+
+The `TRUNCATE TABLE` statement removes all the rows from a table or partition(s).
 
 ```sql
 TRUNCATE TABLE my_table;
 ```
 
-## Updating tables
+## Update Table
 
 spark supports update PrimitiveType and StructType, for example:
 
@@ -125,13 +140,13 @@ UPDATE t SET name = 'a_new' WHERE id = 1;
 UPDATE t SET s.c2 = 'a_new' WHERE s.c1 = 1;
 ```
 
-## Deleting from table
+## Delete From Table
 
 ```sql
 DELETE FROM my_table WHERE currency = 'UNKNOWN';
 ```
 
-## Merging into table
+## Merge Into Table
 
 Paimon currently supports Merge Into syntax in Spark 3+, which allow a set of updates, insertions and deletions based on a source table in a single commit.
 

@@ -20,13 +20,14 @@ package org.apache.paimon.spark.execution
 
 import org.apache.paimon.spark.{SparkCatalog, SparkUtils}
 import org.apache.paimon.spark.catalog.SupportView
+import org.apache.paimon.spark.catalyst.analysis.ResolvedPaimonView
 import org.apache.paimon.spark.catalyst.plans.logical.{CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, PaimonCallCommand, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand}
 
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.ResolvedNamespace
 import org.apache.spark.sql.catalyst.expressions.{Expression, GenericInternalRow, PredicateHelper}
-import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, LogicalPlan}
+import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, DescribeRelation, LogicalPlan, ShowCreateTable}
 import org.apache.spark.sql.connector.catalog.{Identifier, PaimonLookupCatalog, TableCatalog}
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.shim.PaimonCreateTableAsSelectStrategy
@@ -99,6 +100,12 @@ case class PaimonStrategy(spark: SparkSession)
     case ShowPaimonViews(r: ResolvedNamespace, pattern, output)
         if r.catalog.isInstanceOf[SupportView] =>
       ShowPaimonViewsExec(output, r.catalog.asInstanceOf[SupportView], r.namespace, pattern) :: Nil
+
+    case ShowCreateTable(ResolvedPaimonView(viewCatalog, ident), _, output) =>
+      ShowCreatePaimonViewExec(output, viewCatalog, ident) :: Nil
+
+    case DescribeRelation(ResolvedPaimonView(viewCatalog, ident), _, isExtended, output) =>
+      DescribePaimonViewExec(output, viewCatalog, ident, isExtended) :: Nil
 
     case _ => Nil
   }
