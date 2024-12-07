@@ -72,7 +72,8 @@ public class ExpirePartitionsAction extends TableActionBase {
                                                 .catalogEnvironment()
                                                 .metastoreClientFactory())
                                 .map(MetastoreClient.Factory::create)
-                                .orElse(null));
+                                .orElse(null),
+                        fileStore.options().partitionExpireMaxNum());
     }
 
     @Override

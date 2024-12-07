@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
@@ -146,6 +147,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             String tableName,
             String commitUser,
             RowType partitionType,
+            CoreOptions options,
             String partitionDefaultName,
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
@@ -176,8 +178,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.manifestFile = manifestFileFactory.create();
         this.manifestList = manifestListFactory.create();
         this.indexManifestFile = indexManifestFileFactory.create();
+        this.scan = scan;
         // Stats in DELETE Manifest Entries is useless
-        this.scan = scan.dropStats();
+        if (options.manifestDeleteFileDropStats()) {
+            this.scan.dropStats();
+        }
         this.numBucket = numBucket;
         this.manifestTargetSize = manifestTargetSize;
         this.manifestFullCompactionSize = manifestFullCompactionSize;
@@ -716,21 +721,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             ConflictCheck conflictCheck,
             String branchName,
             @Nullable String statsFileName) {
-        int cnt = 0;
+        int retryCount = 0;
         RetryResult retryResult = null;
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
-            cnt++;
-            if (cnt >= commitMaxRetries) {
-                if (retryResult != null) {
-                    retryResult.cleanAll();
-                }
-                throw new RuntimeException(
-                        String.format(
-                                "Commit failed after %s attempts, there maybe exist commit conflicts between multiple jobs.",
-                                commitMaxRetries));
-            }
-
             CommitResult result =
                     tryCommitOnce(
                             retryResult,
@@ -751,8 +745,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
 
             retryResult = (RetryResult) result;
+
+            if (retryCount >= commitMaxRetries) {
+                if (retryResult != null) {
+                    retryResult.cleanAll();
+                }
+                throw new RuntimeException(
+                        String.format(
+                                "Commit failed after %s retries, there maybe exist commit conflicts between multiple jobs.",
+                                commitMaxRetries));
+            }
+            retryCount++;
         }
-        return cnt;
+        return retryCount + 1;
     }
 
     private int tryOverwrite(
@@ -762,17 +767,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long identifier,
             @Nullable Long watermark,
             Map<Integer, Long> logOffsets) {
-        int cnt = 0;
+        int retryCount = 0;
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
 
-            cnt++;
-            if (cnt >= commitMaxRetries) {
-                throw new RuntimeException(
-                        String.format(
-                                "Commit failed after %s attempts, there maybe exist commit conflicts between multiple jobs.",
-                                commitMaxRetries));
-            }
             List<ManifestEntry> changesWithOverwrite = new ArrayList<>();
             List<IndexManifestEntry> indexChangesWithOverwrite = new ArrayList<>();
             if (latestSnapshot != null) {
@@ -828,8 +826,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             // TODO optimize OVERWRITE too
             RetryResult retryResult = (RetryResult) result;
             retryResult.cleanAll();
+
+            if (retryCount >= commitMaxRetries) {
+                throw new RuntimeException(
+                        String.format(
+                                "Commit failed after %s retries, there maybe exist commit conflicts between multiple jobs.",
+                                commitMaxRetries));
+            }
+            retryCount++;
         }
-        return cnt;
+        return retryCount + 1;
     }
 
     @VisibleForTesting
@@ -1069,22 +1075,22 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     public void compactManifest() {
-        int cnt = 0;
+        int retryCount = 0;
         ManifestCompactResult retryResult = null;
         while (true) {
-            cnt++;
             retryResult = compactManifest(retryResult);
             if (retryResult.isSuccess()) {
                 break;
             }
 
-            if (cnt >= commitMaxRetries) {
+            if (retryCount >= commitMaxRetries) {
                 retryResult.cleanAll();
                 throw new RuntimeException(
                         String.format(
-                                "Commit compact manifest failed after %s attempts, there maybe exist commit conflicts between multiple jobs.",
+                                "Commit compact manifest failed after %s retries, there maybe exist commit conflicts between multiple jobs.",
                                 commitMaxRetries));
             }
+            retryCount++;
         }
     }
 

@@ -32,18 +32,13 @@ import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.runtime.checkpoint.CheckpointOptions;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.state.CheckpointStreamFactory;
-import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
-import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.OperatorSnapshotFutures;
-import org.apache.flink.streaming.api.operators.Output;
-import org.apache.flink.streaming.api.operators.SetupableStreamOperator;
 import org.apache.flink.streaming.api.operators.StreamTaskStateInitializer;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.LatencyMarker;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
-import org.apache.flink.streaming.runtime.tasks.StreamTask;
 import org.apache.flink.streaming.runtime.watermarkstatus.WatermarkStatus;
 
 import java.time.Duration;
@@ -58,9 +53,7 @@ import java.util.TreeSet;
  * time, tags are automatically created for each flink savepoint.
  */
 public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
-        implements OneInputStreamOperator<CommitT, CommitT>,
-                SetupableStreamOperator,
-                BoundedOneInput {
+        implements OneInputStreamOperator<CommitT, CommitT>, BoundedOneInput {
     public static final String SAVEPOINT_TAG_PREFIX = "savepoint-";
 
     private static final long serialVersionUID = 1L;
@@ -255,20 +248,5 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
     @Override
     public void endInput() throws Exception {
         commitOperator.endInput();
-    }
-
-    @Override
-    public void setup(StreamTask containingTask, StreamConfig config, Output output) {
-        commitOperator.setup(containingTask, config, output);
-    }
-
-    @Override
-    public ChainingStrategy getChainingStrategy() {
-        return commitOperator.getChainingStrategy();
-    }
-
-    @Override
-    public void setChainingStrategy(ChainingStrategy strategy) {
-        commitOperator.setChainingStrategy(strategy);
     }
 }

@@ -87,12 +87,6 @@ under the License.
             <td>Whether to support format tables, format table corresponds to a regular csv, parquet or orc table, allowing read and write operations. However, during these processes, it does not connect to the metastore; hence, newly added partitions will not be reflected in the metastore and need to be manually added as separate partition operations.</td>
         </tr>
         <tr>
-            <td><h5>lineage-meta</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>The lineage meta to store table and data lineage information.<br /><br />Possible values:<br /><ul><li>"jdbc": Use standard jdbc to store table and data lineage information.</li></ul><ul><li>"custom": You can implement LineageMetaFactory and LineageMeta to store lineage information in customized storage.</li></ul></td>
-        </tr>
-        <tr>
             <td><h5>lock-acquire-timeout</h5></td>
             <td style="word-wrap: break-word;">8 min</td>
             <td>Duration</td>

@@ -24,7 +24,6 @@ import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.lineage.LineageMetaFactory;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.FileStoreCommit;
@@ -62,7 +61,6 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.options.CatalogOptions.ALLOW_UPPER_CASE;
-import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
@@ -76,19 +74,14 @@ public abstract class AbstractCatalog implements Catalog {
     protected final Map<String, String> tableDefaultOptions;
     protected final Options catalogOptions;
 
-    @Nullable protected final LineageMetaFactory lineageMetaFactory;
-
     protected AbstractCatalog(FileIO fileIO) {
         this.fileIO = fileIO;
-        this.lineageMetaFactory = null;
         this.tableDefaultOptions = new HashMap<>();
         this.catalogOptions = new Options();
     }
 
     protected AbstractCatalog(FileIO fileIO, Options options) {
         this.fileIO = fileIO;
-        this.lineageMetaFactory =
-                findAndCreateLineageMeta(options, AbstractCatalog.class.getClassLoader());
         this.tableDefaultOptions = Catalog.tableDefaultOptions(options.toMap());
         this.catalogOptions = options;
     }
@@ -377,27 +370,13 @@ public abstract class AbstractCatalog implements Catalog {
     protected abstract void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException;
 
-    @Nullable
-    private LineageMetaFactory findAndCreateLineageMeta(Options options, ClassLoader classLoader) {
-        return options.getOptional(LINEAGE_META)
-                .map(
-                        meta ->
-                                FactoryUtil.discoverFactory(
-                                        classLoader, LineageMetaFactory.class, meta))
-                .orElse(null);
-    }
-
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
         if (isSystemDatabase(identifier.getDatabaseName())) {
             String tableName = identifier.getTableName();
             Table table =
                     SystemTableLoader.loadGlobal(
-                            tableName,
-                            fileIO,
-                            this::allTablePaths,
-                            catalogOptions,
-                            lineageMetaFactory);
+                            tableName, fileIO, this::allTablePaths, catalogOptions);
             if (table == null) {
                 throw new TableNotExistException(identifier);
             }
@@ -444,8 +423,7 @@ public abstract class AbstractCatalog implements Catalog {
                                         lockFactory().orElse(null),
                                         lockContext().orElse(null),
                                         identifier),
-                                metastoreClientFactory(identifier, tableMeta.schema).orElse(null),
-                                lineageMetaFactory));
+                                metastoreClientFactory(identifier, tableMeta.schema).orElse(null)));
         CoreOptions options = table.coreOptions();
         if (options.type() == TableType.OBJECT_TABLE) {
             String objectLocation = options.objectLocation();

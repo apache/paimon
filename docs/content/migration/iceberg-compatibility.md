@@ -371,8 +371,36 @@ you also need to set some (or all) of the following table options when creating 
       <td>String</td>
       <td>hadoop-conf-dir for Iceberg Hive catalog.</td>
     </tr>
+    <tr>
+      <td><h5>metadata.iceberg.manifest-compression</h5></td>
+      <td style="word-wrap: break-word;">snappy</td>
+      <td>String</td>
+      <td>Compression for Iceberg manifest files.</td>
+    </tr>
+    <tr>
+      <td><h5>metadata.iceberg.manifest-legacy-version</h5></td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>Should use the legacy manifest version to generate Iceberg's 1.4 manifest files.</td>
+    </tr>
+    <tr>
+      <td><h5>metadata.iceberg.hive-client-class</h5></td>
+      <td style="word-wrap: break-word;">org.apache.hadoop.hive.metastore.HiveMetaStoreClient</td>
+      <td>String</td>
+      <td>Hive client class name for Iceberg Hive Catalog.</td>
+    </tr>
     </tbody>
 </table>
+
+## AWS Glue Catalog
+
+You can use Hive Catalog to connect AWS Glue metastore, you can use set `'metadata.iceberg.hive-client-class'` to
+`'com.amazonaws.glue.catalog.metastore.AWSCatalogMetastoreClient'`.
+
+## AWS Athena
+
+AWS Athena may use old manifest reader to read Iceberg manifest by names, we should let Paimon producing legacy Iceberg
+manifest list file, you can enable: `'metadata.iceberg.manifest-legacy-version'`.
 
 ## Trino Iceberg
 
@@ -451,21 +479,24 @@ SELECT * FROM animals WHERE class = 'mammal';
 
 Paimon Iceberg compatibility currently supports the following data types.
 
-| Paimon Data Type  | Iceberg Data Type |
-|-------------------|-------------------|
-| `BOOLEAN`         | `boolean`         |
-| `INT`             | `int`             |
-| `BIGINT`          | `long`            |
-| `FLOAT`           | `float`           |
-| `DOUBLE`          | `double`          |
-| `DECIMAL`         | `decimal`         |
-| `CHAR`            | `string`          |
-| `VARCHAR`         | `string`          |
-| `BINARY`          | `binary`          |
-| `VARBINARY`       | `binary`          |
-| `DATE`            | `date`            |
-| `TIMESTAMP`*      | `timestamp`       |
-| `TIMESTAMP_LTZ`*  | `timestamptz`     |
+| Paimon Data Type | Iceberg Data Type |
+|------------------|-------------------|
+| `BOOLEAN`        | `boolean`         |
+| `INT`            | `int`             |
+| `BIGINT`         | `long`            |
+| `FLOAT`          | `float`           |
+| `DOUBLE`         | `double`          |
+| `DECIMAL`        | `decimal`         |
+| `CHAR`           | `string`          |
+| `VARCHAR`        | `string`          |
+| `BINARY`         | `binary`          |
+| `VARBINARY`      | `binary`          |
+| `DATE`           | `date`            |
+| `TIMESTAMP`*     | `timestamp`       |
+| `TIMESTAMP_LTZ`* | `timestamptz`     |
+| `ARRAY`          | `list`            |
+| `MAP`            | `map`             |
+| `ROW`            | `struct`          |
 
 *: `TIMESTAMP` and `TIMESTAMP_LTZ` type only support precision from 4 to 6
 

@@ -16,22 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lineage;
+package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.factories.Factory;
-import org.apache.paimon.options.Options;
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.rules.Rule
 
-import java.io.Serializable;
-
-/** Factory to create {@link LineageMeta}. Each factory should have a unique identifier. */
-public interface LineageMetaFactory extends Factory, Serializable {
-
-    LineageMeta create(LineageMetaContext context);
-
-    /**
-     * Context has all options in a catalog and is used in factory to create {@link LineageMeta}.
-     */
-    interface LineageMetaContext {
-        Options options();
-    }
+case class Spark4ResolutionRules(session: SparkSession) extends Rule[LogicalPlan] {
+  override def apply(plan: LogicalPlan): LogicalPlan = plan
 }

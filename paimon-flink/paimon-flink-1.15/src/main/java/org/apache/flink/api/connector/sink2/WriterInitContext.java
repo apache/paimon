@@ -16,17 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lineage;
+package org.apache.flink.api.connector.sink2;
 
-import org.apache.paimon.data.Timestamp;
-
-/** Table lineage entity with database, table and job for table source and sink lineage. */
-public interface TableLineageEntity {
-    String getDatabase();
-
-    String getTable();
-
-    String getJob();
-
-    Timestamp getCreateTime();
-}
+/** Placeholder class to resolve compatibility issues. */
+public interface WriterInitContext extends org.apache.flink.api.connector.sink2.Sink.InitContext {}

@@ -22,12 +22,14 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.iceberg.metadata.IcebergDataField;
 import org.apache.paimon.iceberg.metadata.IcebergSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -110,27 +112,44 @@ public class IcebergDataFileMeta {
             long recordCount,
             long fileSizeInBytes,
             IcebergSchema icebergSchema,
-            SimpleStats stats) {
+            SimpleStats stats,
+            @Nullable List<String> statsColumns) {
+        int numFields = icebergSchema.fields().size();
+        Map<String, Integer> indexMap = new HashMap<>();
+        if (statsColumns == null) {
+            for (int i = 0; i < numFields; i++) {
+                indexMap.put(icebergSchema.fields().get(i).name(), i);
+            }
+        } else {
+            for (int i = 0; i < statsColumns.size(); i++) {
+                indexMap.put(statsColumns.get(i), i);
+            }
+        }
+
         Map<Integer, Long> nullValueCounts = new HashMap<>();
         Map<Integer, byte[]> lowerBounds = new HashMap<>();
         Map<Integer, byte[]> upperBounds = new HashMap<>();
 
-        List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
-        int numFields = icebergSchema.fields().size();
         for (int i = 0; i < numFields; i++) {
-            fieldGetters.add(
-                    InternalRow.createFieldGetter(icebergSchema.fields().get(i).dataType(), i));
-        }
+            IcebergDataField field = icebergSchema.fields().get(i);
+            if (!indexMap.containsKey(field.name())) {
+                continue;
+            }
 
-        for (int i = 0; i < numFields; i++) {
-            int fieldId = icebergSchema.fields().get(i).id();
-            DataType type = icebergSchema.fields().get(i).dataType();
-            nullValueCounts.put(fieldId, stats.nullCounts().getLong(i));
-            Object minValue = fieldGetters.get(i).getFieldOrNull(stats.minValues());
-            Object maxValue = fieldGetters.get(i).getFieldOrNull(stats.maxValues());
+            int idx = indexMap.get(field.name());
+            nullValueCounts.put(field.id(), stats.nullCounts().getLong(idx));
+
+            InternalRow.FieldGetter fieldGetter =
+                    InternalRow.createFieldGetter(field.dataType(), idx);
+            Object minValue = fieldGetter.getFieldOrNull(stats.minValues());
+            Object maxValue = fieldGetter.getFieldOrNull(stats.maxValues());
             if (minValue != null && maxValue != null) {
-                lowerBounds.put(fieldId, IcebergConversions.toByteBuffer(type, minValue).array());
-                upperBounds.put(fieldId, IcebergConversions.toByteBuffer(type, maxValue).array());
+                lowerBounds.put(
+                        field.id(),
+                        IcebergConversions.toByteBuffer(field.dataType(), minValue).array());
+                upperBounds.put(
+                        field.id(),
+                        IcebergConversions.toByteBuffer(field.dataType(), maxValue).array());
             }
         }
 

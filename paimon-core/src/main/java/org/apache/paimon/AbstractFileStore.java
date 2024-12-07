@@ -218,6 +218,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 tableName,
                 commitUser,
                 partitionType,
+                options,
                 options.partitionDefaultName(),
                 pathFactory(),
                 snapshotManager(),
@@ -308,7 +309,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newScan(),
                 newCommit(commitUser),
                 metastoreClient,
-                options.endInputCheckPartitionExpire());
+                options.endInputCheckPartitionExpire(),
+                options.partitionExpireMaxNum());
     }
 
     @Override

@@ -40,6 +40,8 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     extensions.injectResolutionRule(spark => new PaimonAnalysis(spark))
     extensions.injectResolutionRule(spark => PaimonProcedureResolver(spark))
     extensions.injectResolutionRule(spark => PaimonViewResolver(spark))
+    extensions.injectResolutionRule(
+      spark => SparkShimLoader.getSparkShim.createCustomResolution(spark))
     extensions.injectResolutionRule(spark => PaimonIncompatibleResolutionRules(spark))
 
     extensions.injectPostHocResolutionRule(spark => PaimonPostHocResolutionRules(spark))

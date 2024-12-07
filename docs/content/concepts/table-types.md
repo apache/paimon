@@ -33,7 +33,7 @@ Paimon supports table types:
 3. view: metastore required, views in SQL are a kind of virtual table
 4. format-table: file format table refers to a directory that contains multiple files of the same format, where
    operations on this table allow for reading or writing to these files, compatible with Hive tables
-5. object table: provides metadata indexes for unstructured data objects in the specified Object Storage storage directory.
+5. object table: provides metadata indexes for unstructured data objects in the specified Object Storage directory.
 6. materialized-table: aimed at simplifying both batch and stream data pipelines, providing a consistent development
    experience, see [Flink Materialized Table](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/materialized-table/overview/)
 

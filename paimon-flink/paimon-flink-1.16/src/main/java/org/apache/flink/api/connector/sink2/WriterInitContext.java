@@ -16,18 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lineage;
+package org.apache.flink.api.connector.sink2;
 
-import org.apache.paimon.data.Timestamp;
-
-/**
- * Data lineage entity with table lineage, barrier id and snapshot id for table source and sink
- * lineage.
- */
-public interface DataLineageEntity extends TableLineageEntity {
-    long getBarrierId();
-
-    long getSnapshotId();
-
-    Timestamp getCreateTime();
-}
+/** Placeholder class to resolve compatibility issues. */
+public interface WriterInitContext extends org.apache.flink.api.connector.sink2.Sink.InitContext {}

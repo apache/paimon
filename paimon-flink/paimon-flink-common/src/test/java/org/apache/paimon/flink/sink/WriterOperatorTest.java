@@ -115,9 +115,10 @@ public class WriterOperatorTest {
 
     private void testMetricsImpl(FileStoreTable fileStoreTable) throws Exception {
         String tableName = tablePath.getName();
-        RowDataStoreWriteOperator operator = getStoreSinkWriteOperator(fileStoreTable);
+        RowDataStoreWriteOperator.Factory operatorFactory =
+                getStoreSinkWriteOperatorFactory(fileStoreTable);
         OneInputStreamOperatorTestHarness<InternalRow, Committable> harness =
-                createHarness(operator);
+                createHarness(operatorFactory);
 
         TypeSerializer<Committable> serializer =
                 new CommittableTypeInfo().createSerializer(new ExecutionConfig());
@@ -133,7 +134,7 @@ public class WriterOperatorTest {
         harness.snapshot(1, 2);
         harness.notifyOfCompletedCheckpoint(1);
 
-        OperatorMetricGroup metricGroup = operator.getMetricGroup();
+        OperatorMetricGroup metricGroup = harness.getOneInputOperator().getMetricGroup();
         MetricGroup writerBufferMetricGroup =
                 metricGroup
                         .addGroup("paimon")
@@ -173,9 +174,10 @@ public class WriterOperatorTest {
                         rowType, Arrays.asList("pt", "k"), Collections.singletonList("k"), options);
 
         // we don't wait for compaction because this is async lookup test
-        RowDataStoreWriteOperator operator = getAsyncLookupWriteOperator(fileStoreTable, false);
+        RowDataStoreWriteOperator.Factory operatorFactory =
+                getAsyncLookupWriteOperatorFactory(fileStoreTable, false);
         OneInputStreamOperatorTestHarness<InternalRow, Committable> harness =
-                createHarness(operator);
+                createHarness(operatorFactory);
 
         TableCommitImpl commit = fileStoreTable.newCommit(commitUser);
 
@@ -205,8 +207,8 @@ public class WriterOperatorTest {
         harness.close();
 
         // re-create operator from state, this time wait for compaction to check result
-        operator = getAsyncLookupWriteOperator(fileStoreTable, true);
-        harness = createHarness(operator);
+        operatorFactory = getAsyncLookupWriteOperatorFactory(fileStoreTable, true);
+        harness = createHarness(operatorFactory);
         harness.setup(serializer);
         harness.initializeState(state);
         harness.open();
@@ -263,9 +265,10 @@ public class WriterOperatorTest {
         FileStoreTable fileStoreTable =
                 createFileStoreTable(
                         rowType, Arrays.asList("pt", "k"), Collections.singletonList("k"), options);
-        RowDataStoreWriteOperator operator = getStoreSinkWriteOperator(fileStoreTable);
+        RowDataStoreWriteOperator.Factory operatorFactory =
+                getStoreSinkWriteOperatorFactory(fileStoreTable);
         OneInputStreamOperatorTestHarness<InternalRow, Committable> harness =
-                createHarness(operator);
+                createHarness(operatorFactory);
 
         TableCommitImpl commit = fileStoreTable.newCommit(commitUser);
 
@@ -277,7 +280,7 @@ public class WriterOperatorTest {
         if (insertOnly) {
             Field field = TableWriteOperator.class.getDeclaredField("write");
             field.setAccessible(true);
-            StoreSinkWrite write = (StoreSinkWrite) field.get(operator);
+            StoreSinkWrite write = (StoreSinkWrite) field.get(harness.getOneInputOperator());
             write.withInsertOnly(true);
         }
 
@@ -339,17 +342,17 @@ public class WriterOperatorTest {
                         options);
         TableCommitImpl commit = fileStoreTable.newCommit(commitUser);
 
-        RowDataStoreWriteOperator rowDataStoreWriteOperator =
-                getStoreSinkWriteOperator(fileStoreTable);
+        RowDataStoreWriteOperator.Factory operatorFactory =
+                getStoreSinkWriteOperatorFactory(fileStoreTable);
         OneInputStreamOperatorTestHarness<InternalRow, Committable> harness =
-                createHarness(rowDataStoreWriteOperator);
+                createHarness(operatorFactory);
 
         TypeSerializer<Committable> serializer =
                 new CommittableTypeInfo().createSerializer(new ExecutionConfig());
         harness.setup(serializer);
         harness.open();
 
-        OperatorMetricGroup metricGroup = rowDataStoreWriteOperator.getMetricGroup();
+        OperatorMetricGroup metricGroup = harness.getOneInputOperator().getMetricGroup();
         MetricGroup writerBufferMetricGroup =
                 metricGroup
                         .addGroup("paimon")
@@ -408,8 +411,9 @@ public class WriterOperatorTest {
     //  Test utils
     // ------------------------------------------------------------------------
 
-    private RowDataStoreWriteOperator getStoreSinkWriteOperator(FileStoreTable fileStoreTable) {
-        return new RowDataStoreWriteOperator(
+    private RowDataStoreWriteOperator.Factory getStoreSinkWriteOperatorFactory(
+            FileStoreTable fileStoreTable) {
+        return new RowDataStoreWriteOperator.Factory(
                 fileStoreTable,
                 null,
                 (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
@@ -426,9 +430,9 @@ public class WriterOperatorTest {
                 commitUser);
     }
 
-    private RowDataStoreWriteOperator getAsyncLookupWriteOperator(
+    private RowDataStoreWriteOperator.Factory getAsyncLookupWriteOperatorFactory(
             FileStoreTable fileStoreTable, boolean waitCompaction) {
-        return new RowDataStoreWriteOperator(
+        return new RowDataStoreWriteOperator.Factory(
                 fileStoreTable,
                 null,
                 (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
@@ -471,10 +475,11 @@ public class WriterOperatorTest {
     }
 
     private OneInputStreamOperatorTestHarness<InternalRow, Committable> createHarness(
-            RowDataStoreWriteOperator operator) throws Exception {
+            RowDataStoreWriteOperator.Factory operatorFactory) throws Exception {
         InternalTypeInfo<InternalRow> internalRowInternalTypeInfo =
                 new InternalTypeInfo<>(new InternalRowTypeSerializer(RowType.builder().build()));
         return new OneInputStreamOperatorTestHarness<>(
-                operator, internalRowInternalTypeInfo.createSerializer(new ExecutionConfig()));
+                operatorFactory,
+                internalRowInternalTypeInfo.createSerializer(new ExecutionConfig()));
     }
 }

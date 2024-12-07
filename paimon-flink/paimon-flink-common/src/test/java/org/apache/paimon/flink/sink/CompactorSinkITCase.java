@@ -254,8 +254,8 @@ public class CompactorSinkITCase extends AbstractTestBase {
         return harness;
     }
 
-    protected StoreCompactOperator createCompactOperator(FileStoreTable table) {
-        return new StoreCompactOperator(
+    protected StoreCompactOperator.Factory createCompactOperator(FileStoreTable table) {
+        return new StoreCompactOperator.Factory(
                 table,
                 (t, commitUser, state, ioManager, memoryPool, metricGroup) ->
                         new StoreSinkWriteImpl(
@@ -272,9 +272,9 @@ public class CompactorSinkITCase extends AbstractTestBase {
                 true);
     }
 
-    protected MultiTablesStoreCompactOperator createMultiTablesCompactOperator(
+    protected MultiTablesStoreCompactOperator.Factory createMultiTablesCompactOperator(
             Catalog.Loader catalogLoader) throws Exception {
-        return new MultiTablesStoreCompactOperator(
+        return new MultiTablesStoreCompactOperator.Factory(
                 catalogLoader,
                 commitUser,
                 new CheckpointConfig(),

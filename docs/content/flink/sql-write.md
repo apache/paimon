@@ -79,7 +79,7 @@ The data is clustered using an automatically chosen strategy (such as ORDER, ZOR
 by setting the `sink.clustering.strategy`. Clustering relies on sampling and sorting. If the clustering process takes too much time, you can decrease
 the total sample number by setting the `sink.clustering.sample-factor` or disable the sorting step by setting the `sink.clustering.sort-in-cluster` to false.
 
-You can refer to [FlinkConnectorOptions]({{< ref "maintenance/configurations#FlinkConnectorOptions" >}}) for more info about the configurations above.
+You can refer to [FlinkConnectorOptions]({{< ref "maintenance/configurations#flinkconnectoroptions" >}}) for more info about the configurations above.
 
 ## Overwriting the Whole Table
 

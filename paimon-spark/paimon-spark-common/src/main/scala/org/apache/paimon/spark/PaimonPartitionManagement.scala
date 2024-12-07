@@ -100,7 +100,7 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
   }
 
   override def loadPartitionMetadata(ident: InternalRow): JMap[String, String] = {
-    throw new UnsupportedOperationException("Load partition is not supported")
+    Map.empty[String, String].asJava
   }
 
   override def listPartitionIdentifiers(
