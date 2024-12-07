@@ -21,6 +21,8 @@ package org.apache.paimon.flink.action.cdc;
 import org.apache.paimon.catalog.Identifier;
 
 import java.io.Serializable;
+import java.util.HashMap;
+import java.util.Map;
 
 /** Used to convert a MySQL source table name to corresponding Paimon table name. */
 public class TableNameConverter implements Serializable {
@@ -31,20 +33,31 @@ public class TableNameConverter implements Serializable {
     private final boolean mergeShards;
     private final String prefix;
     private final String suffix;
+    private final Map<String, String> tableMapping;
 
     public TableNameConverter(boolean caseSensitive) {
-        this(caseSensitive, true, "", "");
+        this(caseSensitive, true, "", "", null);
     }
 
     public TableNameConverter(
-            boolean caseSensitive, boolean mergeShards, String prefix, String suffix) {
+            boolean caseSensitive,
+            boolean mergeShards,
+            String prefix,
+            String suffix,
+            Map<String, String> tableMapping) {
         this.caseSensitive = caseSensitive;
         this.mergeShards = mergeShards;
         this.prefix = prefix;
         this.suffix = suffix;
+        this.tableMapping = lowerMapKey(tableMapping);
     }
 
     public String convert(String originName) {
+        if (tableMapping.containsKey(originName.toLowerCase())) {
+            String mappedName = tableMapping.get(originName.toLowerCase());
+            return caseSensitive ? mappedName : mappedName.toLowerCase();
+        }
+
         String tableName = caseSensitive ? originName : originName.toLowerCase();
         return prefix + tableName + suffix;
     }
@@ -57,5 +70,19 @@ public class TableNameConverter implements Serializable {
                                 + "_"
                                 + originIdentifier.getObjectName();
         return convert(rawName);
+    }
+
+    private Map<String, String> lowerMapKey(Map<String, String> map) {
+        int size = map == null ? 0 : map.size();
+        Map<String, String> lowerKeyMap = new HashMap(size);
+        if (size == 0) {
+            return lowerKeyMap;
+        }
+
+        for (String key : map.keySet()) {
+            lowerKeyMap.put(key.toLowerCase(), map.get(key));
+        }
+
+        return lowerKeyMap;
     }
 }
