@@ -22,7 +22,9 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.TimeUtils;
+import org.apache.paimon.utils.ParameterUtils;
+import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
@@ -47,11 +49,12 @@ public class ExpirePartitionsProcedure extends BaseProcedure {
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
-                ProcedureParameter.required("expiration_time", StringType),
+                ProcedureParameter.optional("expiration_time", StringType),
                 ProcedureParameter.optional("timestamp_formatter", StringType),
                 ProcedureParameter.optional("timestamp_pattern", StringType),
                 ProcedureParameter.optional("expire_strategy", StringType),
-                ProcedureParameter.optional("max_expires", IntegerType)
+                ProcedureParameter.optional("max_expires", IntegerType),
+                ProcedureParameter.optional("options", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -77,34 +80,63 @@ public class ExpirePartitionsProcedure extends BaseProcedure {
     @Override
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
-        String expirationTime = args.getString(1);
+        String expirationTime = args.isNullAt(1) ? null : args.getString(1);
         String timestampFormatter = args.isNullAt(2) ? null : args.getString(2);
         String timestampPattern = args.isNullAt(3) ? null : args.getString(3);
         String expireStrategy = args.isNullAt(4) ? null : args.getString(4);
         Integer maxExpires = args.isNullAt(5) ? null : args.getInt(5);
+        String options = args.isNullAt(6) ? null : args.getString(6);
+
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
+                    Map<String, String> dynamicOptions = new HashMap<>();
+                    if (!StringUtils.isNullOrWhitespaceOnly(expireStrategy)) {
+                        dynamicOptions.put(
+                                CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
+                    }
+                    if (!StringUtils.isNullOrWhitespaceOnly(timestampFormatter)) {
+                        dynamicOptions.put(
+                                CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(),
+                                timestampFormatter);
+                    }
+                    if (!StringUtils.isNullOrWhitespaceOnly(timestampPattern)) {
+                        dynamicOptions.put(
+                                CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
+                    }
+                    if (!StringUtils.isNullOrWhitespaceOnly(expirationTime)) {
+                        dynamicOptions.put(
+                                CoreOptions.PARTITION_EXPIRATION_TIME.key(), expirationTime);
+                    }
+                    if (maxExpires != null) {
+                        dynamicOptions.put(
+                                CoreOptions.PARTITION_EXPIRATION_MAX_NUM.key(),
+                                String.valueOf(maxExpires));
+                    }
+                    if (!StringUtils.isNullOrWhitespaceOnly(options)) {
+                        dynamicOptions.putAll(ParameterUtils.parseCommaSeparatedKeyValues(options));
+                    }
+
+                    table = table.copy(dynamicOptions);
                     FileStoreTable fileStoreTable = (FileStoreTable) table;
                     FileStore fileStore = fileStoreTable.store();
-                    Map<String, String> map = new HashMap<>();
-                    map.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
-                    map.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
-                    map.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
+
+                    // check expiration time not null
+                    Preconditions.checkNotNull(
+                            fileStore.options().partitionExpireTime(),
+                            "The partition expiration time is must been required, you can set it by configuring the property 'partition.expiration-time' or adding the 'expiration_time' parameter in procedure.  ");
 
                     PartitionExpire partitionExpire =
                             new PartitionExpire(
-                                    TimeUtils.parseDuration(expirationTime),
+                                    fileStore.options().partitionExpireTime(),
                                     Duration.ofMillis(0L),
                                     createPartitionExpireStrategy(
-                                            CoreOptions.fromMap(map), fileStore.partitionType()),
+                                            fileStore.options(), fileStore.partitionType()),
                                     fileStore.newScan(),
                                     fileStore.newCommit(""),
                                     fileStoreTable.catalogEnvironment().partitionHandler(),
                                     fileStore.options().partitionExpireMaxNum());
-                    if (maxExpires != null) {
-                        partitionExpire.withMaxExpireNum(maxExpires);
-                    }
+
                     List<Map<String, String>> expired = partitionExpire.expire(Long.MAX_VALUE);
                     return expired == null || expired.isEmpty()
                             ? new InternalRow[] {

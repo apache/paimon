@@ -23,7 +23,10 @@ import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.TimeUtils;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.ParameterUtils;
+import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
@@ -59,6 +62,7 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
                 timestampFormatter,
                 timestampPattern,
                 expireStrategy,
+                null,
                 null);
     }
 
@@ -69,28 +73,50 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
             String timestampFormatter,
             String timestampPattern,
             String expireStrategy,
-            Integer maxExpires)
+            Integer maxExpires,
+            String options)
             throws Catalog.TableNotExistException {
-        FileStoreTable fileStoreTable = (FileStoreTable) table(tableId);
+        Map<String, String> dynamicOptions = new HashMap<>();
+        if (!StringUtils.isNullOrWhitespaceOnly(expireStrategy)) {
+            dynamicOptions.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
+        }
+        if (!StringUtils.isNullOrWhitespaceOnly(timestampFormatter)) {
+            dynamicOptions.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
+        }
+        if (!StringUtils.isNullOrWhitespaceOnly(timestampPattern)) {
+            dynamicOptions.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
+        }
+        if (!StringUtils.isNullOrWhitespaceOnly(expirationTime)) {
+            dynamicOptions.put(CoreOptions.PARTITION_EXPIRATION_TIME.key(), expirationTime);
+        }
+        if (maxExpires != null) {
+            dynamicOptions.put(
+                    CoreOptions.PARTITION_EXPIRATION_MAX_NUM.key(), String.valueOf(maxExpires));
+        }
+        if (!StringUtils.isNullOrWhitespaceOnly(options)) {
+            dynamicOptions.putAll(ParameterUtils.parseCommaSeparatedKeyValues(options));
+        }
+
+        Table table = table(tableId).copy(dynamicOptions);
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
         FileStore fileStore = fileStoreTable.store();
-        Map<String, String> map = new HashMap<>();
-        map.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
-        map.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
-        map.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
+
+        // check expiration time not null
+        Preconditions.checkNotNull(
+                fileStore.options().partitionExpireTime(),
+                "The partition expiration time is must been required, you can set it by configuring the property 'partition.expiration-time' or adding the 'expiration_time' parameter in procedure.  ");
 
         PartitionExpire partitionExpire =
                 new PartitionExpire(
-                        TimeUtils.parseDuration(expirationTime),
+                        fileStore.options().partitionExpireTime(),
                         Duration.ofMillis(0L),
                         createPartitionExpireStrategy(
-                                CoreOptions.fromMap(map), fileStore.partitionType()),
+                                fileStore.options(), fileStore.partitionType()),
                         fileStore.newScan(),
                         fileStore.newCommit(""),
                         fileStoreTable.catalogEnvironment().partitionHandler(),
                         fileStore.options().partitionExpireMaxNum());
-        if (maxExpires != null) {
-            partitionExpire.withMaxExpireNum(maxExpires);
-        }
+
         List<Map<String, String>> expired = partitionExpire.expire(Long.MAX_VALUE);
         return expired == null || expired.isEmpty()
                 ? new String[] {"No expired partitions."}
