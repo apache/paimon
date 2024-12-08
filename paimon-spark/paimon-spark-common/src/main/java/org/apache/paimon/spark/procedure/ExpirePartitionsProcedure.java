@@ -18,13 +18,11 @@
 
 package org.apache.paimon.spark.procedure;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.utils.ProcedureUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
@@ -35,7 +33,6 @@ import org.apache.spark.sql.types.StructType;
 import org.apache.spark.unsafe.types.UTF8String;
 
 import java.time.Duration;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -90,32 +87,14 @@ public class ExpirePartitionsProcedure extends BaseProcedure {
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
-                    Map<String, String> dynamicOptions = new HashMap<>();
-                    if (!StringUtils.isNullOrWhitespaceOnly(expireStrategy)) {
-                        dynamicOptions.put(
-                                CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
-                    }
-                    if (!StringUtils.isNullOrWhitespaceOnly(timestampFormatter)) {
-                        dynamicOptions.put(
-                                CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(),
-                                timestampFormatter);
-                    }
-                    if (!StringUtils.isNullOrWhitespaceOnly(timestampPattern)) {
-                        dynamicOptions.put(
-                                CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
-                    }
-                    if (!StringUtils.isNullOrWhitespaceOnly(expirationTime)) {
-                        dynamicOptions.put(
-                                CoreOptions.PARTITION_EXPIRATION_TIME.key(), expirationTime);
-                    }
-                    if (maxExpires != null) {
-                        dynamicOptions.put(
-                                CoreOptions.PARTITION_EXPIRATION_MAX_NUM.key(),
-                                String.valueOf(maxExpires));
-                    }
-                    if (!StringUtils.isNullOrWhitespaceOnly(options)) {
-                        dynamicOptions.putAll(ParameterUtils.parseCommaSeparatedKeyValues(options));
-                    }
+                    Map<String, String> dynamicOptions =
+                            ProcedureUtils.fillInPartitionOptions(
+                                    expireStrategy,
+                                    timestampFormatter,
+                                    timestampPattern,
+                                    expirationTime,
+                                    maxExpires,
+                                    options);
 
                     table = table.copy(dynamicOptions);
                     FileStoreTable fileStoreTable = (FileStoreTable) table;
