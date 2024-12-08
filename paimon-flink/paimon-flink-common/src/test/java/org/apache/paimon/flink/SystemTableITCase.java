@@ -50,7 +50,7 @@ public class SystemTableITCase extends CatalogTableITCase {
     }
 
     @Test
-    public void testBinlogTableBatchRead() throws Exception {
+    public void testBinlogTableBatchRead() {
         sql(
                 "CREATE TABLE T (a INT, b INT, primary key (a) NOT ENFORCED) with ('changelog-producer' = 'lookup', "
                         + "'bucket' = '2')");
@@ -62,5 +62,104 @@ public class SystemTableITCase extends CatalogTableITCase {
                 .containsExactly(
                         Row.of("+I", new Integer[] {1}, new Integer[] {3}),
                         Row.of("+I", new Integer[] {2}, new Integer[] {2}));
+    }
+
+    @Test
+    public void testSummaryTableAppendOnlyTable() {
+        sql(
+                "CREATE TABLE T ("
+                        + "a INT,"
+                        + " b INT"
+                        + ") comment 'this is comment'"
+                        + " with ("
+                        + "'bucket' = '2',"
+                        + "'bucket-key' = 'a')");
+        sql("INSERT INTO T VALUES (1, 2), (1, 2), (1, 2), (1, 2)");
+        tEnv.executeSql("SELECT * FROM T$summary").print();
+
+        // append table with unaware_bucket.
+        sql(
+                "CREATE TABLE T_unaware_bucket ("
+                        + "a INT,"
+                        + " b INT"
+                        + ") with ("
+                        + "'bucket' = '-1'"
+                        + ")");
+
+        sql("INSERT INTO T_unaware_bucket VALUES (1, 2)");
+        tEnv.executeSql("SELECT * FROM T_unaware_bucket$summary").print();
+
+        // append table with partitioned.
+        sql(
+                "CREATE TABLE T_with_partition ("
+                        + "a INT,"
+                        + " b INT,"
+                        + " dt string,"
+                        + " hm string"
+                        + ") PARTITIONED BY (dt, hm) with ("
+                        + "'bucket' = '2',"
+                        + " 'bucket-key' = 'a')");
+        sql(
+                "INSERT INTO T_with_partition VALUES (1, 2, '20240101', '11'),(1, 2, '20240101', '11')");
+        tEnv.executeSql("SELECT * FROM T_with_partition$summary").print();
+    }
+
+    @Test
+    public void testSummaryTablePrimaryKeyTable() {
+        sql(
+                "CREATE TABLE T (a INT,"
+                        + " b INT,"
+                        + " primary key (a) NOT ENFORCED"
+                        + ") with ("
+                        + "'bucket' = '2')");
+        //        sql("INSERT INTO T VALUES (1, 2)");
+        tEnv.executeSql("SELECT * FROM T$summary").print();
+
+        sql(
+                "CREATE TABLE T_unaware_bucket (a INT,"
+                        + " b INT,"
+                        + " primary key (a) NOT ENFORCED"
+                        + ") with ("
+                        + "'bucket' = '-1')");
+        sql("INSERT INTO T_unaware_bucket VALUES (1, 2)");
+        tEnv.executeSql("SELECT * FROM T_unaware_bucket$summary").print();
+
+        sql(
+                "CREATE TABLE T_with_partition ("
+                        + "a INT,"
+                        + " b INT,"
+                        + " dt string,"
+                        + " hm string,"
+                        + " primary key (a, dt, hm) NOT ENFORCED"
+                        + ") PARTITIONED BY (dt, hm) with ( "
+                        + "'bucket' = '2')");
+
+        sql(
+                "INSERT INTO T_with_partition VALUES"
+                        + " (1, 2, '20240101', '11')"
+                        + ",(1, 2, '20240101', '12')");
+        sql("INSERT INTO T_with_partition VALUES (1, 2, '20240101', '13')");
+        sql("INSERT INTO T_with_partition VALUES (1, 2, '20240101', '13')");
+        tEnv.executeSql("SELECT * FROM T_with_partition$summary").print();
+    }
+
+    @Test
+    public void testSummaryTableWithCompact() {
+        sql(
+                "CREATE TABLE T ("
+                        + "a INT,"
+                        + " b INT,"
+                        + " dt string,"
+                        + " hm string,"
+                        + " primary key (a, dt, hm) NOT ENFORCED"
+                        + ") PARTITIONED BY (dt, hm) with ('changelog-producer' = 'lookup', "
+                        + "'bucket' = '2')");
+        sql("INSERT INTO T VALUES (1, 2, '20240101', '11')" + ",(1, 2, '20240101', '11')");
+        sql(
+                "INSERT INTO T /*+ OPTIONS("
+                        + "'full-compaction.delta-commits' = '1'"
+                        + ") */"
+                        + " VALUES (1, 2, '20240101', '11')");
+        tEnv.executeSql("SELECT * FROM T$summary").print();
     }
 }
