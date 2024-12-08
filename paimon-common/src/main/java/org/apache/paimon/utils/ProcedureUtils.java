@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions;
 import java.util.HashMap;
 import java.util.Map;
 
+/** Utils for procedure. */
 public class ProcedureUtils {
 
     public static Map<String, String> fillInPartitionOptions(
