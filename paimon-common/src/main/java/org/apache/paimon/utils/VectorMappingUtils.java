@@ -97,8 +97,7 @@ public class VectorMappingUtils {
         return dataType.accept(visitor);
     }
 
-    public static ColumnVector[] createIndexMappedVectors(
-            int[] indexMapping, ColumnVector[] vectors) {
+    public static ColumnVector[] createMappedVectors(int[] indexMapping, ColumnVector[] vectors) {
         ColumnVector[] newVectors = new ColumnVector[indexMapping.length];
         for (int i = 0; i < indexMapping.length; i++) {
             int realIndex = indexMapping[i];
