@@ -20,6 +20,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 import javax.annotation.Nullable;
 
@@ -36,6 +37,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -74,6 +77,13 @@ public class ThreadPoolUtils {
                         newDaemonThreadFactory(namePrefix));
         executor.allowCoreThreadTimeOut(true);
         return executor;
+    }
+
+    public static ScheduledExecutorService createScheduledThreadPool(
+            int threadNum, String namePrefix) {
+        return new ScheduledThreadPoolExecutor(
+                threadNum,
+                new ThreadFactoryBuilder().setDaemon(true).setNameFormat(namePrefix).build());
     }
 
     /** This method aims to parallel process tasks with memory control and sequentially. */
