@@ -28,8 +28,11 @@ import org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractor;
 import org.apache.paimon.flink.action.cdc.watermark.CdcWatermarkStrategy;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
+import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -43,6 +46,7 @@ import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -192,7 +196,8 @@ public abstract class SynchronizationActionBase extends ActionBase {
             DataStream<RichCdcMultiplexRecord> input,
             EventParser.Factory<RichCdcMultiplexRecord> parserFactory);
 
-    protected FileStoreTable alterTableOptions(Identifier identifier, FileStoreTable table) {
+    protected FileStoreTable alterTableSchema(
+            Identifier identifier, FileStoreTable table, Schema paimonSchema) {
         // doesn't support altering bucket here
         Map<String, String> dynamicOptions = new HashMap<>(tableConfig);
         dynamicOptions.remove(CoreOptions.BUCKET.key());
@@ -207,10 +212,7 @@ public abstract class SynchronizationActionBase extends ActionBase {
                                 immutableOptionKeys.contains(entry.getKey())
                                         || Objects.equals(
                                                 oldOptions.get(entry.getKey()), entry.getValue()));
-
-        if (dynamicOptions.isEmpty()) {
-            return table;
-        }
+        List<SchemaChange> tableSchemaChanges = new ArrayList<>();
 
         // alter the table dynamic options
         List<SchemaChange> optionChanges =
@@ -218,8 +220,22 @@ public abstract class SynchronizationActionBase extends ActionBase {
                         .map(entry -> SchemaChange.setOption(entry.getKey(), entry.getValue()))
                         .collect(Collectors.toList());
 
+        // alter the table schema
+        List<SchemaChange> columnChanges =
+                UpdatedDataFieldsProcessFunction.extractSchemaChanges(
+                        new SchemaManager(table.fileIO(), table.location()),
+                        paimonSchema.fields(),
+                        allowUpperCase);
+
+        tableSchemaChanges.addAll(optionChanges);
+        tableSchemaChanges.addAll(columnChanges);
+
+        if (tableSchemaChanges.isEmpty()) {
+            return table;
+        }
+
         try {
-            catalog.alterTable(identifier, optionChanges, false);
+            catalog.alterTable(identifier, tableSchemaChanges, false);
         } catch (Catalog.TableNotExistException
                 | Catalog.ColumnAlreadyExistException
                 | Catalog.ColumnNotExistException e) {
