@@ -18,20 +18,17 @@
 
 package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.utils.ProcedureUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.time.Duration;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -77,7 +74,7 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
             String options)
             throws Catalog.TableNotExistException {
 
-                Map<String, String> dynamicOptions =
+        Map<String, String> dynamicOptions =
                 ProcedureUtils.fillInPartitionOptions(
                         expireStrategy,
                         timestampFormatter,
@@ -85,7 +82,7 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
                         expirationTime,
                         maxExpires,
                         options);
-
+                        
         Table table = table(tableId).copy(dynamicOptions);
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         FileStore fileStore = fileStoreTable.store();

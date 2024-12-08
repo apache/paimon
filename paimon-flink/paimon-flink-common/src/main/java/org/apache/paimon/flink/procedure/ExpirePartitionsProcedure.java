@@ -79,7 +79,7 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
             Integer maxExpires,
             String options)
             throws Catalog.TableNotExistException {
-                Map<String, String> dynamicOptions =
+        Map<String, String> dynamicOptions =
                 ProcedureUtils.fillInPartitionOptions(
                         expireStrategy,
                         timestampFormatter,
@@ -87,6 +87,7 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
                         expirationTime,
                         maxExpires,
                         options);
+
         Table table = table(tableId).copy(dynamicOptions);
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         FileStore fileStore = fileStoreTable.store();
