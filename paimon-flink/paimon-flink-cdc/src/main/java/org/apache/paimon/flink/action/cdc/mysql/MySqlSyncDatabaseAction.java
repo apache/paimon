@@ -138,7 +138,8 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                         + ", or MySQL database does not exist.");
 
         TableNameConverter tableNameConverter =
-                new TableNameConverter(allowUpperCase, mergeShards, tablePrefix, tableSuffix);
+                new TableNameConverter(
+                        allowUpperCase, mergeShards, tablePrefix, tableSuffix, tableMapping);
         for (JdbcTableInfo tableInfo : jdbcTableInfos) {
             Identifier identifier =
                     Identifier.create(

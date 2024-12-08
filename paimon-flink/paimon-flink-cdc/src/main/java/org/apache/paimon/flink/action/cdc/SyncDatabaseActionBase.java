@@ -52,6 +52,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     protected MultiTablesSinkMode mode = COMBINED;
     protected String tablePrefix = "";
     protected String tableSuffix = "";
+    protected Map<String, String> tableMapping = new HashMap<>();
     protected String includingTables = ".*";
     protected List<String> partitionKeys = new ArrayList<>();
     protected List<String> primaryKeys = new ArrayList<>();
@@ -93,6 +94,13 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     public SyncDatabaseActionBase withTableSuffix(@Nullable String tableSuffix) {
         if (tableSuffix != null) {
             this.tableSuffix = tableSuffix;
+        }
+        return this;
+    }
+
+    public SyncDatabaseActionBase withTableMapping(Map<String, String> tableMapping) {
+        if (tableMapping != null) {
+            this.tableMapping = tableMapping;
         }
         return this;
     }
@@ -155,7 +163,8 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
         Pattern excludingPattern =
                 excludingTables == null ? null : Pattern.compile(excludingTables);
         TableNameConverter tableNameConverter =
-                new TableNameConverter(allowUpperCase, mergeShards, tablePrefix, tableSuffix);
+                new TableNameConverter(
+                        allowUpperCase, mergeShards, tablePrefix, tableSuffix, tableMapping);
         Set<String> createdTables;
         try {
             createdTables = new HashSet<>(catalog.listTables(database));
