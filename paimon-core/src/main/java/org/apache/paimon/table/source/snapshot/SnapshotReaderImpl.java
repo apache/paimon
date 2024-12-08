@@ -53,6 +53,7 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -252,6 +253,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
         return this;
     }
 
+    public SnapshotReader withBuckets(Collection<Integer> buckets) {
+        scan.withBuckets(buckets);
+        return this;
+    }
+
     @Override
     public SnapshotReader withBucketFilter(Filter<Integer> bucketFilter) {
         scan.withBucketFilter(bucketFilter);
@@ -284,7 +290,13 @@ public class SnapshotReaderImpl implements SnapshotReader {
                             Math.abs(file.hashCode() % numberOfParallelSubtasks)
                                     == indexOfThisSubtask);
         } else {
-            withBucketFilter(bucket -> bucket % numberOfParallelSubtasks == indexOfThisSubtask);
+            Set<Integer> buckets = new HashSet<>();
+            for (int bucket = 0; bucket < this.tableSchema.numBuckets(); bucket++) {
+                if (bucket % numberOfParallelSubtasks == indexOfThisSubtask) {
+                    buckets.add(bucket);
+                }
+            }
+            withBuckets(buckets);
         }
         return this;
     }
