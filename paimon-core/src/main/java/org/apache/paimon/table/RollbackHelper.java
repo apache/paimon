@@ -21,7 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
@@ -205,7 +205,7 @@ public class RollbackHelper {
         }
 
         // delete data files
-        Predicate<ManifestEntry> dataFileSkipper = null;
+        Predicate<ExpireFileEntry> dataFileSkipper = null;
         boolean success = true;
         try {
             dataFileSkipper = tagDeletion.dataFileSkipper(retainedSnapshot);

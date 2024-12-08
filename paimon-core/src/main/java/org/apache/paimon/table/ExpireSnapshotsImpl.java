@@ -22,7 +22,7 @@ import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
-import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.utils.Preconditions;
@@ -176,7 +176,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                 continue;
             }
             // expire merge tree files and collect changed buckets
-            Predicate<ManifestEntry> skipper;
+            Predicate<ExpireFileEntry> skipper;
             try {
                 skipper = snapshotDeletion.createDataFileSkipperForTags(taggedSnapshots, id);
             } catch (Exception e) {

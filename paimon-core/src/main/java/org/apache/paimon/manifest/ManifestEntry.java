@@ -102,6 +102,11 @@ public class ManifestEntry implements FileEntry {
         return file.maxKey();
     }
 
+    @Override
+    public List<String> extraFiles() {
+        return file.extraFiles();
+    }
+
     public int totalBuckets() {
         return totalBuckets;
     }

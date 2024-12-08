@@ -39,6 +39,7 @@ import org.apache.paimon.utils.VersionedObjectSerializer;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -82,6 +83,15 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     @VisibleForTesting
     public long suggestedFileSize() {
         return suggestedFileSize;
+    }
+
+    public List<ExpireFileEntry> readExpireFileEntries(String fileName, @Nullable Long fileSize) {
+        List<ManifestEntry> entries = read(fileName, fileSize);
+        List<ExpireFileEntry> result = new ArrayList<>(entries.size());
+        for (ManifestEntry entry : entries) {
+            result.add(ExpireFileEntry.from(entry));
+        }
+        return result;
     }
 
     /**
