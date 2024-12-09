@@ -25,6 +25,7 @@ import java.util.PrimitiveIterator;
 
 /** Parquet reader state for column index. */
 public class ParquetReadState {
+
     /** A special row range used when there is no row indexes (hence all rows must be included). */
     private static final RowRange MAX_ROW_RANGE = new RowRange(Long.MIN_VALUE, Long.MAX_VALUE);
 
@@ -105,15 +106,11 @@ public class ParquetReadState {
     }
 
     public boolean isFinished() {
-        return this.currentRange.equals(this.END_ROW_RANGE);
+        return this.currentRange.equals(END_ROW_RANGE);
     }
 
     public boolean isMaxRange() {
-        return this.currentRange.equals(this.MAX_ROW_RANGE);
-    }
-
-    public RowRange getCurrentRange() {
-        return currentRange;
+        return this.currentRange.equals(MAX_ROW_RANGE);
     }
 
     /** Advance to the next range. */

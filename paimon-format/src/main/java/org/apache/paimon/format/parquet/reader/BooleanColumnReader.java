@@ -43,11 +43,6 @@ public class BooleanColumnReader extends AbstractColumnReader<WritableBooleanVec
     }
 
     @Override
-    protected boolean supportLazyDecode() {
-        return true;
-    }
-
-    @Override
     protected void afterReadPage() {
         bitOffset = 0;
         currentByte = 0;
