@@ -63,6 +63,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -134,6 +135,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final List<CommitCallback> commitCallbacks;
     private final StatsFileHandler statsFileHandler;
     private final BucketMode bucketMode;
+    private final Optional<Duration> commitMaxTimeout;
     private final int commitMaxRetries;
 
     @Nullable private Lock lock;
@@ -166,7 +168,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             BucketMode bucketMode,
             @Nullable Integer manifestReadParallelism,
             List<CommitCallback> commitCallbacks,
-            int commitMaxRetries) {
+            int commitMaxRetries,
+            Optional<Duration> commitMaxTimeout) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.tableName = tableName;
@@ -193,6 +196,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.manifestReadParallelism = manifestReadParallelism;
         this.commitCallbacks = commitCallbacks;
         this.commitMaxRetries = commitMaxRetries;
+        this.commitMaxTimeout = commitMaxTimeout;
 
         this.lock = null;
         this.ignoreEmptyCommit = true;
@@ -723,6 +727,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable String statsFileName) {
         int retryCount = 0;
         RetryResult retryResult = null;
+        long startMillis = System.currentTimeMillis();
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
             CommitResult result =
@@ -754,6 +759,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 commitMaxRetries));
             }
             retryCount++;
+
+            if (commitMaxTimeout.isPresent()
+                    && System.currentTimeMillis() - startMillis
+                            > commitMaxTimeout.get().toMillis()) {
+                retryResult.cleanAll();
+                throw new RuntimeException(
+                        String.format(
+                                "Commit failed after %s millis, there maybe exist commit conflicts between multiple jobs.",
+                                commitMaxTimeout.get().toMillis()));
+            }
         }
         return retryCount + 1;
     }
@@ -1052,6 +1067,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     public void compactManifest() {
         int retryCount = 0;
         ManifestCompactResult retryResult = null;
+        long startMillis = System.currentTimeMillis();
         while (true) {
             retryResult = compactManifest(retryResult);
             if (retryResult.isSuccess()) {
@@ -1066,6 +1082,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 commitMaxRetries));
             }
             retryCount++;
+
+            if (commitMaxTimeout.isPresent()
+                    && System.currentTimeMillis() - startMillis
+                    > commitMaxTimeout.get().toMillis()) {
+                retryResult.cleanAll();
+                throw new RuntimeException(
+                        String.format(
+                                "Commit failed after %s millis, there maybe exist commit conflicts between multiple jobs.",
+                                commitMaxTimeout.get().toMillis()));
+            }
         }
     }
 
