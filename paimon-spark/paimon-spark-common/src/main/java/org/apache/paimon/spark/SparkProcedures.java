@@ -48,6 +48,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 
 /** The {@link Procedure}s including all the stored procedures. */
@@ -60,6 +61,10 @@ public class SparkProcedures {
     public static ProcedureBuilder newBuilder(String name) {
         Supplier<ProcedureBuilder> builderSupplier = BUILDERS.get(name.toLowerCase(Locale.ROOT));
         return builderSupplier != null ? builderSupplier.get() : null;
+    }
+
+    public static Set<String> names() {
+        return BUILDERS.keySet();
     }
 
     private static Map<String, Supplier<ProcedureBuilder>> initProcedureBuilders() {
