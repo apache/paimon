@@ -142,10 +142,9 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                                 ? new FormatReaderContext(fileIO, filePath, fileSize)
                                 : new OrcFormatReaderContext(
                                         fileIO, filePath, fileSize, orcPoolSize),
-                        bulkFormatMapping.getIndexMapping(),
+                        bulkFormatMapping.getColumnMapping(),
                         bulkFormatMapping.getCastMapping(),
-                        PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition),
-                        bulkFormatMapping.getTrimmedKeyMapping());
+                        PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
 
         Optional<DeletionVector> deletionVector = dvFactory.create(fileName);
         if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {

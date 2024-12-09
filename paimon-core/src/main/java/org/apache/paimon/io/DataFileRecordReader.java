@@ -38,18 +38,16 @@ import java.io.IOException;
 public class DataFileRecordReader implements FileRecordReader<InternalRow> {
 
     private final FileRecordReader<InternalRow> reader;
-    @Nullable private final int[] indexMapping;
+    @Nullable private final int[] columnMapping;
     @Nullable private final PartitionInfo partitionInfo;
     @Nullable private final CastFieldGetter[] castMapping;
-    @Nullable private final int[] trimmedKeyMapping;
 
     public DataFileRecordReader(
             FormatReaderFactory readerFactory,
             FormatReaderFactory.Context context,
-            @Nullable int[] indexMapping,
+            @Nullable int[] columnMapping,
             @Nullable CastFieldGetter[] castMapping,
-            @Nullable PartitionInfo partitionInfo,
-            @Nullable int[] trimmedKeyMapping)
+            @Nullable PartitionInfo partitionInfo)
             throws IOException {
         try {
             this.reader = readerFactory.createReader(context);
@@ -57,10 +55,9 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
             FileUtils.checkExists(context.fileIO(), context.filePath());
             throw e;
         }
-        this.indexMapping = indexMapping;
+        this.columnMapping = columnMapping;
         this.partitionInfo = partitionInfo;
         this.castMapping = castMapping;
-        this.trimmedKeyMapping = trimmedKeyMapping;
     }
 
     @Nullable
@@ -72,21 +69,16 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         }
 
         if (iterator instanceof ColumnarRowIterator) {
-            iterator =
-                    ((ColumnarRowIterator) iterator)
-                            .mapping(trimmedKeyMapping, partitionInfo, indexMapping);
+            iterator = ((ColumnarRowIterator) iterator).mapping(partitionInfo, columnMapping);
         } else {
-            if (trimmedKeyMapping != null) {
-                final ProjectedRow projectedRow = ProjectedRow.from(trimmedKeyMapping);
-                iterator = iterator.transform(projectedRow::replaceRow);
-            }
             if (partitionInfo != null) {
                 final PartitionSettedRow partitionSettedRow =
                         PartitionSettedRow.from(partitionInfo);
                 iterator = iterator.transform(partitionSettedRow::replaceRow);
             }
-            if (indexMapping != null) {
-                final ProjectedRow projectedRow = ProjectedRow.from(indexMapping);
+
+            if (columnMapping != null) {
+                final ProjectedRow projectedRow = ProjectedRow.from(columnMapping);
                 iterator = iterator.transform(projectedRow::replaceRow);
             }
         }

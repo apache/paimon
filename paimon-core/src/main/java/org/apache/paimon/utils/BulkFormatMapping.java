@@ -51,7 +51,7 @@ public class BulkFormatMapping {
 
     // index mapping from data schema fields to table schema fields, this is used to realize paimon
     // schema evolution
-    @Nullable private final int[] indexMapping;
+    @Nullable private final int[] columnMapping;
     // help indexMapping to cast defferent data type
     @Nullable private final CastFieldGetter[] castMapping;
     // partition fields mapping, add partition fields to the read fields
@@ -65,12 +65,12 @@ public class BulkFormatMapping {
     public BulkFormatMapping(
             @Nullable int[] indexMapping,
             @Nullable CastFieldGetter[] castMapping,
-            @Nullable Pair<int[], RowType> partitionPair,
             @Nullable int[] trimmedKeyMapping,
+            @Nullable Pair<int[], RowType> partitionPair,
             FormatReaderFactory bulkFormat,
             TableSchema dataSchema,
             List<Predicate> dataFilters) {
-        this.indexMapping = indexMapping;
+        this.columnMapping = combine(indexMapping, trimmedKeyMapping);
         this.castMapping = castMapping;
         this.bulkFormat = bulkFormat;
         this.partitionPair = partitionPair;
@@ -79,9 +79,29 @@ public class BulkFormatMapping {
         this.dataFilters = dataFilters;
     }
 
+    private int[] combine(@Nullable int[] indexMapping, @Nullable int[] trimmedKeyMapping) {
+        if (indexMapping == null) {
+            return trimmedKeyMapping;
+        }
+        if (trimmedKeyMapping == null) {
+            return indexMapping;
+        }
+
+        int[] combined = new int[indexMapping.length];
+
+        for (int i = 0; i < indexMapping.length; i++) {
+            if (indexMapping[i] < 0) {
+                combined[i] = indexMapping[i];
+            } else {
+                combined[i] = trimmedKeyMapping[indexMapping[i]];
+            }
+        }
+        return combined;
+    }
+
     @Nullable
-    public int[] getIndexMapping() {
-        return indexMapping;
+    public int[] getColumnMapping() {
+        return columnMapping;
     }
 
     @Nullable
@@ -94,11 +114,11 @@ public class BulkFormatMapping {
         return partitionPair;
     }
 
-    @Nullable
-    public int[] getTrimmedKeyMapping() {
-        return trimmedKeyMapping;
-    }
-
+    //    @Nullable
+    //    public int[] getTrimmedKeyMapping() {
+    //        return trimmedKeyMapping;
+    //    }
+    //
     public FormatReaderFactory getReaderFactory() {
         return bulkFormat;
     }
@@ -155,19 +175,19 @@ public class BulkFormatMapping {
             IndexCastMapping indexCastMapping =
                     SchemaEvolutionUtil.createIndexCastMapping(readTableFields, readDataFields);
 
+            // map from key fields reading to value fields reading
+            Pair<int[], RowType> trimmedKeyPair = trimKeyFields(readDataFields, allDataFields);
+
             // build partition mapping and filter partition fields
             Pair<Pair<int[], RowType>, List<DataField>>
                     partitionMappingAndFieldsWithoutPartitionPair =
-                            PartitionUtils.constructPartitionMapping(dataSchema, readDataFields);
+                            PartitionUtils.constructPartitionMapping(
+                                    dataSchema, trimmedKeyPair.getRight().getFields());
             Pair<int[], RowType> partitionMapping =
                     partitionMappingAndFieldsWithoutPartitionPair.getLeft();
 
-            List<DataField> fieldsWithoutPartition =
-                    partitionMappingAndFieldsWithoutPartitionPair.getRight();
-
-            // map from key fields reading to value fields reading
-            Pair<int[], RowType> trimmedKeyPair =
-                    trimKeyFields(fieldsWithoutPartition, allDataFields);
+            RowType readRowType =
+                    new RowType(partitionMappingAndFieldsWithoutPartitionPair.getRight());
 
             // build read filters
             List<Predicate> readFilters = readFilters(filters, tableSchema, dataSchema);
@@ -175,11 +195,11 @@ public class BulkFormatMapping {
             return new BulkFormatMapping(
                     indexCastMapping.getIndexMapping(),
                     indexCastMapping.getCastMapping(),
-                    partitionMapping,
                     trimmedKeyPair.getLeft(),
+                    partitionMapping,
                     formatDiscover
                             .discover(formatIdentifier)
-                            .createReaderFactory(trimmedKeyPair.getRight(), readFilters),
+                            .createReaderFactory(readRowType, readFilters),
                     dataSchema,
                     readFilters);
         }
@@ -207,8 +227,8 @@ public class BulkFormatMapping {
                     if (positionMap.containsKey(id)) {
                         map[i] = positionMap.get(id);
                     } else {
-                        map[i] = positionMap.put(id, trimmedFields.size());
-                        trimmedFields.add(f);
+                        trimmedFields.add(keyField ? f : field);
+                        map[i] = positionMap.computeIfAbsent(id, k -> index.getAndIncrement());
                     }
                 } else {
                     throw new RuntimeException("Can't find field with id: " + id + " in fields.");
