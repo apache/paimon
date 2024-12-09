@@ -142,7 +142,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                                 ? new FormatReaderContext(fileIO, filePath, fileSize)
                                 : new OrcFormatReaderContext(
                                         fileIO, filePath, fileSize, orcPoolSize),
-                        bulkFormatMapping.getColumnMapping(),
+                        bulkFormatMapping.getIndexMapping(),
                         bulkFormatMapping.getCastMapping(),
                         PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
 

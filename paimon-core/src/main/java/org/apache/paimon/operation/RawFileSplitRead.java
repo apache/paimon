@@ -219,7 +219,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                 new DataFileRecordReader(
                         bulkFormatMapping.getReaderFactory(),
                         formatReaderContext,
-                        bulkFormatMapping.getColumnMapping(),
+                        bulkFormatMapping.getIndexMapping(),
                         bulkFormatMapping.getCastMapping(),
                         PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
 

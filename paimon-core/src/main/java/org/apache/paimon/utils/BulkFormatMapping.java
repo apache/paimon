@@ -51,13 +51,11 @@ public class BulkFormatMapping {
 
     // index mapping from data schema fields to table schema fields, this is used to realize paimon
     // schema evolution
-    @Nullable private final int[] columnMapping;
+    @Nullable private final int[] indexMapping;
     // help indexMapping to cast defferent data type
     @Nullable private final CastFieldGetter[] castMapping;
     // partition fields mapping, add partition fields to the read fields
     @Nullable private final Pair<int[], RowType> partitionPair;
-    // key fields mapping, add key fields to the read fields
-    @Nullable private final int[] trimmedKeyMapping;
     private final FormatReaderFactory bulkFormat;
     private final TableSchema dataSchema;
     private final List<Predicate> dataFilters;
@@ -70,11 +68,10 @@ public class BulkFormatMapping {
             FormatReaderFactory bulkFormat,
             TableSchema dataSchema,
             List<Predicate> dataFilters) {
-        this.columnMapping = combine(indexMapping, trimmedKeyMapping);
+        this.indexMapping = combine(indexMapping, trimmedKeyMapping);
         this.castMapping = castMapping;
         this.bulkFormat = bulkFormat;
         this.partitionPair = partitionPair;
-        this.trimmedKeyMapping = trimmedKeyMapping;
         this.dataSchema = dataSchema;
         this.dataFilters = dataFilters;
     }
@@ -100,8 +97,8 @@ public class BulkFormatMapping {
     }
 
     @Nullable
-    public int[] getColumnMapping() {
-        return columnMapping;
+    public int[] getIndexMapping() {
+        return indexMapping;
     }
 
     @Nullable
@@ -114,11 +111,6 @@ public class BulkFormatMapping {
         return partitionPair;
     }
 
-    //    @Nullable
-    //    public int[] getTrimmedKeyMapping() {
-    //        return trimmedKeyMapping;
-    //    }
-    //
     public FormatReaderFactory getReaderFactory() {
         return bulkFormat;
     }

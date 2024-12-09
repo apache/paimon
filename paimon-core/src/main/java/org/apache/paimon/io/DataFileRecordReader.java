@@ -38,14 +38,14 @@ import java.io.IOException;
 public class DataFileRecordReader implements FileRecordReader<InternalRow> {
 
     private final FileRecordReader<InternalRow> reader;
-    @Nullable private final int[] columnMapping;
+    @Nullable private final int[] indexMapping;
     @Nullable private final PartitionInfo partitionInfo;
     @Nullable private final CastFieldGetter[] castMapping;
 
     public DataFileRecordReader(
             FormatReaderFactory readerFactory,
             FormatReaderFactory.Context context,
-            @Nullable int[] columnMapping,
+            @Nullable int[] indexMapping,
             @Nullable CastFieldGetter[] castMapping,
             @Nullable PartitionInfo partitionInfo)
             throws IOException {
@@ -55,7 +55,7 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
             FileUtils.checkExists(context.fileIO(), context.filePath());
             throw e;
         }
-        this.columnMapping = columnMapping;
+        this.indexMapping = indexMapping;
         this.partitionInfo = partitionInfo;
         this.castMapping = castMapping;
     }
@@ -69,7 +69,7 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         }
 
         if (iterator instanceof ColumnarRowIterator) {
-            iterator = ((ColumnarRowIterator) iterator).mapping(partitionInfo, columnMapping);
+            iterator = ((ColumnarRowIterator) iterator).mapping(partitionInfo, indexMapping);
         } else {
             if (partitionInfo != null) {
                 final PartitionSettedRow partitionSettedRow =
@@ -77,8 +77,8 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
                 iterator = iterator.transform(partitionSettedRow::replaceRow);
             }
 
-            if (columnMapping != null) {
-                final ProjectedRow projectedRow = ProjectedRow.from(columnMapping);
+            if (indexMapping != null) {
+                final ProjectedRow projectedRow = ProjectedRow.from(indexMapping);
                 iterator = iterator.transform(projectedRow::replaceRow);
             }
         }
