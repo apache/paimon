@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest.auth;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.rest.RESTUtil;
 
 import org.slf4j.Logger;
@@ -30,8 +31,9 @@ import java.util.concurrent.TimeUnit;
 
 /** Auth session. */
 public class AuthSession {
+
+    static final int TOKEN_REFRESH_NUM_RETRIES = 5;
     private static final Logger log = LoggerFactory.getLogger(AuthSession.class);
-    private static final int TOKEN_REFRESH_NUM_RETRIES = 5;
     private static final long MAX_REFRESH_WINDOW_MILLIS = 300_000; // 5 minutes
     private static final long MIN_REFRESH_WAIT_MILLIS = 10;
     private final CredentialsProvider credentialsProvider;
@@ -74,7 +76,8 @@ public class AuthSession {
         return headers;
     }
 
-    private static void scheduleTokenRefresh(
+    @VisibleForTesting
+    static void scheduleTokenRefresh(
             ScheduledExecutorService executor, AuthSession session, long expiresAtMillis) {
         scheduleTokenRefresh(executor, session, expiresAtMillis, 0);
     }

@@ -25,15 +25,20 @@ import org.apache.commons.io.FileUtils;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
+import org.mockito.Mockito;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ScheduledExecutorService;
 
+import static org.apache.paimon.rest.auth.AuthSession.TOKEN_REFRESH_NUM_RETRIES;
 import static org.junit.Assert.assertEquals;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Test for {@link AuthSession}. */
 public class AuthSessionTest {
@@ -92,6 +97,28 @@ public class AuthSessionTest {
                         + 10L);
         header = session.getHeaders();
         assertEquals(header.get("Authorization"), "Bearer " + token);
+    }
+
+    @Test
+    public void testRetryWhenRefreshFail() throws Exception {
+        Map<String, String> initialHeaders = new HashMap<>();
+        CredentialsProvider credentialsProvider =
+                Mockito.mock(BearTokenFileCredentialsProvider.class);
+        long expiresAtMillis = System.currentTimeMillis() - 1000L;
+        when(credentialsProvider.expiresAtMillis()).thenReturn(Optional.of(expiresAtMillis));
+        when(credentialsProvider.expiresInMills()).thenReturn(Optional.of(50L));
+        when(credentialsProvider.supportRefresh()).thenReturn(true);
+        when(credentialsProvider.keepRefreshed()).thenReturn(true);
+        when(credentialsProvider.refresh()).thenReturn(false);
+        AuthSession session =
+                AuthSession.fromRefreshCredentialsProvider(
+                        null, initialHeaders, credentialsProvider);
+        AuthSession.scheduleTokenRefresh(
+                ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token"),
+                session,
+                expiresAtMillis);
+        Thread.sleep(10_000L);
+        verify(credentialsProvider, Mockito.times(TOKEN_REFRESH_NUM_RETRIES + 1)).refresh();
     }
 
     private Pair<File, String> generateTokenAndWriteToFile(String fileName) throws IOException {
