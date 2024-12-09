@@ -24,10 +24,11 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.manifest.FileEntry;
+import org.apache.paimon.manifest.FileEntry.Identifier;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
@@ -46,7 +47,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -54,7 +54,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
 
 /**
  * Base class for file deletion including methods for clean data files, manifest files and empty
@@ -110,7 +109,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
      * @param skipper if the test result of a data file is true, it will be skipped when deleting;
      *     else it will be deleted
      */
-    public abstract void cleanUnusedDataFiles(T snapshot, Predicate<ManifestEntry> skipper);
+    public abstract void cleanUnusedDataFiles(T snapshot, Predicate<ExpireFileEntry> skipper);
 
     /**
      * Clean metadata files that will not be used anymore of a snapshot, including data manifests,
@@ -164,21 +163,23 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         deletionBuckets.clear();
     }
 
-    protected void recordDeletionBuckets(ManifestEntry entry) {
+    protected void recordDeletionBuckets(ExpireFileEntry entry) {
         deletionBuckets
                 .computeIfAbsent(entry.partition(), p -> new HashSet<>())
                 .add(entry.bucket());
     }
 
-    public void cleanUnusedDataFiles(String manifestList, Predicate<ManifestEntry> skipper) {
+    public void cleanUnusedDataFiles(String manifestList, Predicate<ExpireFileEntry> skipper) {
         // try read manifests
-        List<String> manifestFileNames = readManifestFileNames(tryReadManifestList(manifestList));
-        List<ManifestEntry> manifestEntries;
+        List<ManifestFileMeta> manifests = tryReadManifestList(manifestList);
+        List<ExpireFileEntry> manifestEntries;
         // data file path -> (original manifest entry, extra file paths)
-        Map<Path, Pair<ManifestEntry, List<Path>>> dataFileToDelete = new HashMap<>();
-        for (String manifest : manifestFileNames) {
+        Map<Path, Pair<ExpireFileEntry, List<Path>>> dataFileToDelete = new HashMap<>();
+        for (ManifestFileMeta manifest : manifests) {
             try {
-                manifestEntries = manifestFile.read(manifest);
+                manifestEntries =
+                        manifestFile.readExpireFileEntries(
+                                manifest.fileName(), manifest.fileSize());
             } catch (Exception e) {
                 // cancel deletion if any exception occurs
                 LOG.warn("Failed to read some manifest files. Cancel deletion.", e);
@@ -192,12 +193,12 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     }
 
     protected void doCleanUnusedDataFile(
-            Map<Path, Pair<ManifestEntry, List<Path>>> dataFileToDelete,
-            Predicate<ManifestEntry> skipper) {
+            Map<Path, Pair<ExpireFileEntry, List<Path>>> dataFileToDelete,
+            Predicate<ExpireFileEntry> skipper) {
         List<Path> actualDataFileToDelete = new ArrayList<>();
         dataFileToDelete.forEach(
                 (path, pair) -> {
-                    ManifestEntry entry = pair.getLeft();
+                    ExpireFileEntry entry = pair.getLeft();
                     // check whether we should skip the data file
                     if (!skipper.test(entry)) {
                         // delete data files
@@ -211,20 +212,20 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     }
 
     protected void getDataFileToDelete(
-            Map<Path, Pair<ManifestEntry, List<Path>>> dataFileToDelete,
-            List<ManifestEntry> dataFileEntries) {
+            Map<Path, Pair<ExpireFileEntry, List<Path>>> dataFileToDelete,
+            List<ExpireFileEntry> dataFileEntries) {
         // we cannot delete a data file directly when we meet a DELETE entry, because that
         // file might be upgraded
-        for (ManifestEntry entry : dataFileEntries) {
+        for (ExpireFileEntry entry : dataFileEntries) {
             Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
-            Path dataFilePath = new Path(bucketPath, entry.file().fileName());
+            Path dataFilePath = new Path(bucketPath, entry.fileName());
             switch (entry.kind()) {
                 case ADD:
                     dataFileToDelete.remove(dataFilePath);
                     break;
                 case DELETE:
-                    List<Path> extraFiles = new ArrayList<>(entry.file().extraFiles().size());
-                    for (String file : entry.file().extraFiles()) {
+                    List<Path> extraFiles = new ArrayList<>(entry.extraFiles().size());
+                    for (String file : entry.extraFiles()) {
                         extraFiles.add(new Path(bucketPath, file));
                     }
                     dataFileToDelete.put(dataFilePath, Pair.of(entry, extraFiles));
@@ -242,27 +243,28 @@ public abstract class FileDeletionBase<T extends Snapshot> {
      * @param manifestListName name of manifest list
      */
     public void deleteAddedDataFiles(String manifestListName) {
-        List<String> manifestFileNames =
-                readManifestFileNames(tryReadManifestList(manifestListName));
-        for (String file : manifestFileNames) {
+        List<ManifestFileMeta> manifests = tryReadManifestList(manifestListName);
+        for (ManifestFileMeta manifest : manifests) {
             try {
-                List<ManifestEntry> manifestEntries = manifestFile.read(file);
+                List<ExpireFileEntry> manifestEntries =
+                        manifestFile.readExpireFileEntries(
+                                manifest.fileName(), manifest.fileSize());
                 deleteAddedDataFiles(manifestEntries);
             } catch (Exception e) {
                 // We want to delete the data file, so just ignore the unavailable files
-                LOG.info("Failed to read manifest " + file + ". Ignore it.", e);
+                LOG.info("Failed to read manifest " + manifest.fileName() + ". Ignore it.", e);
             }
         }
     }
 
-    private void deleteAddedDataFiles(List<ManifestEntry> manifestEntries) {
+    private void deleteAddedDataFiles(List<ExpireFileEntry> manifestEntries) {
         List<Path> dataFileToDelete = new ArrayList<>();
-        for (ManifestEntry entry : manifestEntries) {
+        for (ExpireFileEntry entry : manifestEntries) {
             if (entry.kind() == FileKind.ADD) {
                 dataFileToDelete.add(
                         new Path(
                                 pathFactory.bucketPath(entry.partition(), entry.bucket()),
-                                entry.file().fileName()));
+                                entry.fileName()));
                 recordDeletionBuckets(entry);
             }
         }
@@ -327,7 +329,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         cleanUnusedStatisticsManifests(snapshot, skippingSet);
     }
 
-    public Predicate<ManifestEntry> createDataFileSkipperForTags(
+    public Predicate<ExpireFileEntry> createDataFileSkipperForTags(
             List<Snapshot> taggedSnapshots, long expiringSnapshotId) throws Exception {
         int index = SnapshotManager.findPreviousSnapshot(taggedSnapshots, expiringSnapshotId);
         // refresh tag data files
@@ -358,18 +360,6 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         }
     }
 
-    protected List<String> tryReadDataManifests(Snapshot snapshot) {
-        List<ManifestFileMeta> manifestFileMetas = tryReadManifestList(snapshot.baseManifestList());
-        manifestFileMetas.addAll(tryReadManifestList(snapshot.deltaManifestList()));
-        return readManifestFileNames(manifestFileMetas);
-    }
-
-    protected List<String> readManifestFileNames(List<ManifestFileMeta> manifestFileMetas) {
-        return manifestFileMetas.stream()
-                .map(ManifestFileMeta::fileName)
-                .collect(Collectors.toCollection(LinkedList::new));
-    }
-
     /**
      * NOTE: This method is used for building data file skipping set. If failed to read some
      * manifests, it will throw exception which callers must handle.
@@ -377,23 +367,26 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     protected void addMergedDataFiles(
             Map<BinaryRow, Map<Integer, Set<String>>> dataFiles, Snapshot snapshot)
             throws IOException {
-        for (ManifestEntry entry : readMergedDataFiles(snapshot)) {
+        for (ExpireFileEntry entry : readMergedDataFiles(snapshot)) {
             dataFiles
                     .computeIfAbsent(entry.partition(), p -> new HashMap<>())
                     .computeIfAbsent(entry.bucket(), b -> new HashSet<>())
-                    .add(entry.file().fileName());
+                    .add(entry.fileName());
         }
     }
 
-    protected Collection<ManifestEntry> readMergedDataFiles(Snapshot snapshot) throws IOException {
+    protected Collection<ExpireFileEntry> readMergedDataFiles(Snapshot snapshot)
+            throws IOException {
         // read data manifests
-        List<String> files = tryReadDataManifests(snapshot);
+
+        List<ManifestFileMeta> manifests = tryReadManifestList(snapshot.baseManifestList());
+        manifests.addAll(tryReadManifestList(snapshot.deltaManifestList()));
 
         // read and merge manifest entries
-        Map<ManifestEntry.Identifier, ManifestEntry> map = new HashMap<>();
-        for (String manifest : files) {
-            List<ManifestEntry> entries;
-            entries = manifestFile.readWithIOException(manifest);
+        Map<Identifier, ExpireFileEntry> map = new HashMap<>();
+        for (ManifestFileMeta manifest : manifests) {
+            List<ExpireFileEntry> entries =
+                    manifestFile.readExpireFileEntries(manifest.fileName(), manifest.fileSize());
             FileEntry.mergeEntries(entries, map);
         }
 
@@ -401,12 +394,12 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     }
 
     protected boolean containsDataFile(
-            Map<BinaryRow, Map<Integer, Set<String>>> dataFiles, ManifestEntry testee) {
-        Map<Integer, Set<String>> buckets = dataFiles.get(testee.partition());
+            Map<BinaryRow, Map<Integer, Set<String>>> dataFiles, ExpireFileEntry entry) {
+        Map<Integer, Set<String>> buckets = dataFiles.get(entry.partition());
         if (buckets != null) {
-            Set<String> fileNames = buckets.get(testee.bucket());
+            Set<String> fileNames = buckets.get(entry.bucket());
             if (fileNames != null) {
-                return fileNames.contains(testee.file().fileName());
+                return fileNames.contains(entry.fileName());
             }
         }
         return false;

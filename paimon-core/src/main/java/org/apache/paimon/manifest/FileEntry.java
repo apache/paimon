@@ -60,6 +60,8 @@ public interface FileEntry {
 
     BinaryRow maxKey();
 
+    List<String> extraFiles();
+
     /**
      * The same {@link Identifier} indicates that the {@link ManifestEntry} refers to the same data
      * file.
