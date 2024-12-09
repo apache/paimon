@@ -29,10 +29,13 @@ import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.types.Row;
 import org.assertj.core.api.Assertions;
+import org.junit.Rule;
+import org.junit.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 
 import java.util.Arrays;
@@ -41,6 +44,7 @@ import java.util.stream.Stream;
 /** IT cases for migrating iceberg table to paimon table. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
 public abstract class MigrateIcebergTableProcedureITCase {
+    @Rule public TemporaryFolder folder = new TemporaryFolder();
 
     @TempDir private java.nio.file.Path iceTempDir;
     @TempDir private java.nio.file.Path paiTempDir;
@@ -51,6 +55,9 @@ public abstract class MigrateIcebergTableProcedureITCase {
     private static Stream<Arguments> testIcebergArguments() {
         return Stream.of(Arguments.of(true, false), Arguments.of(false, false));
     }
+
+    @Test
+    public void initTest() {}
 
     @ParameterizedTest
     @MethodSource("testIcebergArguments")
