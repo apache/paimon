@@ -220,6 +220,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 restoredMaxSeqNumber,
                 keyComparator,
                 mfFactory.create(),
+                keyType,
+                valueType,
                 writerFactory,
                 options.commitForceCompact(),
                 options.changelogProducer(),

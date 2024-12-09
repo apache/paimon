@@ -143,6 +143,7 @@ public abstract class MergeTreeTestBase {
         options.set(
                 CoreOptions.NUM_SORTED_RUNS_STOP_TRIGGER,
                 options.get(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER) + 1);
+        options.set(CoreOptions.STORAGE_THIN_MODE, false);
         this.options = new CoreOptions(options);
         RowType keyType = new RowType(singletonList(new DataField(0, "k", new IntType())));
         RowType valueType = new RowType(singletonList(new DataField(1, "v", new IntType())));
@@ -513,6 +514,8 @@ public abstract class MergeTreeTestBase {
                         maxSequenceNumber,
                         comparator,
                         DeduplicateMergeFunction.factory().create(),
+                        writerFactory.keyType(),
+                        writerFactory.valueType(),
                         writerFactory,
                         options.commitForceCompact(),
                         changelogProducer,

@@ -32,6 +32,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StatsCollectorFactories;
@@ -44,7 +45,9 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 
 import static org.apache.paimon.io.DataFilePathFactory.dataFileToFileIndexPath;
@@ -77,6 +80,8 @@ public class KeyValueDataFileWriter
     private long minSeqNumber = Long.MAX_VALUE;
     private long maxSeqNumber = Long.MIN_VALUE;
     private long deleteRecordCount = 0;
+    @Nullable private final KeyStateAbstractor keyStateAbstractor;
+    private final boolean thinMode;
 
     public KeyValueDataFileWriter(
             FileIO fileIO,
@@ -97,11 +102,14 @@ public class KeyValueDataFileWriter
                 factory,
                 path,
                 converter,
-                KeyValue.schema(keyType, valueType),
+                KeyValue.schema(options.thinMode() ? RowType.of() : keyType, valueType),
                 simpleStatsExtractor,
                 compression,
                 StatsCollectorFactories.createStatsFactories(
-                        options, KeyValue.schema(keyType, valueType).getFieldNames()),
+                        options,
+                        KeyValue.schema(options.thinMode() ? RowType.of() : keyType, valueType)
+                                .getFieldNames(),
+                        keyType.getFieldNames()),
                 options.asyncFileWrite());
 
         this.keyType = keyType;
@@ -116,6 +124,8 @@ public class KeyValueDataFileWriter
         this.dataFileIndexWriter =
                 DataFileIndexWriter.create(
                         fileIO, dataFileToFileIndexPath(path), valueType, fileIndexOptions);
+        this.thinMode = options.thinMode();
+        this.keyStateAbstractor = thinMode ? new KeyStateAbstractor(keyType, valueType) : null;
     }
 
     @Override
@@ -169,14 +179,16 @@ public class KeyValueDataFileWriter
         SimpleColStats[] rowStats = fieldStats();
         int numKeyFields = keyType.getFieldCount();
 
-        SimpleColStats[] keyFieldStats = Arrays.copyOfRange(rowStats, 0, numKeyFields);
-        SimpleStats keyStats = keyStatsConverter.toBinaryAllMode(keyFieldStats);
-
-        SimpleColStats[] valFieldStats =
-                Arrays.copyOfRange(rowStats, numKeyFields + 2, rowStats.length);
-
+        int valueFrom = thinMode ? 2 : numKeyFields + 2;
+        SimpleColStats[] valFieldStats = Arrays.copyOfRange(rowStats, valueFrom, rowStats.length);
         Pair<List<String>, SimpleStats> valueStatsPair =
                 valueStatsConverter.toBinary(valFieldStats);
+
+        SimpleColStats[] keyFieldStats =
+                thinMode
+                        ? keyStateAbstractor.abstractFromValueState(valFieldStats)
+                        : Arrays.copyOfRange(rowStats, 0, numKeyFields);
+        SimpleStats keyStats = keyStatsConverter.toBinaryAllMode(keyFieldStats);
 
         DataFileIndexWriter.FileIndexResult indexResult =
                 dataFileIndexWriter == null
@@ -210,5 +222,34 @@ public class KeyValueDataFileWriter
             dataFileIndexWriter.close();
         }
         super.close();
+    }
+
+    private static class KeyStateAbstractor {
+
+        private final int[] keyStatMapping;
+
+        public KeyStateAbstractor(RowType keyType, RowType valueType) {
+
+            Map<Integer, Integer> idToIndex = new HashMap<>();
+            for (int i = 0; i < valueType.getFieldCount(); i++) {
+                idToIndex.put(valueType.getFields().get(i).id(), i);
+            }
+
+            keyStatMapping = new int[keyType.getFieldCount()];
+
+            for (int i = 0; i < keyType.getFieldCount(); i++) {
+                keyStatMapping[i] =
+                        idToIndex.get(
+                                keyType.getFields().get(i).id() - SpecialFields.KEY_FIELD_ID_START);
+            }
+        }
+
+        SimpleColStats[] abstractFromValueState(SimpleColStats[] valueStats) {
+            SimpleColStats[] keyStats = new SimpleColStats[keyStatMapping.length];
+            for (int i = 0; i < keyStatMapping.length; i++) {
+                keyStats[i] = valueStats[keyStatMapping[i]];
+            }
+            return keyStats;
+        }
     }
 }

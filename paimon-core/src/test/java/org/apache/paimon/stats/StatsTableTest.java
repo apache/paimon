@@ -86,10 +86,10 @@ public class StatsTableTest extends TableTestBase {
                 manifestFile.read(manifest.fileName(), manifest.fileSize()).get(0).file();
         SimpleStats recordStats = file.valueStats();
         assertThat(recordStats.minValues().isNullAt(0)).isTrue();
-        assertThat(recordStats.minValues().isNullAt(1)).isTrue();
+        assertThat(recordStats.minValues().isNullAt(1)).isFalse();
         assertThat(recordStats.minValues().isNullAt(2)).isTrue();
         assertThat(recordStats.maxValues().isNullAt(0)).isTrue();
-        assertThat(recordStats.maxValues().isNullAt(1)).isTrue();
+        assertThat(recordStats.maxValues().isNullAt(1)).isFalse();
         assertThat(recordStats.maxValues().isNullAt(2)).isTrue();
     }
 
@@ -135,9 +135,9 @@ public class StatsTableTest extends TableTestBase {
         DataFileMeta file =
                 manifestFile.read(manifest.fileName(), manifest.fileSize()).get(0).file();
         SimpleStats recordStats = file.valueStats();
-        assertThat(file.valueStatsCols()).isEmpty();
-        assertThat(recordStats.minValues().getFieldCount()).isEqualTo(0);
-        assertThat(recordStats.maxValues().getFieldCount()).isEqualTo(0);
-        assertThat(recordStats.nullCounts().size()).isEqualTo(0);
+        assertThat(file.valueStatsCols().size()).isEqualTo(1);
+        assertThat(recordStats.minValues().getFieldCount()).isEqualTo(1);
+        assertThat(recordStats.maxValues().getFieldCount()).isEqualTo(1);
+        assertThat(recordStats.nullCounts().size()).isEqualTo(1);
     }
 }

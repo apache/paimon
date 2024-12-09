@@ -167,8 +167,10 @@ public class TestChangelogDataReadWrite {
     }
 
     public RecordWriter<KeyValue> createMergeTreeWriter(BinaryRow partition, int bucket) {
-        CoreOptions options =
-                new CoreOptions(Collections.singletonMap(CoreOptions.FILE_FORMAT.key(), "avro"));
+        Map<String, String> optionMap = new HashMap<>();
+        optionMap.put(CoreOptions.FILE_FORMAT.key(), "avro");
+        optionMap.put(CoreOptions.STORAGE_THIN_MODE.key(), "false");
+        CoreOptions options = new CoreOptions(optionMap);
 
         Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
         pathFactoryMap.put("avro", pathFactory);

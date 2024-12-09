@@ -114,6 +114,10 @@ public class KeyValue {
         return new RowType(createKeyValueFields(keyType.getFields(), valueType.getFields()));
     }
 
+    public static RowType schema(RowType valueType) {
+        return schema(RowType.of(), valueType);
+    }
+
     public static RowType schemaWithLevel(RowType keyType, RowType valueType) {
         List<DataField> fields = new ArrayList<>(schema(keyType, valueType).getFields());
         fields.add(LEVEL);

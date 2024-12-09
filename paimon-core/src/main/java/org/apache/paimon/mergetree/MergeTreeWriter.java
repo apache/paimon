@@ -96,6 +96,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             long maxSequenceNumber,
             Comparator<InternalRow> keyComparator,
             MergeFunction<KeyValue> mergeFunction,
+            RowType keyType,
+            RowType valueType,
             KeyValueFileWriterFactory writerFactory,
             boolean commitForceCompact,
             ChangelogProducer changelogProducer,
@@ -106,8 +108,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         this.sortMaxFan = sortMaxFan;
         this.sortCompression = sortCompression;
         this.ioManager = ioManager;
-        this.keyType = writerFactory.keyType();
-        this.valueType = writerFactory.valueType();
+        this.keyType = keyType;
+        this.valueType = valueType;
         this.compactManager = compactManager;
         this.newSequenceNumber = maxSequenceNumber + 1;
         this.keyComparator = keyComparator;

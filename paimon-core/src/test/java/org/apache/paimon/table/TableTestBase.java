@@ -160,6 +160,10 @@ public abstract class TableTestBase {
         }
     }
 
+    public void dropTableDefault() throws Exception {
+        catalog.dropTable(identifier(), true);
+    }
+
     protected List<InternalRow> read(Table table, Pair<ConfigOption<?>, String>... dynamicOptions)
             throws Exception {
         return read(table, null, dynamicOptions);
@@ -175,6 +179,8 @@ public abstract class TableTestBase {
             options.put(pair.getKey().key(), pair.getValue());
         }
         table = table.copy(options);
+        //        PredicateBuilder predicateBuilder = new PredicateBuilder();
+        //        predicateBuilder.equal()
         ReadBuilder readBuilder = table.newReadBuilder();
         if (projection != null) {
             readBuilder.withProjection(projection);

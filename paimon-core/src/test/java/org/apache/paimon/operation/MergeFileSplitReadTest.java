@@ -287,7 +287,7 @@ public class MergeFileSplitReadTest {
                                                         .map(field -> field.replace("key_", "")),
                                                 partitionType.getFieldNames().stream())
                                         .collect(Collectors.toList()),
-                        Collections.emptyMap(),
+                        Collections.singletonMap("storage.thin-mode", "false"),
                         null);
         TableSchema tableSchema = schemaManager.createTable(schema);
         return new TestFileStore.Builder(
