@@ -33,7 +33,7 @@ import java.util.List;
 public class BulkFormatMappingTest {
 
     @Test
-    public void tesTtrimKeyFields() {
+    public void testTrimKeyFields() {
 
         List<DataField> keyFields = new ArrayList<>();
         List<DataField> allFields = new ArrayList<>();
