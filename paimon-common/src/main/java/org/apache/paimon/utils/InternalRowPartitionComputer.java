@@ -21,6 +21,7 @@ package org.apache.paimon.utils;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalRow.FieldGetter;
 import org.apache.paimon.types.DataType;
@@ -32,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.utils.InternalRowUtils.createNullCheckingFieldGetter;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.TypeUtils.castFromString;
 
 /** PartitionComputer for {@link InternalRow}. */
@@ -100,6 +102,22 @@ public class InternalRowPartitionComputer {
                                     entry.getValue(), partType.getField(entry.getKey()).type()));
         }
         return partValues;
+    }
+
+    public static GenericRow convertSpecToInternalRow(
+            Map<String, String> spec, RowType partType, String defaultPartValue) {
+        checkArgument(spec.size() == partType.getFieldCount());
+        GenericRow partRow = new GenericRow(spec.size());
+        List<String> fieldNames = partType.getFieldNames();
+        for (Map.Entry<String, String> entry : spec.entrySet()) {
+            Object value =
+                    defaultPartValue.equals(entry.getValue())
+                            ? null
+                            : castFromString(
+                                    entry.getValue(), partType.getField(entry.getKey()).type());
+            partRow.setField(fieldNames.indexOf(entry.getKey()), value);
+        }
+        return partRow;
     }
 
     public static String partToSimpleString(

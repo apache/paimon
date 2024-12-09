@@ -83,6 +83,7 @@ import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.manifest.ManifestEntry.recordCount;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountAdd;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountDelete;
+import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.partToSimpleString;
@@ -530,17 +531,26 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     partitions.stream().map(Objects::toString).collect(Collectors.joining(",")));
         }
 
-        // partitions may be partial partition fields, so here must to use predicate way.
-        Predicate predicate =
-                partitions.stream()
-                        .map(
-                                partition ->
-                                        createPartitionPredicate(
-                                                partition, partitionType, partitionDefaultName))
-                        .reduce(PredicateBuilder::or)
-                        .orElseThrow(() -> new RuntimeException("Failed to get partition filter."));
-        PartitionPredicate partitionFilter =
-                PartitionPredicate.fromPredicate(partitionType, predicate);
+        boolean fullMode =
+                partitions.stream().allMatch(part -> part.size() == partitionType.getFieldCount());
+        PartitionPredicate partitionFilter;
+        if (fullMode) {
+            List<BinaryRow> binaryPartitions =
+                    createBinaryPartitions(partitions, partitionType, partitionDefaultName);
+            partitionFilter = PartitionPredicate.fromMultiple(partitionType, binaryPartitions);
+        } else {
+            // partitions may be partial partition fields, so here must to use predicate way.
+            Predicate predicate =
+                    partitions.stream()
+                            .map(
+                                    partition ->
+                                            createPartitionPredicate(
+                                                    partition, partitionType, partitionDefaultName))
+                            .reduce(PredicateBuilder::or)
+                            .orElseThrow(
+                                    () -> new RuntimeException("Failed to get partition filter."));
+            partitionFilter = PartitionPredicate.fromPredicate(partitionType, predicate);
+        }
 
         tryOverwrite(
                 partitionFilter,
