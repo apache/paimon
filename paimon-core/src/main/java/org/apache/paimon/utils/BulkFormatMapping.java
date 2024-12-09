@@ -207,8 +207,8 @@ public class BulkFormatMapping {
                     if (positionMap.containsKey(id)) {
                         map[i] = positionMap.get(id);
                     } else {
-                        trimmedFields.add(keyField ? f : field);
-                        map[i] = positionMap.computeIfAbsent(id, k -> index.getAndIncrement());
+                        map[i] = positionMap.put(id, trimmedFields.size());
+                        trimmedFields.add(f);
                     }
                 } else {
                     throw new RuntimeException("Can't find field with id: " + id + " in fields.");
