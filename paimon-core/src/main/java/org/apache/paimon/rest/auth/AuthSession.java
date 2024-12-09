@@ -86,7 +86,7 @@ public class AuthSession {
             int retryTimes) {
         if (retryTimes < TOKEN_REFRESH_NUM_RETRIES) {
             long expiresInMillis = expiresAtMillis - System.currentTimeMillis();
-            // how much ahead of time to start the request to allow it to complete
+            // how much ahead of time to start the refresh to allow it to complete
             long refreshWindowMillis = Math.min(expiresInMillis, MAX_REFRESH_WINDOW_MILLIS);
             // how much time to wait before expiration
             long waitIntervalMillis = expiresInMillis - refreshWindowMillis;

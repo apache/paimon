@@ -18,19 +18,13 @@
 
 package org.apache.paimon.rest.auth;
 
-import org.apache.paimon.utils.StringUtils;
-
 /** credentials provider for bear token. */
 public class BearTokenCredentialsProvider extends BaseBearTokenCredentialsProvider {
 
     private final String token;
 
     public BearTokenCredentialsProvider(String token) {
-        if (StringUtils.isNullOrWhitespaceOnly(token)) {
-            throw new IllegalArgumentException("token is null");
-        } else {
-            this.token = token;
-        }
+        this.token = token;
     }
 
     @Override
