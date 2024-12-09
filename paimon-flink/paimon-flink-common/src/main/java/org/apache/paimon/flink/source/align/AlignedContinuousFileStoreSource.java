@@ -21,6 +21,7 @@ package org.apache.paimon.flink.source.align;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.ProjectionRowData;
 import org.apache.paimon.flink.source.ContinuousFileStoreSource;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.flink.source.PendingSplitsCheckpoint;
@@ -52,8 +53,9 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
             ReadBuilder readBuilder,
             Map<String, String> options,
             @Nullable Long limit,
-            BucketMode bucketMode) {
-        super(readBuilder, options, limit, bucketMode);
+            BucketMode bucketMode,
+            @Nullable ProjectionRowData rowData) {
+        super(readBuilder, options, limit, bucketMode, rowData);
     }
 
     @Override
@@ -72,8 +74,8 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
                 ioManager,
                 limit,
                 new FutureCompletingBlockingQueue<>(
-                        context.getConfiguration()
-                                .get(SourceReaderOptions.ELEMENT_QUEUE_CAPACITY)));
+                        context.getConfiguration().get(SourceReaderOptions.ELEMENT_QUEUE_CAPACITY)),
+                rowData);
     }
 
     @Override

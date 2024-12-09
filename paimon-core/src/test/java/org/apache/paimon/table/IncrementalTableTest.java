@@ -271,7 +271,7 @@ public class IncrementalTableTest extends TableTestBase {
                         GenericRow.of(fromString("+I"), 1, 6, 1));
 
         // read tag1 tag3 projection
-        result = read(table, new int[][] {{1}}, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG3"));
+        result = read(table, new int[] {1}, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG3"));
         assertThat(result).containsExactlyInAnyOrder(GenericRow.of(2), GenericRow.of(6));
 
         assertThatThrownBy(() -> read(table, Pair.of(INCREMENTAL_BETWEEN, "TAG2,TAG1")))
