@@ -21,8 +21,9 @@ package org.apache.paimon.rest.auth;
 import org.apache.paimon.factories.Factory;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTCatalogOptions;
 
-import static org.apache.paimon.rest.auth.AuthOptions.CREDENTIALS_PROVIDER;
+import static org.apache.paimon.rest.RESTCatalogOptions.CREDENTIALS_PROVIDER;
 
 /** Factory for creating {@link CredentialsProvider}. */
 public interface CredentialsProviderFactory extends Factory {
@@ -44,6 +45,6 @@ public interface CredentialsProviderFactory extends Factory {
             return credentialsProviderFactory.create(options);
         } catch (UnsupportedOperationException ignore) {
         }
-        return new BearTokenCredentialsProvider(options.get(AuthOptions.TOKEN));
+        return new BearTokenCredentialsProvider(options.get(RESTCatalogOptions.TOKEN));
     }
 }

@@ -26,7 +26,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.rest.auth.AuthOptions;
 import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.CredentialsProvider;
 import org.apache.paimon.rest.auth.CredentialsProviderFactory;
@@ -81,7 +80,7 @@ public class RESTCatalog implements Catalog {
         CredentialsProvider credentialsProvider =
                 CredentialsProviderFactory.createCredentialsProvider(
                         options, RESTCatalog.class.getClassLoader());
-        this.keepTokenRefreshed = options.get(AuthOptions.TOKEN_REFRESH_ENABLED);
+        this.keepTokenRefreshed = options.get(RESTCatalogOptions.TOKEN_REFRESH_ENABLED);
         if (keepTokenRefreshed) {
             this.catalogAuth =
                     AuthSession.fromRefreshCredentialsProvider(

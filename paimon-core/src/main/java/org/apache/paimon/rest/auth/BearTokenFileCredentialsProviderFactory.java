@@ -19,9 +19,10 @@
 package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTCatalogOptions;
 
-import static org.apache.paimon.rest.auth.AuthOptions.TOKEN_EXPIRES_IN;
-import static org.apache.paimon.rest.auth.AuthOptions.TOKEN_FILE_PATH;
+import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_EXPIRATION_TIME;
+import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_PROVIDER_PATH;
 
 /** factory for create {@link BearTokenCredentialsProvider}. */
 public class BearTokenFileCredentialsProviderFactory implements CredentialsProviderFactory {
@@ -33,17 +34,17 @@ public class BearTokenFileCredentialsProviderFactory implements CredentialsProvi
 
     @Override
     public CredentialsProvider create(Options options) {
-        if (!options.getOptional(TOKEN_FILE_PATH).isPresent()) {
-            throw new IllegalArgumentException(TOKEN_FILE_PATH.key() + " is required");
+        if (!options.getOptional(TOKEN_PROVIDER_PATH).isPresent()) {
+            throw new IllegalArgumentException(TOKEN_PROVIDER_PATH.key() + " is required");
         }
-        String tokenFilePath = options.get(TOKEN_FILE_PATH);
-        boolean keepTokenRefreshed = options.get(AuthOptions.TOKEN_REFRESH_ENABLED);
+        String tokenFilePath = options.get(TOKEN_PROVIDER_PATH);
+        boolean keepTokenRefreshed = options.get(RESTCatalogOptions.TOKEN_REFRESH_ENABLED);
         if (keepTokenRefreshed) {
-            if (!options.getOptional(TOKEN_EXPIRES_IN).isPresent()) {
+            if (!options.getOptional(TOKEN_EXPIRATION_TIME).isPresent()) {
                 throw new IllegalArgumentException(
-                        TOKEN_EXPIRES_IN.key() + " is required when token refresh enabled");
+                        TOKEN_EXPIRATION_TIME.key() + " is required when token refresh enabled");
             }
-            long tokenExpireInMills = options.get(TOKEN_EXPIRES_IN).toMillis();
+            long tokenExpireInMills = options.get(TOKEN_EXPIRATION_TIME).toMillis();
             return new BearTokenFileCredentialsProvider(tokenFilePath, tokenExpireInMills);
 
         } else {

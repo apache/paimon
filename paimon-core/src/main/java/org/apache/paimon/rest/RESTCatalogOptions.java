@@ -45,4 +45,29 @@ public class RESTCatalogOptions {
                     .intType()
                     .defaultValue(1)
                     .withDescription("REST Catalog http client thread num.");
+    public static final ConfigOption<String> TOKEN =
+            ConfigOptions.key("token")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth token.");
+    public static final ConfigOption<Duration> TOKEN_EXPIRATION_TIME =
+            ConfigOptions.key("token.expiration-time")
+                    .durationType()
+                    .defaultValue(Duration.ofHours(1))
+                    .withDescription("REST Catalog auth token expires in.");
+    public static final ConfigOption<Boolean> TOKEN_REFRESH_ENABLED =
+            ConfigOptions.key("token-refresh-enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("REST Catalog auth token refresh enable.");
+    public static final ConfigOption<String> TOKEN_PROVIDER_PATH =
+            ConfigOptions.key("token.provider.path")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth token file path.");
+    public static final ConfigOption<String> CREDENTIALS_PROVIDER =
+            ConfigOptions.key("credentials-provider")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth credentials provider.");
 }

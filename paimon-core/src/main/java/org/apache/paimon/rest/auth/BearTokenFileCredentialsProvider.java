@@ -18,12 +18,12 @@
 
 package org.apache.paimon.rest.auth;
 
+import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.StringUtils;
 
+import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Paths;
+import java.io.UncheckedIOException;
 import java.util.Optional;
 
 /** credentials provider for get bear token from file. */
@@ -57,11 +57,12 @@ public class BearTokenFileCredentialsProvider extends BaseBearTokenCredentialsPr
     @Override
     public boolean refresh() {
         long start = System.currentTimeMillis();
-        this.token = getTokenFromFile();
-        this.expiresAtMillis = start + this.expiresInMills;
-        if (StringUtils.isNullOrWhitespaceOnly(this.token)) {
+        String newToken = getTokenFromFile();
+        if (StringUtils.isNullOrWhitespaceOnly(newToken)) {
             return false;
         }
+        this.expiresAtMillis = start + this.expiresInMills;
+        this.token = newToken;
         return true;
     }
 
@@ -97,10 +98,9 @@ public class BearTokenFileCredentialsProvider extends BaseBearTokenCredentialsPr
 
     private String getTokenFromFile() {
         try {
-            // todo: handle exception
-            return new String(Files.readAllBytes(Paths.get(tokenFilePath)), StandardCharsets.UTF_8);
+            return FileIOUtils.readFileUtf8(new File(tokenFilePath));
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            throw new UncheckedIOException(e);
         }
     }
 }

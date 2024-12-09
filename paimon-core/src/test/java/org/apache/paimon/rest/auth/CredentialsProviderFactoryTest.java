@@ -19,6 +19,7 @@
 package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTCatalogOptions;
 
 import org.apache.commons.io.FileUtils;
 import org.junit.Rule;
@@ -41,8 +42,9 @@ public class CredentialsProviderFactoryTest {
     public void testCreateBearTokenCredentialsProviderSuccess() {
         Options options = new Options();
         String token = UUID.randomUUID().toString();
-        options.set(AuthOptions.TOKEN, token);
-        options.set(AuthOptions.CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN.name());
+        options.set(RESTCatalogOptions.TOKEN, token);
+        options.set(
+                RESTCatalogOptions.CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN.name());
         BearTokenCredentialsProvider credentialsProvider =
                 (BearTokenCredentialsProvider)
                         CredentialsProviderFactory.createCredentialsProvider(
@@ -53,7 +55,8 @@ public class CredentialsProviderFactoryTest {
     @Test
     public void testCreateBearTokenCredentialsProviderFail() {
         Options options = new Options();
-        options.set(AuthOptions.CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN.name());
+        options.set(
+                RESTCatalogOptions.CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN.name());
         assertThrows(
                 IllegalArgumentException.class,
                 () ->
@@ -68,9 +71,10 @@ public class CredentialsProviderFactoryTest {
         File tokenFile = folder.newFile(fileName);
         String token = UUID.randomUUID().toString();
         FileUtils.writeStringToFile(tokenFile, token);
-        options.set(AuthOptions.TOKEN_FILE_PATH, tokenFile.getPath());
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER_PATH, tokenFile.getPath());
         options.set(
-                AuthOptions.CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN_FILE.name());
+                RESTCatalogOptions.CREDENTIALS_PROVIDER,
+                CredentialsProviderType.BEAR_TOKEN_FILE.name());
         BearTokenFileCredentialsProvider credentialsProvider =
                 (BearTokenFileCredentialsProvider)
                         CredentialsProviderFactory.createCredentialsProvider(
@@ -82,7 +86,8 @@ public class CredentialsProviderFactoryTest {
     public void testCreateBearTokenFileCredentialsProviderFail() throws Exception {
         Options options = new Options();
         options.set(
-                AuthOptions.CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN_FILE.name());
+                RESTCatalogOptions.CREDENTIALS_PROVIDER,
+                CredentialsProviderType.BEAR_TOKEN_FILE.name());
         assertThrows(
                 IllegalArgumentException.class,
                 () ->
@@ -98,10 +103,11 @@ public class CredentialsProviderFactoryTest {
         String token = UUID.randomUUID().toString();
         FileUtils.writeStringToFile(tokenFile, token);
         options.set(
-                AuthOptions.CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN_FILE.name());
-        options.set(AuthOptions.TOKEN_FILE_PATH, tokenFile.getPath());
-        options.set(AuthOptions.TOKEN_REFRESH_ENABLED, true);
-        options.set(AuthOptions.TOKEN_EXPIRES_IN, Duration.ofSeconds(10L));
+                RESTCatalogOptions.CREDENTIALS_PROVIDER,
+                CredentialsProviderType.BEAR_TOKEN_FILE.name());
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER_PATH, tokenFile.getPath());
+        options.set(RESTCatalogOptions.TOKEN_REFRESH_ENABLED, true);
+        options.set(RESTCatalogOptions.TOKEN_EXPIRATION_TIME, Duration.ofSeconds(10L));
         BearTokenFileCredentialsProvider credentialsProvider =
                 (BearTokenFileCredentialsProvider)
                         CredentialsProviderFactory.createCredentialsProvider(
@@ -117,11 +123,13 @@ public class CredentialsProviderFactoryTest {
         String token = UUID.randomUUID().toString();
         FileUtils.writeStringToFile(tokenFile, token);
         options.set(
-                AuthOptions.CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN_FILE.name());
-        options.set(AuthOptions.TOKEN_FILE_PATH, tokenFile.getPath());
-        options.set(AuthOptions.TOKEN_REFRESH_ENABLED, true);
+                RESTCatalogOptions.CREDENTIALS_PROVIDER,
+                CredentialsProviderType.BEAR_TOKEN_FILE.name());
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER_PATH, tokenFile.getPath());
+        options.set(RESTCatalogOptions.TOKEN_REFRESH_ENABLED, true);
         options.set(
-                AuthOptions.CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN_FILE.name());
+                RESTCatalogOptions.CREDENTIALS_PROVIDER,
+                CredentialsProviderType.BEAR_TOKEN_FILE.name());
         assertThrows(
                 IllegalArgumentException.class,
                 () ->

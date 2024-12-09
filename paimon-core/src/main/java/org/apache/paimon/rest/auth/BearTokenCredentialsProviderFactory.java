@@ -19,6 +19,7 @@
 package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTCatalogOptions;
 import org.apache.paimon.utils.StringUtils;
 
 /** factory for create {@link BearTokenCredentialsProvider}. */
@@ -30,12 +31,12 @@ public class BearTokenCredentialsProviderFactory implements CredentialsProviderF
 
     @Override
     public CredentialsProvider create(Options options) {
-        if (options.getOptional(AuthOptions.TOKEN)
+        if (options.getOptional(RESTCatalogOptions.TOKEN)
                 .map(StringUtils::isNullOrWhitespaceOnly)
                 .orElse(true)) {
             throw new IllegalArgumentException(
-                    AuthOptions.TOKEN.key() + " is required and not empty");
+                    RESTCatalogOptions.TOKEN.key() + " is required and not empty");
         }
-        return new BearTokenCredentialsProvider(options.get(AuthOptions.TOKEN));
+        return new BearTokenCredentialsProvider(options.get(RESTCatalogOptions.TOKEN));
     }
 }
