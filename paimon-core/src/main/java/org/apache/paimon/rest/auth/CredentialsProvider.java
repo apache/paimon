@@ -23,6 +23,7 @@ import java.util.Optional;
 
 /** Credentials provider. */
 public interface CredentialsProvider {
+
     Map<String, String> authHeader();
 
     boolean refresh();

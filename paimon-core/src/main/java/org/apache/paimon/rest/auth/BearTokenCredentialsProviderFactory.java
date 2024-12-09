@@ -24,6 +24,7 @@ import org.apache.paimon.utils.StringUtils;
 
 /** factory for create {@link BearTokenCredentialsProvider}. */
 public class BearTokenCredentialsProviderFactory implements CredentialsProviderFactory {
+
     @Override
     public String identifier() {
         return CredentialsProviderType.BEAR_TOKEN.name();

@@ -24,6 +24,7 @@ import java.util.Map;
 
 /** Base bear token credentials provider. */
 public abstract class BaseBearTokenCredentialsProvider implements CredentialsProvider {
+
     private static final String AUTHORIZATION_HEADER = "Authorization";
     private static final String BEARER_PREFIX = "Bearer ";
 

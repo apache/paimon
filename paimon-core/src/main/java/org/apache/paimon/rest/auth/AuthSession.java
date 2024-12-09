@@ -19,7 +19,6 @@
 package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.rest.RESTUtil;
-import org.apache.paimon.utils.Pair;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,22 +51,12 @@ public class AuthSession {
         long startTimeMillis = System.currentTimeMillis();
         Optional<Long> expiresAtMillisOpt = credentialsProvider.expiresAtMillis();
 
+        // when init session if credentials expire time is in the past, refresh it and update
+        // expiresAtMillis
         if (expiresAtMillisOpt.isPresent() && expiresAtMillisOpt.get() <= startTimeMillis) {
-            Pair<Boolean, Long> refreshResult = session.refresh();
-
-            // if expiration is non-null, then token refresh was successful
-            boolean isSuccessful = refreshResult.getKey();
-            if (isSuccessful) {
-                if (session.credentialsProvider.expiresAtMillis().isPresent()) {
-                    // use the new expiration time from the refreshed token
-                    expiresAtMillisOpt = session.credentialsProvider.expiresAtMillis();
-                } else {
-                    // otherwise use the expiration time from the token response
-                    expiresAtMillisOpt = Optional.of(startTimeMillis + refreshResult.getValue());
-                }
-            } else {
-                // token refresh failed, don't reattempt with the original expiration
-                expiresAtMillisOpt = Optional.empty();
+            boolean refreshSuccessful = session.refresh();
+            if (refreshSuccessful) {
+                expiresAtMillisOpt = session.credentialsProvider.expiresAtMillis();
             }
         }
 
@@ -98,7 +87,7 @@ public class AuthSession {
         if (retryTimes < TOKEN_REFRESH_NUM_RETRIES) {
             long expiresInMillis = expiresAtMillis - System.currentTimeMillis();
             // how much ahead of time to start the request to allow it to complete
-            long refreshWindowMillis = Math.min(expiresInMillis / 10, MAX_REFRESH_WINDOW_MILLIS);
+            long refreshWindowMillis = Math.min(expiresInMillis, MAX_REFRESH_WINDOW_MILLIS);
             // how much time to wait before expiration
             long waitIntervalMillis = expiresInMillis - refreshWindowMillis;
             // how much time to actually wait
@@ -107,13 +96,13 @@ public class AuthSession {
             executor.schedule(
                     () -> {
                         long refreshStartTime = System.currentTimeMillis();
-                        Pair<Boolean, Long> refreshResult = session.refresh();
-                        boolean isSuccessful = refreshResult.getKey();
+                        boolean isSuccessful = session.refresh();
                         if (isSuccessful) {
                             scheduleTokenRefresh(
                                     executor,
                                     session,
-                                    refreshStartTime + refreshResult.getValue(),
+                                    refreshStartTime
+                                            + session.credentialsProvider.expiresInMills().get(),
                                     0);
                         } else {
                             scheduleTokenRefresh(
@@ -127,19 +116,19 @@ public class AuthSession {
         }
     }
 
-    public Pair<Boolean, Long> refresh() {
+    public Boolean refresh() {
         if (this.credentialsProvider.supportRefresh()
                 && this.credentialsProvider.keepRefreshed()
                 && this.credentialsProvider.expiresInMills().isPresent()) {
             boolean isSuccessful = this.credentialsProvider.refresh();
-            if (!isSuccessful) {
-                return Pair.of(false, 0L);
+            if (isSuccessful) {
+                Map<String, String> currentHeaders = this.headers;
+                this.headers =
+                        RESTUtil.merge(currentHeaders, this.credentialsProvider.authHeader());
             }
-            Map<String, String> currentHeaders = this.headers;
-            this.headers = RESTUtil.merge(currentHeaders, this.credentialsProvider.authHeader());
-            return Pair.of(true, credentialsProvider.expiresInMills().get());
+            return isSuccessful;
         }
 
-        return Pair.of(false, 0L);
+        return false;
     }
 }
