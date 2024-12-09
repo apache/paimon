@@ -19,8 +19,8 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.spark.PaimonSparkTestBase
-import org.apache.paimon.spark.analysis.NoSuchProcedureException
 
+import org.apache.spark.sql.catalyst.parser.ParseException
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonParseException
 import org.assertj.core.api.Assertions.assertThatThrownBy
 
