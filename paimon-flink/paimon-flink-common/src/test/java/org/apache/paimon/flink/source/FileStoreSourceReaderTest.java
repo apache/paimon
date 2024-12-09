@@ -141,6 +141,7 @@ public class FileStoreSourceReaderTest {
                 new TestChangelogDataReadWrite(tempDir.toString()).createReadWithKey(),
                 new FileStoreSourceReaderMetrics(new DummyMetricGroup()),
                 IOManager.create(tempDir.toString()),
+                null,
                 null);
     }
 

@@ -21,6 +21,7 @@ package org.apache.paimon.flink.source.operator;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.FlinkRowData;
+import org.apache.paimon.flink.ProjectionRowData;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -36,6 +37,8 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 
+import javax.annotation.Nullable;
+
 /**
  * The operator that reads the {@link Split splits} received from the preceding {@link
  * MonitorSource}. Contrary to the {@link MonitorSource} which has a parallelism of 1, this operator
@@ -47,6 +50,7 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
     private static final long serialVersionUID = 1L;
 
     private final ReadBuilder readBuilder;
+    @Nullable private final ProjectionRowData projectionRowData;
 
     private transient TableRead read;
     private transient StreamRecord<RowData> reuseRecord;
@@ -61,8 +65,9 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
     private transient long idleStartTime = FileStoreSourceReaderMetrics.ACTIVE;
     private transient Counter numRecordsIn;
 
-    public ReadOperator(ReadBuilder readBuilder) {
+    public ReadOperator(ReadBuilder readBuilder, @Nullable ProjectionRowData projectionRowData) {
         this.readBuilder = readBuilder;
+        this.projectionRowData = projectionRowData;
     }
 
     @Override
@@ -85,7 +90,12 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
                                 .getSpillingDirectoriesPaths());
         this.read = readBuilder.newRead().withIOManager(ioManager);
         this.reuseRow = new FlinkRowData(null);
-        this.reuseRecord = new StreamRecord<>(reuseRow);
+        if (projectionRowData != null) {
+            projectionRowData.replaceRow(this.reuseRow);
+            this.reuseRecord = new StreamRecord<>(projectionRowData);
+        } else {
+            this.reuseRecord = new StreamRecord<>(reuseRow);
+        }
         this.idlingStarted();
     }
 

@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.flink.ProjectionRowData;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.table.source.ReadBuilder;
 
@@ -43,10 +44,13 @@ public abstract class FlinkSource
     protected final ReadBuilder readBuilder;
 
     @Nullable protected final Long limit;
+    @Nullable protected final ProjectionRowData rowData;
 
-    public FlinkSource(ReadBuilder readBuilder, @Nullable Long limit) {
+    public FlinkSource(
+            ReadBuilder readBuilder, @Nullable Long limit, @Nullable ProjectionRowData rowData) {
         this.readBuilder = readBuilder;
         this.limit = limit;
+        this.rowData = rowData;
     }
 
     @Override
@@ -56,7 +60,12 @@ public abstract class FlinkSource
         FileStoreSourceReaderMetrics sourceReaderMetrics =
                 new FileStoreSourceReaderMetrics(context.metricGroup());
         return new FileStoreSourceReader(
-                context, readBuilder.newRead(), sourceReaderMetrics, ioManager, limit);
+                context,
+                readBuilder.newRead(),
+                sourceReaderMetrics,
+                ioManager,
+                limit,
+                ProjectionRowData.copy(rowData));
     }
 
     @Override

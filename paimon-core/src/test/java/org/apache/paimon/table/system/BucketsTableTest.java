@@ -72,7 +72,7 @@ public class BucketsTableTest extends TableTestBase {
 
     @Test
     public void testBucketsTable() throws Exception {
-        assertThat(read(bucketsTable, new int[][] {{0}, {1}, {2}, {4}}))
+        assertThat(read(bucketsTable, new int[] {0, 1, 2, 4}))
                 .containsExactlyInAnyOrder(
                         GenericRow.of(BinaryString.fromString("[1]"), 0, 2L, 2L),
                         GenericRow.of(BinaryString.fromString("[2]"), 0, 2L, 2L));
