@@ -18,6 +18,8 @@
 
 package org.apache.spark.sql.catalyst.parser.extensions
 
+import org.apache.paimon.spark.SparkProcedures
+
 import org.antlr.v4.runtime._
 import org.antlr.v4.runtime.atn.PredictionMode
 import org.antlr.v4.runtime.misc.{Interval, ParseCancellationException}
@@ -33,6 +35,8 @@ import org.apache.spark.sql.internal.VariableSubstitution
 import org.apache.spark.sql.types.{DataType, StructType}
 
 import java.util.Locale
+
+import scala.collection.JavaConverters._
 
 /* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -100,8 +104,15 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
       .replaceAll("--.*?\\n", " ")
       .replaceAll("\\s+", " ")
       .replaceAll("/\\*.*?\\*/", " ")
+      .replaceAll("`", "")
       .trim()
-    normalized.startsWith("call") || isTagRefDdl(normalized)
+    isPaimonProcedure(normalized) || isTagRefDdl(normalized)
+  }
+
+  // All builtin paimon procedures are under the 'sys' namespace
+  private def isPaimonProcedure(normalized: String): Boolean = {
+    normalized.startsWith("call") &&
+    SparkProcedures.names().asScala.map("sys." + _).exists(normalized.contains)
   }
 
   private def isTagRefDdl(normalized: String): Boolean = {
