@@ -65,6 +65,7 @@ import static org.apache.parquet.column.ValuesType.VALUES;
 
 /** Reader to read nested primitive column. */
 public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnVector> {
+
     private static final Logger LOG = LoggerFactory.getLogger(NestedPrimitiveColumnReader.class);
 
     private final IntArrayList repetitionLevelList = new IntArrayList(0);
@@ -94,9 +95,6 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
 
     private IntIterator definitionLevelColumn;
     private ParquetDataColumnReader dataColumn;
-
-    /** Total values in the current page. */
-    //    private int pageValueCount;
 
     /**
      * Helper struct to track intermediate states while reading Parquet pages in the column chunk.

@@ -22,6 +22,7 @@ import org.apache.paimon.types.DataType;
 
 /** Field that represent parquet's field type. */
 public abstract class ParquetField {
+
     private final DataType type;
     private final int repetitionLevel;
     private final int definitionLevel;
