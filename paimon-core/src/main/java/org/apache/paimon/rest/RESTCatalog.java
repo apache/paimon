@@ -54,7 +54,6 @@ public class RESTCatalog implements Catalog {
     // a lazy thread pool for token refresh
     private final AuthSession catalogAuth;
     private volatile ScheduledExecutorService refreshExecutor = null;
-    private boolean keepTokenRefreshed;
 
     private static final ObjectMapper objectMapper = RESTObjectMapper.create();
 
@@ -80,8 +79,7 @@ public class RESTCatalog implements Catalog {
         CredentialsProvider credentialsProvider =
                 CredentialsProviderFactory.createCredentialsProvider(
                         options, RESTCatalog.class.getClassLoader());
-        this.keepTokenRefreshed = options.get(RESTCatalogOptions.TOKEN_REFRESH_ENABLED);
-        if (keepTokenRefreshed) {
+        if (credentialsProvider.keepRefreshed()) {
             this.catalogAuth =
                     AuthSession.fromRefreshCredentialsProvider(
                             tokenRefreshExecutor(), this.baseHeader, credentialsProvider);
@@ -215,10 +213,6 @@ public class RESTCatalog implements Catalog {
     }
 
     private ScheduledExecutorService tokenRefreshExecutor() {
-        if (!keepTokenRefreshed) {
-            return null;
-        }
-
         if (refreshExecutor == null) {
             synchronized (this) {
                 if (refreshExecutor == null) {

@@ -55,14 +55,9 @@ public class RESTCatalogOptions {
                     .durationType()
                     .defaultValue(Duration.ofHours(1))
                     .withDescription(
-                            "REST Catalog auth token expires in.The token generates system refresh frequency is t1," +
-                                    " the token expires time is t2, we need to guarantee that t2 > t1," +
-                                    " the token validity time is [t2 - t1, t2], and the expires time defined here needs to be less than (t2 - t1)");
-    public static final ConfigOption<Boolean> TOKEN_REFRESH_ENABLED =
-            ConfigOptions.key("token-refresh-enabled")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription("REST Catalog auth token refresh enable.");
+                            "REST Catalog auth token expires in.The token generates system refresh frequency is t1,"
+                                    + " the token expires time is t2, we need to guarantee that t2 > t1,"
+                                    + " the token validity time is [t2 - t1, t2], and the expires time defined here needs to be less than (t2 - t1)");
     public static final ConfigOption<String> TOKEN_PROVIDER_PATH =
             ConfigOptions.key("token.provider.path")
                     .stringType()

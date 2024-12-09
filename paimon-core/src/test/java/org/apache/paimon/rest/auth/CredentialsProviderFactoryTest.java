@@ -69,7 +69,6 @@ public class CredentialsProviderFactoryTest {
         String token = UUID.randomUUID().toString();
         FileUtils.writeStringToFile(tokenFile, token);
         options.set(RESTCatalogOptions.TOKEN_PROVIDER_PATH, tokenFile.getPath());
-        options.set(CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN_FILE.name());
         BearTokenFileCredentialsProvider credentialsProvider =
                 (BearTokenFileCredentialsProvider)
                         CredentialsProviderFactory.createCredentialsProvider(
@@ -95,33 +94,13 @@ public class CredentialsProviderFactoryTest {
         File tokenFile = folder.newFile(fileName);
         String token = UUID.randomUUID().toString();
         FileUtils.writeStringToFile(tokenFile, token);
-        options.set(CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN_FILE.name());
         options.set(RESTCatalogOptions.TOKEN_PROVIDER_PATH, tokenFile.getPath());
-        options.set(RESTCatalogOptions.TOKEN_REFRESH_ENABLED, true);
         options.set(RESTCatalogOptions.TOKEN_EXPIRATION_TIME, Duration.ofSeconds(10L));
         BearTokenFileCredentialsProvider credentialsProvider =
                 (BearTokenFileCredentialsProvider)
                         CredentialsProviderFactory.createCredentialsProvider(
                                 options, this.getClass().getClassLoader());
         assertEquals(token, credentialsProvider.token());
-    }
-
-    @Test
-    public void testCreateRefreshBearTokenFileCredentialsProviderFail() throws Exception {
-        Options options = new Options();
-        String fileName = "token";
-        File tokenFile = folder.newFile(fileName);
-        String token = UUID.randomUUID().toString();
-        FileUtils.writeStringToFile(tokenFile, token);
-        options.set(CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN_FILE.name());
-        options.set(RESTCatalogOptions.TOKEN_PROVIDER_PATH, tokenFile.getPath());
-        options.set(RESTCatalogOptions.TOKEN_REFRESH_ENABLED, true);
-        options.set(CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN_FILE.name());
-        assertThrows(
-                IllegalArgumentException.class,
-                () ->
-                        CredentialsProviderFactory.createCredentialsProvider(
-                                options, this.getClass().getClassLoader()));
     }
 
     @Test
