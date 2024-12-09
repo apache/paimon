@@ -26,11 +26,10 @@ import java.util.Map;
 
 /** Tests for {@link TableNameConverter}. */
 public class TableNameConverterTest {
-    private Map<String, String> tableMapping;
 
     @Test
     public void testConvertTableName() {
-        Map<String, String> tableMapping = new HashMap<>();
+        Map<String, String> tableMapping = new HashMap<>(1);
         tableMapping.put("mapped_src", "mapped_TGT");
         TableNameConverter caseConverter =
                 new TableNameConverter(true, true, "pre_", "_pos", tableMapping);
@@ -38,9 +37,9 @@ public class TableNameConverterTest {
 
         Assert.assertEquals(caseConverter.convert("unmapped_src"), "pre_unmapped_src_pos");
 
-        TableNameConverter incaseConverter =
+        TableNameConverter noCaseConverter =
                 new TableNameConverter(false, true, "pre_", "_pos", tableMapping);
-        Assert.assertEquals(incaseConverter.convert("mapped_src"), "mapped_tgt");
-        Assert.assertEquals(incaseConverter.convert("unmapped_src"), "pre_unmapped_src_pos");
+        Assert.assertEquals(noCaseConverter.convert("mapped_src"), "mapped_tgt");
+        Assert.assertEquals(noCaseConverter.convert("unmapped_src"), "pre_unmapped_src_pos");
     }
 }

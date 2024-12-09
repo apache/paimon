@@ -74,7 +74,7 @@ public class TableNameConverter implements Serializable {
 
     private Map<String, String> lowerMapKey(Map<String, String> map) {
         int size = map == null ? 0 : map.size();
-        Map<String, String> lowerKeyMap = new HashMap(size);
+        Map<String, String> lowerKeyMap = new HashMap<>(size);
         if (size == 0) {
             return lowerKeyMap;
         }
