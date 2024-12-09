@@ -72,8 +72,6 @@ public class SpecialFields {
 
     public static final String KEY_FIELD_PREFIX = "_KEY_";
     public static final int KEY_FIELD_ID_START = SYSTEM_FIELD_ID_START;
-    // reserve 1000 for other system fields
-    public static final int KEY_FIELD_ID_END = Integer.MAX_VALUE - 1_000;
 
     public static final DataField SEQUENCE_NUMBER =
             new DataField(Integer.MAX_VALUE - 1, "_SEQUENCE_NUMBER", DataTypes.BIGINT().notNull());
@@ -101,8 +99,8 @@ public class SpecialFields {
         return field.startsWith(KEY_FIELD_PREFIX) || SYSTEM_FIELD_NAMES.contains(field);
     }
 
-    public static boolean isKeyField(int id) {
-        return id >= KEY_FIELD_ID_START && id < KEY_FIELD_ID_END;
+    public static boolean isKeyField(String field) {
+        return field.startsWith(KEY_FIELD_PREFIX);
     }
 
     // ----------------------------------------------------------------------------------------

@@ -49,9 +49,14 @@ import static org.apache.paimon.table.SpecialFields.KEY_FIELD_ID_START;
 /** Class with index mapping and bulk format. */
 public class BulkFormatMapping {
 
+    // index mapping from data schema fields to table schema fields, this is used to realize paimon
+    // schema evolution
     @Nullable private final int[] indexMapping;
+    // help indexMapping to cast defferent data type
     @Nullable private final CastFieldGetter[] castMapping;
+    // partition fields mapping, add partition fields to the read fields
     @Nullable private final Pair<int[], RowType> partitionPair;
+    // key fields mapping, add key fields to the read fields
     @Nullable private final int[] trimmedKeyMapping;
     private final FormatReaderFactory bulkFormat;
     private final TableSchema dataSchema;
@@ -193,7 +198,7 @@ public class BulkFormatMapping {
             AtomicInteger index = new AtomicInteger();
             for (int i = 0; i < fieldsWithoutPartition.size(); i++) {
                 DataField field = fieldsWithoutPartition.get(i);
-                boolean keyField = SpecialFields.isKeyField(field.id());
+                boolean keyField = SpecialFields.isKeyField(field.name());
                 int id = keyField ? field.id() - KEY_FIELD_ID_START : field.id();
                 // field in data schema
                 DataField f = fieldMap.get(id);
