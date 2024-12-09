@@ -28,4 +28,9 @@ public class RESTCatalogInternalOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog uri's prefix.");
+    public static final ConfigOption<String> CREDENTIALS_PROVIDER =
+            ConfigOptions.key("credentials-provider")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth credentials provider.");
 }

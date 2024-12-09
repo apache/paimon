@@ -23,7 +23,7 @@ import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalogOptions;
 
-import static org.apache.paimon.rest.RESTCatalogOptions.CREDENTIALS_PROVIDER;
+import static org.apache.paimon.rest.RESTCatalogInternalOptions.CREDENTIALS_PROVIDER;
 
 /** Factory for creating {@link CredentialsProvider}. */
 public interface CredentialsProviderFactory extends Factory {
@@ -34,17 +34,21 @@ public interface CredentialsProviderFactory extends Factory {
     }
 
     static CredentialsProvider createCredentialsProvider(Options options, ClassLoader classLoader) {
-        String credentialsProviderIdentifier = options.get(CREDENTIALS_PROVIDER);
+        String credentialsProviderIdentifier = getCredentialsProviderTypeByConf(options).name();
         CredentialsProviderFactory credentialsProviderFactory =
                 FactoryUtil.discoverFactory(
                         classLoader,
                         CredentialsProviderFactory.class,
                         credentialsProviderIdentifier);
+        return credentialsProviderFactory.create(options);
+    }
 
-        try {
-            return credentialsProviderFactory.create(options);
-        } catch (UnsupportedOperationException ignore) {
+    static CredentialsProviderType getCredentialsProviderTypeByConf(Options options) {
+        if (options.getOptional(CREDENTIALS_PROVIDER).isPresent()) {
+            return CredentialsProviderType.valueOf(options.get(CREDENTIALS_PROVIDER));
+        } else if (options.getOptional(RESTCatalogOptions.TOKEN_PROVIDER_PATH).isPresent()) {
+            return CredentialsProviderType.BEAR_TOKEN_FILE;
         }
-        return new BearTokenCredentialsProvider(options.get(RESTCatalogOptions.TOKEN));
+        return CredentialsProviderType.BEAR_TOKEN;
     }
 }

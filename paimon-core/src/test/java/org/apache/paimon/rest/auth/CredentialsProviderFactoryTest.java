@@ -30,6 +30,7 @@ import java.io.File;
 import java.time.Duration;
 import java.util.UUID;
 
+import static org.apache.paimon.rest.RESTCatalogInternalOptions.CREDENTIALS_PROVIDER;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 
@@ -43,8 +44,6 @@ public class CredentialsProviderFactoryTest {
         Options options = new Options();
         String token = UUID.randomUUID().toString();
         options.set(RESTCatalogOptions.TOKEN, token);
-        options.set(
-                RESTCatalogOptions.CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN.name());
         BearTokenCredentialsProvider credentialsProvider =
                 (BearTokenCredentialsProvider)
                         CredentialsProviderFactory.createCredentialsProvider(
@@ -55,8 +54,6 @@ public class CredentialsProviderFactoryTest {
     @Test
     public void testCreateBearTokenCredentialsProviderFail() {
         Options options = new Options();
-        options.set(
-                RESTCatalogOptions.CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN.name());
         assertThrows(
                 IllegalArgumentException.class,
                 () ->
@@ -72,9 +69,7 @@ public class CredentialsProviderFactoryTest {
         String token = UUID.randomUUID().toString();
         FileUtils.writeStringToFile(tokenFile, token);
         options.set(RESTCatalogOptions.TOKEN_PROVIDER_PATH, tokenFile.getPath());
-        options.set(
-                RESTCatalogOptions.CREDENTIALS_PROVIDER,
-                CredentialsProviderType.BEAR_TOKEN_FILE.name());
+        options.set(CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN_FILE.name());
         BearTokenFileCredentialsProvider credentialsProvider =
                 (BearTokenFileCredentialsProvider)
                         CredentialsProviderFactory.createCredentialsProvider(
@@ -85,9 +80,7 @@ public class CredentialsProviderFactoryTest {
     @Test
     public void testCreateBearTokenFileCredentialsProviderFail() throws Exception {
         Options options = new Options();
-        options.set(
-                RESTCatalogOptions.CREDENTIALS_PROVIDER,
-                CredentialsProviderType.BEAR_TOKEN_FILE.name());
+        options.set(CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN_FILE.name());
         assertThrows(
                 IllegalArgumentException.class,
                 () ->
@@ -102,9 +95,7 @@ public class CredentialsProviderFactoryTest {
         File tokenFile = folder.newFile(fileName);
         String token = UUID.randomUUID().toString();
         FileUtils.writeStringToFile(tokenFile, token);
-        options.set(
-                RESTCatalogOptions.CREDENTIALS_PROVIDER,
-                CredentialsProviderType.BEAR_TOKEN_FILE.name());
+        options.set(CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN_FILE.name());
         options.set(RESTCatalogOptions.TOKEN_PROVIDER_PATH, tokenFile.getPath());
         options.set(RESTCatalogOptions.TOKEN_REFRESH_ENABLED, true);
         options.set(RESTCatalogOptions.TOKEN_EXPIRATION_TIME, Duration.ofSeconds(10L));
@@ -122,18 +113,40 @@ public class CredentialsProviderFactoryTest {
         File tokenFile = folder.newFile(fileName);
         String token = UUID.randomUUID().toString();
         FileUtils.writeStringToFile(tokenFile, token);
-        options.set(
-                RESTCatalogOptions.CREDENTIALS_PROVIDER,
-                CredentialsProviderType.BEAR_TOKEN_FILE.name());
+        options.set(CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN_FILE.name());
         options.set(RESTCatalogOptions.TOKEN_PROVIDER_PATH, tokenFile.getPath());
         options.set(RESTCatalogOptions.TOKEN_REFRESH_ENABLED, true);
-        options.set(
-                RESTCatalogOptions.CREDENTIALS_PROVIDER,
-                CredentialsProviderType.BEAR_TOKEN_FILE.name());
+        options.set(CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN_FILE.name());
         assertThrows(
                 IllegalArgumentException.class,
                 () ->
                         CredentialsProviderFactory.createCredentialsProvider(
                                 options, this.getClass().getClassLoader()));
+    }
+
+    @Test
+    public void getCredentialsProviderTypeByConfWhenDefineTokenPath() {
+        Options options = new Options();
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER_PATH, "/a/b/c");
+        assertEquals(
+                CredentialsProviderType.BEAR_TOKEN_FILE,
+                CredentialsProviderFactory.getCredentialsProviderTypeByConf(options));
+    }
+
+    @Test
+    public void getCredentialsProviderTypeByConfWhenConfNotDefined() {
+        Options options = new Options();
+        assertEquals(
+                CredentialsProviderType.BEAR_TOKEN,
+                CredentialsProviderFactory.getCredentialsProviderTypeByConf(options));
+    }
+
+    @Test
+    public void getCredentialsProviderTypeByConfWhenDefineProviderType() {
+        Options options = new Options();
+        options.set(CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN_FILE.name());
+        assertEquals(
+                CredentialsProviderType.BEAR_TOKEN_FILE,
+                CredentialsProviderFactory.getCredentialsProviderTypeByConf(options));
     }
 }

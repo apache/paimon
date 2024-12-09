@@ -20,7 +20,6 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.rest.auth.CredentialsProviderType;
 
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
@@ -51,8 +50,6 @@ public class RESTCatalogTest {
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
         mockOptions(RESTCatalogInternalOptions.PREFIX.key(), "prefix");
-        options.set(
-                RESTCatalogOptions.CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN.name());
         restCatalog = new RESTCatalog(options);
     }
 
@@ -65,8 +62,6 @@ public class RESTCatalogTest {
     public void testInitFailWhenDefineWarehouse() {
         Options options = new Options();
         options.set(CatalogOptions.WAREHOUSE, "/a/b/c");
-        options.set(
-                RESTCatalogOptions.CREDENTIALS_PROVIDER, CredentialsProviderType.BEAR_TOKEN.name());
         assertThrows(IllegalArgumentException.class, () -> new RESTCatalog(options));
     }
 
