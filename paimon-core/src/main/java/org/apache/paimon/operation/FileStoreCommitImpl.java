@@ -1085,7 +1085,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
             if (commitMaxTimeout.isPresent()
                     && System.currentTimeMillis() - startMillis
-                    > commitMaxTimeout.get().toMillis()) {
+                            > commitMaxTimeout.get().toMillis()) {
                 retryResult.cleanAll();
                 throw new RuntimeException(
                         String.format(
