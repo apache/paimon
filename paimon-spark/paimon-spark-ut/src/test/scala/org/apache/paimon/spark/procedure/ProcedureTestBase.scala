@@ -32,7 +32,7 @@ abstract class ProcedureTestBase extends PaimonSparkTestBase {
                  |""".stripMargin)
 
     assertThatThrownBy(() => spark.sql("CALL sys.unknown_procedure(table => 'test.T')"))
-      .isInstanceOf(classOf[NoSuchProcedureException])
+      .isInstanceOf(classOf[ParseException])
   }
 
   test(s"test parse exception") {
