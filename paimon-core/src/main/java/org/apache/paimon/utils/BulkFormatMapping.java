@@ -49,10 +49,11 @@ import static org.apache.paimon.table.SpecialFields.KEY_FIELD_ID_START;
 /** Class with index mapping and bulk format. */
 public class BulkFormatMapping {
 
-    // index mapping from data schema fields to table schema fields, this is used to realize paimon
-    // schema evolution
+    // Index mapping from data schema fields to table schema fields, this is used to realize paimon
+    // schema evolution. And it combines trimeedKeyMapping, which maps key fields to the value
+    // fields
     @Nullable private final int[] indexMapping;
-    // help indexMapping to cast defferent data type
+    // help indexMapping to cast different data type
     @Nullable private final CastFieldGetter[] castMapping;
     // partition fields mapping, add partition fields to the read fields
     @Nullable private final Pair<int[], RowType> partitionPair;
@@ -147,15 +148,12 @@ public class BulkFormatMapping {
          *
          * <p>1. Calculate the readDataFields, which is what we intend to read from the data schema.
          * Meanwhile, generate the indexCastMapping, which is used to map the index of the
-         * readDataFields to the index of the data schema.
+         * readDataFields to the index of the data schema. Also, this mapping combined
+         * trimmedKeyMapping(whith maps the _KEY_xxx fields to xxx fields.)
          *
          * <p>2. We want read much fewer fields than readDataFields, so we kick out the partition
          * fields. We generate the partitionMappingAndFieldsWithoutPartitionPair which helps reduce
          * the real read fields and tell us how to map it back.
-         *
-         * <p>3. We still want read fewer fields, so we combine the _KEY_xxx fields to xxx fields.
-         * They are always the same, we just need to get once. We generate trimmedKeyPair to reduce
-         * the real read fields again, also it tells us how to map it back.
          */
         public BulkFormatMapping build(
                 String formatIdentifier, TableSchema tableSchema, TableSchema dataSchema) {
