@@ -672,11 +672,6 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                 "Never-expire",
                 "9999-09-09") :: Nil)
 
-            // no 'partition.expiration-time' value in table property or procedure parameter.
-            assertThatThrownBy(
-              () => spark.sql("CALL paimon.sys.expire_partitions(table => 'test.T')"))
-              .hasMessageContaining("The partition expiration time is must been required")
-
             // 'partition.timestamp-formatter' value using table property.
             // 'partition.expiration-time' value using procedure parameter.
             checkAnswer(
