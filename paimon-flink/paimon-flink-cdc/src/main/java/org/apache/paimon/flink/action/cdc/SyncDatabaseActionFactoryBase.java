@@ -29,6 +29,7 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.INCLUDING_
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MULTIPLE_TABLE_PARTITION_KEYS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PARTITION_KEYS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PRIMARY_KEYS;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_MAPPING;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_PREFIX;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_SUFFIX;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TYPE_MAPPING;
@@ -51,6 +52,7 @@ public abstract class SyncDatabaseActionFactoryBase<T extends SyncDatabaseAction
     protected void withParams(MultipleParameterToolAdapter params, T action) {
         action.withTablePrefix(params.get(TABLE_PREFIX))
                 .withTableSuffix(params.get(TABLE_SUFFIX))
+                .withTableMapping(optionalConfigMap(params, TABLE_MAPPING))
                 .includingTables(params.get(INCLUDING_TABLES))
                 .excludingTables(params.get(EXCLUDING_TABLES))
                 .withPartitionKeyMultiple(
