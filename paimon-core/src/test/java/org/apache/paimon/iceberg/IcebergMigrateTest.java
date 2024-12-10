@@ -31,6 +31,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.iceberg.CatalogUtil;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.DeleteFile;
 import org.apache.iceberg.PartitionKey;
@@ -45,13 +46,13 @@ import org.apache.iceberg.data.orc.GenericOrcWriter;
 import org.apache.iceberg.data.parquet.GenericParquetWriter;
 import org.apache.iceberg.deletes.EqualityDeleteWriter;
 import org.apache.iceberg.expressions.Expressions;
-import org.apache.iceberg.hadoop.HadoopCatalog;
 import org.apache.iceberg.io.DataWriter;
 import org.apache.iceberg.io.OutputFile;
 import org.apache.iceberg.orc.ORC;
 import org.apache.iceberg.parquet.Parquet;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
 import org.apache.iceberg.types.Types;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -66,20 +67,25 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
 /** Tests for {@link IcebergMigrator}. */
 public class IcebergMigrateTest {
     @TempDir java.nio.file.Path iceTempDir;
     @TempDir java.nio.file.Path paiTempDir;
 
+    Catalog paiCatalog;
+
+    org.apache.iceberg.catalog.Catalog icebergCatalog;
     String iceDatabase = "ice_db";
     String iceTable = "ice_t";
 
@@ -99,6 +105,12 @@ public class IcebergMigrateTest {
 
     PartitionSpec icePartitionSpec =
             PartitionSpec.builderFor(iceSchema).identity("dt").identity("hh").build();
+
+    @BeforeEach
+    public void beforeEach() throws Exception {
+        paiCatalog = createPaimonCatalog();
+        icebergCatalog = createIcebergCatalog();
+    }
 
     @ParameterizedTest(name = "isPartitioned = {0}")
     @ValueSource(booleans = {true, false})
@@ -127,21 +139,20 @@ public class IcebergMigrateTest {
             writeRecordsToIceberg(icebergTable, format, records2);
         }
 
-        CatalogContext context = CatalogContext.create(new Path(paiTempDir.toString()));
-        context.options().set(CACHE_ENABLED, false);
-        Catalog catalog = CatalogFactory.createCatalog(context);
         IcebergMigrator icebergMigrator =
                 new IcebergMigrator(
-                        catalog,
-                        new Path(icebergTable.location(), "metadata"),
+                        paiCatalog,
                         paiDatabase,
                         paiTable,
+                        icebergCatalog,
+                        iceDatabase,
+                        iceTable,
                         false,
                         1);
         icebergMigrator.executeMigrate();
 
         FileStoreTable paimonTable =
-                (FileStoreTable) catalog.getTable(Identifier.create(paiDatabase, paiTable));
+                (FileStoreTable) paiCatalog.getTable(Identifier.create(paiDatabase, paiTable));
         List<String> paiResults = getPaimonResult(paimonTable);
         assertThat(
                         paiResults.stream()
@@ -184,21 +195,20 @@ public class IcebergMigrateTest {
         // a delete file
         icebergTable.newDelete().deleteFromRowFilter(Expressions.equal("hh", "00")).commit();
 
-        CatalogContext context = CatalogContext.create(new Path(paiTempDir.toString()));
-        context.options().set(CACHE_ENABLED, false);
-        Catalog catalog = CatalogFactory.createCatalog(context);
         IcebergMigrator icebergMigrator =
                 new IcebergMigrator(
-                        catalog,
-                        new Path(icebergTable.location(), "metadata"),
+                        paiCatalog,
                         paiDatabase,
                         paiTable,
+                        icebergCatalog,
+                        iceDatabase,
+                        iceTable,
                         false,
                         1);
         icebergMigrator.executeMigrate();
 
         FileStoreTable paimonTable =
-                (FileStoreTable) catalog.getTable(Identifier.create(paiDatabase, paiTable));
+                (FileStoreTable) paiCatalog.getTable(Identifier.create(paiDatabase, paiTable));
         List<String> paiResults = getPaimonResult(paimonTable);
         assertThat(
                         paiResults.stream()
@@ -244,15 +254,14 @@ public class IcebergMigrateTest {
             writeRecordsToIceberg(icebergTable, format, records2);
         }
 
-        CatalogContext context = CatalogContext.create(new Path(paiTempDir.toString()));
-        context.options().set(CACHE_ENABLED, false);
-        Catalog catalog = CatalogFactory.createCatalog(context);
         IcebergMigrator icebergMigrator =
                 new IcebergMigrator(
-                        catalog,
-                        new Path(icebergTable.location(), "metadata"),
+                        paiCatalog,
                         paiDatabase,
                         paiTable,
+                        icebergCatalog,
+                        iceDatabase,
+                        iceTable,
                         ignoreDelete,
                         1);
         if (!ignoreDelete) {
@@ -268,7 +277,7 @@ public class IcebergMigrateTest {
         }
 
         FileStoreTable paimonTable =
-                (FileStoreTable) catalog.getTable(Identifier.create(paiDatabase, paiTable));
+                (FileStoreTable) paiCatalog.getTable(Identifier.create(paiDatabase, paiTable));
         List<String> paiResults = getPaimonResult(paimonTable);
         assertThat(
                         paiResults.stream()
@@ -328,21 +337,20 @@ public class IcebergMigrateTest {
             writeRecordsToIceberg(icebergTable, format, addedRecords);
         }
 
-        CatalogContext context = CatalogContext.create(new Path(paiTempDir.toString()));
-        context.options().set(CACHE_ENABLED, false);
-        Catalog catalog = CatalogFactory.createCatalog(context);
         IcebergMigrator icebergMigrator =
                 new IcebergMigrator(
-                        catalog,
-                        new Path(icebergTable.location(), "metadata"),
+                        paiCatalog,
                         paiDatabase,
                         paiTable,
+                        icebergCatalog,
+                        iceDatabase,
+                        iceTable,
                         false,
                         1);
         icebergMigrator.executeMigrate();
 
         FileStoreTable paimonTable =
-                (FileStoreTable) catalog.getTable(Identifier.create(paiDatabase, paiTable));
+                (FileStoreTable) paiCatalog.getTable(Identifier.create(paiDatabase, paiTable));
         List<String> paiResults = getPaimonResult(paimonTable);
         assertThat(
                         paiResults.stream()
@@ -398,10 +406,12 @@ public class IcebergMigrateTest {
         Catalog catalog = CatalogFactory.createCatalog(context);
         IcebergMigrator icebergMigrator =
                 new IcebergMigrator(
-                        catalog,
-                        new Path(icebergTable.location(), "metadata"),
+                        paiCatalog,
                         paiDatabase,
                         paiTable,
+                        icebergCatalog,
+                        iceDatabase,
+                        iceTable,
                         false,
                         1);
         icebergMigrator.executeMigrate();
@@ -412,20 +422,38 @@ public class IcebergMigrateTest {
         assertThat(paiResults.size()).isEqualTo(1);
     }
 
+    private org.apache.iceberg.catalog.Catalog createIcebergCatalog() {
+        Map<String, String> icebergCatalogOptions = new HashMap<>();
+        icebergCatalogOptions.put("type", "hadoop");
+        icebergCatalogOptions.put("warehouse", iceTempDir.toString());
+
+        return CatalogUtil.buildIcebergCatalog(
+                "iceberg_catalog", icebergCatalogOptions, new Configuration());
+    }
+
+    private Catalog createPaimonCatalog() {
+        CatalogContext context = CatalogContext.create(new Path(paiTempDir.toString()));
+        context.options().set(CACHE_ENABLED, false);
+        return CatalogFactory.createCatalog(context);
+    }
+
     private Table createIcebergTable(boolean isPartitioned) {
         return createIcebergTable(isPartitioned, iceSchema);
     }
 
     private Table createIcebergTable(boolean isPartitioned, Schema icebergSchema) {
-        HadoopCatalog catalog = new HadoopCatalog(new Configuration(), iceTempDir.toString());
+        //        HadoopCatalog catalog = new HadoopCatalog(new Configuration(),
+        // iceTempDir.toString());
         TableIdentifier icebergIdentifier = TableIdentifier.of(iceDatabase, iceTable);
 
         if (!isPartitioned) {
-            return catalog.buildTable(icebergIdentifier, icebergSchema)
+            return icebergCatalog
+                    .buildTable(icebergIdentifier, icebergSchema)
                     .withPartitionSpec(PartitionSpec.unpartitioned())
                     .create();
         } else {
-            return catalog.buildTable(icebergIdentifier, icebergSchema)
+            return icebergCatalog
+                    .buildTable(icebergIdentifier, icebergSchema)
                     .withPartitionSpec(icePartitionSpec)
                     .create();
         }

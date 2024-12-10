@@ -68,6 +68,10 @@ public class IcebergPathFactory {
         return new Path(metadataDirectory(), String.format("v%d.metadata.json", snapshotId));
     }
 
+    public Path toMetadataPath(String metadataName) {
+        return new Path(metadataDirectory(), metadataName);
+    }
+
     public Stream<Path> getAllMetadataPathBefore(FileIO fileIO, long snapshotId)
             throws IOException {
         return FileUtils.listVersionedFileStatus(fileIO, metadataDirectory, "v")

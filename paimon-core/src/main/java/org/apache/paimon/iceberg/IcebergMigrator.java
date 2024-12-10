@@ -42,10 +42,10 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.DataField;
 
+import org.apache.iceberg.catalog.TableIdentifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -61,18 +61,24 @@ import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 /** migrate hive table to paimon table. */
 public class IcebergMigrator implements Migrator {
     private static final Logger LOG = LoggerFactory.getLogger(IcebergMigrator.class);
-    private static final String VERSION_HINT_FILENAME = "version-hint.text";
 
     private final ThreadPoolExecutor executor;
 
     private final Catalog paimonCatalog;
     private final FileIO paimonFileIO;
     private final String paimonDatabaseName;
-    private final String paimonTableNameame;
+    private final String paimonTableName;
 
-    private final int icebergNewestSnapshotId;
-    // Path factory for iceberg metadata
-    private final IcebergPathFactory icebergPathFactory;
+    private final org.apache.iceberg.catalog.Catalog icebergCatalog;
+    private final String icebergDatabaseName;
+    private final String icebergTableName;
+
+    // metadata path factory for iceberg metadata
+    private IcebergPathFactory icebergMetaPathFactory;
+    // iceberg table latest snapshot id
+    private long icebergLatestSnapshotId;
+    // iceberg latest snapshot metadata file name
+    private String icebergLatestMetaDataFileName;
     // metadata for newest iceberg snapshot
     private final IcebergMetadata icebergMetadata;
 
@@ -80,30 +86,56 @@ public class IcebergMigrator implements Migrator {
 
     public IcebergMigrator(
             Catalog paimonCatalog,
-            Path icebergMetaPath,
             String paimonDatabaseName,
-            String paimonTableNameame,
+            String paimonTableName,
+            org.apache.iceberg.catalog.Catalog icebergCatalog,
+            String icebergDatabaseName,
+            String icebergTableName,
             boolean ignoreDelete,
             Integer parallelism) {
         this.paimonCatalog = paimonCatalog;
         this.paimonFileIO = paimonCatalog.fileIO();
         this.paimonDatabaseName = paimonDatabaseName;
-        this.paimonTableNameame = paimonTableNameame;
+        this.paimonTableName = paimonTableName;
 
-        this.icebergPathFactory = new IcebergPathFactory(icebergMetaPath);
-        this.icebergNewestSnapshotId = getIcebergNewestSnapshotId();
+        this.icebergCatalog = icebergCatalog;
+        this.icebergDatabaseName = icebergDatabaseName;
+        this.icebergTableName = icebergTableName;
+
+        initIcebergInfoForPaimon();
         this.icebergMetadata =
                 IcebergMetadata.fromPath(
-                        paimonFileIO, icebergPathFactory.toMetadataPath(icebergNewestSnapshotId));
+                        paimonFileIO,
+                        icebergMetaPathFactory.toMetadataPath(icebergLatestMetaDataFileName));
         this.ignoreDelete = ignoreDelete;
 
         this.executor = createCachedThreadPool(parallelism, "ICEBERG_MIGRATOR");
     }
 
+    public void initIcebergInfoForPaimon() {
+        try {
+            LOG.info("Try to load iceberg table to get the metadata path of latest snapshot.");
+            org.apache.iceberg.Table icebergTable =
+                    icebergCatalog.loadTable(
+                            TableIdentifier.of(icebergDatabaseName, icebergTableName));
+            org.apache.iceberg.TableMetadata currentMetadata =
+                    ((org.apache.iceberg.BaseTable) icebergTable).operations().current();
+            Path metadataLocation = new Path(currentMetadata.metadataFileLocation());
+            LOG.info("iceberg latest snapshot metadata file location: {}", metadataLocation);
+            this.icebergMetaPathFactory = new IcebergPathFactory(metadataLocation.getParent());
+            this.icebergLatestMetaDataFileName = metadataLocation.getName();
+            this.icebergLatestSnapshotId = currentMetadata.currentSnapshot().snapshotId();
+            LOG.info("get iceberg metadata path successfully.");
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "failed to get iceberg metadata path by loading iceberg table.");
+        }
+    }
+
     @Override
     public void executeMigrate() throws Exception {
         Schema paimonSchema = icebergSchemaToPaimonSchema(icebergMetadata);
-        Identifier paimonIdentifier = Identifier.create(paimonDatabaseName, paimonTableNameame);
+        Identifier paimonIdentifier = Identifier.create(paimonDatabaseName, paimonTableName);
 
         paimonCatalog.createDatabase(paimonDatabaseName, false);
         paimonCatalog.createTable(paimonIdentifier, paimonSchema, false);
@@ -112,9 +144,9 @@ public class IcebergMigrator implements Migrator {
             FileStoreTable paimonTable = (FileStoreTable) paimonCatalog.getTable(paimonIdentifier);
 
             IcebergManifestFile manifestFile =
-                    IcebergManifestFile.create(paimonTable, icebergPathFactory);
+                    IcebergManifestFile.create(paimonTable, icebergMetaPathFactory);
             IcebergManifestList manifestList =
-                    IcebergManifestList.create(paimonTable, icebergPathFactory);
+                    IcebergManifestList.create(paimonTable, icebergMetaPathFactory);
 
             List<IcebergManifestFileMeta> icebergManifestFileMetas =
                     manifestList.read(icebergMetadata.currentSnapshot().manifestList());
@@ -131,8 +163,8 @@ public class IcebergMigrator implements Migrator {
             if (icebergEntries.isEmpty()) {
                 LOG.info(
                         "No live manifest entry in iceberg table for snapshot {}, iceberg table meta path is {}.",
-                        icebergNewestSnapshotId,
-                        icebergPathFactory.toMetadataPath(icebergNewestSnapshotId));
+                        icebergLatestSnapshotId,
+                        icebergMetaPathFactory.toMetadataPath(icebergLatestSnapshotId));
                 return;
             }
 
@@ -198,18 +230,6 @@ public class IcebergMigrator implements Migrator {
 
     @Override
     public void renameTable(boolean ignoreIfNotExists) throws Exception {}
-
-    public int getIcebergNewestSnapshotId() {
-        Path versionHintPath =
-                new Path(icebergPathFactory.metadataDirectory(), VERSION_HINT_FILENAME);
-        try {
-            return Integer.parseInt(paimonFileIO.readFileUtf8(versionHintPath));
-        } catch (IOException e) {
-            throw new RuntimeException(
-                    "read iceberg version-hint.text failed. Iceberg metadata path: "
-                            + icebergPathFactory.metadataDirectory());
-        }
-    }
 
     public Schema icebergSchemaToPaimonSchema(IcebergMetadata icebergMetadata) {
         // get iceberg current schema
