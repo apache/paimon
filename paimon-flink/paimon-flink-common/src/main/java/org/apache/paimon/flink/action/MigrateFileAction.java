@@ -54,9 +54,9 @@ public class MigrateFileAction extends ActionBase {
 
     @Override
     public void run() throws Exception {
-        MigrateFileProcedure migrateTableProcedure = new MigrateFileProcedure();
-        migrateTableProcedure.withCatalog(catalog);
-        migrateTableProcedure.call(
+        MigrateFileProcedure migrateFileProcedure = new MigrateFileProcedure();
+        migrateFileProcedure.withCatalog(catalog);
+        migrateFileProcedure.call(
                 new DefaultProcedureContext(env),
                 connector,
                 sourceTable,

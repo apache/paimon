@@ -192,7 +192,8 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
                         "default.hivetable",
                         catalogConf,
                         "",
-                        6);
+                        6,
+                        "");
         migrateTableAction.run();
 
         tEnv.executeSql(
