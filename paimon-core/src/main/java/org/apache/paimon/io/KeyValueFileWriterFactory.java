@@ -21,6 +21,7 @@ package org.apache.paimon.io;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueSerializer;
+import org.apache.paimon.KeyValueThinSerializer;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
@@ -33,6 +34,7 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
 import javax.annotation.Nullable;
@@ -107,7 +109,10 @@ public class KeyValueFileWriterFactory {
 
     private KeyValueDataFileWriter createDataFileWriter(
             Path path, int level, FileSource fileSource) {
-        KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
+        ObjectSerializer<KeyValue> kvSerializer =
+                options.thinMode()
+                        ? new KeyValueThinSerializer(keyType, valueType)
+                        : new KeyValueSerializer(keyType, valueType);
         return new KeyValueDataFileWriter(
                 fileIO,
                 formatContext.writerFactory(level),
@@ -191,12 +196,14 @@ public class KeyValueFileWriterFactory {
 
         public KeyValueFileWriterFactory build(
                 BinaryRow partition, int bucket, CoreOptions options) {
-            RowType fileRowType = KeyValue.schema(keyType, valueType);
+            RowType finalKeyType = options.thinMode() ? RowType.of() : keyType;
+            RowType writeKeyType = KeyValue.schema(finalKeyType, valueType);
             WriteFormatContext context =
                     new WriteFormatContext(
                             partition,
                             bucket,
-                            fileRowType,
+                            keyType,
+                            writeKeyType,
                             fileFormat,
                             format2PathFactory,
                             options);
@@ -217,6 +224,7 @@ public class KeyValueFileWriterFactory {
         private WriteFormatContext(
                 BinaryRow partition,
                 int bucket,
+                RowType keyType,
                 RowType rowType,
                 FileFormat defaultFormat,
                 Map<String, FileStorePathFactory> parentFactories,
@@ -236,7 +244,8 @@ public class KeyValueFileWriterFactory {
             this.format2PathFactory = new HashMap<>();
             this.format2WriterFactory = new HashMap<>();
             SimpleColStatsCollector.Factory[] statsCollectorFactories =
-                    StatsCollectorFactories.createStatsFactories(options, rowType.getFieldNames());
+                    StatsCollectorFactories.createStatsFactories(
+                            options, rowType.getFieldNames(), keyType.getFieldNames());
             for (String format : parentFactories.keySet()) {
                 format2PathFactory.put(
                         format,
