@@ -134,7 +134,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final List<CommitCallback> commitCallbacks;
     private final StatsFileHandler statsFileHandler;
     private final BucketMode bucketMode;
-    @Nullable private long commitTimeout;
+    private long commitTimeout;
     private final int commitMaxRetries;
 
     @Nullable private Lock lock;
@@ -168,7 +168,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Integer manifestReadParallelism,
             List<CommitCallback> commitCallbacks,
             int commitMaxRetries,
-            @Nullable long commitTimeout) {
+            long commitTimeout) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.tableName = tableName;
