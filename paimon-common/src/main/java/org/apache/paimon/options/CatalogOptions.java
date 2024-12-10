@@ -87,7 +87,7 @@ public class CatalogOptions {
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(
-                            "Controls whether the catalog will cache databases, tables and manifests.");
+                            "Controls whether the catalog will cache databases, tables, manifests and partitions.");
 
     public static final ConfigOption<Duration> CACHE_EXPIRATION_INTERVAL_MS =
             key("cache.expiration-interval")

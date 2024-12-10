@@ -25,6 +25,7 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.operation.metrics.CacheMetrics;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -206,5 +207,12 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    public ObjectsFile<T> withCacheMetrics(CacheMetrics cacheMetrics) {
+        if (cache != null) {
+            cache.withCacheMetrics(cacheMetrics);
+        }
+        return this;
     }
 }

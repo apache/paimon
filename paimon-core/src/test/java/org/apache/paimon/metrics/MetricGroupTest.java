@@ -24,12 +24,12 @@ import java.util.HashMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for the {@link MetricRegistryImpl}. */
-public class MetricRegistryImplTest {
+/** Tests for the {@link MetricGroup}. */
+public class MetricGroupTest {
 
     @Test
     public void testGroupRegisterMetrics() {
-        MetricRegistryImpl registry = new MetricRegistryImpl();
+        TestMetricRegistry registry = new TestMetricRegistry();
         MetricGroup group = registry.tableMetricGroup("commit", "myTable");
 
         // these will fail is the registration is propagated
@@ -50,7 +50,7 @@ public class MetricRegistryImplTest {
     @Test
     public void testTolerateMetricNameCollisions() {
         final String name = "abctestname";
-        MetricRegistryImpl registry = new MetricRegistryImpl();
+        TestMetricRegistry registry = new TestMetricRegistry();
         MetricGroup group = registry.tableMetricGroup("commit", "myTable");
 
         Counter counter = group.counter(name);
