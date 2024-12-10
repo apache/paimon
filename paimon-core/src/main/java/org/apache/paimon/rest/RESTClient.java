@@ -26,12 +26,6 @@ public interface RESTClient extends Closeable {
 
     <T extends RESTResponse> T get(String path, Class<T> responseType, Map<String, String> headers);
 
-    <T extends RESTResponse> T get(
-            String path,
-            Map<String, String> queryParams,
-            Class<T> responseType,
-            Map<String, String> headers);
-
     <T extends RESTResponse> T post(
             String path, RESTRequest body, Class<T> responseType, Map<String, String> headers);
 }

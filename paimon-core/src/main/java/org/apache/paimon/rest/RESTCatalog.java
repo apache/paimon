@@ -30,10 +30,12 @@ import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.CredentialsProvider;
 import org.apache.paimon.rest.auth.CredentialsProviderFactory;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
+import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.DatabaseName;
+import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -144,7 +146,14 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public Database getDatabase(String name) throws DatabaseNotExistException {
-        throw new UnsupportedOperationException();
+        try {
+            GetDatabaseResponse response =
+                    client.get(resourcePaths.database(name), GetDatabaseResponse.class, headers());
+            return new Database.DatabaseImpl(
+                    name, response.options(), response.comment().orElseGet(() -> null));
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(name);
+        }
     }
 
     @Override

@@ -23,6 +23,8 @@ import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.DatabaseName;
+import org.apache.paimon.rest.responses.ErrorResponse;
+import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -114,6 +116,10 @@ public class RESTCatalogController {
                             mediaType = "application/json")
                 }),
         @ApiResponse(
+                responseCode = "409",
+                description = "Resource has exist",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
@@ -123,6 +129,37 @@ public class RESTCatalogController {
         try {
             Map<String, String> properties = new HashMap<>();
             CreateDatabaseResponse response = new CreateDatabaseResponse("name", properties);
+            return new ResponseEntity<>(response, HttpStatus.CREATED);
+        } catch (Exception e) {
+            return new ResponseEntity<>(null, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    @Operation(
+            summary = "Get Database",
+            tags = {"database"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "201",
+                content = {
+                    @Content(
+                            schema = @Schema(implementation = GetDatabaseResponse.class),
+                            mediaType = "application/json")
+                }),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @GetMapping("/api/v1/{prefix}/databases/{database}")
+    public ResponseEntity<GetDatabaseResponse> getDatabases(
+            @PathVariable String prefix, @PathVariable String database) {
+        try {
+            Map<String, String> options = new HashMap<>();
+            GetDatabaseResponse response = new GetDatabaseResponse("name", options, "comment");
             return new ResponseEntity<>(response, HttpStatus.CREATED);
         } catch (Exception e) {
             return new ResponseEntity<>(null, HttpStatus.INTERNAL_SERVER_ERROR);

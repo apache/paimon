@@ -17,7 +17,7 @@
 
 # Start the application
 cd ..
-#mvn clean install -DskipTests
+mvn clean install -DskipTests
 cd ./paimon-open-api
 mvn spring-boot:run &
 SPRING_PID=$!

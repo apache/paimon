@@ -26,7 +26,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 
 import okhttp3.Dispatcher;
 import okhttp3.Headers;
-import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -70,31 +69,6 @@ public class HttpClient implements RESTClient {
             Request request =
                     new Request.Builder()
                             .url(uri + path)
-                            .get()
-                            .headers(Headers.of(headers))
-                            .build();
-            return exec(request, responseType);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    @Override
-    public <T extends RESTResponse> T get(
-            String path,
-            Map<String, String> queryParams,
-            Class<T> responseType,
-            Map<String, String> headers) {
-        try {
-            HttpUrl.Builder httpUrlBuilder = HttpUrl.parse(uri + path).newBuilder();
-            if (queryParams != null) {
-                for (Map.Entry<String, String> param : queryParams.entrySet()) {
-                    httpUrlBuilder.addQueryParameter(param.getKey(), param.getValue());
-                }
-            }
-            Request request =
-                    new Request.Builder()
-                            .url(httpUrlBuilder.build())
                             .get()
                             .headers(Headers.of(headers))
                             .build();
