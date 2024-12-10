@@ -72,9 +72,8 @@ public class KeyValueDataFileWriterImpl extends KeyValueDataFileWriter {
     @Override
     Pair<SimpleColStats[], SimpleColStats[]> fetchKeyValueStats(SimpleColStats[] rowStats) {
         int numKeyFields = keyType.getFieldCount();
-        int numValueFields = valueType.getFieldCount();
         return Pair.of(
                 Arrays.copyOfRange(rowStats, 0, numKeyFields),
-                Arrays.copyOfRange(rowStats, numKeyFields + 2, numValueFields));
+                Arrays.copyOfRange(rowStats, numKeyFields + 2, rowStats.length));
     }
 }
