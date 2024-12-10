@@ -43,7 +43,6 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -80,8 +79,7 @@ public class KeyValueDataFileWriter
     private long minSeqNumber = Long.MAX_VALUE;
     private long maxSeqNumber = Long.MIN_VALUE;
     private long deleteRecordCount = 0;
-    @Nullable private final KeyStateAbstractor keyStateAbstractor;
-    private final boolean thinMode;
+    private final KeyStateAbstractor keyStateAbstractor;
 
     public KeyValueDataFileWriter(
             FileIO fileIO,
@@ -124,8 +122,7 @@ public class KeyValueDataFileWriter
         this.dataFileIndexWriter =
                 DataFileIndexWriter.create(
                         fileIO, dataFileToFileIndexPath(path), valueType, fileIndexOptions);
-        this.thinMode = options.thinMode();
-        this.keyStateAbstractor = thinMode ? new KeyStateAbstractor(keyType, valueType) : null;
+        this.keyStateAbstractor = new KeyStateAbstractor(keyType, valueType, options.thinMode());
     }
 
     @Override
@@ -176,19 +173,12 @@ public class KeyValueDataFileWriter
             return null;
         }
 
-        SimpleColStats[] rowStats = fieldStats();
-        int numKeyFields = keyType.getFieldCount();
+        Pair<SimpleColStats[], SimpleColStats[]> keyValueStats =
+                keyStateAbstractor.abstractFromValueState(fieldStats());
 
-        int valueFrom = thinMode ? 2 : numKeyFields + 2;
-        SimpleColStats[] valFieldStats = Arrays.copyOfRange(rowStats, valueFrom, rowStats.length);
+        SimpleStats keyStats = keyStatsConverter.toBinaryAllMode(keyValueStats.getKey());
         Pair<List<String>, SimpleStats> valueStatsPair =
-                valueStatsConverter.toBinary(valFieldStats);
-
-        SimpleColStats[] keyFieldStats =
-                thinMode
-                        ? keyStateAbstractor.abstractFromValueState(valFieldStats)
-                        : Arrays.copyOfRange(rowStats, 0, numKeyFields);
-        SimpleStats keyStats = keyStatsConverter.toBinaryAllMode(keyFieldStats);
+                valueStatsConverter.toBinary(keyValueStats.getValue());
 
         DataFileIndexWriter.FileIndexResult indexResult =
                 dataFileIndexWriter == null
@@ -225,31 +215,49 @@ public class KeyValueDataFileWriter
     }
 
     private static class KeyStateAbstractor {
+        private final int numKeyFields;
+        private final int numValueFields;
+        // if keyStatMapping is not null, means thin mode on.
+        @Nullable private final int[] keyStatMapping;
 
-        private final int[] keyStatMapping;
-
-        public KeyStateAbstractor(RowType keyType, RowType valueType) {
-
+        public KeyStateAbstractor(RowType keyType, RowType valueType, boolean thinMode) {
+            this.numKeyFields = keyType.getFieldCount();
+            this.numValueFields = valueType.getFieldCount();
             Map<Integer, Integer> idToIndex = new HashMap<>();
             for (int i = 0; i < valueType.getFieldCount(); i++) {
                 idToIndex.put(valueType.getFields().get(i).id(), i);
             }
-
-            keyStatMapping = new int[keyType.getFieldCount()];
-
-            for (int i = 0; i < keyType.getFieldCount(); i++) {
-                keyStatMapping[i] =
-                        idToIndex.get(
-                                keyType.getFields().get(i).id() - SpecialFields.KEY_FIELD_ID_START);
+            if (thinMode) {
+                this.keyStatMapping = new int[keyType.getFieldCount()];
+                for (int i = 0; i < keyType.getFieldCount(); i++) {
+                    keyStatMapping[i] =
+                            idToIndex.get(
+                                    keyType.getFields().get(i).id()
+                                            - SpecialFields.KEY_FIELD_ID_START);
+                }
+            } else {
+                this.keyStatMapping = null;
             }
         }
 
-        SimpleColStats[] abstractFromValueState(SimpleColStats[] valueStats) {
-            SimpleColStats[] keyStats = new SimpleColStats[keyStatMapping.length];
-            for (int i = 0; i < keyStatMapping.length; i++) {
-                keyStats[i] = valueStats[keyStatMapping[i]];
+        Pair<SimpleColStats[], SimpleColStats[]> abstractFromValueState(SimpleColStats[] rowStats) {
+            SimpleColStats[] keyStats = new SimpleColStats[numKeyFields];
+            SimpleColStats[] valFieldStats = new SimpleColStats[numValueFields];
+
+            int valueFrom = thinMode() ? 2 : numKeyFields + 2;
+            System.arraycopy(rowStats, valueFrom, valFieldStats, 0, numValueFields);
+            if (thinMode()) {
+                for (int i = 0; i < keyStatMapping.length; i++) {
+                    keyStats[i] = valFieldStats[keyStatMapping[i]];
+                }
+            } else {
+                System.arraycopy(valFieldStats, 0, keyStats, 0, numKeyFields);
             }
-            return keyStats;
+            return Pair.of(keyStats, valFieldStats);
+        }
+
+        private boolean thinMode() {
+            return keyStatMapping != null;
         }
     }
 }
