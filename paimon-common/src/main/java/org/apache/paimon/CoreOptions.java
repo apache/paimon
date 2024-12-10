@@ -527,7 +527,7 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether to force a compaction before commit.");
 
-    public static final ConfigOption<Duration> COMMIT_MAX_TIMEOUT =
+    public static final ConfigOption<Duration> COMMIT_TIMEOUT =
             key("commit.timeout")
                     .durationType()
                     .noDefaultValue()
@@ -1936,9 +1936,9 @@ public class CoreOptions implements Serializable {
     }
 
     public long commitTimeout() {
-        return options.get(COMMIT_MAX_TIMEOUT) == null
+        return options.get(COMMIT_TIMEOUT) == null
                 ? Long.MAX_VALUE
-                : options.get(COMMIT_MAX_TIMEOUT).toMillis();
+                : options.get(COMMIT_TIMEOUT).toMillis();
     }
 
     public int commitMaxRetries() {
