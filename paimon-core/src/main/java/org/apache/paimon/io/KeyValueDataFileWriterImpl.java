@@ -60,6 +60,7 @@ public class KeyValueDataFileWriterImpl extends KeyValueDataFileWriter {
                 converter,
                 keyType,
                 valueType,
+                KeyValue.schema(keyType, valueType),
                 simpleStatsExtractor,
                 schemaId,
                 level,

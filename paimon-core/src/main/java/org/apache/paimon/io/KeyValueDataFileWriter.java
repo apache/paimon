@@ -84,6 +84,7 @@ public abstract class KeyValueDataFileWriter
             Function<KeyValue, InternalRow> converter,
             RowType keyType,
             RowType valueType,
+            RowType writeRowType,
             @Nullable SimpleStatsExtractor simpleStatsExtractor,
             long schemaId,
             int level,
@@ -96,14 +97,11 @@ public abstract class KeyValueDataFileWriter
                 factory,
                 path,
                 converter,
-                KeyValue.schema(options.thinMode() ? RowType.of() : keyType, valueType),
+                writeRowType,
                 simpleStatsExtractor,
                 compression,
                 StatsCollectorFactories.createStatsFactories(
-                        options,
-                        KeyValue.schema(options.thinMode() ? RowType.of() : keyType, valueType)
-                                .getFieldNames(),
-                        keyType.getFieldNames()),
+                        options, writeRowType.getFieldNames(), keyType.getFieldNames()),
                 options.asyncFileWrite());
 
         this.keyType = keyType;

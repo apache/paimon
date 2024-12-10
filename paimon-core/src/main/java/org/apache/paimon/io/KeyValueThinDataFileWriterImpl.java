@@ -84,6 +84,7 @@ public class KeyValueThinDataFileWriterImpl extends KeyValueDataFileWriter {
                 converter,
                 keyType,
                 valueType,
+                KeyValue.schema(RowType.of(), valueType),
                 simpleStatsExtractor,
                 schemaId,
                 level,
