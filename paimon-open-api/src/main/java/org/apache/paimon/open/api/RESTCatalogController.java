@@ -20,6 +20,10 @@ package org.apache.paimon.open.api;
 
 import org.apache.paimon.rest.ResourcePaths;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.rest.responses.DatabaseName;
+import org.apache.paimon.rest.responses.ListDatabasesResponse;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -61,6 +65,32 @@ public class RESTCatalogController {
             Map<String, String> defaults = new HashMap<>();
             Map<String, String> overrides = new HashMap<>();
             ConfigResponse response = new ConfigResponse(defaults, overrides);
+            return new ResponseEntity<>(response, HttpStatus.CREATED);
+        } catch (Exception e) {
+            return new ResponseEntity<>(null, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    @Operation(
+            summary = "List Databases",
+            tags = {"database"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "201",
+                content = {
+                    @Content(
+                            schema = @Schema(implementation = ListDatabasesResponse.class),
+                            mediaType = "application/json")
+                }),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @GetMapping("/api/v1/{prefix}/databases")
+    public ResponseEntity<ListDatabasesResponse> listDatabases(String prefix) {
+        try {
+            ListDatabasesResponse response =
+                    new ListDatabasesResponse(ImmutableList.of(new DatabaseName("account")));
             return new ResponseEntity<>(response, HttpStatus.CREATED);
         } catch (Exception e) {
             return new ResponseEntity<>(null, HttpStatus.INTERNAL_SERVER_ERROR);

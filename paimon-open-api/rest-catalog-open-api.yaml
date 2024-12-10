@@ -28,6 +28,27 @@ servers:
   - url: http://localhost:8080
     description: Server URL in Development environment
 paths:
+  /api/v1/{prefix}/databases:
+    get:
+      tags:
+        - database
+      summary: List Databases
+      operationId: listDatabases
+      parameters:
+        - name: prefix
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListDatabasesResponse'
+        "500":
+          description: Internal Server Error
   /api/v1/config:
     get:
       tags:
@@ -45,6 +66,20 @@ paths:
                 $ref: '#/components/schemas/ConfigResponse'
 components:
   schemas:
+    DatabaseName:
+      type: object
+      properties:
+        name:
+          type: string
+          writeOnly: true
+    ListDatabasesResponse:
+      type: object
+      properties:
+        databases:
+          type: array
+          writeOnly: true
+          items:
+            $ref: '#/components/schemas/DatabaseName'
     ConfigResponse:
       type: object
       properties:

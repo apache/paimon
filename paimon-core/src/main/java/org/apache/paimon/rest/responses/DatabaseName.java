@@ -16,22 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest;
+package org.apache.paimon.rest.responses;
 
-import java.io.Closeable;
-import java.util.Map;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-/** Interface for a basic HTTP Client for interfacing with the REST catalog. */
-public interface RESTClient extends Closeable {
+import java.beans.ConstructorProperties;
 
-    <T extends RESTResponse> T get(String path, Class<T> responseType, Map<String, String> headers);
+/** Class for Database entity. */
+@JsonIgnoreProperties(ignoreUnknown = true)
+public class DatabaseName {
+    private static final String FIELD_NAME = "name";
 
-    <T extends RESTResponse> T get(
-            String path,
-            Map<String, String> queryParams,
-            Class<T> responseType,
-            Map<String, String> headers);
+    @JsonProperty(FIELD_NAME)
+    private String name;
 
-    <T extends RESTResponse> T post(
-            String path, RESTRequest body, Class<T> responseType, Map<String, String> headers);
+    @ConstructorProperties({FIELD_NAME})
+    public DatabaseName(String name) {
+        this.name = name;
+    }
+
+    @JsonGetter(FIELD_NAME)
+    public String name() {
+        return this.name;
+    }
 }

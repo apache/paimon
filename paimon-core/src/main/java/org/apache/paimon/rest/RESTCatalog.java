@@ -30,11 +30,14 @@ import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.CredentialsProvider;
 import org.apache.paimon.rest.auth.CredentialsProviderFactory;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.rest.responses.DatabaseName;
+import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 
 import org.apache.paimon.shade.guava30.com.google.common.annotations.VisibleForTesting;
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.Duration;
@@ -42,6 +45,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
@@ -113,7 +117,14 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public List<String> listDatabases() {
-        throw new UnsupportedOperationException();
+        ListDatabasesResponse response =
+                client.get(resourcePaths.databases(), ListDatabasesResponse.class, headers());
+        if (response.databases() != null) {
+            return response.databases().stream()
+                    .map(DatabaseName::name)
+                    .collect(Collectors.toList());
+        }
+        return ImmutableList.of();
     }
 
     @Override
