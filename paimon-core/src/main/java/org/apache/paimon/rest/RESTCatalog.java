@@ -47,15 +47,16 @@ import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
 /** A catalog implementation for REST. */
 public class RESTCatalog implements Catalog {
-    private RESTClient client;
-    private ResourcePaths resourcePaths;
-    private Map<String, String> options;
-    private Map<String, String> baseHeader;
-    // a lazy thread pool for token refresh
-    private final AuthSession catalogAuth;
-    private volatile ScheduledExecutorService refreshExecutor = null;
 
-    private static final ObjectMapper objectMapper = RESTObjectMapper.create();
+    private static final ObjectMapper OBJECT_MAPPER = RESTObjectMapper.create();
+
+    private final RESTClient client;
+    private final ResourcePaths resourcePaths;
+    private final Map<String, String> options;
+    private final Map<String, String> baseHeader;
+    private final AuthSession catalogAuth;
+
+    private volatile ScheduledExecutorService refreshExecutor = null;
 
     public RESTCatalog(Options options) {
         if (options.getOptional(CatalogOptions.WAREHOUSE).isPresent()) {
@@ -71,7 +72,7 @@ public class RESTCatalog implements Catalog {
                         uri,
                         connectTimeout,
                         readTimeout,
-                        objectMapper,
+                        OBJECT_MAPPER,
                         threadPoolSize,
                         DefaultErrorHandler.getInstance());
         this.client = new HttpClient(httpClientOptions);
@@ -194,7 +195,14 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void close() throws Exception {}
+    public void close() throws Exception {
+        if (refreshExecutor != null) {
+            refreshExecutor.shutdownNow();
+        }
+        if (client != null) {
+            client.close();
+        }
+    }
 
     @VisibleForTesting
     Map<String, String> fetchOptionsFromServer(

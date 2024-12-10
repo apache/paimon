@@ -25,31 +25,37 @@ import java.time.Duration;
 
 /** Options for REST Catalog. */
 public class RESTCatalogOptions {
+
     public static final ConfigOption<String> URI =
             ConfigOptions.key("uri")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog server's uri.");
+
     public static final ConfigOption<Duration> CONNECTION_TIMEOUT =
             ConfigOptions.key("rest.client.connection-timeout")
                     .durationType()
                     .noDefaultValue()
                     .withDescription("REST Catalog http client connect timeout.");
+
     public static final ConfigOption<Duration> READ_TIMEOUT =
             ConfigOptions.key("rest.client.read-timeout")
                     .durationType()
                     .noDefaultValue()
                     .withDescription("REST Catalog http client read timeout.");
+
     public static final ConfigOption<Integer> THREAD_POOL_SIZE =
             ConfigOptions.key("rest.client.num-threads")
                     .intType()
                     .defaultValue(1)
                     .withDescription("REST Catalog http client thread num.");
+
     public static final ConfigOption<String> TOKEN =
             ConfigOptions.key("token")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog auth token.");
+
     public static final ConfigOption<Duration> TOKEN_EXPIRATION_TIME =
             ConfigOptions.key("token.expiration-time")
                     .durationType()
@@ -59,6 +65,7 @@ public class RESTCatalogOptions {
                                     + " the token expires time is t2, we need to guarantee that t2 > t1,"
                                     + " the token validity time is [t2 - t1, t2],"
                                     + " and the expires time defined here needs to be less than (t2 - t1)");
+
     public static final ConfigOption<String> TOKEN_PROVIDER_PATH =
             ConfigOptions.key("token.provider.path")
                     .stringType()

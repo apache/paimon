@@ -20,6 +20,7 @@ package org.apache.paimon.rest;
 
 /** Resource paths for REST catalog. */
 public class ResourcePaths {
+
     public static final String V1_CONFIG = "/api/v1/config";
 
     public static ResourcePaths forCatalogProperties(String prefix) {

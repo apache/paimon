@@ -20,7 +20,6 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
-import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 import javax.annotation.Nullable;
 
@@ -81,9 +80,7 @@ public class ThreadPoolUtils {
 
     public static ScheduledExecutorService createScheduledThreadPool(
             int threadNum, String namePrefix) {
-        return new ScheduledThreadPoolExecutor(
-                threadNum,
-                new ThreadFactoryBuilder().setDaemon(true).setNameFormat(namePrefix).build());
+        return new ScheduledThreadPoolExecutor(threadNum, newDaemonThreadFactory(namePrefix));
     }
 
     /** This method aims to parallel process tasks with memory control and sequentially. */

@@ -36,9 +36,9 @@ import static org.junit.Assert.assertThrows;
 
 /** Test for REST Catalog. */
 public class RESTCatalogTest {
+
     private MockWebServer mockWebServer;
     private RESTCatalog restCatalog;
-    private final String initToken = "init_token";
 
     @Before
     public void setUp() throws IOException {
@@ -47,6 +47,7 @@ public class RESTCatalogTest {
         String baseUrl = mockWebServer.url("").toString();
         Options options = new Options();
         options.set(RESTCatalogOptions.URI, baseUrl);
+        String initToken = "init_token";
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
         mockOptions(RESTCatalogInternalOptions.PREFIX.key(), "prefix");
