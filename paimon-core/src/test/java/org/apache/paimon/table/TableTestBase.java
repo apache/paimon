@@ -179,8 +179,6 @@ public abstract class TableTestBase {
             options.put(pair.getKey().key(), pair.getValue());
         }
         table = table.copy(options);
-        //        PredicateBuilder predicateBuilder = new PredicateBuilder();
-        //        predicateBuilder.equal()
         ReadBuilder readBuilder = table.newReadBuilder();
         if (projection != null) {
             readBuilder.withProjection(projection);
