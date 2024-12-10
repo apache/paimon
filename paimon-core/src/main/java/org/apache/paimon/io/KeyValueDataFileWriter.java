@@ -174,7 +174,7 @@ public class KeyValueDataFileWriter
         }
 
         Pair<SimpleColStats[], SimpleColStats[]> keyValueStats =
-                stateAbstractor.abstractFromValueState(fieldStats());
+                stateAbstractor.fetchKeyValueStats(fieldStats());
 
         SimpleStats keyStats = keyStatsConverter.toBinaryAllMode(keyValueStats.getKey());
         Pair<List<String>, SimpleStats> valueStatsPair =
@@ -240,17 +240,22 @@ public class KeyValueDataFileWriter
             }
         }
 
-        Pair<SimpleColStats[], SimpleColStats[]> abstractFromValueState(SimpleColStats[] rowStats) {
+        Pair<SimpleColStats[], SimpleColStats[]> fetchKeyValueStats(SimpleColStats[] rowStats) {
             SimpleColStats[] keyStats = new SimpleColStats[numKeyFields];
             SimpleColStats[] valFieldStats = new SimpleColStats[numValueFields];
 
+            // If thin mode only, there is no key stats in rowStats, so we only jump
+            // _SEQUNCE_NUMBER_ and _ROW_KIND_ stats. Therefore, the 'from' value is 2.
+            // Otherwise, we need to jump key stats, so the 'from' value is numKeyFields + 2.
             int valueFrom = thinMode() ? 2 : numKeyFields + 2;
             System.arraycopy(rowStats, valueFrom, valFieldStats, 0, numValueFields);
             if (thinMode()) {
+                // Thin mode on, so need to map value stats to key stats.
                 for (int i = 0; i < keyStatMapping.length; i++) {
                     keyStats[i] = valFieldStats[keyStatMapping[i]];
                 }
             } else {
+                // Thin mode off, just copy stats from rowStats.
                 System.arraycopy(valFieldStats, 0, keyStats, 0, numKeyFields);
             }
             return Pair.of(keyStats, valFieldStats);
