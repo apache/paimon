@@ -531,7 +531,7 @@ public class CoreOptions implements Serializable {
             key("commit.timeout")
                     .durationType()
                     .noDefaultValue()
-                    .withDescription("Max timeout duration of retry when commit failed.");
+                    .withDescription("Timeout duration of retry when commit failed.");
 
     public static final ConfigOption<Integer> COMMIT_MAX_RETRIES =
             key("commit.max-retries")
