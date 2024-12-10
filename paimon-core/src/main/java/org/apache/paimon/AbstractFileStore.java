@@ -105,16 +105,21 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public FileStorePathFactory pathFactory() {
+        return pathFactory(options.fileFormat().getFormatIdentifier());
+    }
+
+    protected FileStorePathFactory pathFactory(String format) {
         return new FileStorePathFactory(
                 options.path(),
                 partitionType,
                 options.partitionDefaultName(),
-                options.fileFormat().getFormatIdentifier(),
+                format,
                 options.dataFilePrefix(),
                 options.changelogFilePrefix(),
                 options.legacyPartitionName(),
                 options.fileSuffixIncludeCompression(),
-                options.fileCompression());
+                options.fileCompression(),
+                options.dataFilePathDirectory());
     }
 
     @Override
