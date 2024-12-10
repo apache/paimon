@@ -107,12 +107,15 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
     }
 
     private class Reader extends AbstractNonCoordinatedSourceReader<Split> {
+        private static final String CHECKPOINT_STATE = "CS";
+        private static final String NEXT_SNAPSHOT_STATE = "NSS";
+
         private final StreamTableScan scan = readBuilder.newStreamScan();
         private final SplitState<Long> checkpointState =
-                new SplitState<>("next-snapshot", x -> Long.toString(x), Long::parseLong);
+                new SplitState<>(CHECKPOINT_STATE, x -> Long.toString(x), Long::parseLong);
         private final SplitState<Tuple2<Long, Long>> nextSnapshotState =
                 new SplitState<>(
-                        "next-snapshot-per-checkpoint",
+                        NEXT_SNAPSHOT_STATE,
                         x -> x.f0 + ":" + x.f1,
                         x ->
                                 Tuple2.of(
