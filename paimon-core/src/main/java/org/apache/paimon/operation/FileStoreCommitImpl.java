@@ -750,7 +750,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
 
             retryResult = (RetryResult) result;
-            retryCount++;
+
 
             if ((commitMaxTimeout != null
                             && System.currentTimeMillis() - startMillis
@@ -762,6 +762,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 "Commit failed after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
                                 commitMaxTimeout.toMillis(), retryCount));
             }
+
+            retryCount++;
         }
         return retryCount + 1;
     }
@@ -1067,7 +1069,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 break;
             }
 
-            retryCount++;
+
 
             if ((commitMaxTimeout != null
                             && System.currentTimeMillis() - startMillis
@@ -1079,6 +1081,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 "Commit failed after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
                                 commitMaxTimeout.toMillis(), retryCount));
             }
+            
+            retryCount++;
         }
     }
 
