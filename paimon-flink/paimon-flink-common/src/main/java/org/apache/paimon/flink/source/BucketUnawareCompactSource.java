@@ -91,7 +91,6 @@ public class BucketUnawareCompactSource
             extends AbstractNonCoordinatedSourceReader<UnawareAppendCompactionTask> {
         private final UnawareAppendTableCompactionCoordinator compactionCoordinator;
         private final long scanInterval;
-        private long lastFetchTimeMillis = 0L;
 
         public BucketUnawareCompactSourceReader(
                 FileStoreTable table, boolean streaming, Predicate filter, long scanInterval) {
@@ -103,22 +102,21 @@ public class BucketUnawareCompactSource
         @Override
         public InputStatus pollNext(ReaderOutput<UnawareAppendCompactionTask> readerOutput)
                 throws Exception {
-            long sleepTimeMillis = scanInterval - System.currentTimeMillis() + lastFetchTimeMillis;
-            if (sleepTimeMillis > 0) {
-                Thread.sleep(sleepTimeMillis);
-            }
-
+            boolean isEmpty;
             try {
                 // do scan and plan action, emit append-only compaction tasks.
                 List<UnawareAppendCompactionTask> tasks = compactionCoordinator.run();
+                isEmpty = tasks.isEmpty();
                 tasks.forEach(readerOutput::collect);
-                return InputStatus.MORE_AVAILABLE;
             } catch (EndOfScanException esf) {
                 LOG.info("Catching EndOfStreamException, the stream is finished.");
                 return InputStatus.END_OF_INPUT;
-            } finally {
-                lastFetchTimeMillis = System.currentTimeMillis();
             }
+
+            if (isEmpty) {
+                Thread.sleep(scanInterval);
+            }
+            return InputStatus.MORE_AVAILABLE;
         }
     }
 
