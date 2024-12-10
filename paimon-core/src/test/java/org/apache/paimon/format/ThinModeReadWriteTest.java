@@ -33,7 +33,6 @@ import org.apache.paimon.types.DataTypes;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import java.util.HashMap;
 import java.util.List;
 
 /** This class test the compatibility and effectiveness of storage thin mode. */
@@ -99,34 +98,23 @@ public class ThinModeReadWriteTest extends TableTestBase {
     }
 
     private void testFormat(String format) throws Exception {
-        testReadWrite(format, true, true);
-        testReadWrite(format, true, false);
-        testReadWrite(format, false, true);
-        testReadWrite(format, false, false);
+        testReadWrite(format, true);
+        testReadWrite(format, true);
+        testReadWrite(format, false);
+        testReadWrite(format, false);
     }
 
-    private void testReadWrite(String format, boolean writeThin, boolean readThin)
-            throws Exception {
-        Table tableWrite = createTable(format, writeThin);
-        Table tableRead = setThinMode(tableWrite, readThin);
+    private void testReadWrite(String format, boolean writeThin) throws Exception {
+        Table table = createTable(format, writeThin);
 
         InternalRow[] datas = datas(2000);
 
-        write(tableWrite, datas);
+        write(table, datas);
 
-        List<InternalRow> readed = read(tableRead);
+        List<InternalRow> readed = read(table);
 
         Assertions.assertThat(readed).containsExactlyInAnyOrder(datas);
         dropTableDefault();
-    }
-
-    private Table setThinMode(Table table, Boolean flag) {
-        return table.copy(
-                new HashMap() {
-                    {
-                        put("storage.thin-mode", flag.toString());
-                    }
-                });
     }
 
     InternalRow[] datas(int i) {
@@ -157,7 +145,7 @@ public class ThinModeReadWriteTest extends TableTestBase {
                 randomBytes());
     }
 
-    public static long tableSize(Table table) throws Exception {
+    public static long tableSize(Table table) {
         long count = 0;
         List<ManifestEntry> files =
                 ((FileStoreTable) table).store().newScan().plan().files(FileKind.ADD);
