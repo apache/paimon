@@ -20,6 +20,7 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.operation.metrics.CacheStats;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaChange;
@@ -56,6 +57,7 @@ import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_THRESHOLD;
 import static org.apache.paimon.options.CatalogOptions.CACHE_PARTITION_MAX_NUM;
 import static org.apache.paimon.options.CatalogOptions.CACHE_SNAPSHOT_MAX_NUM_PER_TABLE;
+import static org.apache.paimon.options.CatalogOptions.CACHE_STATS_ENABLED;
 import static org.apache.paimon.table.system.SystemTableLoader.SYSTEM_TABLES;
 
 /** A {@link Catalog} to cache databases and tables and manifests. */
@@ -73,6 +75,8 @@ public class CachingCatalog extends DelegateCatalog {
     // partition cache will affect data latency
     @Nullable protected final Cache<Identifier, List<PartitionEntry>> partitionCache;
 
+    private final CacheStats cacheStats;
+
     public CachingCatalog(Catalog wrapped) {
         this(
                 wrapped,
@@ -80,7 +84,8 @@ public class CachingCatalog extends DelegateCatalog {
                 CACHE_MANIFEST_SMALL_FILE_MEMORY.defaultValue(),
                 CACHE_MANIFEST_SMALL_FILE_THRESHOLD.defaultValue().getBytes(),
                 CACHE_PARTITION_MAX_NUM.defaultValue(),
-                CACHE_SNAPSHOT_MAX_NUM_PER_TABLE.defaultValue());
+                CACHE_SNAPSHOT_MAX_NUM_PER_TABLE.defaultValue(),
+                CACHE_STATS_ENABLED.defaultValue());
     }
 
     public CachingCatalog(
@@ -89,7 +94,8 @@ public class CachingCatalog extends DelegateCatalog {
             MemorySize manifestMaxMemory,
             long manifestCacheThreshold,
             long cachedPartitionMaxNum,
-            int snapshotMaxNumPerTable) {
+            int snapshotMaxNumPerTable,
+            boolean cacheStatsEnabled) {
         this(
                 wrapped,
                 expirationInterval,
@@ -97,6 +103,7 @@ public class CachingCatalog extends DelegateCatalog {
                 manifestCacheThreshold,
                 cachedPartitionMaxNum,
                 snapshotMaxNumPerTable,
+                cacheStatsEnabled,
                 Ticker.systemTicker());
     }
 
@@ -107,6 +114,7 @@ public class CachingCatalog extends DelegateCatalog {
             long manifestCacheThreshold,
             long cachedPartitionMaxNum,
             int snapshotMaxNumPerTable,
+            boolean cacheStatsEnabled,
             Ticker ticker) {
         super(wrapped);
         if (expirationInterval.isZero() || expirationInterval.isNegative()) {
@@ -146,6 +154,7 @@ public class CachingCatalog extends DelegateCatalog {
                                 .maximumWeight(cachedPartitionMaxNum)
                                 .ticker(ticker)
                                 .build();
+        this.cacheStats = cacheStatsEnabled ? new CacheStats() : null;
     }
 
     public static Catalog tryToCreate(Catalog catalog, Options options) {
@@ -167,16 +176,22 @@ public class CachingCatalog extends DelegateCatalog {
                 manifestMaxMemory,
                 manifestThreshold,
                 options.get(CACHE_PARTITION_MAX_NUM),
-                options.get(CACHE_SNAPSHOT_MAX_NUM_PER_TABLE));
+                options.get(CACHE_SNAPSHOT_MAX_NUM_PER_TABLE),
+                options.get(CACHE_STATS_ENABLED));
     }
 
     @Override
     public Database getDatabase(String databaseName) throws DatabaseNotExistException {
         Database database = databaseCache.getIfPresent(databaseName);
         if (database != null) {
+            if (cacheStats != null) {
+                cacheStats.setHitDatabaseCache(true);
+            }
             return database;
         }
-
+        if (cacheStats != null) {
+            cacheStats.setHitDatabaseCache(false);
+        }
         database = super.getDatabase(databaseName);
         databaseCache.put(databaseName, database);
         return database;
@@ -224,9 +239,14 @@ public class CachingCatalog extends DelegateCatalog {
     public Table getTable(Identifier identifier) throws TableNotExistException {
         Table table = tableCache.getIfPresent(identifier);
         if (table != null) {
+            if (cacheStats != null) {
+                cacheStats.setHitTableCache(true);
+            }
             return table;
         }
-
+        if (cacheStats != null) {
+            cacheStats.setHitTableCache(false);
+        }
         if (isSpecifiedSystemTable(identifier)) {
             Identifier originIdentifier =
                     new Identifier(
@@ -289,8 +309,15 @@ public class CachingCatalog extends DelegateCatalog {
 
         List<PartitionEntry> result = partitionCache.getIfPresent(identifier);
         if (result == null) {
+            if (cacheStats != null) {
+                cacheStats.setHitPartitionCache(false);
+            }
             result = wrapped.listPartitions(identifier);
             partitionCache.put(identifier, result);
+        } else {
+            if (cacheStats != null) {
+                cacheStats.setHitPartitionCache(true);
+            }
         }
         return result;
     }
@@ -335,6 +362,22 @@ public class CachingCatalog extends DelegateCatalog {
             tables.add(Identifier.fromString(ident.getFullName() + SYSTEM_TABLE_SPLITTER + type));
         }
         return tables;
+    }
+
+    public CacheStats getCacheStats() {
+        cacheStats.setDatabaseCacheSize(databaseCache.estimatedSize());
+        cacheStats.setTableCacheSize(tableCache.estimatedSize());
+        if (manifestCache != null) {
+            cacheStats.setManifestCacheSize(manifestCache.getSegmentCacheSize());
+        }
+        if (partitionCache != null) {
+            int partitionSize = 0;
+            for (Map.Entry<Identifier, List<PartitionEntry>> entry : partitionCache.asMap().entrySet()) {
+                partitionSize += entry.getValue().size();
+            }
+            cacheStats.setPartitionCacheSize(partitionSize);
+        }
+        return cacheStats;
     }
 
     // ================================== refresh ================================================

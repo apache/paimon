@@ -34,6 +34,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.ManifestsReader;
+import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -405,6 +406,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public Iterator<ManifestEntry> readFileIterator() {
             return wrapped.readFileIterator();
+        }
+
+        @Override
+        public ScanMetrics getScanMetrics() {
+            return wrapped.getScanMetrics();
         }
     }
 

@@ -38,22 +38,22 @@ public class ScanStats {
     }
 
     @VisibleForTesting
-    protected long getScannedManifests() {
+    public long getScannedManifests() {
         return scannedManifests;
     }
 
     @VisibleForTesting
-    protected long getSkippedTableFiles() {
+    public long getSkippedTableFiles() {
         return skippedTableFiles;
     }
 
     @VisibleForTesting
-    protected long getResultedTableFiles() {
+    public long getResultedTableFiles() {
         return resultedTableFiles;
     }
 
     @VisibleForTesting
-    protected long getDuration() {
+    public long getDuration() {
         return duration;
     }
 }

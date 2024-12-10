@@ -90,4 +90,8 @@ public class SegmentsCache<T> {
 
         return new SegmentsCache<>(pageSize, maxMemorySize, maxElementSize);
     }
+
+    public long getSegmentCacheSize() {
+        return cache.estimatedSize();
+    }
 }
