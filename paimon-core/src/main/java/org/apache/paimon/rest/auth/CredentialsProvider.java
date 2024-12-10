@@ -16,21 +16,35 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest;
+package org.apache.paimon.rest.auth;
 
-import org.apache.paimon.options.ConfigOption;
-import org.apache.paimon.options.ConfigOptions;
+import java.util.Map;
+import java.util.Optional;
 
-/** Internal options for REST Catalog. */
-public class RESTCatalogInternalOptions {
-    public static final ConfigOption<String> PREFIX =
-            ConfigOptions.key("prefix")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("REST Catalog uri's prefix.");
-    public static final ConfigOption<String> CREDENTIALS_PROVIDER =
-            ConfigOptions.key("credentials-provider")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("REST Catalog auth credentials provider.");
+/** Credentials provider. */
+public interface CredentialsProvider {
+
+    Map<String, String> authHeader();
+
+    boolean refresh();
+
+    default boolean supportRefresh() {
+        return false;
+    }
+
+    default boolean keepRefreshed() {
+        return false;
+    }
+
+    default boolean willSoonExpire() {
+        return false;
+    }
+
+    default Optional<Long> expiresAtMillis() {
+        return Optional.empty();
+    }
+
+    default Optional<Long> expiresInMills() {
+        return Optional.empty();
+    }
 }

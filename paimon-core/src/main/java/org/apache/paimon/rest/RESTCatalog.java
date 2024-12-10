@@ -18,7 +18,6 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
@@ -27,37 +26,42 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.auth.AuthSession;
+import org.apache.paimon.rest.auth.CredentialsProvider;
+import org.apache.paimon.rest.auth.CredentialsProviderFactory;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
+import org.apache.paimon.shade.guava30.com.google.common.annotations.VisibleForTesting;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ScheduledExecutorService;
+
+import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
 /** A catalog implementation for REST. */
 public class RESTCatalog implements Catalog {
     private RESTClient client;
-    private String token;
     private ResourcePaths resourcePaths;
     private Map<String, String> options;
     private Map<String, String> baseHeader;
+    // a lazy thread pool for token refresh
+    private final AuthSession catalogAuth;
+    private volatile ScheduledExecutorService refreshExecutor = null;
 
     private static final ObjectMapper objectMapper = RESTObjectMapper.create();
-    static final String AUTH_HEADER = "Authorization";
-    static final String AUTH_HEADER_VALUE_FORMAT = "Bearer %s";
 
     public RESTCatalog(Options options) {
         if (options.getOptional(CatalogOptions.WAREHOUSE).isPresent()) {
             throw new IllegalArgumentException("Can not config warehouse in RESTCatalog.");
         }
         String uri = options.get(RESTCatalogOptions.URI);
-        token = options.get(RESTCatalogOptions.TOKEN);
         Optional<Duration> connectTimeout =
                 options.getOptional(RESTCatalogOptions.CONNECTION_TIMEOUT);
         Optional<Duration> readTimeout = options.getOptional(RESTCatalogOptions.READ_TIMEOUT);
@@ -71,12 +75,21 @@ public class RESTCatalog implements Catalog {
                         threadPoolSize,
                         DefaultErrorHandler.getInstance());
         this.client = new HttpClient(httpClientOptions);
-        Map<String, String> authHeaders =
-                ImmutableMap.of(AUTH_HEADER, String.format(AUTH_HEADER_VALUE_FORMAT, token));
+        this.baseHeader = configHeaders(options.toMap());
+        CredentialsProvider credentialsProvider =
+                CredentialsProviderFactory.createCredentialsProvider(
+                        options, RESTCatalog.class.getClassLoader());
+        if (credentialsProvider.keepRefreshed()) {
+            this.catalogAuth =
+                    AuthSession.fromRefreshCredentialsProvider(
+                            tokenRefreshExecutor(), this.baseHeader, credentialsProvider);
+
+        } else {
+            this.catalogAuth = new AuthSession(this.baseHeader, credentialsProvider);
+        }
         Map<String, String> initHeaders =
-                RESTUtil.merge(configHeaders(options.toMap()), authHeaders);
+                RESTUtil.merge(configHeaders(options.toMap()), this.catalogAuth.getHeaders());
         this.options = fetchOptionsFromServer(initHeaders, options.toMap());
-        this.baseHeader = configHeaders(this.options());
         this.resourcePaths =
                 ResourcePaths.forCatalogProperties(
                         this.options.get(RESTCatalogInternalOptions.PREFIX));
@@ -187,11 +200,27 @@ public class RESTCatalog implements Catalog {
     Map<String, String> fetchOptionsFromServer(
             Map<String, String> headers, Map<String, String> clientProperties) {
         ConfigResponse response =
-                client.get(ResourcePaths.V1_CONFIG, ConfigResponse.class, headers);
+                client.get(ResourcePaths.V1_CONFIG, ConfigResponse.class, headers());
         return response.merge(clientProperties);
     }
 
     private static Map<String, String> configHeaders(Map<String, String> properties) {
         return RESTUtil.extractPrefixMap(properties, "header.");
+    }
+
+    private Map<String, String> headers() {
+        return catalogAuth.getHeaders();
+    }
+
+    private ScheduledExecutorService tokenRefreshExecutor() {
+        if (refreshExecutor == null) {
+            synchronized (this) {
+                if (refreshExecutor == null) {
+                    this.refreshExecutor = createScheduledThreadPool(1, "token-refresh-thread");
+                }
+            }
+        }
+
+        return refreshExecutor;
     }
 }

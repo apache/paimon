@@ -16,21 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest;
+package org.apache.paimon.rest.auth;
 
-import org.apache.paimon.options.ConfigOption;
-import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
-/** Internal options for REST Catalog. */
-public class RESTCatalogInternalOptions {
-    public static final ConfigOption<String> PREFIX =
-            ConfigOptions.key("prefix")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("REST Catalog uri's prefix.");
-    public static final ConfigOption<String> CREDENTIALS_PROVIDER =
-            ConfigOptions.key("credentials-provider")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("REST Catalog auth credentials provider.");
+import java.util.Map;
+
+/** Base bear token credentials provider. */
+public abstract class BaseBearTokenCredentialsProvider implements CredentialsProvider {
+
+    private static final String AUTHORIZATION_HEADER = "Authorization";
+    private static final String BEARER_PREFIX = "Bearer ";
+
+    @Override
+    public Map<String, String> authHeader() {
+        return ImmutableMap.of(AUTHORIZATION_HEADER, BEARER_PREFIX + token());
+    }
+
+    abstract String token();
 }

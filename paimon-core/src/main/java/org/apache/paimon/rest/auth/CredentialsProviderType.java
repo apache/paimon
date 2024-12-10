@@ -16,21 +16,10 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest;
+package org.apache.paimon.rest.auth;
 
-import org.apache.paimon.options.ConfigOption;
-import org.apache.paimon.options.ConfigOptions;
-
-/** Internal options for REST Catalog. */
-public class RESTCatalogInternalOptions {
-    public static final ConfigOption<String> PREFIX =
-            ConfigOptions.key("prefix")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("REST Catalog uri's prefix.");
-    public static final ConfigOption<String> CREDENTIALS_PROVIDER =
-            ConfigOptions.key("credentials-provider")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("REST Catalog auth credentials provider.");
+/** Credentials provider type. */
+public enum CredentialsProviderType {
+    BEAR_TOKEN,
+    BEAR_TOKEN_FILE
 }

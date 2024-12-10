@@ -16,21 +16,24 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest;
+package org.apache.paimon.rest.auth;
 
-import org.apache.paimon.options.ConfigOption;
-import org.apache.paimon.options.ConfigOptions;
+/** credentials provider for bear token. */
+public class BearTokenCredentialsProvider extends BaseBearTokenCredentialsProvider {
 
-/** Internal options for REST Catalog. */
-public class RESTCatalogInternalOptions {
-    public static final ConfigOption<String> PREFIX =
-            ConfigOptions.key("prefix")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("REST Catalog uri's prefix.");
-    public static final ConfigOption<String> CREDENTIALS_PROVIDER =
-            ConfigOptions.key("credentials-provider")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("REST Catalog auth credentials provider.");
+    private final String token;
+
+    public BearTokenCredentialsProvider(String token) {
+        this.token = token;
+    }
+
+    @Override
+    String token() {
+        return this.token;
+    }
+
+    @Override
+    public boolean refresh() {
+        return true;
+    }
 }

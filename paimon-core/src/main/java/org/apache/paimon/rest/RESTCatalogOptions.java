@@ -30,11 +30,6 @@ public class RESTCatalogOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog server's uri.");
-    public static final ConfigOption<String> TOKEN =
-            ConfigOptions.key("token")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("REST Catalog server's auth token.");
     public static final ConfigOption<Duration> CONNECTION_TIMEOUT =
             ConfigOptions.key("rest.client.connection-timeout")
                     .durationType()
@@ -50,4 +45,23 @@ public class RESTCatalogOptions {
                     .intType()
                     .defaultValue(1)
                     .withDescription("REST Catalog http client thread num.");
+    public static final ConfigOption<String> TOKEN =
+            ConfigOptions.key("token")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth token.");
+    public static final ConfigOption<Duration> TOKEN_EXPIRATION_TIME =
+            ConfigOptions.key("token.expiration-time")
+                    .durationType()
+                    .defaultValue(Duration.ofHours(1))
+                    .withDescription(
+                            "REST Catalog auth token expires time.The token generates system refresh frequency is t1,"
+                                    + " the token expires time is t2, we need to guarantee that t2 > t1,"
+                                    + " the token validity time is [t2 - t1, t2],"
+                                    + " and the expires time defined here needs to be less than (t2 - t1)");
+    public static final ConfigOption<String> TOKEN_PROVIDER_PATH =
+            ConfigOptions.key("token.provider.path")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth token provider path.");
 }
