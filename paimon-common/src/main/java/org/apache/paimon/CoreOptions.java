@@ -1456,7 +1456,8 @@ public class CoreOptions implements Serializable {
             key("storage.thin-mode")
                     .booleanType()
                     .defaultValue(true)
-                    .withDescription("Enable storage thin mode to avoid duplicate columns store.");
+                    .withDescription(
+                            "Enable storage thin mode to avoid duplicate columns storage.");
 
     @ExcludeFromDocumentation("Only used internally to support materialized table")
     public static final ConfigOption<String> MATERIALIZED_TABLE_DEFINITION_QUERY =
