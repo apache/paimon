@@ -25,6 +25,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 
 /** A factory to create {@link RecordReader} for file. */
@@ -41,6 +43,7 @@ public interface FormatReaderFactory {
 
         long fileSize();
 
+        @Nullable
         FileIndexResult fileIndex();
     }
 }

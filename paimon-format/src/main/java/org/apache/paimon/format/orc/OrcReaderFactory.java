@@ -24,6 +24,7 @@ import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.fileindex.FileIndexResult;
+import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.OrcFormatReaderContext;
 import org.apache.paimon.format.fs.HadoopReadOnlyFileSystem;
@@ -258,7 +259,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             org.apache.paimon.fs.Path path,
             long splitStart,
             long splitLength,
-            FileIndexResult fileIndexResult,
+            @Nullable FileIndexResult fileIndexResult,
             boolean deletionVectorsEnabled)
             throws IOException {
         org.apache.orc.Reader orcReader = createReader(conf, fileIO, path, fileIndexResult);
@@ -276,9 +277,11 @@ public class OrcReaderFactory implements FormatReaderFactory {
                             .skipCorruptRecords(OrcConf.SKIP_CORRUPT_DATA.getBoolean(conf))
                             .tolerateMissingSchema(
                                     OrcConf.TOLERATE_MISSING_SCHEMA.getBoolean(conf));
-            if (!conjunctPredicates.isEmpty() && !deletionVectorsEnabled) {
-                // deletion vectors can not enable this feature, cased by getRowNumber would be
-                // changed.
+            if (!conjunctPredicates.isEmpty()
+                    && !deletionVectorsEnabled
+                    && !(fileIndexResult instanceof BitmapIndexResult)) {
+                // row group filter push down will make row number change incorrect
+                // so deletion vectors mode and bitmap index cannot work with row group push down
                 options.useSelected(OrcConf.READER_USE_SELECTED.getBoolean(conf));
                 options.allowSARGToFilter(OrcConf.ALLOW_SARG_TO_FILTER.getBoolean(conf));
             }
@@ -342,7 +345,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             org.apache.hadoop.conf.Configuration conf,
             FileIO fileIO,
             org.apache.paimon.fs.Path path,
-            FileIndexResult fileIndexResult)
+            @Nullable FileIndexResult fileIndexResult)
             throws IOException {
         // open ORC file and create reader
         org.apache.hadoop.fs.Path hPath = new org.apache.hadoop.fs.Path(path.toUri());
