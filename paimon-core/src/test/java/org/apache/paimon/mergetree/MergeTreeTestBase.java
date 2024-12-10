@@ -514,8 +514,6 @@ public abstract class MergeTreeTestBase {
                         maxSequenceNumber,
                         comparator,
                         DeduplicateMergeFunction.factory().create(),
-                        writerFactory.keyType(),
-                        writerFactory.valueType(),
                         writerFactory,
                         options.commitForceCompact(),
                         changelogProducer,
