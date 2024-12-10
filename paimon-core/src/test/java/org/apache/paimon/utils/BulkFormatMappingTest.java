@@ -18,6 +18,8 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.schema.IndexCastMapping;
+import org.apache.paimon.schema.SchemaEvolutionUtil;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -34,7 +36,6 @@ public class BulkFormatMappingTest {
 
     @Test
     public void testTrimKeyFields() {
-
         List<DataField> keyFields = new ArrayList<>();
         List<DataField> allFields = new ArrayList<>();
         List<DataField> testFields = new ArrayList<>();
@@ -91,5 +92,56 @@ public class BulkFormatMappingTest {
         Assertions.assertThat(fields.get(3).id()).isEqualTo(7);
         Assertions.assertThat(fields.get(4).id()).isEqualTo(4);
         Assertions.assertThat(fields.get(5).id()).isEqualTo(6);
+    }
+
+    @Test
+    public void testTrimKeyWithIndexMapping() {
+        List<DataField> readTableFields = new ArrayList<>();
+        List<DataField> readDataFields = new ArrayList<>();
+
+        readTableFields.add(
+                new DataField(
+                        SpecialFields.KEY_FIELD_ID_START + 1,
+                        SpecialFields.KEY_FIELD_PREFIX + "a",
+                        DataTypes.STRING()));
+        readTableFields.add(new DataField(0, "0", DataTypes.STRING()));
+        readTableFields.add(new DataField(1, "a", DataTypes.STRING()));
+        readTableFields.add(new DataField(2, "2", DataTypes.STRING()));
+        readTableFields.add(new DataField(3, "3", DataTypes.STRING()));
+
+        readDataFields.add(
+                new DataField(
+                        SpecialFields.KEY_FIELD_ID_START + 1,
+                        SpecialFields.KEY_FIELD_PREFIX + "a",
+                        DataTypes.STRING()));
+        readDataFields.add(new DataField(0, "0", DataTypes.STRING()));
+        readDataFields.add(new DataField(1, "a", DataTypes.STRING()));
+        readDataFields.add(new DataField(3, "3", DataTypes.STRING()));
+
+        // build index cast mapping
+        IndexCastMapping indexCastMapping =
+                SchemaEvolutionUtil.createIndexCastMapping(readTableFields, readDataFields);
+
+        // map from key fields reading to value fields reading
+        Pair<int[], RowType> trimmedKeyPair =
+                BulkFormatMapping.BulkFormatMappingBuilder.trimKeyFields(
+                        readDataFields, readDataFields);
+
+        BulkFormatMapping bulkFormatMapping =
+                new BulkFormatMapping(
+                        indexCastMapping.getIndexMapping(),
+                        indexCastMapping.getCastMapping(),
+                        trimmedKeyPair.getLeft(),
+                        null,
+                        null,
+                        null,
+                        null);
+
+        Assertions.assertThat(bulkFormatMapping.getIndexMapping()).containsExactly(0, 1, 0, -1, 2);
+        List<DataField> trimmed = trimmedKeyPair.getRight().getFields();
+        Assertions.assertThat(trimmed.get(0).id()).isEqualTo(1);
+        Assertions.assertThat(trimmed.get(1).id()).isEqualTo(0);
+        Assertions.assertThat(trimmed.get(2).id()).isEqualTo(3);
+        Assertions.assertThat(trimmed.size()).isEqualTo(3);
     }
 }
