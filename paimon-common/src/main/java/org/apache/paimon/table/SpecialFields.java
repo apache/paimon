@@ -99,6 +99,10 @@ public class SpecialFields {
         return field.startsWith(KEY_FIELD_PREFIX) || SYSTEM_FIELD_NAMES.contains(field);
     }
 
+    public static boolean isKeyField(String field) {
+        return field.startsWith(KEY_FIELD_PREFIX);
+    }
+
     // ----------------------------------------------------------------------------------------
     // Structured type fields
     // ----------------------------------------------------------------------------------------

@@ -76,6 +76,7 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
                         PartitionSettedRow.from(partitionInfo);
                 iterator = iterator.transform(partitionSettedRow::replaceRow);
             }
+
             if (indexMapping != null) {
                 final ProjectedRow projectedRow = ProjectedRow.from(indexMapping);
                 iterator = iterator.transform(projectedRow::replaceRow);
