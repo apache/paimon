@@ -224,8 +224,8 @@ public class BulkFormatMapping {
                         map[i] = positionMap.computeIfAbsent(id, k -> trimmedFields.size());
                         // If the target field is not key field, we remain what it is, because it
                         // may be projected. Example: the target field is a row type, but only read
-                        // the few fields in it. If we simply
-                        // trimmedFields.add(f), we will read more fields than we need.
+                        // the few fields in it. If we simply trimmedFields.add(f), we will read
+                        // more fields than we need.
                         trimmedFields.add(keyField ? f : field);
                     }
                 } else {
