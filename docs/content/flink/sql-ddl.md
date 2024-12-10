@@ -99,7 +99,7 @@ Also, you can create [FlinkGenericCatalog]({{< ref "flink/quick-start" >}}).
 > metastore.create.as.acid=false
 > ```
 
-##### Synchronizing Partitions into Hive Metastore
+#### Synchronizing Partitions into Hive Metastore
 
 By default, Paimon does not synchronize newly created partitions into Hive metastore. Users will see an unpartitioned table in Hive. Partition push-down will be carried out by filter push-down instead.
 
@@ -144,7 +144,7 @@ CREATE CATALOG my_jdbc WITH (
 
 USE CATALOG my_jdbc;
 ```
-You can configure any connection parameters that have been declared by JDBC through "jdbc.", the connection parameters may be different between different databases, please configure according to the actual situation.
+You can configure any connection parameters that have been declared by JDBC through "jdbc", the connection parameters may be different between different databases, please configure according to the actual situation.
 
 You can also perform logical isolation for databases under multiple catalogs by specifying "catalog-key".
 
