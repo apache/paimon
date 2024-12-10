@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink;
 
+import io.github.pixee.security.ObjectInputFilters;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.types.DataTypes;
 
@@ -58,6 +59,7 @@ public class SchemaChangeSerializationTest {
 
         ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
         ObjectInputStream ois = new ObjectInputStream(bais);
+        ObjectInputFilters.enableObjectFilterIfUnprotected(ois);
         Object actual = ois.readObject();
         assertThat(actual).isEqualTo(schemaChange);
     }
