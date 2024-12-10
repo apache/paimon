@@ -184,6 +184,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue("data-")
                     .withDescription("Specify the file name prefix of data files.");
 
+    public static final ConfigOption<String> DATA_FILE_PATH_DIRECTORY =
+            key("data-file.path-directory")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Specify the path directory of data files.");
+
     public static final ConfigOption<String> CHANGELOG_FILE_PREFIX =
             key("changelog-file.prefix")
                     .stringType()
@@ -1636,6 +1642,11 @@ public class CoreOptions implements Serializable {
 
     public String dataFilePrefix() {
         return options.get(DATA_FILE_PREFIX);
+    }
+
+    @Nullable
+    public String dataFilePathDirectory() {
+        return options.get(DATA_FILE_PATH_DIRECTORY);
     }
 
     public String changelogFilePrefix() {

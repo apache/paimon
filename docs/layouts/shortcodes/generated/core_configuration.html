@@ -219,6 +219,12 @@ under the License.
             <td>The TTL in rocksdb index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
         </tr>
         <tr>
+            <td><h5>data-file.path-directory</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the path directory of data files.</td>
+        </tr>
+        <tr>
             <td><h5>data-file.prefix</h5></td>
             <td style="word-wrap: break-word;">"data-"</td>
             <td>String</td>

@@ -402,6 +402,12 @@ You can use Hive Catalog to connect AWS Glue metastore, you can use set `'metada
 AWS Athena may use old manifest reader to read Iceberg manifest by names, we should let Paimon producing legacy Iceberg
 manifest list file, you can enable: `'metadata.iceberg.manifest-legacy-version'`.
 
+## DuckDB
+
+Duckdb may rely on files placed in the `root/data` directory, while Paimon is usually placed directly in the `root`
+directory, so you can configure this parameter for the table to achieve compatibility:
+`'data-file.path-directory' = 'data'`.
+
 ## Trino Iceberg
 
 In this example, we use Trino Iceberg connector to access Paimon table through Iceberg Hive catalog.
