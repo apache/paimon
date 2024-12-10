@@ -38,8 +38,8 @@ import org.apache.flink.table.data.RowData;
 
 /**
  * The operator that reads the {@link Split splits} received from the preceding {@link
- * MonitorFunction}. Contrary to the {@link MonitorFunction} which has a parallelism of 1, this
- * operator can have DOP > 1.
+ * MonitorSource}. Contrary to the {@link MonitorSource} which has a parallelism of 1, this operator
+ * can have DOP > 1.
  */
 public class ReadOperator extends AbstractStreamOperator<RowData>
         implements OneInputStreamOperator<Split, RowData> {

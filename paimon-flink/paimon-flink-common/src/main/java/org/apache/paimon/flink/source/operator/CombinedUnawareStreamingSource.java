@@ -23,14 +23,16 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.compact.MultiTableScanBase;
 import org.apache.paimon.flink.compact.MultiUnawareBucketTableScan;
 import org.apache.paimon.flink.sink.MultiTableCompactionTaskTypeInfo;
+import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
+import org.apache.paimon.flink.source.SimpleSourceSplit;
 
-import org.apache.flink.api.common.functions.OpenContext;
-import org.apache.flink.api.connector.source.Boundedness;
-import org.apache.flink.configuration.Configuration;
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.connector.source.ReaderOutput;
+import org.apache.flink.api.connector.source.SourceReader;
+import org.apache.flink.api.connector.source.SourceReaderContext;
+import org.apache.flink.core.io.InputStatus;
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.operators.StreamSource;
 
 import java.util.regex.Pattern;
 
@@ -40,13 +42,12 @@ import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.IS_E
 /**
  * It is responsible for monitoring compactor source in stream mode for the table of unaware bucket.
  */
-public class CombinedUnawareStreamingSourceFunction
-        extends CombinedCompactorSourceFunction<MultiTableUnawareAppendCompactionTask> {
+public class CombinedUnawareStreamingSource
+        extends CombinedCompactorSource<MultiTableUnawareAppendCompactionTask> {
 
     private final long monitorInterval;
-    private MultiTableScanBase<MultiTableUnawareAppendCompactionTask> tableScan;
 
-    public CombinedUnawareStreamingSourceFunction(
+    public CombinedUnawareStreamingSource(
             Catalog.Loader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
@@ -56,38 +57,46 @@ public class CombinedUnawareStreamingSourceFunction
         this.monitorInterval = monitorInterval;
     }
 
-    /**
-     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
-     */
-    public void open(OpenContext openContext) throws Exception {
-        open(new Configuration());
-    }
-
-    /**
-     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
-     */
-    public void open(Configuration parameters) throws Exception {
-        super.open(parameters);
-        tableScan =
-                new MultiUnawareBucketTableScan(
-                        catalogLoader,
-                        includingPattern,
-                        excludingPattern,
-                        databasePattern,
-                        isStreaming,
-                        isRunning);
-    }
-
-    @SuppressWarnings("BusyWait")
     @Override
-    void scanTable() throws Exception {
-        while (isRunning.get()) {
-            MultiTableScanBase.ScanResult scanResult = tableScan.scanTable(ctx);
+    public SourceReader<MultiTableUnawareAppendCompactionTask, SimpleSourceSplit> createReader(
+            SourceReaderContext sourceReaderContext) throws Exception {
+        return new Reader();
+    }
+
+    private class Reader
+            extends AbstractNonCoordinatedSourceReader<MultiTableUnawareAppendCompactionTask> {
+        private MultiTableScanBase<MultiTableUnawareAppendCompactionTask> tableScan;
+
+        @Override
+        public void start() {
+            super.start();
+            tableScan =
+                    new MultiUnawareBucketTableScan(
+                            catalogLoader,
+                            includingPattern,
+                            excludingPattern,
+                            databasePattern,
+                            isStreaming);
+        }
+
+        @Override
+        public InputStatus pollNext(
+                ReaderOutput<MultiTableUnawareAppendCompactionTask> readerOutput) throws Exception {
+            MultiTableScanBase.ScanResult scanResult = tableScan.scanTable(readerOutput);
             if (scanResult == FINISHED) {
-                return;
+                return InputStatus.END_OF_INPUT;
             }
             if (scanResult == IS_EMPTY) {
                 Thread.sleep(monitorInterval);
+            }
+            return InputStatus.MORE_AVAILABLE;
+        }
+
+        @Override
+        public void close() throws Exception {
+            super.close();
+            if (tableScan != null) {
+                tableScan.close();
             }
         }
     }
@@ -101,33 +110,18 @@ public class CombinedUnawareStreamingSourceFunction
             Pattern databasePattern,
             long monitorInterval) {
 
-        CombinedUnawareStreamingSourceFunction function =
-                new CombinedUnawareStreamingSourceFunction(
+        CombinedUnawareStreamingSource source =
+                new CombinedUnawareStreamingSource(
                         catalogLoader,
                         includingPattern,
                         excludingPattern,
                         databasePattern,
                         monitorInterval);
-        StreamSource<MultiTableUnawareAppendCompactionTask, CombinedUnawareStreamingSourceFunction>
-                sourceOperator = new StreamSource<>(function);
-        boolean isParallel = false;
         MultiTableCompactionTaskTypeInfo compactionTaskTypeInfo =
                 new MultiTableCompactionTaskTypeInfo();
-        return new DataStreamSource<>(
-                        env,
-                        compactionTaskTypeInfo,
-                        sourceOperator,
-                        isParallel,
-                        name,
-                        Boundedness.CONTINUOUS_UNBOUNDED)
-                .forceNonParallel();
-    }
 
-    @Override
-    public void close() throws Exception {
-        super.close();
-        if (tableScan != null) {
-            tableScan.close();
-        }
+        return env.fromSource(
+                        source, WatermarkStrategy.noWatermarks(), name, compactionTaskTypeInfo)
+                .forceNonParallel();
     }
 }

@@ -20,13 +20,11 @@ package org.apache.paimon.flink.source.operator;
 
 import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.flink.source.AbstractNonCoordinatedSource;
 import org.apache.paimon.table.source.Split;
 
-import org.apache.flink.api.common.functions.OpenContext;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
+import org.apache.flink.api.connector.source.Boundedness;
 
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
 /**
@@ -45,8 +43,7 @@ import java.util.regex.Pattern;
  * <p>Currently, only dedicated compaction job for multi-tables rely on this monitor. This is the
  * single (non-parallel) monitoring task, it is responsible for the new Paimon table.
  */
-public abstract class CombinedCompactorSourceFunction<T> extends RichSourceFunction<T> {
-
+public abstract class CombinedCompactorSource<T> extends AbstractNonCoordinatedSource<T> {
     private static final long serialVersionUID = 2L;
 
     protected final Catalog.Loader catalogLoader;
@@ -55,10 +52,7 @@ public abstract class CombinedCompactorSourceFunction<T> extends RichSourceFunct
     protected final Pattern databasePattern;
     protected final boolean isStreaming;
 
-    protected transient AtomicBoolean isRunning;
-    protected transient SourceContext<T> ctx;
-
-    public CombinedCompactorSourceFunction(
+    public CombinedCompactorSource(
             Catalog.Loader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
@@ -71,37 +65,8 @@ public abstract class CombinedCompactorSourceFunction<T> extends RichSourceFunct
         this.isStreaming = isStreaming;
     }
 
-    /**
-     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
-     */
-    public void open(OpenContext openContext) throws Exception {
-        open(new Configuration());
-    }
-
-    /**
-     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
-     */
-    public void open(Configuration parameters) throws Exception {
-        isRunning = new AtomicBoolean(true);
-    }
-
     @Override
-    public void run(SourceContext<T> sourceContext) throws Exception {
-        this.ctx = sourceContext;
-        scanTable();
+    public Boundedness getBoundedness() {
+        return isStreaming ? Boundedness.CONTINUOUS_UNBOUNDED : Boundedness.BOUNDED;
     }
-
-    @Override
-    public void cancel() {
-        // this is to cover the case where cancel() is called before the run()
-        if (ctx != null) {
-            synchronized (ctx.getCheckpointLock()) {
-                isRunning.set(false);
-            }
-        } else {
-            isRunning.set(false);
-        }
-    }
-
-    abstract void scanTable() throws Exception;
 }

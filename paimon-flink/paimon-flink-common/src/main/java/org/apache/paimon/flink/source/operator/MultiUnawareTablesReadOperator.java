@@ -44,7 +44,7 @@ import java.util.stream.Collectors;
 /**
  * The operator is used for historical partition compaction. It reads {@link
  * MultiTableUnawareAppendCompactionTask} received from the preceding {@link
- * CombinedUnawareBatchSourceFunction} and filter partitions which is not historical.
+ * CombinedUnawareBatchSource} and filter partitions which is not historical.
  */
 public class MultiUnawareTablesReadOperator
         extends AbstractStreamOperator<MultiTableUnawareAppendCompactionTask>
