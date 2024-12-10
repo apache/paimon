@@ -751,7 +751,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
             retryResult = (RetryResult) result;
 
-
             if ((commitMaxTimeout != null
                             && System.currentTimeMillis() - startMillis
                                     > commitMaxTimeout.toMillis())
@@ -1069,8 +1068,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 break;
             }
 
-
-
             if ((commitMaxTimeout != null
                             && System.currentTimeMillis() - startMillis
                                     > commitMaxTimeout.toMillis())
@@ -1081,7 +1078,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 "Commit failed after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
                                 commitMaxTimeout.toMillis(), retryCount));
             }
-            
+
             retryCount++;
         }
     }
