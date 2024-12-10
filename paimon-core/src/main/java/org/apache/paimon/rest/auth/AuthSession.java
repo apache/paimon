@@ -33,9 +33,10 @@ import java.util.concurrent.TimeUnit;
 public class AuthSession {
 
     static final int TOKEN_REFRESH_NUM_RETRIES = 5;
+    static final long MIN_REFRESH_WAIT_MILLIS = 10;
+    static final long MAX_REFRESH_WINDOW_MILLIS = 300_000; // 5 minutes
+
     private static final Logger log = LoggerFactory.getLogger(AuthSession.class);
-    private static final long MAX_REFRESH_WINDOW_MILLIS = 300_000; // 5 minutes
-    private static final long MIN_REFRESH_WAIT_MILLIS = 10;
     private final CredentialsProvider credentialsProvider;
     private volatile Map<String, String> headers;
 
@@ -76,10 +77,36 @@ public class AuthSession {
         return headers;
     }
 
+    public Boolean refresh() {
+        if (this.credentialsProvider.supportRefresh()
+                && this.credentialsProvider.keepRefreshed()
+                && this.credentialsProvider.expiresInMills().isPresent()) {
+            boolean isSuccessful = this.credentialsProvider.refresh();
+            if (isSuccessful) {
+                Map<String, String> currentHeaders = this.headers;
+                this.headers =
+                        RESTUtil.merge(currentHeaders, this.credentialsProvider.authHeader());
+            }
+            return isSuccessful;
+        }
+
+        return false;
+    }
+
     @VisibleForTesting
     static void scheduleTokenRefresh(
             ScheduledExecutorService executor, AuthSession session, long expiresAtMillis) {
         scheduleTokenRefresh(executor, session, expiresAtMillis, 0);
+    }
+
+    @VisibleForTesting
+    static long getTimeToWaitByExpiresInMills(long expiresInMillis) {
+        // how much ahead of time to start the refresh to allow it to complete
+        long refreshWindowMillis = Math.min(expiresInMillis, MAX_REFRESH_WINDOW_MILLIS);
+        // how much time to wait before expiration
+        long waitIntervalMillis = expiresInMillis - refreshWindowMillis;
+        // how much time to actually wait
+        return Math.max(waitIntervalMillis, MIN_REFRESH_WAIT_MILLIS);
     }
 
     private static void scheduleTokenRefresh(
@@ -89,12 +116,7 @@ public class AuthSession {
             int retryTimes) {
         if (retryTimes < TOKEN_REFRESH_NUM_RETRIES) {
             long expiresInMillis = expiresAtMillis - System.currentTimeMillis();
-            // how much ahead of time to start the refresh to allow it to complete
-            long refreshWindowMillis = Math.min(expiresInMillis, MAX_REFRESH_WINDOW_MILLIS);
-            // how much time to wait before expiration
-            long waitIntervalMillis = expiresInMillis - refreshWindowMillis;
-            // how much time to actually wait
-            long timeToWait = Math.max(waitIntervalMillis, MIN_REFRESH_WAIT_MILLIS);
+            long timeToWait = getTimeToWaitByExpiresInMills(expiresInMillis);
 
             executor.schedule(
                     () -> {
@@ -117,21 +139,5 @@ public class AuthSession {
         } else {
             log.warn("Failed to refresh token after {} retries.", TOKEN_REFRESH_NUM_RETRIES);
         }
-    }
-
-    public Boolean refresh() {
-        if (this.credentialsProvider.supportRefresh()
-                && this.credentialsProvider.keepRefreshed()
-                && this.credentialsProvider.expiresInMills().isPresent()) {
-            boolean isSuccessful = this.credentialsProvider.refresh();
-            if (isSuccessful) {
-                Map<String, String> currentHeaders = this.headers;
-                this.headers =
-                        RESTUtil.merge(currentHeaders, this.credentialsProvider.authHeader());
-            }
-            return isSuccessful;
-        }
-
-        return false;
     }
 }
