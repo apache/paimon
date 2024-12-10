@@ -1935,8 +1935,8 @@ public class CoreOptions implements Serializable {
         return options.get(COMMIT_FORCE_COMPACT);
     }
 
-    public Optional<Duration> commitMaxTimeout() {
-        return options.getOptional(COMMIT_MAX_TIMEOUT);
+    public Duration commitMaxTimeout() {
+        return options.get(COMMIT_MAX_TIMEOUT);
     }
 
     public int commitMaxRetries() {

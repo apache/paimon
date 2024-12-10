@@ -135,7 +135,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final List<CommitCallback> commitCallbacks;
     private final StatsFileHandler statsFileHandler;
     private final BucketMode bucketMode;
-    private final Optional<Duration> commitMaxTimeout;
+    @Nullable private Duration commitMaxTimeout;
     private final int commitMaxRetries;
 
     @Nullable private Lock lock;
@@ -169,7 +169,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Integer manifestReadParallelism,
             List<CommitCallback> commitCallbacks,
             int commitMaxRetries,
-            Optional<Duration> commitMaxTimeout) {
+            @Nullable Duration commitMaxTimeout) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.tableName = tableName;
@@ -750,24 +750,17 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
 
             retryResult = (RetryResult) result;
-
-            if (retryCount >= commitMaxRetries) {
-                retryResult.cleanAll();
-                throw new RuntimeException(
-                        String.format(
-                                "Commit failed after %s retries, there maybe exist commit conflicts between multiple jobs.",
-                                commitMaxRetries));
-            }
             retryCount++;
 
-            if (commitMaxTimeout.isPresent()
-                    && System.currentTimeMillis() - startMillis
-                            > commitMaxTimeout.get().toMillis()) {
+            if ((commitMaxTimeout != null
+                            && System.currentTimeMillis() - startMillis
+                                    > commitMaxTimeout.toMillis())
+                    || retryCount >= commitMaxRetries) {
                 retryResult.cleanAll();
                 throw new RuntimeException(
                         String.format(
-                                "Commit failed after %s millis, there maybe exist commit conflicts between multiple jobs.",
-                                commitMaxTimeout.get().toMillis()));
+                                "Commit failed after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
+                                commitMaxTimeout.toMillis(), retryCount));
             }
         }
         return retryCount + 1;
@@ -1074,23 +1067,17 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 break;
             }
 
-            if (retryCount >= commitMaxRetries) {
-                retryResult.cleanAll();
-                throw new RuntimeException(
-                        String.format(
-                                "Commit compact manifest failed after %s retries, there maybe exist commit conflicts between multiple jobs.",
-                                commitMaxRetries));
-            }
             retryCount++;
 
-            if (commitMaxTimeout.isPresent()
-                    && System.currentTimeMillis() - startMillis
-                            > commitMaxTimeout.get().toMillis()) {
+            if ((commitMaxTimeout != null
+                            && System.currentTimeMillis() - startMillis
+                                    > commitMaxTimeout.toMillis())
+                    || retryCount >= commitMaxRetries) {
                 retryResult.cleanAll();
                 throw new RuntimeException(
                         String.format(
-                                "Commit failed after %s millis, there maybe exist commit conflicts between multiple jobs.",
-                                commitMaxTimeout.get().toMillis()));
+                                "Commit failed after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
+                                commitMaxTimeout.toMillis(), retryCount));
             }
         }
     }
