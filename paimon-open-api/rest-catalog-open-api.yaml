@@ -36,19 +36,83 @@ paths:
       operationId: listDatabases
       parameters:
         - name: prefix
-          in: query
+          in: path
           required: true
           schema:
             type: string
       responses:
+        "500":
+          description: Internal Server Error
         "201":
           description: Created
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListDatabasesResponse'
+    post:
+      tags:
+        - database
+      summary: Create Databases
+      operationId: createDatabases
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDatabaseRequest'
+        required: true
+      responses:
+        "409":
+          description: Resource has exist
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateDatabaseResponse'
+  /api/v1/{prefix}/databases/{database}:
+    get:
+      tags:
+        - database
+      summary: Get Database
+      operationId: getDatabases
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "404":
+          description: Resource not found
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetDatabaseResponse'
   /api/v1/config:
     get:
       tags:
@@ -56,16 +120,56 @@ paths:
       summary: Get Config
       operationId: getConfig
       responses:
-        "500":
-          description: Internal Server Error
         "201":
           description: Created
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConfigResponse'
+        "500":
+          description: Internal Server Error
 components:
   schemas:
+    CreateDatabaseRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          writeOnly: true
+        ignoreIfExists:
+          type: boolean
+          writeOnly: true
+        properties:
+          type: object
+          additionalProperties:
+            type: string
+          writeOnly: true
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          writeOnly: true
+        code:
+          type: integer
+          format: int32
+          writeOnly: true
+        stack:
+          type: array
+          writeOnly: true
+          items:
+            type: string
+    CreateDatabaseResponse:
+      type: object
+      properties:
+        name:
+          type: string
+          writeOnly: true
+        properties:
+          type: object
+          additionalProperties:
+            type: string
+          writeOnly: true
     DatabaseName:
       type: object
       properties:
@@ -80,6 +184,20 @@ components:
           writeOnly: true
           items:
             $ref: '#/components/schemas/DatabaseName'
+    GetDatabaseResponse:
+      type: object
+      properties:
+        name:
+          type: string
+          writeOnly: true
+        options:
+          type: object
+          additionalProperties:
+            type: string
+          writeOnly: true
+        comment:
+          type: string
+          writeOnly: true
     ConfigResponse:
       type: object
       properties:
