@@ -237,7 +237,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 bucketMode(),
                 options.scanManifestParallelism(),
                 callbacks,
-                options.commitMaxRetries());
+                options.commitMaxRetries(),
+                options.commitTimeout());
     }
 
     @Override
