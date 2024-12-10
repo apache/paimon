@@ -528,7 +528,7 @@ public class CoreOptions implements Serializable {
                     .withDescription("Whether to force a compaction before commit.");
 
     public static final ConfigOption<Duration> COMMIT_MAX_TIMEOUT =
-            key("commit.max-timeout")
+            key("commit.timeout")
                     .durationType()
                     .noDefaultValue()
                     .withDescription("Max timeout duration of retry when commit failed.");
