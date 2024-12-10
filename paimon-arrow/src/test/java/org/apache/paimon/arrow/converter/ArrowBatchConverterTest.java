@@ -910,8 +910,9 @@ public class ArrowBatchConverterTest {
 
     private Object[] randomRowValues(boolean[] nullable) {
         Object[] values = new Object[18];
-        values[0] = BinaryString.fromString(StringUtils.getRandomString(RND, 10, 10));
-        values[1] = BinaryString.fromString(StringUtils.getRandomString(RND, 1, 20));
+        // The orc char reader will trim the string. See TreeReaderFactory.CharTreeReader
+        values[0] = BinaryString.fromString(StringUtils.getRandomString(RND, 9, 9) + "A");
+        values[1] = BinaryString.fromString(StringUtils.getRandomString(RND, 1, 19) + "A");
         values[2] = RND.nextBoolean();
         values[3] = randomBytes(10, 10);
         values[4] = randomBytes(1, 20);
