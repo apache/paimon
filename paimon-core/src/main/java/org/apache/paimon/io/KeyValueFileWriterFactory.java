@@ -196,14 +196,12 @@ public class KeyValueFileWriterFactory {
 
         public KeyValueFileWriterFactory build(
                 BinaryRow partition, int bucket, CoreOptions options) {
-            RowType finalKeyType = options.thinMode() ? RowType.of() : keyType;
-            RowType writeKeyType = KeyValue.schema(finalKeyType, valueType);
             WriteFormatContext context =
                     new WriteFormatContext(
                             partition,
                             bucket,
                             keyType,
-                            writeKeyType,
+                            KeyValue.schema(options.thinMode() ? RowType.of() : keyType, valueType),
                             fileFormat,
                             format2PathFactory,
                             options);
