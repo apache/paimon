@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.flink.ProjectionRowData;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.source.assigners.FIFOSplitAssigner;
 import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
@@ -53,7 +54,7 @@ public class StaticFileStoreSource extends FlinkSource {
             @Nullable Long limit,
             int splitBatchSize,
             SplitAssignMode splitAssignMode) {
-        this(readBuilder, limit, splitBatchSize, splitAssignMode, null);
+        this(readBuilder, limit, splitBatchSize, splitAssignMode, null, null);
     }
 
     public StaticFileStoreSource(
@@ -61,8 +62,9 @@ public class StaticFileStoreSource extends FlinkSource {
             @Nullable Long limit,
             int splitBatchSize,
             SplitAssignMode splitAssignMode,
-            @Nullable DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo) {
-        super(readBuilder, limit);
+            @Nullable DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo,
+            @Nullable ProjectionRowData rowData) {
+        super(readBuilder, limit, rowData);
         this.splitBatchSize = splitBatchSize;
         this.splitAssignMode = splitAssignMode;
         this.dynamicPartitionFilteringInfo = dynamicPartitionFilteringInfo;

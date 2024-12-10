@@ -77,6 +77,7 @@ public class AlignedSourceReaderTest extends FileStoreSourceReaderTest {
                 new FileStoreSourceReaderMetrics(new DummyMetricGroup()),
                 IOManager.create(tempDir.toString()),
                 null,
-                new FutureCompletingBlockingQueue<>(2));
+                new FutureCompletingBlockingQueue<>(2),
+                null);
     }
 }
