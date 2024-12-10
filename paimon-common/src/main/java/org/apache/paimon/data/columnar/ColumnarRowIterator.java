@@ -87,15 +87,15 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
     }
 
     public ColumnarRowIterator mapping(
-            @Nullable PartitionInfo partitionInfo, @Nullable int[] columnMapping) {
-        if (partitionInfo != null || columnMapping != null) {
+            @Nullable PartitionInfo partitionInfo, @Nullable int[] indexMapping) {
+        if (partitionInfo != null || indexMapping != null) {
             VectorizedColumnBatch vectorizedColumnBatch = row.batch();
             ColumnVector[] vectors = vectorizedColumnBatch.columns;
             if (partitionInfo != null) {
                 vectors = VectorMappingUtils.createPartitionMappedVectors(partitionInfo, vectors);
             }
-            if (columnMapping != null) {
-                vectors = VectorMappingUtils.createMappedVectors(columnMapping, vectors);
+            if (indexMapping != null) {
+                vectors = VectorMappingUtils.createMappedVectors(indexMapping, vectors);
             }
             return copy(vectors);
         }
