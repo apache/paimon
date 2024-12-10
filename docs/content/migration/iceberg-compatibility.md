@@ -397,6 +397,7 @@ you also need to set some (or all) of the following table options when creating 
 You can use Hive Catalog to connect AWS Glue metastore, you can use set `'metadata.iceberg.hive-client-class'` to
 `'com.amazonaws.glue.catalog.metastore.AWSCatalogMetastoreClient'`.
 
+> **Note:** You can use this [repo](https://github.com/promotedai/aws-glue-data-catalog-client-for-apache-hive-metastore) to build the required jar, include it in your path and configure the AWSCatalogMetastoreClient.
 ## AWS Athena
 
 AWS Athena may use old manifest reader to read Iceberg manifest by names, we should let Paimon producing legacy Iceberg
