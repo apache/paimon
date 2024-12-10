@@ -112,7 +112,7 @@ public class TestCdcSource extends AbstractNonCoordinatedSource<TestCdcEvent> {
         public void addSplits(List<SimpleSourceSplit> list) {
             int count =
                     list.stream()
-                            .map(x -> Integer.parseInt(x.splitId()))
+                            .map(x -> Integer.parseInt(x.value()))
                             .reduce(Integer::sum)
                             .orElse(0);
             while (events.size() > count) {

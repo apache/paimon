@@ -119,7 +119,7 @@ public class FiniteTestSource<T> extends AbstractNonCoordinatedSource<T> {
         public void addSplits(List<SimpleSourceSplit> list) {
             List<Integer> retrievedStates =
                     list.stream()
-                            .map(x -> Integer.parseInt(x.splitId()))
+                            .map(x -> Integer.parseInt(x.value()))
                             .collect(Collectors.toList());
 
             // given that the parallelism of the function is 1, we can only have 1 state

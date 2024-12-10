@@ -147,7 +147,7 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
 
             List<Long> retrievedStates =
                     list.stream()
-                            .map(SimpleSourceSplit::splitId)
+                            .map(SimpleSourceSplit::value)
                             .filter(x -> x.startsWith(CHECKPOINT_STATE))
                             .map(x -> Long.parseLong(x.substring(CHECKPOINT_STATE.length())))
                             .collect(Collectors.toList());
@@ -162,7 +162,7 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
             }
 
             list.stream()
-                    .map(SimpleSourceSplit::splitId)
+                    .map(SimpleSourceSplit::value)
                     .filter(x -> x.startsWith(NEXT_SNAPSHOT_STATE))
                     .map(x -> x.substring(NEXT_SNAPSHOT_STATE.length()).split(":"))
                     .forEach(

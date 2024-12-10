@@ -20,6 +20,10 @@ package org.apache.paimon.flink.source;
 
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 
 /** {@link SimpleVersionedSerializer} for {@link SimpleSourceSplit}. */
@@ -31,15 +35,43 @@ public class SimpleSourceSplitSerializer implements SimpleVersionedSerializer<Si
     }
 
     @Override
-    public byte[] serialize(SimpleSourceSplit obj) throws IOException {
-        String splitId = obj.splitId();
-        return splitId == null ? new byte[0] : splitId.getBytes();
+    public byte[] serialize(SimpleSourceSplit split) throws IOException {
+        if (split.splitId() == null) {
+            return new byte[0];
+        }
+
+        try (final ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                final DataOutputStream out = new DataOutputStream(baos)) {
+            writeString(out, split.splitId());
+            writeString(out, split.value());
+            return baos.toByteArray();
+        }
     }
 
     @Override
     public SimpleSourceSplit deserialize(int version, byte[] serialized) throws IOException {
-        return serialized.length == 0
-                ? new SimpleSourceSplit()
-                : new SimpleSourceSplit(new String(serialized));
+        if (serialized.length == 0) {
+            return new SimpleSourceSplit();
+        }
+
+        try (final ByteArrayInputStream bais = new ByteArrayInputStream(serialized);
+                final DataInputStream in = new DataInputStream(bais)) {
+            String splitId = readString(in);
+            String value = readString(in);
+            return new SimpleSourceSplit(splitId, value);
+        }
+    }
+
+    private void writeString(DataOutputStream out, String str) throws IOException {
+        byte[] bytes = str.getBytes();
+        out.writeInt(bytes.length);
+        out.write(str.getBytes());
+    }
+
+    private String readString(DataInputStream in) throws IOException {
+        int length = in.readInt();
+        byte[] bytes = new byte[length];
+        in.readFully(bytes);
+        return new String(bytes);
     }
 }

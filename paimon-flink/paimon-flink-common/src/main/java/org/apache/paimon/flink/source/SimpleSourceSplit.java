@@ -20,20 +20,32 @@ package org.apache.paimon.flink.source;
 
 import org.apache.flink.api.connector.source.SourceSplit;
 
+import java.util.UUID;
+
 /** A {@link SourceSplit} that provides basic information through splitId. */
 public class SimpleSourceSplit implements SourceSplit {
     private final String splitId;
+    private final String value;
 
     public SimpleSourceSplit() {
         this("");
     }
 
-    public SimpleSourceSplit(String splitId) {
+    public SimpleSourceSplit(String value) {
+        this(UUID.randomUUID().toString(), value);
+    }
+
+    SimpleSourceSplit(String splitId, String value) {
         this.splitId = splitId;
+        this.value = value;
     }
 
     @Override
     public String splitId() {
         return splitId;
+    }
+
+    public String value() {
+        return value;
     }
 }
