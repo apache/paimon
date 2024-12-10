@@ -159,7 +159,7 @@ public class OperatorSourceTest {
 
     @Test
     public void testReadOperator() throws Exception {
-        ReadOperator readOperator = new ReadOperator(table.newReadBuilder());
+        ReadOperator readOperator = new ReadOperator(table.newReadBuilder(), null);
         OneInputStreamOperatorTestHarness<Split, RowData> harness =
                 new OneInputStreamOperatorTestHarness<>(readOperator);
         harness.setup(
@@ -181,7 +181,7 @@ public class OperatorSourceTest {
 
     @Test
     public void testReadOperatorMetricsRegisterAndUpdate() throws Exception {
-        ReadOperator readOperator = new ReadOperator(table.newReadBuilder());
+        ReadOperator readOperator = new ReadOperator(table.newReadBuilder(), null);
         OneInputStreamOperatorTestHarness<Split, RowData> harness =
                 new OneInputStreamOperatorTestHarness<>(readOperator);
         harness.setup(

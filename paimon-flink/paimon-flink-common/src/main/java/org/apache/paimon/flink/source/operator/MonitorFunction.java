@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.source.operator;
 
+import org.apache.paimon.flink.ProjectionRowData;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.ChannelComputer;
@@ -235,7 +236,8 @@ public class MonitorFunction extends RichSourceFunction<Split>
             long monitorInterval,
             boolean emitSnapshotWatermark,
             boolean shuffleBucketWithPartition,
-            BucketMode bucketMode) {
+            BucketMode bucketMode,
+            ProjectionRowData projectionRowData) {
         SingleOutputStreamOperator<Split> singleOutputStreamOperator =
                 env.addSource(
                                 new MonitorFunction(
@@ -251,7 +253,7 @@ public class MonitorFunction extends RichSourceFunction<Split>
                                 singleOutputStreamOperator, shuffleBucketWithPartition);
 
         return sourceDataStream.transform(
-                name + "-Reader", typeInfo, new ReadOperator(readBuilder));
+                name + "-Reader", typeInfo, new ReadOperator(readBuilder, projectionRowData));
     }
 
     private static DataStream<Split> shuffleUnwareBucket(
