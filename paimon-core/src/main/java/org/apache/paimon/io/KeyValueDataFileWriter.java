@@ -32,7 +32,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
-import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StatsCollectorFactories;
@@ -44,9 +43,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.function.Function;
 
 import static org.apache.paimon.io.DataFilePathFactory.dataFileToFileIndexPath;
@@ -58,13 +55,13 @@ import static org.apache.paimon.io.DataFilePathFactory.dataFileToFileIndexPath;
  * <p>NOTE: records given to the writer must be sorted because it does not compare the min max keys
  * to produce {@link DataFileMeta}.
  */
-public class KeyValueDataFileWriter
+public abstract class KeyValueDataFileWriter
         extends StatsCollectingSingleFileWriter<KeyValue, DataFileMeta> {
 
     private static final Logger LOG = LoggerFactory.getLogger(KeyValueDataFileWriter.class);
 
-    private final RowType keyType;
-    private final RowType valueType;
+    protected final RowType keyType;
+    protected final RowType valueType;
     private final long schemaId;
     private final int level;
 
@@ -79,7 +76,6 @@ public class KeyValueDataFileWriter
     private long minSeqNumber = Long.MAX_VALUE;
     private long maxSeqNumber = Long.MIN_VALUE;
     private long deleteRecordCount = 0;
-    private final StateAbstractor stateAbstractor;
 
     public KeyValueDataFileWriter(
             FileIO fileIO,
@@ -122,7 +118,6 @@ public class KeyValueDataFileWriter
         this.dataFileIndexWriter =
                 DataFileIndexWriter.create(
                         fileIO, dataFileToFileIndexPath(path), valueType, fileIndexOptions);
-        this.stateAbstractor = new StateAbstractor(keyType, valueType, options.thinMode());
     }
 
     @Override
@@ -173,8 +168,7 @@ public class KeyValueDataFileWriter
             return null;
         }
 
-        Pair<SimpleColStats[], SimpleColStats[]> keyValueStats =
-                stateAbstractor.fetchKeyValueStats(fieldStats());
+        Pair<SimpleColStats[], SimpleColStats[]> keyValueStats = fetchKeyValueStats(fieldStats());
 
         SimpleStats keyStats = keyStatsConverter.toBinaryAllMode(keyValueStats.getKey());
         Pair<List<String>, SimpleStats> valueStatsPair =
@@ -206,63 +200,13 @@ public class KeyValueDataFileWriter
                 valueStatsPair.getKey());
     }
 
+    abstract Pair<SimpleColStats[], SimpleColStats[]> fetchKeyValueStats(SimpleColStats[] rowStats);
+
     @Override
     public void close() throws IOException {
         if (dataFileIndexWriter != null) {
             dataFileIndexWriter.close();
         }
         super.close();
-    }
-
-    private static class StateAbstractor {
-        private final int numKeyFields;
-        private final int numValueFields;
-        // if keyStatMapping is not null, means thin mode on.
-        @Nullable private final int[] keyStatMapping;
-
-        public StateAbstractor(RowType keyType, RowType valueType, boolean thinMode) {
-            this.numKeyFields = keyType.getFieldCount();
-            this.numValueFields = valueType.getFieldCount();
-            Map<Integer, Integer> idToIndex = new HashMap<>();
-            for (int i = 0; i < valueType.getFieldCount(); i++) {
-                idToIndex.put(valueType.getFields().get(i).id(), i);
-            }
-            if (thinMode) {
-                this.keyStatMapping = new int[keyType.getFieldCount()];
-                for (int i = 0; i < keyType.getFieldCount(); i++) {
-                    keyStatMapping[i] =
-                            idToIndex.get(
-                                    keyType.getFields().get(i).id()
-                                            - SpecialFields.KEY_FIELD_ID_START);
-                }
-            } else {
-                this.keyStatMapping = null;
-            }
-        }
-
-        Pair<SimpleColStats[], SimpleColStats[]> fetchKeyValueStats(SimpleColStats[] rowStats) {
-            SimpleColStats[] keyStats = new SimpleColStats[numKeyFields];
-            SimpleColStats[] valFieldStats = new SimpleColStats[numValueFields];
-
-            // If thin mode only, there is no key stats in rowStats, so we only jump
-            // _SEQUNCE_NUMBER_ and _ROW_KIND_ stats. Therefore, the 'from' value is 2.
-            // Otherwise, we need to jump key stats, so the 'from' value is numKeyFields + 2.
-            int valueFrom = thinMode() ? 2 : numKeyFields + 2;
-            System.arraycopy(rowStats, valueFrom, valFieldStats, 0, numValueFields);
-            if (thinMode()) {
-                // Thin mode on, so need to map value stats to key stats.
-                for (int i = 0; i < keyStatMapping.length; i++) {
-                    keyStats[i] = valFieldStats[keyStatMapping[i]];
-                }
-            } else {
-                // Thin mode off, just copy stats from rowStats.
-                System.arraycopy(valFieldStats, 0, keyStats, 0, numKeyFields);
-            }
-            return Pair.of(keyStats, valFieldStats);
-        }
-
-        private boolean thinMode() {
-            return keyStatMapping != null;
-        }
     }
 }

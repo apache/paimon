@@ -34,7 +34,6 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
 import javax.annotation.Nullable;
@@ -109,24 +108,35 @@ public class KeyValueFileWriterFactory {
 
     private KeyValueDataFileWriter createDataFileWriter(
             Path path, int level, FileSource fileSource) {
-        ObjectSerializer<KeyValue> kvSerializer =
-                options.thinMode()
-                        ? new KeyValueThinSerializer(keyType, valueType)
-                        : new KeyValueSerializer(keyType, valueType);
-        return new KeyValueDataFileWriter(
-                fileIO,
-                formatContext.writerFactory(level),
-                path,
-                kvSerializer::toRow,
-                keyType,
-                valueType,
-                formatContext.extractor(level),
-                schemaId,
-                level,
-                formatContext.compression(level),
-                options,
-                fileSource,
-                fileIndexOptions);
+        return options.thinMode()
+                ? new KeyValueThinDataFileWriterImpl(
+                        fileIO,
+                        formatContext.writerFactory(level),
+                        path,
+                        new KeyValueThinSerializer(keyType, valueType)::toRow,
+                        keyType,
+                        valueType,
+                        formatContext.extractor(level),
+                        schemaId,
+                        level,
+                        formatContext.compression(level),
+                        options,
+                        fileSource,
+                        fileIndexOptions)
+                : new KeyValueDataFileWriterImpl(
+                        fileIO,
+                        formatContext.writerFactory(level),
+                        path,
+                        new KeyValueSerializer(keyType, valueType)::toRow,
+                        keyType,
+                        valueType,
+                        formatContext.extractor(level),
+                        schemaId,
+                        level,
+                        formatContext.compression(level),
+                        options,
+                        fileSource,
+                        fileIndexOptions);
     }
 
     public void deleteFile(String filename, int level) {
