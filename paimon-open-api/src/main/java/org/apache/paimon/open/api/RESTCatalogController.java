@@ -31,6 +31,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -60,6 +61,22 @@ public class RESTCatalogController {
                 content = {
                     @Content(
                             schema = @Schema(implementation = ConfigResponse.class),
+                            examples = {
+                                @ExampleObject(
+                                        name = "defaults",
+                                        value =
+                                                "{\n"
+                                                        + "    \"k1\": \"v1\",\n"
+                                                        + "    \"k2\": \"v2\",\n"
+                                                        + "}"),
+                                @ExampleObject(
+                                        name = "overrides",
+                                        value =
+                                                "{\n"
+                                                        + "    \"k3\": \"v1\",\n"
+                                                        + "    \"k4\": \"v2\",\n"
+                                                        + "}"),
+                            },
                             mediaType = "application/json")
                 }),
         @ApiResponse(

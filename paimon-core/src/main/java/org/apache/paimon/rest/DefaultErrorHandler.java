@@ -30,6 +30,7 @@ import org.apache.paimon.rest.responses.ErrorResponse;
 
 /** Default error handler. */
 public class DefaultErrorHandler extends ErrorHandler {
+
     private static final ErrorHandler INSTANCE = new DefaultErrorHandler();
 
     public static ErrorHandler getInstance() {
@@ -49,17 +50,19 @@ public class DefaultErrorHandler extends ErrorHandler {
                 throw new ForbiddenException("Forbidden: %s", error.message());
             case 404:
                 throw new NoSuchResourceException("%s", error.message());
-            case 409:
-                throw new AlreadyExistsException("%s", error.message());
             case 405:
             case 406:
                 break;
+            case 409:
+                throw new AlreadyExistsException("%s", error.message());
             case 500:
                 throw new ServiceFailureException("Server error: %s", error.message());
             case 501:
                 throw new UnsupportedOperationException(error.message());
             case 503:
                 throw new ServiceUnavailableException("Service unavailable: %s", error.message());
+            default:
+                break;
         }
 
         throw new RESTException("Unable to process: %s", error.message());

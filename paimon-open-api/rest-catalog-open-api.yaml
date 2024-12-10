@@ -41,14 +41,14 @@ paths:
           schema:
             type: string
       responses:
-        "500":
-          description: Internal Server Error
         "201":
           description: Created
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListDatabasesResponse'
+        "500":
+          description: Internal Server Error
     post:
       tags:
         - database
@@ -67,20 +67,20 @@ paths:
               $ref: '#/components/schemas/CreateDatabaseRequest'
         required: true
       responses:
-        "409":
-          description: Resource has exist
-          content:
-            '*/*':
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal Server Error
         "201":
           description: Created
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/CreateDatabaseResponse'
+        "500":
+          description: Internal Server Error
+        "409":
+          description: Resource has exist
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/{prefix}/databases/{database}:
     get:
       tags:
@@ -105,14 +105,14 @@ paths:
             '*/*':
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal Server Error
         "201":
           description: Created
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetDatabaseResponse'
+        "500":
+          description: Internal Server Error
   /api/v1/config:
     get:
       tags:
@@ -126,6 +126,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConfigResponse'
+              examples:
+                defaults:
+                  description: defaults
+                  value: |-
+                    {
+                        "k1": "v1",
+                        "k2": "v2",
+                    }
+                overrides:
+                  description: overrides
+                  value: |-
+                    {
+                        "k3": "v1",
+                        "k4": "v2",
+                    }
         "500":
           description: Internal Server Error
 components:
@@ -138,6 +153,17 @@ components:
           writeOnly: true
         ignoreIfExists:
           type: boolean
+          writeOnly: true
+        properties:
+          type: object
+          additionalProperties:
+            type: string
+          writeOnly: true
+    CreateDatabaseResponse:
+      type: object
+      properties:
+        name:
+          type: string
           writeOnly: true
         properties:
           type: object
@@ -159,17 +185,6 @@ components:
           writeOnly: true
           items:
             type: string
-    CreateDatabaseResponse:
-      type: object
-      properties:
-        name:
-          type: string
-          writeOnly: true
-        properties:
-          type: object
-          additionalProperties:
-            type: string
-          writeOnly: true
     DatabaseName:
       type: object
       properties:
