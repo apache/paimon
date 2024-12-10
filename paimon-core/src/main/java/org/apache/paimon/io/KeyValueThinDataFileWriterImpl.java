@@ -117,7 +117,7 @@ public class KeyValueThinDataFileWriterImpl extends KeyValueDataFileWriter {
         SimpleColStats[] keyStats = new SimpleColStats[numKeyFields];
         SimpleColStats[] valFieldStats = new SimpleColStats[numValueFields];
 
-        // If thin mode only, there is no key stats in rowStats, so we only jump
+        // In thin mode, there is no key stats in rowStats, so we only jump
         // _SEQUNCE_NUMBER_ and _ROW_KIND_ stats. Therefore, the 'from' value is 2.
         System.arraycopy(rowStats, 2, valFieldStats, 0, numValueFields);
         // Thin mode on, so need to map value stats to key stats.
