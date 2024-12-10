@@ -26,6 +26,7 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousCompactorStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotFullStartingScanner;
@@ -110,6 +111,10 @@ public abstract class AbstractDataTableScan implements DataTableScan {
 
     public CoreOptions options() {
         return options;
+    }
+
+    public ScanMetrics getScanMetrics() {
+        return snapshotReader.getScanMetrics();
     }
 
     protected StartingScanner createStartingScanner(boolean isStreaming) {

@@ -87,7 +87,7 @@ public class CatalogOptions {
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(
-                            "Controls whether the catalog will cache databases, tables and manifests.");
+                            "Controls whether the catalog will cache databases, tables, manifests and partitions.");
 
     public static final ConfigOption<Duration> CACHE_EXPIRATION_INTERVAL_MS =
             key("cache.expiration-interval")
@@ -127,6 +127,13 @@ public class CatalogOptions {
                     .defaultValue(20)
                     .withDescription(
                             "Controls the max number for snapshots per table in the catalog are cached.");
+
+    public static final ConfigOption<Boolean> CACHE_STATS_ENABLED =
+            key("cache.cache-stats-enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Controls whether the catalog cache stats are enabled.");
 
     public static final ConfigOption<Boolean> ALLOW_UPPER_CASE =
             ConfigOptions.key("allow-upper-case")

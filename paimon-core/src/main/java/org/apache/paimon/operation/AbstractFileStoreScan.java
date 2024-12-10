@@ -393,6 +393,10 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         return manifestsReader.read(specifiedSnapshot, scanMode);
     }
 
+    public ScanMetrics getScanMetrics() {
+        return scanMetrics;
+    }
+
     // ------------------------------------------------------------------------
     // Start Thread Safe Methods: The following methods need to be thread safe because they will be
     // called by multiple threads

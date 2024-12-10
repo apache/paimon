@@ -27,6 +27,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.ManifestsReader;
+import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ScanMode;
@@ -109,6 +110,8 @@ public interface SnapshotReader {
     List<BucketEntry> bucketEntries();
 
     Iterator<ManifestEntry> readFileIterator();
+
+    ScanMetrics getScanMetrics();
 
     /** Result plan of this scan. */
     interface Plan extends TableScan.Plan {

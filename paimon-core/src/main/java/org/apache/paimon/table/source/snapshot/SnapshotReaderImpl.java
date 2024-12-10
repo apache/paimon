@@ -33,6 +33,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.AbstractFileStoreScan;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.ManifestsReader;
@@ -274,6 +275,14 @@ public class SnapshotReaderImpl implements SnapshotReader {
     public SnapshotReader dropStats() {
         scan.dropStats();
         return this;
+    }
+
+    @Override
+    public ScanMetrics getScanMetrics() {
+        if (scan instanceof AbstractFileStoreScan) {
+            return ((AbstractFileStoreScan) scan).getScanMetrics();
+        }
+        return null;
     }
 
     @Override

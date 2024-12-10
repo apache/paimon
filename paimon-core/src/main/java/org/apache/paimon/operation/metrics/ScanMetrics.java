@@ -72,4 +72,8 @@ public class ScanMetrics {
         latestScan = scanStats;
         durationHistogram.update(scanStats.getDuration());
     }
+
+    public ScanStats getLatestScan() {
+        return latestScan;
+    }
 }

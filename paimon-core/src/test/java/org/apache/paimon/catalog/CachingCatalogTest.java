@@ -373,7 +373,8 @@ class CachingCatalogTest extends CatalogTestBase {
                         MemorySize.ofMebiBytes(1),
                         manifestCacheThreshold,
                         0L,
-                        10);
+                        10,
+                        false);
         Identifier tableIdent = new Identifier("db", "tbl");
         catalog.dropTable(tableIdent, true);
         catalog.createTable(tableIdent, DEFAULT_TABLE_SCHEMA, false);
