@@ -18,8 +18,10 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
+import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.exceptions.RESTException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
@@ -45,6 +47,10 @@ public class DefaultErrorHandler extends ErrorHandler {
                 throw new NotAuthorizedException("Not authorized: %s", error.message());
             case 403:
                 throw new ForbiddenException("Forbidden: %s", error.message());
+            case 404:
+                throw new NoSuchResourceException("%s", error.message());
+            case 409:
+                throw new AlreadyExistsException("%s", error.message());
             case 405:
             case 406:
                 break;

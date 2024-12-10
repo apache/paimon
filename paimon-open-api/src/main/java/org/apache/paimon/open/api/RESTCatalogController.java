@@ -19,7 +19,9 @@
 package org.apache.paimon.open.api;
 
 import org.apache.paimon.rest.ResourcePaths;
+import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.DatabaseName;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 
@@ -34,6 +36,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.HashMap;
@@ -87,10 +92,37 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema())})
     })
     @GetMapping("/api/v1/{prefix}/databases")
-    public ResponseEntity<ListDatabasesResponse> listDatabases(String prefix) {
+    public ResponseEntity<ListDatabasesResponse> listDatabases(@PathVariable String prefix) {
         try {
             ListDatabasesResponse response =
                     new ListDatabasesResponse(ImmutableList.of(new DatabaseName("account")));
+            return new ResponseEntity<>(response, HttpStatus.CREATED);
+        } catch (Exception e) {
+            return new ResponseEntity<>(null, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    @Operation(
+            summary = "Create Databases",
+            tags = {"database"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "201",
+                content = {
+                    @Content(
+                            schema = @Schema(implementation = CreateDatabaseResponse.class),
+                            mediaType = "application/json")
+                }),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @PostMapping("/api/v1/{prefix}/databases")
+    public ResponseEntity<CreateDatabaseResponse> createDatabases(
+            @PathVariable String prefix, @RequestBody CreateDatabaseRequest request) {
+        try {
+            Map<String, String> properties = new HashMap<>();
+            CreateDatabaseResponse response = new CreateDatabaseResponse("name", properties);
             return new ResponseEntity<>(response, HttpStatus.CREATED);
         } catch (Exception e) {
             return new ResponseEntity<>(null, HttpStatus.INTERNAL_SERVER_ERROR);

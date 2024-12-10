@@ -29,7 +29,10 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.CredentialsProvider;
 import org.apache.paimon.rest.auth.CredentialsProviderFactory;
+import org.apache.paimon.rest.exceptions.AlreadyExistsException;
+import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.DatabaseName;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.schema.Schema;
@@ -130,7 +133,13 @@ public class RESTCatalog implements Catalog {
     @Override
     public void createDatabase(String name, boolean ignoreIfExists, Map<String, String> properties)
             throws DatabaseAlreadyExistException {
-        throw new UnsupportedOperationException();
+        CreateDatabaseRequest request = new CreateDatabaseRequest(name, ignoreIfExists, properties);
+        try {
+            client.post(
+                    resourcePaths.databases(), request, CreateDatabaseResponse.class, headers());
+        } catch (AlreadyExistsException e) {
+            throw new DatabaseAlreadyExistException(name);
+        }
     }
 
     @Override
