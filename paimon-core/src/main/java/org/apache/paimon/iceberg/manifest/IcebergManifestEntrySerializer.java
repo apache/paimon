@@ -54,4 +54,32 @@ public class IcebergManifestEntrySerializer extends ObjectSerializer<IcebergMani
                 row.getLong(3),
                 fileSerializer.fromRow(row.getRow(4, fileSerializer.numFields())));
     }
+
+    public IcebergManifestEntry fromRow(InternalRow row, IcebergManifestFileMeta meta) {
+        IcebergManifestEntry.Status status = IcebergManifestEntry.Status.fromId(row.getInt(0));
+        long snapshotId = !row.isNullAt(1) ? row.getLong(1) : meta.addedSnapshotId();
+        long sequenceNumber = getOrInherit(row, meta, 2, status);
+        long fileSequenceNumber = getOrInherit(row, meta, 3, status);
+
+        return new IcebergManifestEntry(
+                status,
+                snapshotId,
+                sequenceNumber,
+                fileSequenceNumber,
+                fileSerializer.fromRow(row.getRow(4, fileSerializer.numFields())));
+    }
+
+    private long getOrInherit(
+            InternalRow row,
+            IcebergManifestFileMeta meta,
+            int pos,
+            IcebergManifestEntry.Status status) {
+        long sequenceNumber = meta.sequenceNumber();
+        if (row.isNullAt(pos)
+                && (sequenceNumber == 0 || status == IcebergManifestEntry.Status.ADDED)) {
+            return sequenceNumber;
+        } else {
+            return row.getLong(pos);
+        }
+    }
 }

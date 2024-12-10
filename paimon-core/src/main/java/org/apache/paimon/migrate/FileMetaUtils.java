@@ -27,6 +27,7 @@ import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.manifest.IcebergDataFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -61,6 +62,20 @@ public class FileMetaUtils {
     private static final Logger LOG = LoggerFactory.getLogger(FileMetaUtils.class);
 
     public static List<DataFileMeta> construct(
+            List<IcebergDataFileMeta> icebergDataFileMetas,
+            FileIO fileIO,
+            Table paimonTable,
+            Path newDir,
+            Map<Path, Path> rollback) {
+        return icebergDataFileMetas.stream()
+                .map(
+                        icebergDataFileMeta ->
+                                constructFileMeta(
+                                        icebergDataFileMeta, fileIO, paimonTable, newDir, rollback))
+                .collect(Collectors.toList());
+    }
+
+    public static List<DataFileMeta> construct(
             FileIO fileIO,
             String format,
             String location,
@@ -93,6 +108,22 @@ public class FileMetaUtils {
     }
 
     // -----------------------------private method---------------------------------------------
+    private static DataFileMeta constructFileMeta(
+            IcebergDataFileMeta icebergDataFileMeta,
+            FileIO fileIO,
+            Table table,
+            Path dir,
+            Map<Path, Path> rollback) {
+        FileStatus status;
+        try {
+            status = fileIO.getFileStatus(new Path(icebergDataFileMeta.filePath()));
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    "error when get file status. file path is " + icebergDataFileMeta.filePath());
+        }
+        String format = icebergDataFileMeta.fileFormat();
+        return constructFileMeta(format, status, fileIO, table, dir, rollback);
+    }
 
     private static DataFileMeta constructFileMeta(
             String format,
