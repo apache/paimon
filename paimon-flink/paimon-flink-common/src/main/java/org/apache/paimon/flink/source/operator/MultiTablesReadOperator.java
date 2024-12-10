@@ -52,9 +52,8 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /**
  * The operator that reads the Tuple2<{@link Split}, String> received from the preceding {@link
- * CombinedAwareBatchSourceFunction} or {@link CombinedAwareStreamingSourceFunction}. Contrary to
- * the {@link CombinedCompactorSourceFunction} which has a parallelism of 1, this operator can have
- * DOP > 1.
+ * CombinedAwareBatchSource} or {@link CombinedAwareStreamingSource}. Contrary to the {@link
+ * CombinedCompactorSource} which has a parallelism of 1, this operator can have DOP > 1.
  */
 public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
         implements OneInputStreamOperator<Tuple2<Split, String>, RowData> {

@@ -21,21 +21,23 @@ package org.apache.paimon.flink.source.operator;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.compact.MultiAwareBucketTableScan;
 import org.apache.paimon.flink.compact.MultiTableScanBase;
+import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
+import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 
-import org.apache.flink.api.common.functions.OpenContext;
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.api.connector.source.Boundedness;
+import org.apache.flink.api.connector.source.ReaderOutput;
+import org.apache.flink.api.connector.source.SourceReader;
+import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.TupleTypeInfo;
-import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.io.InputStatus;
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.operators.StreamSource;
 import org.apache.flink.table.data.RowData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,15 +49,11 @@ import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.FINI
 import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.IS_EMPTY;
 
 /** It is responsible for monitoring compactor source of aware bucket table in batch mode. */
-public class CombinedAwareBatchSourceFunction
-        extends CombinedCompactorSourceFunction<Tuple2<Split, String>> {
+public class CombinedAwareBatchSource extends CombinedCompactorSource<Tuple2<Split, String>> {
 
-    private static final Logger LOGGER =
-            LoggerFactory.getLogger(CombinedAwareBatchSourceFunction.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(CombinedAwareBatchSource.class);
 
-    private MultiTableScanBase<Tuple2<Split, String>> tableScan;
-
-    public CombinedAwareBatchSourceFunction(
+    public CombinedAwareBatchSource(
             Catalog.Loader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
@@ -63,34 +61,33 @@ public class CombinedAwareBatchSourceFunction
         super(catalogLoader, includingPattern, excludingPattern, databasePattern, false);
     }
 
-    /**
-     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
-     */
-    public void open(OpenContext openContext) throws Exception {
-        open(new Configuration());
-    }
-
-    /**
-     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
-     */
-    public void open(Configuration parameters) throws Exception {
-        super.open(parameters);
-        tableScan =
-                new MultiAwareBucketTableScan(
-                        catalogLoader,
-                        includingPattern,
-                        excludingPattern,
-                        databasePattern,
-                        isStreaming,
-                        isRunning);
-    }
-
     @Override
-    void scanTable() throws Exception {
-        if (isRunning.get()) {
-            MultiTableScanBase.ScanResult scanResult = tableScan.scanTable(ctx);
+    public SourceReader<Tuple2<Split, String>, SimpleSourceSplit> createReader(
+            SourceReaderContext sourceReaderContext) throws Exception {
+        return new Reader();
+    }
+
+    private class Reader extends AbstractNonCoordinatedSourceReader<Tuple2<Split, String>> {
+        private MultiTableScanBase<Tuple2<Split, String>> tableScan;
+
+        @Override
+        public void start() {
+            super.start();
+            tableScan =
+                    new MultiAwareBucketTableScan(
+                            catalogLoader,
+                            includingPattern,
+                            excludingPattern,
+                            databasePattern,
+                            isStreaming);
+        }
+
+        @Override
+        public InputStatus pollNext(ReaderOutput<Tuple2<Split, String>> readerOutput)
+                throws Exception {
+            MultiTableScanBase.ScanResult scanResult = tableScan.scanTable(readerOutput);
             if (scanResult == FINISHED) {
-                return;
+                return InputStatus.END_OF_INPUT;
             }
             if (scanResult == IS_EMPTY) {
                 // Currently, in the combined mode, there are two scan tasks for the table of two
@@ -98,6 +95,15 @@ public class CombinedAwareBatchSourceFunction
                 // There will be a situation that there is only one task compaction , therefore this
                 // should not be thrown exception here.
                 LOGGER.info("No file were collected for the table of aware-bucket");
+            }
+            return InputStatus.END_OF_INPUT;
+        }
+
+        @Override
+        public void close() throws Exception {
+            super.close();
+            if (tableScan != null) {
+                tableScan.close();
             }
         }
     }
@@ -111,15 +117,14 @@ public class CombinedAwareBatchSourceFunction
             Pattern excludingPattern,
             Pattern databasePattern,
             Duration partitionIdleTime) {
-        CombinedAwareBatchSourceFunction function =
-                new CombinedAwareBatchSourceFunction(
+        CombinedAwareBatchSource source =
+                new CombinedAwareBatchSource(
                         catalogLoader, includingPattern, excludingPattern, databasePattern);
-        StreamSource<Tuple2<Split, String>, ?> sourceOperator = new StreamSource<>(function);
         TupleTypeInfo<Tuple2<Split, String>> tupleTypeInfo =
                 new TupleTypeInfo<>(
                         new JavaTypeInfo<>(Split.class), BasicTypeInfo.STRING_TYPE_INFO);
-        return new DataStreamSource<>(
-                        env, tupleTypeInfo, sourceOperator, false, name, Boundedness.BOUNDED)
+
+        return env.fromSource(source, WatermarkStrategy.noWatermarks(), name, tupleTypeInfo)
                 .forceNonParallel()
                 .partitionCustom(
                         (key, numPartitions) -> key % numPartitions,
@@ -128,13 +133,5 @@ public class CombinedAwareBatchSourceFunction
                         name,
                         typeInfo,
                         new MultiTablesReadOperator(catalogLoader, false, partitionIdleTime));
-    }
-
-    @Override
-    public void close() throws Exception {
-        super.close();
-        if (tableScan != null) {
-            tableScan.close();
-        }
     }
 }
