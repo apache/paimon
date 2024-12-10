@@ -156,6 +156,33 @@ CREATE TABLE my_table (
 );
 ```
 
+### Create External Table
+
+When the catalog's `metastore` type is `hive`, if the `location` is specified when creating a table, that table will be considered an external table; otherwise, it will be a managed table. 
+
+When you drop an external table, only the metadata in Hive will be removed, and the actual data files will not be deleted; whereas dropping a managed table will also delete the data.
+
+```sql
+CREATE TABLE my_table (
+    user_id BIGINT,
+    item_id BIGINT,
+    behavior STRING,
+    dt STRING,
+    hh STRING
+) PARTITIONED BY (dt, hh) TBLPROPERTIES (
+    'primary-key' = 'dt,hh,user_id'
+) LOCATION '/path/to/table';
+```
+
+Furthermore, if there is already data stored in the specified location, you can create the table without explicitly specifying the fields, partitions and props or other information. 
+In this case, the new table will inherit them all from the existing table’s metadata. 
+
+However, if you manually specify them, you need to ensure that they are consistent with those of the existing table (props can be a subset). Therefore, it is strongly recommended not to specify them.
+
+```sql
+CREATE TABLE my_table LOCATION '/path/to/table';
+```
+
 ### Create Table As Select
 
 Table can be created and populated by the results of a query, for example, we have a sql like this: `CREATE TABLE table_b AS SELECT id, name FORM table_a`,
@@ -241,7 +268,7 @@ DROP VIEW v1;
 ```
 
 ## Tag
-### Create or Replace Tag
+### Create Or Replace Tag
 Create or replace a tag syntax with the following options.
 - Create a tag with or without the snapshot id and time retention.
 - Create an existed tag is not failed if using `IF NOT EXISTS` syntax.
