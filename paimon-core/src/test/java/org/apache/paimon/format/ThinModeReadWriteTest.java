@@ -67,7 +67,7 @@ public class ThinModeReadWriteTest extends TableTestBase {
         schemaBuilder.option("bucket", "1");
         schemaBuilder.option("bucket-key", "f1");
         schemaBuilder.option("file.format", format);
-        schemaBuilder.option("storage.thin-mode", thinMode.toString());
+        schemaBuilder.option("data-file.thin-mode", thinMode.toString());
         return schemaBuilder.build();
     }
 

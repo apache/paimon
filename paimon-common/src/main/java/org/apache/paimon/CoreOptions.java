@@ -1453,7 +1453,7 @@ public class CoreOptions implements Serializable {
                                     + " Default value is false only for compatibility of old reader.");
 
     public static final ConfigOption<Boolean> STORAGE_THIN_MODE =
-            key("storage.thin-mode")
+            key("data-file.thin-mode")
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(

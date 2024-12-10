@@ -187,7 +187,8 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     @Test
     public void testBatchWriteBuilder() throws Exception {
         FileStoreTable table =
-                createFileStoreTable().copy(Collections.singletonMap("storage.thin-mode", "true"));
+                createFileStoreTable()
+                        .copy(Collections.singletonMap("data-file.thin-mode", "true"));
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         BatchTableWrite write = writeBuilder.newWrite();
         BatchTableCommit commit = writeBuilder.newCommit();
