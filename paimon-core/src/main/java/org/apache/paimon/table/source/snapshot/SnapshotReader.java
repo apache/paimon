@@ -39,6 +39,7 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
+import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -82,6 +83,8 @@ public interface SnapshotReader {
     SnapshotReader withManifestEntryFilter(Filter<ManifestEntry> filter);
 
     SnapshotReader withBucket(int bucket);
+
+    SnapshotReader withBuckets(Collection<Integer> buckets);
 
     SnapshotReader withBucketFilter(Filter<Integer> bucketFilter);
 

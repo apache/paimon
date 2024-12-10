@@ -70,6 +70,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
@@ -343,6 +344,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader withBuckets(Collection<Integer> buckets) {
+            wrapped.withBuckets(buckets);
+            return this;
+        }
+
+        @Override
         public SnapshotReader withBucketFilter(Filter<Integer> bucketFilter) {
             wrapped.withBucketFilter(bucketFilter);
             return this;
@@ -453,6 +460,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public InnerTableScan withBuckets(Collection<Integer> buckets) {
+            batchScan.withBuckets(buckets);
+            return this;
+        }
+
+        @Override
         public InnerTableScan withLevelFilter(Filter<Integer> levelFilter) {
             batchScan.withLevelFilter(levelFilter);
             return this;
@@ -486,6 +499,18 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public StreamDataTableScan withFilter(Predicate predicate) {
             convert(predicate).ifPresent(streamScan::withFilter);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withBucketFilter(Filter<Integer> bucketFilter) {
+            streamScan.withBucketFilter(bucketFilter);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withBuckets(Collection<Integer> buckets) {
+            streamScan.withBuckets(buckets);
             return this;
         }
 
