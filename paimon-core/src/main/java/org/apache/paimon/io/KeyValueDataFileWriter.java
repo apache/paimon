@@ -79,7 +79,7 @@ public class KeyValueDataFileWriter
     private long minSeqNumber = Long.MAX_VALUE;
     private long maxSeqNumber = Long.MIN_VALUE;
     private long deleteRecordCount = 0;
-    private final KeyStateAbstractor keyStateAbstractor;
+    private final StateAbstractor stateAbstractor;
 
     public KeyValueDataFileWriter(
             FileIO fileIO,
@@ -122,7 +122,7 @@ public class KeyValueDataFileWriter
         this.dataFileIndexWriter =
                 DataFileIndexWriter.create(
                         fileIO, dataFileToFileIndexPath(path), valueType, fileIndexOptions);
-        this.keyStateAbstractor = new KeyStateAbstractor(keyType, valueType, options.thinMode());
+        this.stateAbstractor = new StateAbstractor(keyType, valueType, options.thinMode());
     }
 
     @Override
@@ -174,7 +174,7 @@ public class KeyValueDataFileWriter
         }
 
         Pair<SimpleColStats[], SimpleColStats[]> keyValueStats =
-                keyStateAbstractor.abstractFromValueState(fieldStats());
+                stateAbstractor.abstractFromValueState(fieldStats());
 
         SimpleStats keyStats = keyStatsConverter.toBinaryAllMode(keyValueStats.getKey());
         Pair<List<String>, SimpleStats> valueStatsPair =
@@ -214,13 +214,13 @@ public class KeyValueDataFileWriter
         super.close();
     }
 
-    private static class KeyStateAbstractor {
+    private static class StateAbstractor {
         private final int numKeyFields;
         private final int numValueFields;
         // if keyStatMapping is not null, means thin mode on.
         @Nullable private final int[] keyStatMapping;
 
-        public KeyStateAbstractor(RowType keyType, RowType valueType, boolean thinMode) {
+        public StateAbstractor(RowType keyType, RowType valueType, boolean thinMode) {
             this.numKeyFields = keyType.getFieldCount();
             this.numValueFields = valueType.getFieldCount();
             Map<Integer, Integer> idToIndex = new HashMap<>();
