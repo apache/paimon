@@ -37,6 +37,7 @@ import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
@@ -284,10 +285,15 @@ public class MergeFileSplitReadTest {
                                 ? Collections.emptyList()
                                 : Stream.concat(
                                                 keyType.getFieldNames().stream()
-                                                        .map(field -> field.replace("key_", "")),
+                                                        .map(
+                                                                field ->
+                                                                        field.replace(
+                                                                                SpecialFields
+                                                                                        .KEY_FIELD_PREFIX,
+                                                                                "")),
                                                 partitionType.getFieldNames().stream())
                                         .collect(Collectors.toList()),
-                        Collections.emptyMap(),
+                        Collections.singletonMap("data-file.thin-mode", "false"),
                         null);
         TableSchema tableSchema = schemaManager.createTable(schema);
         return new TestFileStore.Builder(

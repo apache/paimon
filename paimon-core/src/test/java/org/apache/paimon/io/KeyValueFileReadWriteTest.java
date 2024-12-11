@@ -37,6 +37,7 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.stats.StatsTestUtils;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FailingFileIO;
@@ -158,7 +159,7 @@ public class KeyValueFileReadWriteTest {
         List<DataFileMeta> actualMetas = writer.result();
 
         // projection: (shopId, orderId) -> (orderId)
-        RowType readKeyType = KEY_TYPE.project("key_orderId");
+        RowType readKeyType = KEY_TYPE.project(SpecialFields.KEY_FIELD_PREFIX + "orderId");
         KeyValueFileReaderFactory readerFactory =
                 createReaderFactory(tempDir.toString(), "avro", readKeyType, null);
         InternalRowSerializer projectedKeySerializer = new InternalRowSerializer(readKeyType);

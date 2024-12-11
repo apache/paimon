@@ -21,6 +21,7 @@ package org.apache.paimon.io;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueSerializer;
+import org.apache.paimon.KeyValueThinSerializer;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
@@ -107,21 +108,35 @@ public class KeyValueFileWriterFactory {
 
     private KeyValueDataFileWriter createDataFileWriter(
             Path path, int level, FileSource fileSource) {
-        KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
-        return new KeyValueDataFileWriter(
-                fileIO,
-                formatContext.writerFactory(level),
-                path,
-                kvSerializer::toRow,
-                keyType,
-                valueType,
-                formatContext.extractor(level),
-                schemaId,
-                level,
-                formatContext.compression(level),
-                options,
-                fileSource,
-                fileIndexOptions);
+        return options.thinMode()
+                ? new KeyValueThinDataFileWriterImpl(
+                        fileIO,
+                        formatContext.writerFactory(level),
+                        path,
+                        new KeyValueThinSerializer(keyType, valueType)::toRow,
+                        keyType,
+                        valueType,
+                        formatContext.extractor(level),
+                        schemaId,
+                        level,
+                        formatContext.compression(level),
+                        options,
+                        fileSource,
+                        fileIndexOptions)
+                : new KeyValueDataFileWriterImpl(
+                        fileIO,
+                        formatContext.writerFactory(level),
+                        path,
+                        new KeyValueSerializer(keyType, valueType)::toRow,
+                        keyType,
+                        valueType,
+                        formatContext.extractor(level),
+                        schemaId,
+                        level,
+                        formatContext.compression(level),
+                        options,
+                        fileSource,
+                        fileIndexOptions);
     }
 
     public void deleteFile(String filename, int level) {
@@ -191,12 +206,12 @@ public class KeyValueFileWriterFactory {
 
         public KeyValueFileWriterFactory build(
                 BinaryRow partition, int bucket, CoreOptions options) {
-            RowType fileRowType = KeyValue.schema(keyType, valueType);
             WriteFormatContext context =
                     new WriteFormatContext(
                             partition,
                             bucket,
-                            fileRowType,
+                            keyType,
+                            KeyValue.schema(options.thinMode() ? RowType.of() : keyType, valueType),
                             fileFormat,
                             format2PathFactory,
                             options);
@@ -217,6 +232,7 @@ public class KeyValueFileWriterFactory {
         private WriteFormatContext(
                 BinaryRow partition,
                 int bucket,
+                RowType keyType,
                 RowType rowType,
                 FileFormat defaultFormat,
                 Map<String, FileStorePathFactory> parentFactories,
@@ -236,7 +252,8 @@ public class KeyValueFileWriterFactory {
             this.format2PathFactory = new HashMap<>();
             this.format2WriterFactory = new HashMap<>();
             SimpleColStatsCollector.Factory[] statsCollectorFactories =
-                    StatsCollectorFactories.createStatsFactories(options, rowType.getFieldNames());
+                    StatsCollectorFactories.createStatsFactories(
+                            options, rowType.getFieldNames(), keyType.getFieldNames());
             for (String format : parentFactories.keySet()) {
                 format2PathFactory.put(
                         format,
