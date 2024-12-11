@@ -39,7 +39,7 @@ public class RollbackToWatermarkProcedure extends BaseProcedure {
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
-                // timestamp value
+                // watermark value
                 ProcedureParameter.required("watermark", LongType)
             };
 
