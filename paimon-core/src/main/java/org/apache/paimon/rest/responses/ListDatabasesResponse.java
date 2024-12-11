@@ -41,7 +41,7 @@ public class ListDatabasesResponse implements RESTResponse {
     }
 
     @JsonGetter(FIELD_DATABASES)
-    public List<DatabaseName> databases() {
+    public List<DatabaseName> getDatabases() {
         return this.databases;
     }
 }

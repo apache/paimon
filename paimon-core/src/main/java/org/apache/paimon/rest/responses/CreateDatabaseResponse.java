@@ -46,12 +46,12 @@ public class CreateDatabaseResponse implements RESTResponse {
     }
 
     @JsonGetter(FIELD_NAME)
-    public String name() {
+    public String getName() {
         return name;
     }
 
     @JsonGetter(FIELD_PROPERTIES)
-    public Map<String, String> properties() {
+    public Map<String, String> getProperties() {
         return properties;
     }
 }

@@ -38,7 +38,7 @@ public class DatabaseName {
     }
 
     @JsonGetter(FIELD_NAME)
-    public String name() {
+    public String getName() {
         return this.name;
     }
 }

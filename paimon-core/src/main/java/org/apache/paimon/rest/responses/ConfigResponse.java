@@ -65,12 +65,12 @@ public class ConfigResponse implements RESTResponse {
     }
 
     @JsonGetter(FIELD_DEFAULTS)
-    public Map<String, String> defaults() {
+    public Map<String, String> getDefaults() {
         return defaults;
     }
 
     @JsonGetter(FIELD_OVERRIDES)
-    public Map<String, String> overrides() {
+    public Map<String, String> getOverrides() {
         return overrides;
     }
 }

@@ -77,7 +77,7 @@ public class RESTCatalogTest {
     }
 
     private void mockOptions(String key, String value) {
-        String mockResponse = String.format("{\"defaults\": {\"%s\": \"%s\"}}", key, value);
+        String mockResponse = String.format("{\"getDefaults\": {\"%s\": \"%s\"}}", key, value);
         MockResponse mockResponseObj =
                 new MockResponse()
                         .setBody(mockResponse)

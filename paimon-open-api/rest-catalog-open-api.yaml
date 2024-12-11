@@ -127,15 +127,15 @@ paths:
               schema:
                 $ref: '#/components/schemas/ConfigResponse'
               examples:
-                defaults:
-                  description: defaults
+                getDefaults:
+                  description: getDefaults
                   value: |-
                     {
                         "k1": "v1",
                         "k2": "v2",
                     }
-                overrides:
-                  description: overrides
+                getOverrides:
+                  description: getOverrides
                   value: |-
                     {
                         "k3": "v1",
@@ -164,25 +164,20 @@ components:
       properties:
         name:
           type: string
-          writeOnly: true
         properties:
           type: object
           additionalProperties:
             type: string
-          writeOnly: true
     ErrorResponse:
       type: object
       properties:
         message:
           type: string
-          writeOnly: true
         code:
           type: integer
           format: int32
-          writeOnly: true
         stack:
           type: array
-          writeOnly: true
           items:
             type: string
     DatabaseName:
@@ -190,13 +185,11 @@ components:
       properties:
         name:
           type: string
-          writeOnly: true
     ListDatabasesResponse:
       type: object
       properties:
         databases:
           type: array
-          writeOnly: true
           items:
             $ref: '#/components/schemas/DatabaseName'
     GetDatabaseResponse:
@@ -204,15 +197,12 @@ components:
       properties:
         name:
           type: string
-          writeOnly: true
         options:
           type: object
           additionalProperties:
             type: string
-          writeOnly: true
         comment:
           type: string
-          writeOnly: true
     ConfigResponse:
       type: object
       properties:
@@ -220,9 +210,7 @@ components:
           type: object
           additionalProperties:
             type: string
-          writeOnly: true
         overrides:
           type: object
           additionalProperties:
             type: string
-          writeOnly: true

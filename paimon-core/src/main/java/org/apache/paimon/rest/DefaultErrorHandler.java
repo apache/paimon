@@ -39,32 +39,32 @@ public class DefaultErrorHandler extends ErrorHandler {
 
     @Override
     public void accept(ErrorResponse error) {
-        int code = error.code();
+        int code = error.getCode();
+        String message = error.getMessage();
         switch (code) {
             case 400:
-                throw new BadRequestException(
-                        String.format("Malformed request: %s", error.message()));
+                throw new BadRequestException(String.format("Malformed request: %s", message));
             case 401:
-                throw new NotAuthorizedException("Not authorized: %s", error.message());
+                throw new NotAuthorizedException("Not authorized: %s", message);
             case 403:
-                throw new ForbiddenException("Forbidden: %s", error.message());
+                throw new ForbiddenException("Forbidden: %s", message);
             case 404:
-                throw new NoSuchResourceException("%s", error.message());
+                throw new NoSuchResourceException("%s", message);
             case 405:
             case 406:
                 break;
             case 409:
-                throw new AlreadyExistsException("%s", error.message());
+                throw new AlreadyExistsException("%s", message);
             case 500:
-                throw new ServiceFailureException("Server error: %s", error.message());
+                throw new ServiceFailureException("Server error: %s", message);
             case 501:
-                throw new UnsupportedOperationException(error.message());
+                throw new UnsupportedOperationException(message);
             case 503:
-                throw new ServiceUnavailableException("Service unavailable: %s", error.message());
+                throw new ServiceUnavailableException("Service unavailable: %s", message);
             default:
                 break;
         }
 
-        throw new RESTException("Unable to process: %s", error.message());
+        throw new RESTException("Unable to process: %s", message);
     }
 }

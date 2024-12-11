@@ -124,9 +124,9 @@ public class RESTCatalog implements Catalog {
     public List<String> listDatabases() {
         ListDatabasesResponse response =
                 client.get(resourcePaths.databases(), ListDatabasesResponse.class, headers());
-        if (response.databases() != null) {
-            return response.databases().stream()
-                    .map(DatabaseName::name)
+        if (response.getDatabases() != null) {
+            return response.getDatabases().stream()
+                    .map(DatabaseName::getName)
                     .collect(Collectors.toList());
         }
         return ImmutableList.of();

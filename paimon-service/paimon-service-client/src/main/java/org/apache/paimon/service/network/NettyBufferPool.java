@@ -46,7 +46,7 @@ public class NettyBufferPool implements ByteBufAllocator {
         boolean preferDirect = true;
 
         // Arenas allocate chunks of pageSize << maxOrder bytes. With these
-        // defaults, this results in chunks of 16 MB.
+        // getDefaults, this results in chunks of 16 MB.
         int pageSize = 8192;
         int maxOrder = 11;
 

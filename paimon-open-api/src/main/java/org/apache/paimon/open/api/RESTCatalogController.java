@@ -31,12 +31,9 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
-import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -57,42 +54,22 @@ public class RESTCatalogController {
             tags = {"config"})
     @ApiResponses({
         @ApiResponse(
-                responseCode = "201",
+                responseCode = "200",
                 content = {
                     @Content(
                             schema = @Schema(implementation = ConfigResponse.class),
-                            examples = {
-                                @ExampleObject(
-                                        name = "defaults",
-                                        value =
-                                                "{\n"
-                                                        + "    \"k1\": \"v1\",\n"
-                                                        + "    \"k2\": \"v2\",\n"
-                                                        + "}"),
-                                @ExampleObject(
-                                        name = "overrides",
-                                        value =
-                                                "{\n"
-                                                        + "    \"k3\": \"v1\",\n"
-                                                        + "    \"k4\": \"v2\",\n"
-                                                        + "}"),
-                            },
-                            mediaType = "application/json")
+                            mediaType = "application/json"
+                    )
                 }),
         @ApiResponse(
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
     @GetMapping(ResourcePaths.V1_CONFIG)
-    public ResponseEntity<ConfigResponse> getConfig() {
-        try {
-            Map<String, String> defaults = new HashMap<>();
-            Map<String, String> overrides = new HashMap<>();
-            ConfigResponse response = new ConfigResponse(defaults, overrides);
-            return new ResponseEntity<>(response, HttpStatus.CREATED);
-        } catch (Exception e) {
-            return new ResponseEntity<>(null, HttpStatus.INTERNAL_SERVER_ERROR);
-        }
+    public ConfigResponse getConfig() {
+        Map<String, String> defaults = new HashMap<>();
+        Map<String, String> overrides = new HashMap<>();
+        return new ConfigResponse(defaults, overrides);
     }
 
     @Operation(
@@ -100,7 +77,7 @@ public class RESTCatalogController {
             tags = {"database"})
     @ApiResponses({
         @ApiResponse(
-                responseCode = "201",
+                responseCode = "200",
                 content = {
                     @Content(
                             schema = @Schema(implementation = ListDatabasesResponse.class),
@@ -111,14 +88,8 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema())})
     })
     @GetMapping("/api/v1/{prefix}/databases")
-    public ResponseEntity<ListDatabasesResponse> listDatabases(@PathVariable String prefix) {
-        try {
-            ListDatabasesResponse response =
-                    new ListDatabasesResponse(ImmutableList.of(new DatabaseName("account")));
-            return new ResponseEntity<>(response, HttpStatus.CREATED);
-        } catch (Exception e) {
-            return new ResponseEntity<>(null, HttpStatus.INTERNAL_SERVER_ERROR);
-        }
+    public ListDatabasesResponse listDatabases(@PathVariable String prefix) {
+        return new ListDatabasesResponse(ImmutableList.of(new DatabaseName("account")));
     }
 
     @Operation(
@@ -126,7 +97,7 @@ public class RESTCatalogController {
             tags = {"database"})
     @ApiResponses({
         @ApiResponse(
-                responseCode = "201",
+                responseCode = "200",
                 content = {
                     @Content(
                             schema = @Schema(implementation = CreateDatabaseResponse.class),
@@ -141,15 +112,10 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema())})
     })
     @PostMapping("/api/v1/{prefix}/databases")
-    public ResponseEntity<CreateDatabaseResponse> createDatabases(
+    public CreateDatabaseResponse createDatabases(
             @PathVariable String prefix, @RequestBody CreateDatabaseRequest request) {
-        try {
-            Map<String, String> properties = new HashMap<>();
-            CreateDatabaseResponse response = new CreateDatabaseResponse("name", properties);
-            return new ResponseEntity<>(response, HttpStatus.CREATED);
-        } catch (Exception e) {
-            return new ResponseEntity<>(null, HttpStatus.INTERNAL_SERVER_ERROR);
-        }
+        Map<String, String> properties = new HashMap<>();
+        return new CreateDatabaseResponse("name", properties);
     }
 
     @Operation(
@@ -157,7 +123,7 @@ public class RESTCatalogController {
             tags = {"database"})
     @ApiResponses({
         @ApiResponse(
-                responseCode = "201",
+                responseCode = "200",
                 content = {
                     @Content(
                             schema = @Schema(implementation = GetDatabaseResponse.class),
@@ -172,14 +138,9 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema())})
     })
     @GetMapping("/api/v1/{prefix}/databases/{database}")
-    public ResponseEntity<GetDatabaseResponse> getDatabases(
+    public GetDatabaseResponse getDatabases(
             @PathVariable String prefix, @PathVariable String database) {
-        try {
-            Map<String, String> options = new HashMap<>();
-            GetDatabaseResponse response = new GetDatabaseResponse("name", options, "comment");
-            return new ResponseEntity<>(response, HttpStatus.CREATED);
-        } catch (Exception e) {
-            return new ResponseEntity<>(null, HttpStatus.INTERNAL_SERVER_ERROR);
-        }
+        Map<String, String> options = new HashMap<>();
+        return new GetDatabaseResponse("name", options, "comment");
     }
 }

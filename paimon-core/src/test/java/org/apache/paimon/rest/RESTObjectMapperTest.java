@@ -43,7 +43,7 @@ public class RESTObjectMapperTest {
         ConfigResponse response = new ConfigResponse(conf, conf);
         String responseStr = mapper.writeValueAsString(response);
         ConfigResponse parseData = mapper.readValue(responseStr, ConfigResponse.class);
-        assertEquals(conf.get(confKey), parseData.defaults().get(confKey));
+        assertEquals(conf.get(confKey), parseData.getDefaults().get(confKey));
     }
 
     @Test
@@ -53,7 +53,7 @@ public class RESTObjectMapperTest {
         ErrorResponse response = new ErrorResponse(message, code, new ArrayList<String>());
         String responseStr = mapper.writeValueAsString(response);
         ErrorResponse parseData = mapper.readValue(responseStr, ErrorResponse.class);
-        assertEquals(message, parseData.message());
-        assertEquals(code, parseData.code());
+        assertEquals(message, parseData.getMessage());
+        assertEquals(code, parseData.getCode());
     }
 }

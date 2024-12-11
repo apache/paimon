@@ -55,21 +55,33 @@ public class GetDatabaseResponse implements RESTResponse, Database {
         this.comment = comment;
     }
 
-    @Override
     @JsonGetter(FIELD_NAME)
-    public String name() {
+    public String getName() {
         return name;
     }
 
-    @Override
     @JsonGetter(FIELD_OPTIONS)
-    public Map<String, String> options() {
+    public Map<String, String> getOptions() {
         return options;
     }
 
-    @Override
     @JsonGetter(FIELD_COMMENT)
-    public Optional<String> comment() {
+    public Optional<String> getComment() {
         return Optional.ofNullable(comment);
+    }
+
+    @Override
+    public String name() {
+        return this.getName();
+    }
+
+    @Override
+    public Map<String, String> options() {
+        return this.getOptions();
+    }
+
+    @Override
+    public Optional<String> comment() {
+        return this.getComment();
     }
 }
