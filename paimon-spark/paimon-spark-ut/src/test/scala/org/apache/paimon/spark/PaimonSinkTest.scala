@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.spark.SparkConf
 import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.functions.{col, mean, window}
@@ -26,6 +27,10 @@ import org.apache.spark.sql.streaming.StreamTest
 import java.sql.Date
 
 class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
+
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.sql.catalog.paimon.cache-enabled", "false")
+  }
 
   import testImplicits._
 

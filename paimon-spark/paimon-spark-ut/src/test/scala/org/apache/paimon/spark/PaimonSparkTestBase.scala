@@ -66,7 +66,6 @@ class PaimonSparkTestBase
     super.sparkConf
       .set("spark.sql.catalog.paimon", classOf[SparkCatalog].getName)
       .set("spark.sql.catalog.paimon.warehouse", tempDBDir.getCanonicalPath)
-      .set("spark.sql.catalog.paimon.cache-enabled", "false")
       .set("spark.sql.extensions", classOf[PaimonSparkSessionExtensions].getName)
       .set("spark.serializer", serializer)
   }
