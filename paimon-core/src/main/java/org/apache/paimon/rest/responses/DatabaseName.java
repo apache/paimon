@@ -26,6 +26,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 /** Class for Database entity. */
 public class DatabaseName implements RESTMessage {
+
     private static final String FIELD_NAME = "name";
 
     @JsonProperty(FIELD_NAME)

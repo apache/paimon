@@ -32,6 +32,7 @@ import java.util.Objects;
 
 /** Response for getting config. */
 public class ConfigResponse implements RESTResponse {
+
     private static final String FIELD_DEFAULTS = "defaults";
     private static final String FIELD_OVERRIDES = "overrides";
 

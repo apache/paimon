@@ -28,6 +28,7 @@ import java.util.Map;
 
 /** Request for creating database. */
 public class CreateDatabaseRequest implements RESTRequest {
+
     private static final String FIELD_NAME = "name";
     private static final String FIELD_IGNORE_IF_EXISTS = "ignoreIfExists";
     private static final String FIELD_OPTIONS = "options";

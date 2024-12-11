@@ -28,6 +28,7 @@ import java.util.Map;
 
 /** Response for creating database. */
 public class CreateDatabaseResponse implements RESTResponse {
+
     private static final String FIELD_NAME = "name";
     private static final String FIELD_OPTIONS = "options";
 

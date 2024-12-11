@@ -32,6 +32,7 @@ import java.util.Optional;
 
 /** Response for getting database. */
 public class GetDatabaseResponse implements RESTResponse, Database {
+
     private static final String FIELD_NAME = "name";
     private static final String FIELD_OPTIONS = "options";
     private static final String FIELD_COMMENT = "comment";
