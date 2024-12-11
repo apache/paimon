@@ -29,9 +29,9 @@ import org.springframework.context.annotation.Configuration;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Configuration for Swagger. */
+/** Config for OpenAPI. */
 @Configuration
-public class SwaggerConfig {
+public class OpenAPIConfig {
     @Value("${openapi.url}")
     private String devUrl;
 
