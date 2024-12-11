@@ -180,6 +180,17 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>rollback_to_watermark</td>
+      <td>
+         To rollback to the snapshot which earlier or equal than watermark. Argument:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>watermark: roll back to the snapshot which earlier or equal than watermark.</li>
+      </td>
+      <td>
+          CALL sys.rollback_to_watermark(table => 'default.T', watermark => 1730292023000)<br/><br/>
+      </td>
+    </tr>
+    <tr>
       <td>migrate_database</td>
       <td>
          Migrate hive table to a paimon table. Arguments:
