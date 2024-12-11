@@ -64,13 +64,13 @@ public class RollbackToWatermarkProcedureITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(
                         "+I[k1, 2024-12-02]", "+I[k2, 2024-12-02]", "+I[k3, 2024-12-02]");
 
-        sql("CALL sys.rollback_to_watermark(" + "`table` => 'default.T'," + "`watermark` => 2001)");
+        sql("CALL sys.rollback_to_watermark(`table` => 'default.T',`watermark` => 2001)");
 
         // check for snapshot 2
         assertThat(sql("select * from T").stream().map(Row::toString))
                 .containsExactlyInAnyOrder("+I[k1, 2024-12-02]", "+I[k2, 2024-12-02]");
 
-        sql("CALL sys.rollback_to_watermark(" + "`table` => 'default.T'," + "`watermark` => 1001)");
+        sql("CALL sys.rollback_to_watermark(`table` => 'default.T',`watermark` => 1001)");
 
         // check for snapshot 1
         assertThat(sql("select * from T").stream().map(Row::toString))
