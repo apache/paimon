@@ -142,7 +142,7 @@ public class RESTCatalogController {
     public GetDatabaseResponse getDatabases(
             @PathVariable String prefix, @PathVariable String database) {
         Map<String, String> options = new HashMap<>();
-        return new GetDatabaseResponse("name", options, "comment");
+        return new GetDatabaseResponse("name", options);
     }
 
     @Operation(

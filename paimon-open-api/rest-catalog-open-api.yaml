@@ -194,8 +194,6 @@ components:
           type: object
           additionalProperties:
             type: string
-        comment:
-          type: string
     ConfigResponse:
       type: object
       properties:

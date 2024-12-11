@@ -30,6 +30,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.rest.RESTCatalogInternalOptions.DATABASE_COMMENT;
+
 /** Mock REST message. */
 public class MockRESTMessage {
 
@@ -59,8 +61,8 @@ public class MockRESTMessage {
     public static GetDatabaseResponse getDatabaseResponse(String name) {
         Map<String, String> options = new HashMap<>();
         options.put("a", "b");
-        String comment = "comment";
-        return new GetDatabaseResponse(name, options, comment);
+        options.put(DATABASE_COMMENT.key(), "comment");
+        return new GetDatabaseResponse(name, options);
     }
 
     public static ListDatabasesResponse listDatabasesResponse(String name) {

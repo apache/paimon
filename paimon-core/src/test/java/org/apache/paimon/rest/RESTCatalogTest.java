@@ -117,7 +117,7 @@ public class RESTCatalogTest {
         Database result = restCatalog.getDatabase(name);
         assertEquals(name, result.name());
         assertEquals(response.getOptions().size(), result.options().size());
-        assertEquals(response.getComment(), result.comment().get());
+        assertEquals(response.comment().get(), result.comment().get());
     }
 
     @Test
