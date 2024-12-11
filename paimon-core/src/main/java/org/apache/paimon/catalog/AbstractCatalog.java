@@ -381,7 +381,7 @@ public abstract class AbstractCatalog implements Catalog {
                 throw new TableNotExistException(identifier);
             }
             return table;
-        } else if (isSpecifiedSystemTable(identifier)) {
+        } else if (identifier.isSystemTable()) {
             Table originTable =
                     getDataOrFormatTable(
                             new Identifier(
@@ -519,12 +519,8 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
-    public static boolean isSpecifiedSystemTable(Identifier identifier) {
-        return identifier.getSystemTableName() != null;
-    }
-
     protected static boolean isTableInSystemDatabase(Identifier identifier) {
-        return isSystemDatabase(identifier.getDatabaseName()) || isSpecifiedSystemTable(identifier);
+        return isSystemDatabase(identifier.getDatabaseName()) || identifier.isSystemTable();
     }
 
     protected static void checkNotSystemTable(Identifier identifier, String method) {

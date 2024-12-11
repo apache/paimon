@@ -26,7 +26,6 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.system.SystemTableLoader;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SegmentsCache;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
@@ -48,7 +47,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.catalog.AbstractCatalog.isSpecifiedSystemTable;
 import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRATION_INTERVAL_MS;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_MAX_MEMORY;
@@ -56,7 +54,7 @@ import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_THRESHOLD;
 import static org.apache.paimon.options.CatalogOptions.CACHE_PARTITION_MAX_NUM;
 import static org.apache.paimon.options.CatalogOptions.CACHE_SNAPSHOT_MAX_NUM_PER_TABLE;
-import static org.apache.paimon.table.system.SystemTableLoader.SYSTEM_TABLES;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** A {@link Catalog} to cache databases and tables and manifests. */
 public class CachingCatalog extends DelegateCatalog {
@@ -227,13 +225,10 @@ public class CachingCatalog extends DelegateCatalog {
             return table;
         }
 
-        if (isSpecifiedSystemTable(identifier)) {
-            Identifier originIdentifier =
-                    new Identifier(
-                            identifier.getDatabaseName(),
-                            identifier.getTableName(),
-                            identifier.getBranchName(),
-                            null);
+        // For system table, do not cache it directly. Instead, cache the origin table and then wrap
+        // it to generate the system table.
+        if (identifier.isSystemTable()) {
+            Identifier originIdentifier = identifier.toOriginTable();
             Table originTable = tableCache.getIfPresent(originIdentifier);
             if (originTable == null) {
                 originTable = wrapped.getTable(originIdentifier);
@@ -241,12 +236,11 @@ public class CachingCatalog extends DelegateCatalog {
             }
             table =
                     SystemTableLoader.load(
-                            Preconditions.checkNotNull(identifier.getSystemTableName()),
+                            checkNotNull(identifier.getSystemTableName()),
                             (FileStoreTable) originTable);
             if (table == null) {
                 throw new TableNotExistException(identifier);
             }
-            putTableCache(identifier, table);
             return table;
         }
 
@@ -309,7 +303,7 @@ public class CachingCatalog extends DelegateCatalog {
         public void onRemoval(Identifier identifier, Table table, @NonNull RemovalCause cause) {
             LOG.debug("Evicted {} from the table cache ({})", identifier, cause);
             if (RemovalCause.EXPIRED.equals(cause)) {
-                tryInvalidateSysTables(identifier);
+                tryInvalidateAttachedTables(identifier);
             }
         }
     }
@@ -317,24 +311,21 @@ public class CachingCatalog extends DelegateCatalog {
     @Override
     public void invalidateTable(Identifier identifier) {
         tableCache.invalidate(identifier);
-        tryInvalidateSysTables(identifier);
+        tryInvalidateAttachedTables(identifier);
         if (partitionCache != null) {
             partitionCache.invalidate(identifier);
         }
     }
 
-    private void tryInvalidateSysTables(Identifier identifier) {
-        if (!isSpecifiedSystemTable(identifier)) {
-            tableCache.invalidateAll(allSystemTables(identifier));
+    private void tryInvalidateAttachedTables(Identifier identifier) {
+        if (identifier.isMainTable()) {
+            // invalidate cached branches
+            for (@NonNull Identifier i : tableCache.asMap().keySet()) {
+                if (identifier.getTableName().equals(i.getTableName())) {
+                    tableCache.invalidate(i);
+                }
+            }
         }
-    }
-
-    private static Iterable<Identifier> allSystemTables(Identifier ident) {
-        List<Identifier> tables = new ArrayList<>();
-        for (String type : SYSTEM_TABLES) {
-            tables.add(Identifier.fromString(ident.getFullName() + SYSTEM_TABLE_SPLITTER + type));
-        }
-        return tables;
     }
 
     // ================================== refresh ================================================

@@ -48,7 +48,6 @@ import org.junit.jupiter.api.Test;
 import java.io.FileNotFoundException;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -101,14 +100,49 @@ class CachingCatalogTest extends CatalogTestBase {
 
     @Test
     public void testInvalidateSysTablesIfBaseTableIsDropped() throws Exception {
-        Catalog catalog = new CachingCatalog(this.catalog);
+        TestableCachingCatalog catalog =
+                new TestableCachingCatalog(this.catalog, EXPIRATION_TTL, ticker);
         Identifier tableIdent = new Identifier("db", "tbl");
         catalog.createTable(new Identifier("db", "tbl"), DEFAULT_TABLE_SCHEMA, false);
         Identifier sysIdent = new Identifier("db", "tbl$files");
+        // get system table will only cache the origin table
         catalog.getTable(sysIdent);
+        assertThat(catalog.tableCache.asMap()).containsKey(tableIdent);
+        assertThat(catalog.tableCache.asMap()).doesNotContainKey(sysIdent);
+        // test case sensitivity
+        Identifier sysIdent1 = new Identifier("db", "tbl$SNAPSHOTS");
+        catalog.getTable(sysIdent1);
+        assertThat(catalog.tableCache.asMap()).doesNotContainKey(sysIdent1);
+
         catalog.dropTable(tableIdent, false);
+        assertThat(catalog.tableCache.asMap()).doesNotContainKey(tableIdent);
         assertThatThrownBy(() -> catalog.getTable(sysIdent))
                 .hasMessage("Table db.tbl does not exist.");
+        assertThatThrownBy(() -> catalog.getTable(sysIdent1))
+                .hasMessage("Table db.tbl does not exist.");
+    }
+
+    @Test
+    public void testInvalidateBranchIfBaseTableIsDropped() throws Exception {
+        TestableCachingCatalog catalog =
+                new TestableCachingCatalog(this.catalog, EXPIRATION_TTL, ticker);
+        Identifier tableIdent = new Identifier("db", "tbl");
+        catalog.createTable(new Identifier("db", "tbl"), DEFAULT_TABLE_SCHEMA, false);
+        catalog.getTable(tableIdent).createBranch("b1");
+
+        Identifier branchIdent = new Identifier("db", "tbl$branch_b1");
+        Identifier branchSysIdent = new Identifier("db", "tbl$branch_b1$FILES");
+        // get system table will only cache the origin table
+        catalog.getTable(branchSysIdent);
+        assertThat(catalog.tableCache.asMap()).containsKey(branchIdent);
+        assertThat(catalog.tableCache.asMap()).doesNotContainKey(branchSysIdent);
+
+        catalog.dropTable(tableIdent, false);
+        assertThat(catalog.tableCache.asMap()).doesNotContainKey(branchIdent);
+        assertThatThrownBy(() -> catalog.getTable(branchIdent))
+                .hasMessage("Table db.tbl$branch_b1 does not exist.");
+        assertThatThrownBy(() -> catalog.getTable(branchSysIdent))
+                .hasMessage("Table db.tbl$branch_b1 does not exist.");
     }
 
     @Test
@@ -176,7 +210,7 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testCacheExpirationEagerlyRemovesSysTables() throws Exception {
+    public void testCacheExpirationEagerlyRemovesBranch() throws Exception {
         TestableCachingCatalog catalog =
                 new TestableCachingCatalog(this.catalog, EXPIRATION_TTL, ticker);
 
@@ -190,26 +224,21 @@ class CachingCatalogTest extends CatalogTestBase {
         assertThat(catalog.tableCache().asMap()).containsKey(tableIdent);
         assertThat(catalog.ageOf(tableIdent)).get().isEqualTo(HALF_OF_EXPIRATION);
 
-        for (Identifier sysTable : sysTables(tableIdent)) {
-            catalog.getTable(sysTable);
-        }
-        assertThat(catalog.tableCache().asMap()).containsKeys(sysTables(tableIdent));
-        assertThat(Arrays.stream(sysTables(tableIdent)).map(catalog::ageOf))
-                .isNotEmpty()
-                .allMatch(age -> age.isPresent() && age.get().equals(Duration.ZERO));
+        catalog.getTable(tableIdent).createBranch("b1");
+        Identifier branchIdent = new Identifier("db", "tbl$branch_b1");
+        catalog.getTable(branchIdent);
+
+        assertThat(catalog.tableCache().asMap()).containsKeys(branchIdent);
+        assertThat(catalog.ageOf(branchIdent)).get().isEqualTo(Duration.ZERO);
 
         assertThat(catalog.remainingAgeFor(tableIdent))
                 .as("Loading a non-cached sys table should refresh the main table's age")
                 .isEqualTo(Optional.of(EXPIRATION_TTL));
 
-        // Move time forward and access already cached sys tables.
+        // Move time forward and access already cached branch.
         ticker.advance(HALF_OF_EXPIRATION);
-        for (Identifier sysTable : sysTables(tableIdent)) {
-            catalog.getTable(sysTable);
-        }
-        assertThat(Arrays.stream(sysTables(tableIdent)).map(catalog::ageOf))
-                .isNotEmpty()
-                .allMatch(age -> age.isPresent() && age.get().equals(Duration.ZERO));
+        catalog.getTable(branchIdent);
+        assertThat(catalog.ageOf(branchIdent)).get().isEqualTo(Duration.ZERO);
 
         assertThat(catalog.remainingAgeFor(tableIdent))
                 .as("Accessing a cached sys table should not affect the main table's age")
@@ -218,14 +247,7 @@ class CachingCatalogTest extends CatalogTestBase {
         // Move time forward so the data table drops.
         ticker.advance(HALF_OF_EXPIRATION);
         assertThat(catalog.tableCache().asMap()).doesNotContainKey(tableIdent);
-
-        Arrays.stream(sysTables(tableIdent))
-                .forEach(
-                        sysTable ->
-                                assertThat(catalog.tableCache().asMap())
-                                        .as(
-                                                "When a data table expires, its sys tables should expire regardless of age")
-                                        .doesNotContainKeys(sysTable));
+        assertThat(catalog.tableCache().asMap()).doesNotContainKey(branchIdent);
     }
 
     @Test
