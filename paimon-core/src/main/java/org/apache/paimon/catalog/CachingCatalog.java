@@ -228,12 +228,7 @@ public class CachingCatalog extends DelegateCatalog {
         // For system table, do not cache it directly. Instead, cache the origin table and then wrap
         // it to generate the system table.
         if (identifier.isSystemTable()) {
-            Identifier originIdentifier = identifier.toOriginTable();
-            Table originTable = tableCache.getIfPresent(originIdentifier);
-            if (originTable == null) {
-                originTable = wrapped.getTable(originIdentifier);
-                putTableCache(originIdentifier, originTable);
-            }
+            Table originTable = getTable(identifier.toOriginTable());
             table =
                     SystemTableLoader.load(
                             checkNotNull(identifier.getSystemTableName()),
