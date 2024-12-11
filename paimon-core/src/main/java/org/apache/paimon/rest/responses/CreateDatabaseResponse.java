@@ -21,14 +21,12 @@ package org.apache.paimon.rest.responses;
 import org.apache.paimon.rest.RESTResponse;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.beans.ConstructorProperties;
 import java.util.Map;
 
 /** Response for creating database. */
-@JsonIgnoreProperties(ignoreUnknown = true)
 public class CreateDatabaseResponse implements RESTResponse {
     private static final String FIELD_NAME = "name";
     private static final String FIELD_OPTIONS = "options";

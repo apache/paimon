@@ -16,30 +16,31 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.responses;
+package org.apache.paimon.rest.requests;
 
-import org.apache.paimon.rest.RESTResponse;
+import org.apache.paimon.rest.RESTRequest;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+/** Request for DropDatabase. */
+public class DropDatabaseRequest implements RESTRequest {
+    private final String name;
+    private final boolean ignoreIfNotExists;
+    private final boolean cascade;
 
-import java.beans.ConstructorProperties;
-import java.util.List;
-
-/** Response for listing databases. */
-public class ListDatabasesResponse implements RESTResponse {
-    private static final String FIELD_DATABASES = "databases";
-
-    @JsonProperty(FIELD_DATABASES)
-    private List<DatabaseName> databases;
-
-    @ConstructorProperties({FIELD_DATABASES})
-    public ListDatabasesResponse(List<DatabaseName> databases) {
-        this.databases = databases;
+    public DropDatabaseRequest(String name, boolean ignoreIfNotExists, boolean cascade) {
+        this.name = name;
+        this.ignoreIfNotExists = ignoreIfNotExists;
+        this.cascade = cascade;
     }
 
-    @JsonGetter(FIELD_DATABASES)
-    public List<DatabaseName> getDatabases() {
-        return this.databases;
+    public String getName() {
+        return name;
+    }
+
+    public boolean getIgnoreIfNotExists() {
+        return ignoreIfNotExists;
+    }
+
+    public boolean getCascade() {
+        return cascade;
     }
 }

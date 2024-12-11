@@ -24,7 +24,6 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.beans.ConstructorProperties;
@@ -32,7 +31,6 @@ import java.util.Map;
 import java.util.Objects;
 
 /** Response for getting config. */
-@JsonIgnoreProperties(ignoreUnknown = true)
 public class ConfigResponse implements RESTResponse {
     private static final String FIELD_DEFAULTS = "defaults";
     private static final String FIELD_OVERRIDES = "overrides";

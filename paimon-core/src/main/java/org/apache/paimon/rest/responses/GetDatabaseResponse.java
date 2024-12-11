@@ -22,7 +22,6 @@ import org.apache.paimon.catalog.Database;
 import org.apache.paimon.rest.RESTResponse;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import javax.annotation.Nullable;
@@ -32,7 +31,6 @@ import java.util.Map;
 import java.util.Optional;
 
 /** Response for getting database. */
-@JsonIgnoreProperties(ignoreUnknown = true)
 public class GetDatabaseResponse implements RESTResponse, Database {
     private static final String FIELD_NAME = "name";
     private static final String FIELD_OPTIONS = "options";

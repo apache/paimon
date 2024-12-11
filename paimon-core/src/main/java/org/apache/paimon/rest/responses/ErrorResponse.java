@@ -18,6 +18,8 @@
 
 package org.apache.paimon.rest.responses;
 
+import org.apache.paimon.rest.RESTResponse;
+
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -29,7 +31,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /** Response for error. */
-public class ErrorResponse {
+public class ErrorResponse implements RESTResponse {
     private static final String FIELD_MESSAGE = "message";
     private static final String FIELD_CODE = "code";
     private static final String FIELD_STACK = "stack";

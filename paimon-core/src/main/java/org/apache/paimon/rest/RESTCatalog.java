@@ -32,6 +32,7 @@ import org.apache.paimon.rest.auth.CredentialsProviderFactory;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.DropDatabaseRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.DatabaseName;
@@ -159,7 +160,12 @@ public class RESTCatalog implements Catalog {
     @Override
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException {
-        throw new UnsupportedOperationException();
+        DropDatabaseRequest request = new DropDatabaseRequest(name, ignoreIfNotExists, cascade);
+        try {
+            client.delete(resourcePaths.database(name), request, headers());
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(name);
+        }
     }
 
     @Override

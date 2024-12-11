@@ -18,15 +18,15 @@
 
 package org.apache.paimon.rest.responses;
 
+import org.apache.paimon.rest.RESTMessage;
+
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.beans.ConstructorProperties;
 
 /** Class for Database entity. */
-@JsonIgnoreProperties(ignoreUnknown = true)
-public class DatabaseName {
+public class DatabaseName implements RESTMessage {
     private static final String FIELD_NAME = "name";
 
     @JsonProperty(FIELD_NAME)
