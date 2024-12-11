@@ -29,7 +29,6 @@ public class RESTObjectMapper {
         ObjectMapper mapper = new ObjectMapper();
         mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
-        mapper.configure(SerializationFeature.WRITE_SELF_REFERENCES_AS_NULL, true);
         mapper.registerModule(new JavaTimeModule());
         return mapper;
     }
