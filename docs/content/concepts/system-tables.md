@@ -43,6 +43,27 @@ In some cases, the table name needs to be enclosed with back quotes to avoid syn
 SELECT * FROM my_catalog.my_db.`my_table$snapshots`;
 ```
 
+### Summary Table
+
+```sql
+SELECT * FROM my_table$summary;
+
+/*
++--------------------------------+--------------------------------+--------------------------------+--------------------------------+--------------------------------+--------------------------------+----------------------+--------------------------------+-------------+--------------------------------+--------------------------------+-------------+--------------------------------+----------------+--------------------------------+--------------------------------+--------------------------------+----------------------+----------------------+-----------------------+-------------------------+
+|                     table_name |                     table_path |                     table_type |                   primary_keys |                 partition_keys |                        comment |            schema_id |                    bucket_mode |  bucket_num |                 snapshot_range |             latest_commit_kind |    tag_nums |                        options | partition_nums |      max_recordcount_partition |         max_filenums_partition |         max_filesize_partition |            file_nums |            file_size | estimate_record_count |        last_commit_time |
++--------------------------------+--------------------------------+--------------------------------+--------------------------------+--------------------------------+--------------------------------+----------------------+--------------------------------+-------------+--------------------------------+--------------------------------+-------------+--------------------------------+----------------+--------------------------------+--------------------------------+--------------------------------+----------------------+----------------------+-----------------------+-------------------------+
+|                      default.T | /var/folders/n8/t55hm8l56wl... |              Primary key table |                ["a","dt","hm"] |                    ["dt","hm"] |                                |                    0 |                     HASH_FIXED |           2 |                          [1,4] |                        COMPACT |           0 | {"bucket":"2","path":"/var/... |              1 | {"partition":"[20240101, 11... | {"partition":"[20240101, 11... | {"partition":"[20240101, 11... |                    1 |                 1379 |                     1 | 2024-12-10 10:55:58.395 |
++--------------------------------+--------------------------------+--------------------------------+--------------------------------+--------------------------------+--------------------------------+----------------------+--------------------------------+-------------+--------------------------------+--------------------------------+-------------+--------------------------------+----------------+--------------------------------+--------------------------------+--------------------------------+----------------------+----------------------+-----------------------+-------------------------+
+1 rows in set
+*/
+
+Comment : 
+max_recordcount_partition : The partition with the most record count.
+max_filenums_partition : The partition with the most file nums.
+max_filesize_partition : The partition with the most file size.
+estimate_record_count:  If the latest snapshot type is COMPACT, this will be exact, otherwise it is slightly larger than the actual value, because these data are not merged.
+```
+
 ### Snapshots Table
 
 You can query the snapshot history information of the table through snapshots table, including the record count occurred in the snapshot.

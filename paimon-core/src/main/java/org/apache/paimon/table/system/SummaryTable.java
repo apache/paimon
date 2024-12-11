@@ -102,7 +102,7 @@ public class SummaryTable implements ReadonlyTable {
                             new DataField(13, "partition_nums", new IntType(false)),
                             new DataField(
                                     14,
-                                    "max_record_partition",
+                                    "max_recordcount_partition",
                                     SerializationUtils.newStringType(true)),
                             new DataField(
                                     15,

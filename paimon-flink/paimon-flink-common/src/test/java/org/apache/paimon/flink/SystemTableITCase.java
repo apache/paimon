@@ -74,6 +74,10 @@ public class SystemTableITCase extends CatalogTableITCase {
                         + " with ("
                         + "'bucket' = '2',"
                         + "'bucket-key' = 'a')");
+        // no data, no partition.
+        tEnv.executeSql("SELECT * FROM T$summary").print();
+
+        // 1 file, 4 record.
         sql("INSERT INTO T VALUES (1, 2), (1, 2), (1, 2), (1, 2)");
         tEnv.executeSql("SELECT * FROM T$summary").print();
 
@@ -85,10 +89,14 @@ public class SystemTableITCase extends CatalogTableITCase {
                         + ") with ("
                         + "'bucket' = '-1'"
                         + ")");
-
         sql("INSERT INTO T_unaware_bucket VALUES (1, 2)");
         tEnv.executeSql("SELECT * FROM T_unaware_bucket$summary").print();
 
+
+    }
+
+    @Test
+    public void testSummaryTableAppendOnlyTableWithPartition() {
         // append table with partitioned.
         sql(
                 "CREATE TABLE T_with_partition ("
@@ -102,6 +110,19 @@ public class SystemTableITCase extends CatalogTableITCase {
         sql(
                 "INSERT INTO T_with_partition VALUES (1, 2, '20240101', '11'),(1, 2, '20240101', '11')");
         tEnv.executeSql("SELECT * FROM T_with_partition$summary").print();
+
+        // append table with partitioned and unaware bucket.
+        sql(
+                "CREATE TABLE T_with_partition_unaware_bucket ("
+                        + "a INT,"
+                        + " b INT,"
+                        + " dt string,"
+                        + " hm string"
+                        + ") PARTITIONED BY (dt, hm) with ("
+                        + "'bucket' = '-1')");
+        sql(
+                "INSERT INTO T_with_partition_unaware_bucket VALUES (1, 2, '20240101', '11'),(1, 2, '20240101', '11')");
+        tEnv.executeSql("SELECT * FROM T_with_partition_unaware_bucket$summary").print();
     }
 
     @Test
@@ -114,6 +135,7 @@ public class SystemTableITCase extends CatalogTableITCase {
                         + "'bucket' = '2')");
         //        sql("INSERT INTO T VALUES (1, 2)");
         tEnv.executeSql("SELECT * FROM T$summary").print();
+        tEnv.executeSql("desc T$summary").print();
 
         sql(
                 "CREATE TABLE T_unaware_bucket (a INT,"
