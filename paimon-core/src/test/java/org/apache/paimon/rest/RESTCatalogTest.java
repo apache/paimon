@@ -18,8 +18,15 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.catalog.Database;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.responses.CreateDatabaseResponse;
+import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.ListDatabasesResponse;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
@@ -29,14 +36,17 @@ import org.junit.Test;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /** Test for REST Catalog. */
 public class RESTCatalogTest {
 
+    private ObjectMapper mapper = RESTObjectMapper.create();
     private MockWebServer mockWebServer;
     private RESTCatalog restCatalog;
 
@@ -50,7 +60,11 @@ public class RESTCatalogTest {
         String initToken = "init_token";
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
-        mockOptions(RESTCatalogInternalOptions.PREFIX.key(), "prefix");
+        String mockResponse =
+                String.format(
+                        "{\"defaults\": {\"%s\": \"%s\"}}",
+                        RESTCatalogInternalOptions.PREFIX.key(), "prefix");
+        mockResponse(mockResponse);
         restCatalog = new RESTCatalog(options);
     }
 
@@ -70,14 +84,50 @@ public class RESTCatalogTest {
     public void testGetConfig() {
         String key = "a";
         String value = "b";
-        mockOptions(key, value);
+        String mockResponse = String.format("{\"defaults\": {\"%s\": \"%s\"}}", key, value);
+        mockResponse(mockResponse);
         Map<String, String> header = new HashMap<>();
         Map<String, String> response = restCatalog.fetchOptionsFromServer(header, new HashMap<>());
         assertEquals(value, response.get(key));
     }
 
-    private void mockOptions(String key, String value) {
-        String mockResponse = String.format("{\"getDefaults\": {\"%s\": \"%s\"}}", key, value);
+    @Test
+    public void testListDatabases() throws JsonProcessingException {
+        String name = MockRESTMessage.databaseName();
+        ListDatabasesResponse response = MockRESTMessage.listDatabasesResponse(name);
+        mockResponse(mapper.writeValueAsString(response));
+        List<String> result = restCatalog.listDatabases();
+        assertEquals(response.getDatabases().size(), result.size());
+        assertEquals(name, result.get(0));
+    }
+
+    @Test
+    public void testCreateDatabase() throws Exception {
+        String name = MockRESTMessage.databaseName();
+        CreateDatabaseResponse response = MockRESTMessage.createDatabaseResponse(name);
+        mockResponse(mapper.writeValueAsString(response));
+        assertDoesNotThrow(() -> restCatalog.createDatabase(name, false, response.getOptions()));
+    }
+
+    @Test
+    public void testGetDatabase() throws Exception {
+        String name = MockRESTMessage.databaseName();
+        GetDatabaseResponse response = MockRESTMessage.getDatabaseResponse(name);
+        mockResponse(mapper.writeValueAsString(response));
+        Database result = restCatalog.getDatabase(name);
+        assertEquals(name, result.name());
+        assertEquals(response.getOptions().size(), result.options().size());
+        assertEquals(response.getComment(), result.comment().get());
+    }
+
+    @Test
+    public void testDropDatabase() {
+        String name = "name";
+        mockResponse("");
+        assertDoesNotThrow(() -> restCatalog.dropDatabase(name, false, false));
+    }
+
+    private void mockResponse(String mockResponse) {
         MockResponse mockResponseObj =
                 new MockResponse()
                         .setBody(mockResponse)

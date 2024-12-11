@@ -18,8 +18,10 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
+import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.exceptions.RESTException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
@@ -55,9 +57,15 @@ public class DefaultErrorHandlerTest {
                 ForbiddenException.class,
                 () -> defaultErrorHandler.accept(generateErrorResponse(403)));
         assertThrows(
+                NoSuchResourceException.class,
+                () -> defaultErrorHandler.accept(generateErrorResponse(404)));
+        assertThrows(
                 RESTException.class, () -> defaultErrorHandler.accept(generateErrorResponse(405)));
         assertThrows(
                 RESTException.class, () -> defaultErrorHandler.accept(generateErrorResponse(406)));
+        assertThrows(
+                AlreadyExistsException.class,
+                () -> defaultErrorHandler.accept(generateErrorResponse(409)));
         assertThrows(
                 ServiceFailureException.class,
                 () -> defaultErrorHandler.accept(generateErrorResponse(500)));
