@@ -65,9 +65,9 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
     }
 
     @VisibleForTesting
-    boolean rollingFile() throws IOException {
+    boolean rollingFile(boolean forceCheck) throws IOException {
         return currentWriter.reachTargetSize(
-                recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
+                forceCheck || recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
     }
 
     @Override
@@ -81,7 +81,7 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
             currentWriter.write(row);
             recordCount += 1;
 
-            if (rollingFile()) {
+            if (rollingFile(false)) {
                 closeCurrentWriter();
             }
         } catch (Throwable e) {
@@ -105,7 +105,7 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
             currentWriter.writeBundle(bundle);
             recordCount += bundle.rowCount();
 
-            if (rollingFile()) {
+            if (rollingFile(true)) {
                 closeCurrentWriter();
             }
         } catch (Throwable e) {
