@@ -100,6 +100,23 @@ public class BinlogTable extends AuditLogTable {
         }
 
         @Override
+        public InnerTableRead withReadType(RowType readType) {
+            List<DataField> fields = new ArrayList<>();
+            for (DataField field : readType.getFields()) {
+                if (field.name().equals(SpecialFields.ROW_KIND.name())) {
+                    fields.add(field);
+                } else {
+                    fields.add(
+                            new DataField(
+                                    field.id(),
+                                    field.name(),
+                                    ((ArrayType) field.type()).getElementType()));
+                }
+            }
+            return super.withReadType(readType.copy(fields));
+        }
+
+        @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
             DataSplit dataSplit = (DataSplit) split;
             if (dataSplit.isStreaming()) {
