@@ -82,7 +82,7 @@ public class LookupLevelsTest {
 
     private final RowType keyType =
             DataTypes.ROW(
-                    DataTypes.FIELD(SpecialFields.KEY_FIELD_ID_START, "_key", DataTypes.INT()));
+                    DataTypes.FIELD(SpecialFields.KEY_FIELD_ID_START, "_KEY_key", DataTypes.INT()));
     private final RowType rowType =
             DataTypes.ROW(
                     DataTypes.FIELD(0, "key", DataTypes.INT()),
