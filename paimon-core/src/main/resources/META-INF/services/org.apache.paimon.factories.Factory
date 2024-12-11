@@ -39,3 +39,4 @@ org.apache.paimon.mergetree.compact.aggregate.factory.FieldThetaSketchAggFactory
 org.apache.paimon.rest.RESTCatalogFactory
 org.apache.paimon.rest.auth.BearTokenCredentialsProviderFactory
 org.apache.paimon.rest.auth.BearTokenFileCredentialsProviderFactory
+org.apache.paimon.iceberg.migrate.IcebergMigrateHadoopMetadataFactory

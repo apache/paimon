@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.iceberg;
+package org.apache.paimon.iceberg.migrate;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -25,6 +25,8 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.IcebergOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.Split;
@@ -85,7 +87,6 @@ public class IcebergMigrateTest {
 
     Catalog paiCatalog;
 
-    org.apache.iceberg.catalog.Catalog icebergCatalog;
     String iceDatabase = "ice_db";
     String iceTable = "ice_t";
 
@@ -106,10 +107,13 @@ public class IcebergMigrateTest {
     PartitionSpec icePartitionSpec =
             PartitionSpec.builderFor(iceSchema).identity("dt").identity("hh").build();
 
+    Map<String, String> icebergProperties = new HashMap<>();
+
     @BeforeEach
     public void beforeEach() throws Exception {
         paiCatalog = createPaimonCatalog();
-        icebergCatalog = createIcebergCatalog();
+        icebergProperties.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "hadoop-catalog");
+        icebergProperties.put("iceberg_warehouse", iceTempDir.toString());
     }
 
     @ParameterizedTest(name = "isPartitioned = {0}")
@@ -144,9 +148,9 @@ public class IcebergMigrateTest {
                         paiCatalog,
                         paiDatabase,
                         paiTable,
-                        icebergCatalog,
                         iceDatabase,
                         iceTable,
+                        new Options(icebergProperties),
                         false,
                         1);
         icebergMigrator.executeMigrate();
@@ -200,9 +204,9 @@ public class IcebergMigrateTest {
                         paiCatalog,
                         paiDatabase,
                         paiTable,
-                        icebergCatalog,
                         iceDatabase,
                         iceTable,
+                        new Options(icebergProperties),
                         false,
                         1);
         icebergMigrator.executeMigrate();
@@ -259,9 +263,9 @@ public class IcebergMigrateTest {
                         paiCatalog,
                         paiDatabase,
                         paiTable,
-                        icebergCatalog,
                         iceDatabase,
                         iceTable,
+                        new Options(icebergProperties),
                         ignoreDelete,
                         1);
         if (!ignoreDelete) {
@@ -342,9 +346,9 @@ public class IcebergMigrateTest {
                         paiCatalog,
                         paiDatabase,
                         paiTable,
-                        icebergCatalog,
                         iceDatabase,
                         iceTable,
+                        new Options(icebergProperties),
                         false,
                         1);
         icebergMigrator.executeMigrate();
@@ -409,9 +413,9 @@ public class IcebergMigrateTest {
                         paiCatalog,
                         paiDatabase,
                         paiTable,
-                        icebergCatalog,
                         iceDatabase,
                         iceTable,
+                        new Options(icebergProperties),
                         false,
                         1);
         icebergMigrator.executeMigrate();
@@ -444,6 +448,7 @@ public class IcebergMigrateTest {
     private Table createIcebergTable(boolean isPartitioned, Schema icebergSchema) {
         //        HadoopCatalog catalog = new HadoopCatalog(new Configuration(),
         // iceTempDir.toString());
+        org.apache.iceberg.catalog.Catalog icebergCatalog = createIcebergCatalog();
         TableIdentifier icebergIdentifier = TableIdentifier.of(iceDatabase, iceTable);
 
         if (!isPartitioned) {
