@@ -237,7 +237,7 @@ public class RESTCatalog implements Catalog {
     Map<String, String> fetchOptionsFromServer(
             Map<String, String> headers, Map<String, String> clientProperties) {
         ConfigResponse response =
-                client.get(ResourcePaths.V1_CONFIG, ConfigResponse.class, headers());
+                client.get(ResourcePaths.V1_CONFIG, ConfigResponse.class,headers);
         return response.merge(clientProperties);
     }
 

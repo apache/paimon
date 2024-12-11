@@ -32,7 +32,7 @@ import java.util.Map;
 public class CreateDatabaseRequest implements RESTRequest {
     private static final String FIELD_NAME = "name";
     private static final String FIELD_IGNORE_IF_EXISTS = "ignoreIfExists";
-    private static final String FIELD_PROPERTIES = "properties";
+    private static final String FIELD_OPTIONS = "options";
 
     @JsonProperty(FIELD_NAME)
     private String name;
@@ -40,29 +40,28 @@ public class CreateDatabaseRequest implements RESTRequest {
     @JsonProperty(FIELD_IGNORE_IF_EXISTS)
     private boolean ignoreIfExists;
 
-    @JsonProperty(FIELD_PROPERTIES)
-    private Map<String, String> properties;
+    @JsonProperty(FIELD_OPTIONS)
+    private Map<String, String> options;
 
-    @ConstructorProperties({FIELD_NAME, FIELD_IGNORE_IF_EXISTS, FIELD_PROPERTIES})
-    public CreateDatabaseRequest(
-            String name, boolean ignoreIfExists, Map<String, String> properties) {
+    @ConstructorProperties({FIELD_NAME, FIELD_IGNORE_IF_EXISTS, FIELD_OPTIONS})
+    public CreateDatabaseRequest(String name, boolean ignoreIfExists, Map<String, String> options) {
         this.name = name;
         this.ignoreIfExists = ignoreIfExists;
-        this.properties = properties;
+        this.options = options;
     }
 
     @JsonGetter(FIELD_NAME)
-    public String name() {
+    public String getName() {
         return name;
     }
 
     @JsonGetter(FIELD_IGNORE_IF_EXISTS)
-    public boolean ignoreIfExists() {
+    public boolean getIgnoreIfExists() {
         return ignoreIfExists;
     }
 
-    @JsonGetter(FIELD_PROPERTIES)
-    public Map<String, String> properties() {
-        return properties;
+    @JsonGetter(FIELD_OPTIONS)
+    public Map<String, String> getOptions() {
+        return options;
     }
 }

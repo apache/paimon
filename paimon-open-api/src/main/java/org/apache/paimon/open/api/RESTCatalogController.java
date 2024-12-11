@@ -58,8 +58,7 @@ public class RESTCatalogController {
                 content = {
                     @Content(
                             schema = @Schema(implementation = ConfigResponse.class),
-                            mediaType = "application/json"
-                    )
+                            mediaType = "application/json")
                 }),
         @ApiResponse(
                 responseCode = "500",

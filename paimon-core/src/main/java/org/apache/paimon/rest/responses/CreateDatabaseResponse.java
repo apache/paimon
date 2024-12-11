@@ -31,18 +31,18 @@ import java.util.Map;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CreateDatabaseResponse implements RESTResponse {
     private static final String FIELD_NAME = "name";
-    private static final String FIELD_PROPERTIES = "properties";
+    private static final String FIELD_OPTIONS = "options";
 
     @JsonProperty(FIELD_NAME)
     private String name;
 
-    @JsonProperty(FIELD_PROPERTIES)
-    private Map<String, String> properties;
+    @JsonProperty(FIELD_OPTIONS)
+    private Map<String, String> options;
 
-    @ConstructorProperties({FIELD_NAME, FIELD_PROPERTIES})
-    public CreateDatabaseResponse(String name, Map<String, String> properties) {
+    @ConstructorProperties({FIELD_NAME, FIELD_OPTIONS})
+    public CreateDatabaseResponse(String name, Map<String, String> options) {
         this.name = name;
-        this.properties = properties;
+        this.options = options;
     }
 
     @JsonGetter(FIELD_NAME)
@@ -50,8 +50,8 @@ public class CreateDatabaseResponse implements RESTResponse {
         return name;
     }
 
-    @JsonGetter(FIELD_PROPERTIES)
-    public Map<String, String> getProperties() {
-        return properties;
+    @JsonGetter(FIELD_OPTIONS)
+    public Map<String, String> getOptions() {
+        return options;
     }
 }
