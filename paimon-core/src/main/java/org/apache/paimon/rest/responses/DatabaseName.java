@@ -16,31 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest;
+package org.apache.paimon.rest.responses;
 
-import java.util.StringJoiner;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-/** Resource paths for REST catalog. */
-public class ResourcePaths {
+import java.beans.ConstructorProperties;
 
-    public static final String V1_CONFIG = "/api/v1/config";
-    private static final StringJoiner SLASH = new StringJoiner("/");
+/** Class for Database entity. */
+@JsonIgnoreProperties(ignoreUnknown = true)
+public class DatabaseName {
+    private static final String FIELD_NAME = "name";
 
-    public static ResourcePaths forCatalogProperties(String prefix) {
-        return new ResourcePaths(prefix);
+    @JsonProperty(FIELD_NAME)
+    private String name;
+
+    @ConstructorProperties({FIELD_NAME})
+    public DatabaseName(String name) {
+        this.name = name;
     }
 
-    private final String prefix;
-
-    public ResourcePaths(String prefix) {
-        this.prefix = prefix;
-    }
-
-    public String databases() {
-        return SLASH.add("api").add("v1").add(prefix).add("databases").toString();
-    }
-
-    public String database(String databaseName) {
-        return SLASH.add("api").add("v1").add(prefix).add("databases").add(databaseName).toString();
+    @JsonGetter(FIELD_NAME)
+    public String getName() {
+        return this.name;
     }
 }

@@ -63,17 +63,17 @@ public class ErrorResponse {
     }
 
     @JsonGetter(FIELD_MESSAGE)
-    public String message() {
+    public String getMessage() {
         return message;
     }
 
     @JsonGetter(FIELD_CODE)
-    public Integer code() {
+    public Integer getCode() {
         return code;
     }
 
     @JsonGetter(FIELD_STACK)
-    public List<String> stack() {
+    public List<String> getStack() {
         return stack;
     }
 
