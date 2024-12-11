@@ -18,8 +18,13 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.DropDatabaseRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
+import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.ListDatabasesResponse;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -43,7 +48,7 @@ public class RESTObjectMapperTest {
         ConfigResponse response = new ConfigResponse(conf, conf);
         String responseStr = mapper.writeValueAsString(response);
         ConfigResponse parseData = mapper.readValue(responseStr, ConfigResponse.class);
-        assertEquals(conf.get(confKey), parseData.defaults().get(confKey));
+        assertEquals(conf.get(confKey), parseData.getDefaults().get(confKey));
     }
 
     @Test
@@ -53,7 +58,60 @@ public class RESTObjectMapperTest {
         ErrorResponse response = new ErrorResponse(message, code, new ArrayList<String>());
         String responseStr = mapper.writeValueAsString(response);
         ErrorResponse parseData = mapper.readValue(responseStr, ErrorResponse.class);
-        assertEquals(message, parseData.message());
-        assertEquals(code, parseData.code());
+        assertEquals(message, parseData.getMessage());
+        assertEquals(code, parseData.getCode());
+    }
+
+    @Test
+    public void createDatabaseRequestParseTest() throws Exception {
+        String name = MockRESTMessage.databaseName();
+        CreateDatabaseRequest request = MockRESTMessage.createDatabaseRequest(name);
+        String requestStr = mapper.writeValueAsString(request);
+        CreateDatabaseRequest parseData = mapper.readValue(requestStr, CreateDatabaseRequest.class);
+        assertEquals(request.getName(), parseData.getName());
+        assertEquals(request.getIgnoreIfExists(), parseData.getIgnoreIfExists());
+        assertEquals(request.getOptions().size(), parseData.getOptions().size());
+    }
+
+    @Test
+    public void dropDatabaseRequestParseTest() throws Exception {
+        DropDatabaseRequest request = MockRESTMessage.dropDatabaseRequest();
+        String requestStr = mapper.writeValueAsString(request);
+        DropDatabaseRequest parseData = mapper.readValue(requestStr, DropDatabaseRequest.class);
+        assertEquals(request.getIgnoreIfNotExists(), parseData.getIgnoreIfNotExists());
+        assertEquals(request.getCascade(), parseData.getCascade());
+    }
+
+    @Test
+    public void createDatabaseResponseParseTest() throws Exception {
+        String name = MockRESTMessage.databaseName();
+        CreateDatabaseResponse response = MockRESTMessage.createDatabaseResponse(name);
+        String responseStr = mapper.writeValueAsString(response);
+        CreateDatabaseResponse parseData =
+                mapper.readValue(responseStr, CreateDatabaseResponse.class);
+        assertEquals(name, parseData.getName());
+        assertEquals(response.getOptions().size(), parseData.getOptions().size());
+    }
+
+    @Test
+    public void getDatabaseResponseParseTest() throws Exception {
+        String name = MockRESTMessage.databaseName();
+        GetDatabaseResponse response = MockRESTMessage.getDatabaseResponse(name);
+        String responseStr = mapper.writeValueAsString(response);
+        GetDatabaseResponse parseData = mapper.readValue(responseStr, GetDatabaseResponse.class);
+        assertEquals(name, parseData.getName());
+        assertEquals(response.getOptions().size(), parseData.getOptions().size());
+        assertEquals(response.comment().get(), parseData.comment().get());
+    }
+
+    @Test
+    public void listDatabaseResponseParseTest() throws Exception {
+        String name = MockRESTMessage.databaseName();
+        ListDatabasesResponse response = MockRESTMessage.listDatabasesResponse(name);
+        String responseStr = mapper.writeValueAsString(response);
+        ListDatabasesResponse parseData =
+                mapper.readValue(responseStr, ListDatabasesResponse.class);
+        assertEquals(response.getDatabases().size(), parseData.getDatabases().size());
+        assertEquals(name, parseData.getDatabases().get(0).getName());
     }
 }

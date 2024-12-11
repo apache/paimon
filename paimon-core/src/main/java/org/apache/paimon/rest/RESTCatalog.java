@@ -29,12 +29,21 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.CredentialsProvider;
 import org.apache.paimon.rest.auth.CredentialsProviderFactory;
+import org.apache.paimon.rest.exceptions.AlreadyExistsException;
+import org.apache.paimon.rest.exceptions.NoSuchResourceException;
+import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.DropDatabaseRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.rest.responses.CreateDatabaseResponse;
+import org.apache.paimon.rest.responses.DatabaseName;
+import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 
 import org.apache.paimon.shade.guava30.com.google.common.annotations.VisibleForTesting;
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.Duration;
@@ -42,6 +51,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
@@ -113,24 +123,49 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public List<String> listDatabases() {
-        throw new UnsupportedOperationException();
+        ListDatabasesResponse response =
+                client.get(resourcePaths.databases(), ListDatabasesResponse.class, headers());
+        if (response.getDatabases() != null) {
+            return response.getDatabases().stream()
+                    .map(DatabaseName::getName)
+                    .collect(Collectors.toList());
+        }
+        return ImmutableList.of();
     }
 
     @Override
     public void createDatabase(String name, boolean ignoreIfExists, Map<String, String> properties)
             throws DatabaseAlreadyExistException {
-        throw new UnsupportedOperationException();
+        CreateDatabaseRequest request = new CreateDatabaseRequest(name, ignoreIfExists, properties);
+        try {
+            client.post(
+                    resourcePaths.databases(), request, CreateDatabaseResponse.class, headers());
+        } catch (AlreadyExistsException e) {
+            throw new DatabaseAlreadyExistException(name);
+        }
     }
 
     @Override
     public Database getDatabase(String name) throws DatabaseNotExistException {
-        throw new UnsupportedOperationException();
+        try {
+            GetDatabaseResponse response =
+                    client.get(resourcePaths.database(name), GetDatabaseResponse.class, headers());
+            return new Database.DatabaseImpl(
+                    name, response.options(), response.comment().orElseGet(() -> null));
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(name);
+        }
     }
 
     @Override
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException {
-        throw new UnsupportedOperationException();
+        DropDatabaseRequest request = new DropDatabaseRequest(ignoreIfNotExists, cascade);
+        try {
+            client.delete(resourcePaths.database(name), request, headers());
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(name);
+        }
     }
 
     @Override
@@ -208,7 +243,7 @@ public class RESTCatalog implements Catalog {
     Map<String, String> fetchOptionsFromServer(
             Map<String, String> headers, Map<String, String> clientProperties) {
         ConfigResponse response =
-                client.get(ResourcePaths.V1_CONFIG, ConfigResponse.class, headers());
+                client.get(ResourcePaths.V1_CONFIG, ConfigResponse.class, headers);
         return response.merge(clientProperties);
     }
 

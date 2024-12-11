@@ -16,10 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest;
+package org.apache.paimon.rest.exceptions;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+/** Exception thrown on HTTP 409 means a resource already exists. */
+public class AlreadyExistsException extends RESTException {
 
-/** Interface to mark both REST requests and responses. */
-@JsonIgnoreProperties(ignoreUnknown = true)
-public interface RESTMessage {}
+    public AlreadyExistsException(String message, Object... args) {
+        super(message, args);
+    }
+}

@@ -16,10 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest;
+package org.apache.paimon.rest.exceptions;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+/** Exception thrown on HTTP 404 means a resource not exists. */
+public class NoSuchResourceException extends RESTException {
 
-/** Interface to mark both REST requests and responses. */
-@JsonIgnoreProperties(ignoreUnknown = true)
-public interface RESTMessage {}
+    public NoSuchResourceException(String message, Object... args) {
+        super(message, args);
+    }
+}

@@ -28,6 +28,120 @@ servers:
   - url: http://localhost:8080
     description: Server URL in Development environment
 paths:
+  /api/v1/{prefix}/databases:
+    get:
+      tags:
+        - database
+      summary: List Databases
+      operationId: listDatabases
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListDatabasesResponse'
+        "500":
+          description: Internal Server Error
+    post:
+      tags:
+        - database
+      summary: Create Databases
+      operationId: createDatabases
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDatabaseRequest'
+      responses:
+        "500":
+          description: Internal Server Error
+        "409":
+          description: Resource has exist
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateDatabaseResponse'
+  /api/v1/{prefix}/databases/{database}:
+    get:
+      tags:
+        - database
+      summary: Get Database
+      operationId: getDatabases
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetDatabaseResponse'
+        "404":
+          description: Resource not found
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+    delete:
+      tags:
+        - database
+      summary: Drop Database
+      operationId: dropDatabases
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DropDatabaseRequest'
+      responses:
+        "404":
+          description: Resource not found
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
   /api/v1/config:
     get:
       tags:
@@ -37,14 +151,67 @@ paths:
       responses:
         "500":
           description: Internal Server Error
-        "201":
-          description: Created
+        "200":
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConfigResponse'
 components:
   schemas:
+    CreateDatabaseRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        ignoreIfExists:
+          type: boolean
+        options:
+          type: object
+          additionalProperties:
+            type: string
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        code:
+          type: integer
+          format: int32
+        stack:
+          type: array
+          items:
+            type: string
+    CreateDatabaseResponse:
+      type: object
+      properties:
+        name:
+          type: string
+        options:
+          type: object
+          additionalProperties:
+            type: string
+    DatabaseName:
+      type: object
+      properties:
+        name:
+          type: string
+    ListDatabasesResponse:
+      type: object
+      properties:
+        databases:
+          type: array
+          items:
+            $ref: '#/components/schemas/DatabaseName'
+    GetDatabaseResponse:
+      type: object
+      properties:
+        name:
+          type: string
+        options:
+          type: object
+          additionalProperties:
+            type: string
     ConfigResponse:
       type: object
       properties:
@@ -52,9 +219,14 @@ components:
           type: object
           additionalProperties:
             type: string
-          writeOnly: true
         overrides:
           type: object
           additionalProperties:
             type: string
-          writeOnly: true
+    DropDatabaseRequest:
+      type: object
+      properties:
+        ignoreIfNotExists:
+          type: boolean
+        cascade:
+          type: boolean

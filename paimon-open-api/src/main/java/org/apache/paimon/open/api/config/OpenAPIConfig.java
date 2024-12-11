@@ -32,7 +32,6 @@ import java.util.List;
 /** Config for OpenAPI. */
 @Configuration
 public class OpenAPIConfig {
-
     @Value("${openapi.url}")
     private String devUrl;
 

@@ -35,6 +35,8 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ScheduledExecutorService;
 
+import static org.apache.paimon.rest.auth.AuthSession.MAX_REFRESH_WINDOW_MILLIS;
+import static org.apache.paimon.rest.auth.AuthSession.MIN_REFRESH_WAIT_MILLIS;
 import static org.apache.paimon.rest.auth.AuthSession.TOKEN_REFRESH_NUM_RETRIES;
 import static org.junit.Assert.assertEquals;
 import static org.mockito.Mockito.verify;
@@ -119,6 +121,22 @@ public class AuthSessionTest {
                 expiresAtMillis);
         Thread.sleep(10_000L);
         verify(credentialsProvider, Mockito.times(TOKEN_REFRESH_NUM_RETRIES + 1)).refresh();
+    }
+
+    @Test
+    public void testGetTimeToWaitByExpiresInMills() {
+        long expiresInMillis = -100L;
+        long timeToWait = AuthSession.getTimeToWaitByExpiresInMills(expiresInMillis);
+        assertEquals(MIN_REFRESH_WAIT_MILLIS, timeToWait);
+        expiresInMillis = (long) (MAX_REFRESH_WINDOW_MILLIS * 0.5);
+        timeToWait = AuthSession.getTimeToWaitByExpiresInMills(expiresInMillis);
+        assertEquals(MIN_REFRESH_WAIT_MILLIS, timeToWait);
+        expiresInMillis = MAX_REFRESH_WINDOW_MILLIS;
+        timeToWait = AuthSession.getTimeToWaitByExpiresInMills(expiresInMillis);
+        assertEquals(timeToWait, MIN_REFRESH_WAIT_MILLIS);
+        expiresInMillis = MAX_REFRESH_WINDOW_MILLIS * 2L;
+        timeToWait = AuthSession.getTimeToWaitByExpiresInMills(expiresInMillis);
+        assertEquals(timeToWait, MAX_REFRESH_WINDOW_MILLIS);
     }
 
     private Pair<File, String> generateTokenAndWriteToFile(String fileName) throws IOException {

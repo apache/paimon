@@ -16,10 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest;
+package org.apache.paimon.rest.responses;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.rest.RESTMessage;
 
-/** Interface to mark both REST requests and responses. */
-@JsonIgnoreProperties(ignoreUnknown = true)
-public interface RESTMessage {}
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+
+/** Class for Database entity. */
+public class DatabaseName implements RESTMessage {
+
+    private static final String FIELD_NAME = "name";
+
+    @JsonProperty(FIELD_NAME)
+    private String name;
+
+    @JsonCreator
+    public DatabaseName(@JsonProperty(FIELD_NAME) String name) {
+        this.name = name;
+    }
+
+    @JsonGetter(FIELD_NAME)
+    public String getName() {
+        return this.name;
+    }
+}

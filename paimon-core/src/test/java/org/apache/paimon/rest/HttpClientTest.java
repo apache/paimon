@@ -110,6 +110,20 @@ public class HttpClientTest {
         verify(errorHandler, times(1)).accept(any());
     }
 
+    @Test
+    public void testDeleteSuccess() {
+        mockHttpCallWithCode(mockResponseDataStr, 200);
+        MockRESTData response = httpClient.delete(MOCK_PATH, mockResponseData, headers);
+        verify(errorHandler, times(0)).accept(any());
+    }
+
+    @Test
+    public void testDeleteFail() {
+        mockHttpCallWithCode(mockResponseDataStr, 400);
+        httpClient.delete(MOCK_PATH, mockResponseData, headers);
+        verify(errorHandler, times(1)).accept(any());
+    }
+
     private Map<String, String> headers(String token) {
         Map<String, String> header = new HashMap<>();
         header.put("Authorization", "Bearer " + token);

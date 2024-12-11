@@ -96,6 +96,23 @@ public class HttpClient implements RESTClient {
     }
 
     @Override
+    public <T extends RESTResponse> T delete(
+            String path, RESTRequest body, Map<String, String> headers) {
+        try {
+            RequestBody requestBody = buildRequestBody(body);
+            Request request =
+                    new Request.Builder()
+                            .url(uri + path)
+                            .delete(requestBody)
+                            .headers(Headers.of(headers))
+                            .build();
+            return exec(request, null);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
     public void close() throws IOException {
         okHttpClient.dispatcher().cancelAll();
         okHttpClient.connectionPool().evictAll();
@@ -111,10 +128,13 @@ public class HttpClient implements RESTClient {
                                 response.code());
                 errorHandler.accept(error);
             }
-            if (responseBodyStr == null) {
+            if (responseType != null && responseBodyStr != null) {
+                return mapper.readValue(responseBodyStr, responseType);
+            } else if (responseType == null) {
+                return null;
+            } else {
                 throw new RESTException("response body is null.");
             }
-            return mapper.readValue(responseBodyStr, responseType);
         } catch (Exception e) {
             throw new RESTException(e, "rest exception");
         }

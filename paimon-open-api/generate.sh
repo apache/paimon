@@ -17,6 +17,7 @@
 
 # Start the application
 cd ..
+mvn spotless:apply
 mvn clean install -DskipTests
 cd ./paimon-open-api
 mvn spring-boot:run &
