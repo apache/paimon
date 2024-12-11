@@ -19,16 +19,22 @@
 package org.apache.paimon.fileindex.bitmap;
 
 import org.apache.paimon.fileindex.FileIndexResult;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.RoaringBitmap32;
 
+import java.util.HashSet;
+import java.util.Set;
 import java.util.function.Supplier;
 
 /** bitmap file index result. */
 public class BitmapIndexResult extends LazyField<RoaringBitmap32> implements FileIndexResult {
 
-    public BitmapIndexResult(Supplier<RoaringBitmap32> supplier) {
+    private final Set<FieldRef> fields;
+
+    public BitmapIndexResult(Set<FieldRef> fields, Supplier<RoaringBitmap32> supplier) {
         super(supplier);
+        this.fields = new HashSet<>(fields);
     }
 
     @Override
@@ -37,9 +43,16 @@ public class BitmapIndexResult extends LazyField<RoaringBitmap32> implements Fil
     }
 
     @Override
+    public Set<FieldRef> applyIndexes() {
+        return fields;
+    }
+
+    @Override
     public FileIndexResult and(FileIndexResult fileIndexResult) {
         if (fileIndexResult instanceof BitmapIndexResult) {
+            fields.addAll(fileIndexResult.applyIndexes());
             return new BitmapIndexResult(
+                    fields,
                     () -> RoaringBitmap32.and(get(), ((BitmapIndexResult) fileIndexResult).get()));
         }
         return FileIndexResult.super.and(fileIndexResult);
@@ -48,7 +61,9 @@ public class BitmapIndexResult extends LazyField<RoaringBitmap32> implements Fil
     @Override
     public FileIndexResult or(FileIndexResult fileIndexResult) {
         if (fileIndexResult instanceof BitmapIndexResult) {
+            fields.addAll(fileIndexResult.applyIndexes());
             return new BitmapIndexResult(
+                    fields,
                     () -> RoaringBitmap32.or(get(), ((BitmapIndexResult) fileIndexResult).get()));
         }
         return FileIndexResult.super.and(fileIndexResult);

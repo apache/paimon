@@ -81,6 +81,7 @@ import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.DATA_FILE_PATH_DIRECTORY;
 import static org.apache.paimon.CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD;
 import static org.apache.paimon.CoreOptions.METADATA_STATS_MODE;
+import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucket;
 import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucketKeyHashCode;
@@ -720,6 +721,95 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                     assertThat(row.getString(1).toString()).isEqualTo("C");
                     assertThat(row.getLong(2)).isEqualTo(4L);
                 });
+    }
+
+    @Test
+    public void testFileIndexFilterPushDownFallback() throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("event", DataTypes.STRING())
+                        .field("price", DataTypes.BIGINT())
+                        .build();
+        // in unaware-bucket mode, we split files into splits all the time
+        FileStoreTable table =
+                createUnawareBucketFileStoreTable(
+                        rowType,
+                        options -> {
+                            options.set(METADATA_STATS_MODE, "NONE");
+                            options.set(WRITE_ONLY, true);
+                            options.set(FILE_INDEX_IN_MANIFEST_THRESHOLD.key(), "1 B");
+                        });
+
+        // write some records without file index
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, BinaryString.fromString("A"), 1L));
+        write.write(GenericRow.of(1, BinaryString.fromString("B"), 2L));
+        write.write(GenericRow.of(1, BinaryString.fromString("C"), 3L));
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+
+        // add bitmap index and write some records
+        Map<String, String> properties = new HashMap<>();
+        properties.put(
+                FileIndexOptions.FILE_INDEX
+                        + "."
+                        + BitmapFileIndexFactory.BITMAP_INDEX
+                        + "."
+                        + CoreOptions.COLUMNS,
+                "event");
+        table = table.copy(properties);
+        write = table.newWrite(commitUser);
+        write.write(GenericRow.of(1, BinaryString.fromString("A"), 1L));
+        write.write(GenericRow.of(1, BinaryString.fromString("B"), 2L));
+        write.write(GenericRow.of(1, BinaryString.fromString("C"), 3L));
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+
+        // add bsi index and write some records
+        properties.put(
+                FileIndexOptions.FILE_INDEX
+                        + "."
+                        + BitSliceIndexBitmapFileIndexFactory.BSI_INDEX
+                        + "."
+                        + CoreOptions.COLUMNS,
+                "price");
+        table = table.copy(properties);
+        write = table.newWrite(commitUser);
+        write.write(GenericRow.of(1, BinaryString.fromString("A"), 1L));
+        write.write(GenericRow.of(1, BinaryString.fromString("B"), 2L));
+        write.write(GenericRow.of(1, BinaryString.fromString("C"), 3L));
+        commit.commit(2, write.prepareCommit(true, 2));
+        write.close();
+        commit.close();
+
+        Function<InternalRow, String> toString =
+                row -> row.getInt(0) + "," + row.getString(1).toString() + "," + row.getLong(2);
+        Predicate predicate =
+                PredicateBuilder.and(
+                        new PredicateBuilder(rowType).equal(1, BinaryString.fromString("A")),
+                        new PredicateBuilder(rowType).equal(2, 1L));
+        TableScan.Plan plan = table.newScan().withFilter(predicate).plan();
+
+        // test read without index filter, should not fallback
+        List<String> a1 = new ArrayList<>();
+        RecordReader<InternalRow> r1 =
+                table.newRead().withFilter(predicate).createReader(plan.splits());
+        r1.forEachRemaining(row -> a1.add(toString.apply(row)));
+        assertThat(a1.size()).isEqualTo(5);
+        assertThat(String.join("|", a1)).isEqualTo("1,A,1|1,B,2|1,C,3|1,A,1|1,A,1");
+
+        // test read with index filter, should fallback
+        List<String> a2 = new ArrayList<>();
+        RecordReader<InternalRow> r2 =
+                table.newRead()
+                        .withFilter(predicate)
+                        .withIndexFilter(predicate)
+                        .createReader(plan.splits());
+        r2.forEachRemaining(row -> a2.add(toString.apply(row)));
+        assertThat(a2.size()).isEqualTo(3);
+        assertThat(String.join("|", a2)).isEqualTo("1,A,1|1,A,1|1,A,1");
     }
 
     @Test

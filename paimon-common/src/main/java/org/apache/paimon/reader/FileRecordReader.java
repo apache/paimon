@@ -18,6 +18,8 @@
 
 package org.apache.paimon.reader;
 
+import org.apache.paimon.utils.Filter;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -28,4 +30,25 @@ public interface FileRecordReader<T> extends RecordReader<T> {
     @Override
     @Nullable
     FileRecordIterator<T> readBatch() throws IOException;
+
+    @Override
+    default FileRecordReader<T> filter(Filter<T> filter) {
+        FileRecordReader<T> thisReader = this;
+        return new FileRecordReader<T>() {
+            @Nullable
+            @Override
+            public FileRecordIterator<T> readBatch() throws IOException {
+                FileRecordIterator<T> iterator = thisReader.readBatch();
+                if (iterator == null) {
+                    return null;
+                }
+                return iterator.filter(filter);
+            }
+
+            @Override
+            public void close() throws IOException {
+                thisReader.close();
+            }
+        };
+    }
 }

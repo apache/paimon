@@ -34,6 +34,8 @@ public interface FileIndexer {
 
     FileIndexReader createReader(SeekableInputStream inputStream, int start, int length);
 
+    FileIndexFilterPushDownAnalyzer createFilterPushDownAnalyzer();
+
     static FileIndexer create(String type, DataType dataType, Options options) {
         FileIndexerFactory fileIndexerFactory = FileIndexerFactoryUtils.load(type);
         return fileIndexerFactory.create(dataType, options);

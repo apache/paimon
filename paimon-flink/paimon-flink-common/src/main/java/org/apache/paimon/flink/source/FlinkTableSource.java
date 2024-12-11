@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.fileindex.FileIndexFilterPushDownVisitor;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.PredicateConverter;
@@ -68,6 +69,7 @@ public abstract class FlinkTableSource
     protected final Table table;
 
     @Nullable protected Predicate predicate;
+    @Nullable protected Predicate indexPredicate;
     @Nullable protected int[][] projectFields;
     @Nullable protected Long limit;
     protected SplitStatistics splitStatistics;
@@ -96,9 +98,12 @@ public abstract class FlinkTableSource
         // of query will be wrong.
         List<ResolvedExpression> unConsumedFilters = new ArrayList<>();
         List<ResolvedExpression> consumedFilters = new ArrayList<>();
+        List<Predicate> indexConverted = new ArrayList<>();
         List<Predicate> converted = new ArrayList<>();
         PredicateVisitor<Boolean> onlyPartFieldsVisitor =
                 new PartitionPredicateVisitor(partitionKeys);
+        FileIndexFilterPushDownVisitor indexPushDownVisitor =
+                table.fileIndexFilterPushDownVisitor();
 
         for (ResolvedExpression filter : filters) {
             Optional<Predicate> predicateOptional = PredicateConverter.convert(rowType, filter);
@@ -107,15 +112,21 @@ public abstract class FlinkTableSource
                 unConsumedFilters.add(filter);
             } else {
                 Predicate p = predicateOptional.get();
-                if (isStreaming() || !p.visit(onlyPartFieldsVisitor)) {
+                if (isStreaming()) {
                     unConsumedFilters.add(filter);
-                } else {
+                } else if (p.visit(onlyPartFieldsVisitor)) {
                     consumedFilters.add(filter);
+                } else if (p.visit(indexPushDownVisitor)) {
+                    consumedFilters.add(filter);
+                    indexConverted.add(p);
+                } else {
+                    unConsumedFilters.add(filter);
                 }
                 converted.add(p);
             }
         }
         predicate = converted.isEmpty() ? null : PredicateBuilder.and(converted);
+        indexPredicate = indexConverted.isEmpty() ? null : PredicateBuilder.and(indexConverted);
         LOG.info("Consumed filters: {} of {}", consumedFilters, filters);
 
         return Result.of(filters, unConsumedFilters);

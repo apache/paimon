@@ -73,6 +73,14 @@ public class LookupCompactDiffRead extends AbstractDataTableRead<KeyValue> {
     }
 
     @Override
+    public InnerTableRead withIndexFilter(Predicate indexPredicate) {
+        if (indexPredicate == null) {
+            return this;
+        }
+        throw new UnsupportedOperationException("index should not be pushed down in the lookup");
+    }
+
+    @Override
     public InnerTableRead forceKeepDelete() {
         fullPhaseMergeRead.forceKeepDelete();
         incrementalDiffRead.forceKeepDelete();

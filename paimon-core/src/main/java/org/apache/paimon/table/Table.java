@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.fileindex.FileIndexFilterPushDownVisitor;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -108,6 +109,12 @@ public interface Table extends Serializable {
     /** Reader to read index manifest entry from index manifest file. */
     @Experimental
     SimpleFileReader<IndexManifestEntry> indexManifestFileReader();
+
+    /** Visitor to check if index can push the predicate down. */
+    @Experimental
+    default FileIndexFilterPushDownVisitor fileIndexFilterPushDownVisitor() {
+        return new FileIndexFilterPushDownVisitor();
+    }
 
     /** Rollback table's state to a specific snapshot. */
     @Experimental

@@ -107,6 +107,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory,
             @Nullable Predicate predicate,
+            @Nullable Predicate indexPredicate,
             @Nullable int[][] projectFields,
             @Nullable Long limit,
             @Nullable WatermarkStrategy<RowData> watermarkStrategy,
@@ -117,6 +118,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         this.context = context;
         this.logStoreTableFactory = logStoreTableFactory;
         this.predicate = predicate;
+        this.indexPredicate = indexPredicate;
         this.projectFields = projectFields;
         this.limit = limit;
         this.watermarkStrategy = watermarkStrategy;
@@ -198,6 +200,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                         .logSourceProvider(logSourceProvider)
                         .projection(projectFields)
                         .predicate(predicate)
+                        .indexPredicate(indexPredicate)
                         .limit(limit)
                         .watermarkStrategy(watermarkStrategy)
                         .dynamicPartitionFilteringFields(dynamicPartitionFilteringFields());
@@ -321,6 +324,11 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         }
 
         if (aggregateExpressions.size() != 1) {
+            return false;
+        }
+
+        // todo: support apply aggregate by indexes
+        if (indexPredicate != null) {
             return false;
         }
 

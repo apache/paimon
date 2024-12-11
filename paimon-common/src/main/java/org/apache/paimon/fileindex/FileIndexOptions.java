@@ -20,10 +20,16 @@ package org.apache.paimon.fileindex;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.StringUtils;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -165,6 +171,45 @@ public class FileIndexOptions {
                                                 + column
                                                 + " "
                                                 + indexType));
+    }
+
+    public FileIndexFilterPushDownVisitor createFilterPushDownPredicateVisitor(RowType rowType) {
+        Map<String, List<FileIndexFilterPushDownAnalyzer>> analyzers = new HashMap<>();
+        for (Map.Entry<Column, Map<String, Options>> entry : indexTypeOptions.entrySet()) {
+            Column column = entry.getKey();
+            for (Map.Entry<String, Options> typeEntry : entry.getValue().entrySet()) {
+                String key;
+                FileIndexFilterPushDownAnalyzer analyzer;
+                DataField field = rowType.getField(column.columnName);
+                Options options = typeEntry.getValue();
+                if (column.isNestedColumn) {
+                    if (field.type().getTypeRoot() != DataTypeRoot.MAP) {
+                        throw new IllegalArgumentException(
+                                "Column "
+                                        + column.columnName
+                                        + " is nested column, but is not map type. Only should map type yet.");
+                    }
+                    MapType mapType = (MapType) field.type();
+                    Options mapTopLevelOptions =
+                            getMapTopLevelOptions(column.columnName, typeEntry.getKey());
+                    key = FileIndexCommon.toMapKey(column.columnName, column.nestedColumnName);
+                    analyzer =
+                            FileIndexer.create(
+                                            typeEntry.getKey(),
+                                            mapType.getValueType(),
+                                            new Options(
+                                                    mapTopLevelOptions.toMap(), options.toMap()))
+                                    .createFilterPushDownAnalyzer();
+                } else {
+                    key = column.columnName;
+                    analyzer =
+                            FileIndexer.create(typeEntry.getKey(), field.type(), options)
+                                    .createFilterPushDownAnalyzer();
+                }
+                analyzers.computeIfAbsent(key, k -> new ArrayList<>()).add(analyzer);
+            }
+        }
+        return new FileIndexFilterPushDownVisitor(analyzers);
     }
 
     public boolean isEmpty() {

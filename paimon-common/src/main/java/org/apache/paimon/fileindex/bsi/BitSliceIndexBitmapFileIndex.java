@@ -20,6 +20,7 @@ package org.apache.paimon.fileindex.bsi;
 
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.fileindex.FileIndexFilterPushDownAnalyzer;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fileindex.FileIndexWriter;
@@ -100,6 +101,11 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    @Override
+    public FileIndexFilterPushDownAnalyzer createFilterPushDownAnalyzer() {
+        return new FilterPushDownAnalyzer();
     }
 
     private static class Writer extends FileIndexWriter {
@@ -209,6 +215,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
         @Override
         public FileIndexResult visitIsNull(FieldRef fieldRef) {
             return new BitmapIndexResult(
+                    Collections.singleton(fieldRef),
                     () -> {
                         RoaringBitmap32 bitmap =
                                 RoaringBitmap32.or(positive.isNotNull(), negative.isNotNull());
@@ -220,6 +227,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
         @Override
         public FileIndexResult visitIsNotNull(FieldRef fieldRef) {
             return new BitmapIndexResult(
+                    Collections.singleton(fieldRef),
                     () -> RoaringBitmap32.or(positive.isNotNull(), negative.isNotNull()));
         }
 
@@ -236,6 +244,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
         @Override
         public FileIndexResult visitIn(FieldRef fieldRef, List<Object> literals) {
             return new BitmapIndexResult(
+                    Collections.singleton(fieldRef),
                     () ->
                             literals.stream()
                                     .map(valueMapper)
@@ -255,6 +264,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
         @Override
         public FileIndexResult visitNotIn(FieldRef fieldRef, List<Object> literals) {
             return new BitmapIndexResult(
+                    Collections.singleton(fieldRef),
                     () -> {
                         RoaringBitmap32 ebm =
                                 RoaringBitmap32.or(positive.isNotNull(), negative.isNotNull());
@@ -279,6 +289,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
         @Override
         public FileIndexResult visitLessThan(FieldRef fieldRef, Object literal) {
             return new BitmapIndexResult(
+                    Collections.singleton(fieldRef),
                     () -> {
                         Long value = valueMapper.apply(literal);
                         if (value < 0) {
@@ -292,6 +303,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
         @Override
         public FileIndexResult visitLessOrEqual(FieldRef fieldRef, Object literal) {
             return new BitmapIndexResult(
+                    Collections.singleton(fieldRef),
                     () -> {
                         Long value = valueMapper.apply(literal);
                         if (value < 0) {
@@ -305,6 +317,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
         @Override
         public FileIndexResult visitGreaterThan(FieldRef fieldRef, Object literal) {
             return new BitmapIndexResult(
+                    Collections.singleton(fieldRef),
                     () -> {
                         Long value = valueMapper.apply(literal);
                         if (value < 0) {
@@ -319,6 +332,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
         @Override
         public FileIndexResult visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
             return new BitmapIndexResult(
+                    Collections.singleton(fieldRef),
                     () -> {
                         Long value = valueMapper.apply(literal);
                         if (value < 0) {
@@ -328,6 +342,59 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
                             return positive.gte(value);
                         }
                     });
+        }
+    }
+
+    private static class FilterPushDownAnalyzer extends FileIndexFilterPushDownAnalyzer {
+
+        @Override
+        public Boolean visitIsNull(FieldRef fieldRef) {
+            return true;
+        }
+
+        @Override
+        public Boolean visitIsNotNull(FieldRef fieldRef) {
+            return true;
+        }
+
+        @Override
+        public Boolean visitEqual(FieldRef fieldRef, Object literal) {
+            return true;
+        }
+
+        @Override
+        public Boolean visitNotEqual(FieldRef fieldRef, Object literal) {
+            return true;
+        }
+
+        @Override
+        public Boolean visitIn(FieldRef fieldRef, List<Object> literals) {
+            return true;
+        }
+
+        @Override
+        public Boolean visitNotIn(FieldRef fieldRef, List<Object> literals) {
+            return true;
+        }
+
+        @Override
+        public Boolean visitLessThan(FieldRef fieldRef, Object literal) {
+            return true;
+        }
+
+        @Override
+        public Boolean visitLessOrEqual(FieldRef fieldRef, Object literal) {
+            return true;
+        }
+
+        @Override
+        public Boolean visitGreaterThan(FieldRef fieldRef, Object literal) {
+            return true;
+        }
+
+        @Override
+        public Boolean visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
+            return true;
         }
     }
 
