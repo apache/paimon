@@ -36,6 +36,13 @@ public interface InnerTableRead extends TableRead {
 
     InnerTableRead withFilter(Predicate predicate);
 
+    default InnerTableRead withIndexFilter(Predicate predicate) {
+        if (predicate == null) {
+            return this;
+        }
+        throw new UnsupportedOperationException();
+    }
+
     /** Use {@link #withReadType(RowType)} instead. */
     @Deprecated
     default InnerTableRead withProjection(int[] projection) {

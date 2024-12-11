@@ -40,6 +40,8 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     private Predicate filter;
 
+    private Predicate indexFilter;
+
     private Integer limit = null;
 
     private Integer shardIndexOfThisSubtask;
@@ -78,6 +80,12 @@ public class ReadBuilderImpl implements ReadBuilder {
         } else {
             this.filter = PredicateBuilder.and(this.filter, filter);
         }
+        return this;
+    }
+
+    @Override
+    public ReadBuilder withIndexFilter(Predicate indexFilter) {
+        this.indexFilter = indexFilter;
         return this;
     }
 
@@ -175,6 +183,9 @@ public class ReadBuilderImpl implements ReadBuilder {
         InnerTableRead read = table.newRead().withFilter(filter);
         if (readType != null) {
             read.withReadType(readType);
+        }
+        if (indexFilter != null) {
+            read.withIndexFilter(indexFilter);
         }
         return read;
     }

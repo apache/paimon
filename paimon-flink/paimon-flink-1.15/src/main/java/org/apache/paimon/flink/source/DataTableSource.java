@@ -51,6 +51,7 @@ public class DataTableSource extends BaseDataTableSource {
                 null,
                 null,
                 null,
+                null,
                 false);
     }
 
@@ -61,6 +62,7 @@ public class DataTableSource extends BaseDataTableSource {
             DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory,
             @Nullable Predicate predicate,
+            @Nullable Predicate indexPredicate,
             @Nullable int[][] projectFields,
             @Nullable Long limit,
             @Nullable WatermarkStrategy<RowData> watermarkStrategy,
@@ -72,6 +74,7 @@ public class DataTableSource extends BaseDataTableSource {
                 context,
                 logStoreTableFactory,
                 predicate,
+                indexPredicate,
                 projectFields,
                 limit,
                 watermarkStrategy,
@@ -87,6 +90,7 @@ public class DataTableSource extends BaseDataTableSource {
                 context,
                 logStoreTableFactory,
                 predicate,
+                indexPredicate,
                 projectFields,
                 limit,
                 watermarkStrategy,

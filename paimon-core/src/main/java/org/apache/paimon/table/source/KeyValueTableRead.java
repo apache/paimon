@@ -52,6 +52,7 @@ public final class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
     @Nullable private RowType readType = null;
     private boolean forceKeepDelete = false;
     private Predicate predicate = null;
+    private Predicate indexPredicate = null;
     private IOManager ioManager = null;
 
     public KeyValueTableRead(
@@ -84,6 +85,9 @@ public final class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
         if (readType != null) {
             read = read.withReadType(readType);
         }
+        if (indexPredicate != null) {
+            read = read.withIndexFilter(indexPredicate);
+        }
         read.withFilter(predicate).withIOManager(ioManager);
     }
 
@@ -104,6 +108,13 @@ public final class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
     protected InnerTableRead innerWithFilter(Predicate predicate) {
         initialized().forEach(r -> r.withFilter(predicate));
         this.predicate = predicate;
+        return this;
+    }
+
+    @Override
+    public InnerTableRead withIndexFilter(Predicate indexPredicate) {
+        initialized().forEach(r -> r.withIndexFilter(indexPredicate));
+        this.indexPredicate = indexPredicate;
         return this;
     }
 

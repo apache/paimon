@@ -84,6 +84,12 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
+    public SplitRead<InternalRow> withIndexFilter(@Nullable Predicate predicate) {
+        mergeRead.withIndexFilter(predicate);
+        return this;
+    }
+
+    @Override
     public RecordReader<InternalRow> createReader(DataSplit split) throws IOException {
         RecordReader<KeyValue> reader =
                 readDiff(

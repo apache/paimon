@@ -18,6 +18,7 @@
 
 package org.apache.paimon.fileindex.bloomfilter;
 
+import org.apache.paimon.fileindex.FileIndexFilterPushDownAnalyzer;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fileindex.FileIndexWriter;
@@ -80,6 +81,11 @@ public class BloomFilterFileIndex implements FileIndexer {
         }
     }
 
+    @Override
+    public FileIndexFilterPushDownAnalyzer createFilterPushDownAnalyzer() {
+        return new FilterPushDownAnalyzer();
+    }
+
     private static class Writer extends FileIndexWriter {
 
         private final BloomFilter64 filter;
@@ -133,4 +139,6 @@ public class BloomFilterFileIndex implements FileIndexer {
             return key == null || filter.testHash(hashFunction.hash(key)) ? REMAIN : SKIP;
         }
     }
+
+    private static class FilterPushDownAnalyzer extends FileIndexFilterPushDownAnalyzer {}
 }

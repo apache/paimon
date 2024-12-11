@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.fileindex.FileIndexFilterFallbackPredicateVisitor;
 import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fileindex.bitmap.ApplyBitmapIndexRecordReader;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
@@ -36,6 +37,7 @@ import org.apache.paimon.io.DataFileRecordReader;
 import org.apache.paimon.io.FileIndexEvaluator;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionUtils;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.EmptyFileRecordReader;
 import org.apache.paimon.reader.FileRecordReader;
@@ -58,9 +60,12 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
@@ -80,6 +85,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
     private RowType readRowType;
     @Nullable private List<Predicate> filters;
+    @Nullable private Predicate indexFilter;
 
     public RawFileSplitRead(
             FileIO fileIO,
@@ -124,6 +130,12 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
+    public SplitRead<InternalRow> withIndexFilter(@Nullable Predicate indexFilter) {
+        this.indexFilter = indexFilter;
+        return this;
+    }
+
+    @Override
     public RecordReader<InternalRow> createReader(DataSplit split) throws IOException {
         if (split.beforeFiles().size() > 0) {
             LOG.info("Ignore split before files: {}", split.beforeFiles());
@@ -152,7 +164,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         List<DataField> readTableFields = readRowType.getFields();
         BulkFormatMappingBuilder bulkFormatMappingBuilder =
                 new BulkFormatMappingBuilder(
-                        formatDiscover, readTableFields, TableSchema::fields, filters);
+                        formatDiscover, readTableFields, TableSchema::fields, filters, indexFilter);
 
         for (int i = 0; i < files.size(); i++) {
             DataFileMeta file = files.get(i);
@@ -229,10 +241,27 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                             fileRecordReader, (BitmapIndexResult) fileIndexResult);
         }
 
+        Set<FieldRef> fields =
+                fileIndexResult == null ? Collections.emptySet() : fileIndexResult.applyIndexes();
+        if (indexFilter != null) {
+            Optional<Predicate> fallbackPredicate =
+                    indexFilter.visit(new FileIndexFilterFallbackPredicateVisitor(fields));
+            if (fallbackPredicate.isPresent()) {
+                Predicate fallback = fallbackPredicate.get();
+                LOG.warn(
+                        "The file index of {} was not found at runtime, filter ({}) fallback to use paimon predicate."
+                                + " You can use the `rewrite_file_index` procedure to ensure the integrity of the file index.",
+                        file.fileName(),
+                        fallback);
+                fileRecordReader = fileRecordReader.filter(fallback::test);
+            }
+        }
+
         DeletionVector deletionVector = dvFactory == null ? null : dvFactory.get();
         if (deletionVector != null && !deletionVector.isEmpty()) {
-            return new ApplyDeletionVectorReader(fileRecordReader, deletionVector);
+            fileRecordReader = new ApplyDeletionVectorReader(fileRecordReader, deletionVector);
         }
+
         return fileRecordReader;
     }
 }

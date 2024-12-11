@@ -240,6 +240,15 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     }
 
     @Override
+    public MergeFileSplitRead withIndexFilter(Predicate predicate) {
+        if (predicate == null) {
+            return this;
+        }
+        throw new UnsupportedOperationException(
+                "index should not be pushed down in the LSM merging reader");
+    }
+
+    @Override
     public RecordReader<KeyValue> createReader(DataSplit split) throws IOException {
         if (!split.beforeFiles().isEmpty()) {
             throw new IllegalArgumentException("This read cannot accept split with before files.");

@@ -18,6 +18,11 @@
 
 package org.apache.paimon.fileindex;
 
+import org.apache.paimon.predicate.FieldRef;
+
+import java.util.Collections;
+import java.util.Set;
+
 /** File index result to decide whether filter a file. */
 public interface FileIndexResult {
 
@@ -58,6 +63,10 @@ public interface FileIndexResult {
             };
 
     boolean remain();
+
+    default Set<FieldRef> applyIndexes() {
+        return Collections.emptySet();
+    }
 
     default FileIndexResult and(FileIndexResult fileIndexResult) {
         if (fileIndexResult.remain()) {

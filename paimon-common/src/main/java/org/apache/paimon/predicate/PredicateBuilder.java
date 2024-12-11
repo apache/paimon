@@ -390,6 +390,20 @@ public class PredicateBuilder {
                 .collect(Collectors.toList());
     }
 
+    public static List<Predicate> trimPredicate(
+            @Nullable List<Predicate> predicates, @Nullable Predicate exclude) {
+        if (predicates == null || predicates.isEmpty() || exclude == null) {
+            return predicates;
+        }
+        List<Predicate> result = new ArrayList<>();
+        for (Predicate predicate : predicates) {
+            if (!predicate.equals(exclude)) {
+                result.add(predicate);
+            }
+        }
+        return result;
+    }
+
     @Nullable
     public static Predicate partition(
             Map<String, String> map, RowType rowType, String defaultPartValue) {

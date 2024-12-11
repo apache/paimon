@@ -19,6 +19,7 @@
 package org.apache.paimon.fileindex.bitmap;
 
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.fileindex.FileIndexFilterPushDownAnalyzer;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fileindex.FileIndexWriter;
@@ -69,6 +70,11 @@ public class BitmapFileIndex implements FileIndexer {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    @Override
+    public FileIndexFilterPushDownAnalyzer createFilterPushDownAnalyzer() {
+        return new FilterPushDownAnalyzer();
     }
 
     private static class Writer extends FileIndexWriter {
@@ -189,6 +195,7 @@ public class BitmapFileIndex implements FileIndexer {
         @Override
         public FileIndexResult visitIn(FieldRef fieldRef, List<Object> literals) {
             return new BitmapIndexResult(
+                    Collections.singleton(fieldRef),
                     () -> {
                         readInternalMeta(fieldRef.type());
                         return getInListResultBitmap(literals);
@@ -198,6 +205,7 @@ public class BitmapFileIndex implements FileIndexer {
         @Override
         public FileIndexResult visitNotIn(FieldRef fieldRef, List<Object> literals) {
             return new BitmapIndexResult(
+                    Collections.singleton(fieldRef),
                     () -> {
                         readInternalMeta(fieldRef.type());
                         RoaringBitmap32 bitmap = getInListResultBitmap(literals);
@@ -267,6 +275,39 @@ public class BitmapFileIndex implements FileIndexer {
                     throw new RuntimeException(e);
                 }
             }
+        }
+    }
+
+    private static class FilterPushDownAnalyzer extends FileIndexFilterPushDownAnalyzer {
+
+        @Override
+        public Boolean visitEqual(FieldRef fieldRef, Object literal) {
+            return true;
+        }
+
+        @Override
+        public Boolean visitNotEqual(FieldRef fieldRef, Object literal) {
+            return true;
+        }
+
+        @Override
+        public Boolean visitIn(FieldRef fieldRef, List<Object> literals) {
+            return true;
+        }
+
+        @Override
+        public Boolean visitNotIn(FieldRef fieldRef, List<Object> literals) {
+            return true;
+        }
+
+        @Override
+        public Boolean visitIsNull(FieldRef fieldRef) {
+            return true;
+        }
+
+        @Override
+        public Boolean visitIsNotNull(FieldRef fieldRef) {
+            return true;
         }
     }
 

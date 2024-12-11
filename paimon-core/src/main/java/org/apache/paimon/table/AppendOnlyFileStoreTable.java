@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fileindex.FileIndexFilterPushDownVisitor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.AppendOnlyIcebergCommitCallback;
@@ -67,6 +68,16 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
             TableSchema tableSchema,
             CatalogEnvironment catalogEnvironment) {
         super(fileIO, path, tableSchema, catalogEnvironment);
+    }
+
+    @Override
+    public FileIndexFilterPushDownVisitor fileIndexFilterPushDownVisitor() {
+        CoreOptions options = coreOptions();
+        if (options.fileIndexReadEnabled()) {
+            return options.indexColumnsOptions()
+                    .createFilterPushDownPredicateVisitor(schema().logicalRowType());
+        }
+        return super.fileIndexFilterPushDownVisitor();
     }
 
     @Override
@@ -117,6 +128,12 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
             @Override
             protected InnerTableRead innerWithFilter(Predicate predicate) {
                 read.withFilter(predicate);
+                return this;
+            }
+
+            @Override
+            public InnerTableRead withIndexFilter(Predicate indexPredicate) {
+                read.withIndexFilter(indexPredicate);
                 return this;
             }
 
