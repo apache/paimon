@@ -354,7 +354,6 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                     if (statsDenseStore) {
                         // pk table doesn't need value stats
                         options.set(CoreOptions.METADATA_STATS_MODE, "none");
-                        //                        options.set(CoreOptions.STORAGE_THIN_MODE, false);
                     }
                 };
         writeData(optionsSetter);
