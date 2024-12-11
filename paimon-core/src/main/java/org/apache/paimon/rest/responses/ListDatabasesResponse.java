@@ -20,10 +20,10 @@ package org.apache.paimon.rest.responses;
 
 import org.apache.paimon.rest.RESTResponse;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.beans.ConstructorProperties;
 import java.util.List;
 
 /** Response for listing databases. */
@@ -33,8 +33,8 @@ public class ListDatabasesResponse implements RESTResponse {
     @JsonProperty(FIELD_DATABASES)
     private List<DatabaseName> databases;
 
-    @ConstructorProperties({FIELD_DATABASES})
-    public ListDatabasesResponse(List<DatabaseName> databases) {
+    @JsonCreator
+    public ListDatabasesResponse(@JsonProperty(FIELD_DATABASES) List<DatabaseName> databases) {
         this.databases = databases;
     }
 

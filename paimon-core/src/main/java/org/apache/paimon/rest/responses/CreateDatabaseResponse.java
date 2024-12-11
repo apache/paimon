@@ -20,10 +20,10 @@ package org.apache.paimon.rest.responses;
 
 import org.apache.paimon.rest.RESTResponse;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.beans.ConstructorProperties;
 import java.util.Map;
 
 /** Response for creating database. */
@@ -37,8 +37,10 @@ public class CreateDatabaseResponse implements RESTResponse {
     @JsonProperty(FIELD_OPTIONS)
     private Map<String, String> options;
 
-    @ConstructorProperties({FIELD_NAME, FIELD_OPTIONS})
-    public CreateDatabaseResponse(String name, Map<String, String> options) {
+    @JsonCreator
+    public CreateDatabaseResponse(
+            @JsonProperty(FIELD_NAME) String name,
+            @JsonProperty(FIELD_OPTIONS) Map<String, String> options) {
         this.name = name;
         this.options = options;
     }

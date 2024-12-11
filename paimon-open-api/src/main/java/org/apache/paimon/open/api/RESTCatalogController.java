@@ -20,6 +20,7 @@ package org.apache.paimon.open.api;
 
 import org.apache.paimon.rest.ResourcePaths;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.DropDatabaseRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.DatabaseName;
@@ -32,13 +33,14 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.HashMap;
@@ -142,4 +144,22 @@ public class RESTCatalogController {
         Map<String, String> options = new HashMap<>();
         return new GetDatabaseResponse("name", options, "comment");
     }
+
+    @Operation(
+            summary = "Drop Database",
+            tags = {"database"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @DeleteMapping("/api/v1/{prefix}/databases/{database}")
+    public void dropDatabases(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @RequestBody DropDatabaseRequest request) {}
 }

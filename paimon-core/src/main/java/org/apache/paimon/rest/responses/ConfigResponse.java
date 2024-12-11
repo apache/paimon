@@ -23,10 +23,10 @@ import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.beans.ConstructorProperties;
 import java.util.Map;
 import java.util.Objects;
 
@@ -41,8 +41,10 @@ public class ConfigResponse implements RESTResponse {
     @JsonProperty(FIELD_OVERRIDES)
     private Map<String, String> overrides;
 
-    @ConstructorProperties({FIELD_DEFAULTS, FIELD_OVERRIDES})
-    public ConfigResponse(Map<String, String> defaults, Map<String, String> overrides) {
+    @JsonCreator
+    public ConfigResponse(
+            @JsonProperty(FIELD_DEFAULTS) Map<String, String> defaults,
+            @JsonProperty(FIELD_OVERRIDES) Map<String, String> overrides) {
         this.defaults = defaults;
         this.overrides = overrides;
     }

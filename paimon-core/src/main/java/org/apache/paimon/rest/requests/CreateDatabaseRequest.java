@@ -20,10 +20,10 @@ package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.rest.RESTRequest;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.beans.ConstructorProperties;
 import java.util.Map;
 
 /** Request for creating database. */
@@ -41,8 +41,11 @@ public class CreateDatabaseRequest implements RESTRequest {
     @JsonProperty(FIELD_OPTIONS)
     private Map<String, String> options;
 
-    @ConstructorProperties({FIELD_NAME, FIELD_IGNORE_IF_EXISTS, FIELD_OPTIONS})
-    public CreateDatabaseRequest(String name, boolean ignoreIfExists, Map<String, String> options) {
+    @JsonCreator
+    public CreateDatabaseRequest(
+            @JsonProperty(FIELD_NAME) String name,
+            @JsonProperty(FIELD_IGNORE_IF_EXISTS) boolean ignoreIfExists,
+            @JsonProperty(FIELD_OPTIONS) Map<String, String> options) {
         this.name = name;
         this.ignoreIfExists = ignoreIfExists;
         this.options = options;

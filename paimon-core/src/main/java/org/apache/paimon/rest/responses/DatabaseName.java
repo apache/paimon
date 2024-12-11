@@ -20,10 +20,9 @@ package org.apache.paimon.rest.responses;
 
 import org.apache.paimon.rest.RESTMessage;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
-
-import java.beans.ConstructorProperties;
 
 /** Class for Database entity. */
 public class DatabaseName implements RESTMessage {
@@ -32,8 +31,8 @@ public class DatabaseName implements RESTMessage {
     @JsonProperty(FIELD_NAME)
     private String name;
 
-    @ConstructorProperties({FIELD_NAME})
-    public DatabaseName(String name) {
+    @JsonCreator
+    public DatabaseName(@JsonProperty(FIELD_NAME) String name) {
         this.name = name;
     }
 

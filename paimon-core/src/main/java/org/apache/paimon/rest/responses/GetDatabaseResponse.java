@@ -21,12 +21,12 @@ package org.apache.paimon.rest.responses;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.rest.RESTResponse;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import javax.annotation.Nullable;
 
-import java.beans.ConstructorProperties;
 import java.util.Map;
 import java.util.Optional;
 
@@ -46,8 +46,11 @@ public class GetDatabaseResponse implements RESTResponse, Database {
     @Nullable
     private final String comment;
 
-    @ConstructorProperties({FIELD_NAME, FIELD_OPTIONS, FIELD_COMMENT})
-    public GetDatabaseResponse(String name, Map<String, String> options, @Nullable String comment) {
+    @JsonCreator
+    public GetDatabaseResponse(
+            @JsonProperty(FIELD_NAME) String name,
+            @JsonProperty(FIELD_OPTIONS) Map<String, String> options,
+            @JsonProperty(FIELD_COMMENT) @Nullable String comment) {
         this.name = name;
         this.options = options;
         this.comment = comment;
@@ -64,8 +67,8 @@ public class GetDatabaseResponse implements RESTResponse, Database {
     }
 
     @JsonGetter(FIELD_COMMENT)
-    public Optional<String> getComment() {
-        return Optional.ofNullable(comment);
+    public String getComment() {
+        return comment;
     }
 
     @Override
@@ -80,6 +83,6 @@ public class GetDatabaseResponse implements RESTResponse, Database {
 
     @Override
     public Optional<String> comment() {
-        return this.getComment();
+        return Optional.ofNullable(this.getComment());
     }
 }

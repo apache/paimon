@@ -160,7 +160,7 @@ public class RESTCatalog implements Catalog {
     @Override
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException {
-        DropDatabaseRequest request = new DropDatabaseRequest(name, ignoreIfNotExists, cascade);
+        DropDatabaseRequest request = new DropDatabaseRequest(ignoreIfNotExists, cascade);
         try {
             client.delete(resourcePaths.database(name), request, headers());
         } catch (NoSuchResourceException e) {

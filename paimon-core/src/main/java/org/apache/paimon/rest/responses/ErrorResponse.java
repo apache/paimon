@@ -20,10 +20,10 @@ package org.apache.paimon.rest.responses;
 
 import org.apache.paimon.rest.RESTResponse;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.beans.ConstructorProperties;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.ArrayList;
@@ -51,8 +51,11 @@ public class ErrorResponse implements RESTResponse {
         this.stack = new ArrayList<String>();
     }
 
-    @ConstructorProperties({FIELD_MESSAGE, FIELD_CODE, FIELD_STACK})
-    public ErrorResponse(String message, int code, List<String> stack) {
+    @JsonCreator
+    public ErrorResponse(
+            @JsonProperty(FIELD_MESSAGE) String message,
+            @JsonProperty(FIELD_CODE) int code,
+            @JsonProperty(FIELD_STACK) List<String> stack) {
         this.message = message;
         this.code = code;
         this.stack = stack;

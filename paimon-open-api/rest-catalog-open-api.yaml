@@ -41,14 +41,14 @@ paths:
           schema:
             type: string
       responses:
+        "500":
+          description: Internal Server Error
         "200":
           description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListDatabasesResponse'
-        "500":
-          description: Internal Server Error
     post:
       tags:
         - database
@@ -65,22 +65,21 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateDatabaseRequest'
-        required: true
       responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CreateDatabaseResponse'
+        "500":
+          description: Internal Server Error
         "409":
           description: Resource has exist
           content:
             '*/*':
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal Server Error
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateDatabaseResponse'
   /api/v1/{prefix}/databases/{database}:
     get:
       tags:
@@ -105,14 +104,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetDatabaseResponse'
+        "500":
+          description: Internal Server Error
         "404":
           description: Resource not found
           content:
             '*/*':
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags:
+        - database
+      summary: Drop Database
+      operationId: dropDatabases
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DropDatabaseRequest'
+      responses:
         "500":
           description: Internal Server Error
+        "404":
+          description: Resource not found
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/config:
     get:
       tags:
@@ -120,14 +149,14 @@ paths:
       summary: Get Config
       operationId: getConfig
       responses:
+        "500":
+          description: Internal Server Error
         "200":
           description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConfigResponse'
-        "500":
-          description: Internal Server Error
 components:
   schemas:
     CreateDatabaseRequest:
@@ -137,15 +166,6 @@ components:
           type: string
         ignoreIfExists:
           type: boolean
-        options:
-          type: object
-          additionalProperties:
-            type: string
-    CreateDatabaseResponse:
-      type: object
-      properties:
-        name:
-          type: string
         options:
           type: object
           additionalProperties:
@@ -161,6 +181,15 @@ components:
         stack:
           type: array
           items:
+            type: string
+    CreateDatabaseResponse:
+      type: object
+      properties:
+        name:
+          type: string
+        options:
+          type: object
+          additionalProperties:
             type: string
     DatabaseName:
       type: object
@@ -196,3 +225,10 @@ components:
           type: object
           additionalProperties:
             type: string
+    DropDatabaseRequest:
+      type: object
+      properties:
+        ignoreIfNotExists:
+          type: boolean
+        cascade:
+          type: boolean

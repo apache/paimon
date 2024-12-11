@@ -20,26 +20,36 @@ package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.rest.RESTRequest;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+
 /** Request for DropDatabase. */
 public class DropDatabaseRequest implements RESTRequest {
-    private final String name;
+
+    private static final String FIELD_IGNORE_IF_EXISTS = "ignoreIfExists";
+    private static final String FIELD_CASCADE = "cascade";
+
+    @JsonProperty(FIELD_IGNORE_IF_EXISTS)
     private final boolean ignoreIfNotExists;
+
+    @JsonProperty(FIELD_CASCADE)
     private final boolean cascade;
 
-    public DropDatabaseRequest(String name, boolean ignoreIfNotExists, boolean cascade) {
-        this.name = name;
+    @JsonCreator
+    public DropDatabaseRequest(
+            @JsonProperty(FIELD_IGNORE_IF_EXISTS) boolean ignoreIfNotExists,
+            @JsonProperty(FIELD_CASCADE) boolean cascade) {
         this.ignoreIfNotExists = ignoreIfNotExists;
         this.cascade = cascade;
     }
 
-    public String getName() {
-        return name;
-    }
-
+    @JsonGetter(FIELD_IGNORE_IF_EXISTS)
     public boolean getIgnoreIfNotExists() {
         return ignoreIfNotExists;
     }
 
+    @JsonGetter(FIELD_CASCADE)
     public boolean getCascade() {
         return cascade;
     }
