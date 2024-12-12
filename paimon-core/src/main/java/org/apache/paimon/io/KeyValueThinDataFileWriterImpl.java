@@ -34,6 +34,7 @@ import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
@@ -92,7 +93,7 @@ public class KeyValueThinDataFileWriterImpl extends KeyValueDataFileWriter {
                 options,
                 fileSource,
                 fileIndexOptions);
-        Map<Integer, Integer> idToIndex = new HashMap<>();
+        Map<Integer, Integer> idToIndex = new HashMap<>(valueType.getFieldCount());
         for (int i = 0; i < valueType.getFieldCount(); i++) {
             idToIndex.put(valueType.getFields().get(i).id(), i);
         }
@@ -113,15 +114,11 @@ public class KeyValueThinDataFileWriterImpl extends KeyValueDataFileWriter {
     @Override
     Pair<SimpleColStats[], SimpleColStats[]> fetchKeyValueStats(SimpleColStats[] rowStats) {
         int numKeyFields = keyType.getFieldCount();
-        int numValueFields = valueType.getFieldCount();
-
-        SimpleColStats[] keyStats = new SimpleColStats[numKeyFields];
-        SimpleColStats[] valFieldStats = new SimpleColStats[numValueFields];
-
         // In thin mode, there is no key stats in rowStats, so we only jump
         // _SEQUNCE_NUMBER_ and _ROW_KIND_ stats. Therefore, the 'from' value is 2.
-        System.arraycopy(rowStats, 2, valFieldStats, 0, numValueFields);
+        SimpleColStats[] valFieldStats = Arrays.copyOfRange(rowStats, 2, rowStats.length);
         // Thin mode on, so need to map value stats to key stats.
+        SimpleColStats[] keyStats = new SimpleColStats[numKeyFields];
         for (int i = 0; i < keyStatMapping.length; i++) {
             keyStats[i] = valFieldStats[keyStatMapping[i]];
         }

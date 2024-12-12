@@ -108,7 +108,7 @@ public class KeyValueFileWriterFactory {
 
     private KeyValueDataFileWriter createDataFileWriter(
             Path path, int level, FileSource fileSource) {
-        return options.thinMode()
+        return options.dataFileThinMode()
                 ? new KeyValueThinDataFileWriterImpl(
                         fileIO,
                         formatContext.writerFactory(level),
@@ -211,7 +211,8 @@ public class KeyValueFileWriterFactory {
                             partition,
                             bucket,
                             keyType,
-                            KeyValue.schema(options.thinMode() ? RowType.of() : keyType, valueType),
+                            KeyValue.schema(
+                                    options.dataFileThinMode() ? RowType.of() : keyType, valueType),
                             fileFormat,
                             format2PathFactory,
                             options);

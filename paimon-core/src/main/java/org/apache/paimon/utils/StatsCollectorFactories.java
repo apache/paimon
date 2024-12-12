@@ -54,7 +54,7 @@ public class StatsCollectorFactories {
             if (fieldMode != null) {
                 modes[i] = SimpleColStatsCollector.from(fieldMode);
             } else if (SpecialFields.isSystemField(field)
-                    || (options.thinMode()
+                    || (options.dataFileThinMode()
                             && keyNames.contains(SpecialFields.KEY_FIELD_PREFIX + field))) {
                 modes[i] = () -> new TruncateSimpleColStatsCollector(128);
             } else {

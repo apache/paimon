@@ -34,6 +34,8 @@ import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.apache.paimon.CoreOptions.METADATA_STATS_DENSE_STORE;
 import static org.apache.paimon.CoreOptions.METADATA_STATS_MODE;
@@ -42,13 +44,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for table stats mode. */
 public class StatsTableTest extends TableTestBase {
 
-    @Test
-    public void testPartitionStatsNotDense() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testPartitionStatsNotDense(boolean thinMode) throws Exception {
         Identifier identifier = identifier("T");
         Options options = new Options();
         options.set(METADATA_STATS_MODE, "NONE");
         options.set(METADATA_STATS_DENSE_STORE, false);
         options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.DATA_FILE_THIN_MODE, thinMode);
         Schema schema =
                 Schema.newBuilder()
                         .column("pt", DataTypes.INT())
@@ -86,11 +90,15 @@ public class StatsTableTest extends TableTestBase {
                 manifestFile.read(manifest.fileName(), manifest.fileSize()).get(0).file();
         SimpleStats recordStats = file.valueStats();
         assertThat(recordStats.minValues().isNullAt(0)).isTrue();
-        assertThat(recordStats.minValues().isNullAt(1)).isFalse();
+        assertThat(recordStats.minValues().isNullAt(1)).isEqualTo(!thinMode);
         assertThat(recordStats.minValues().isNullAt(2)).isTrue();
         assertThat(recordStats.maxValues().isNullAt(0)).isTrue();
-        assertThat(recordStats.maxValues().isNullAt(1)).isFalse();
+        assertThat(recordStats.maxValues().isNullAt(1)).isEqualTo(!thinMode);
         assertThat(recordStats.maxValues().isNullAt(2)).isTrue();
+
+        SimpleStats keyStats = file.keyStats();
+        assertThat(keyStats.minValues().isNullAt(0)).isFalse();
+        assertThat(keyStats.maxValues().isNullAt(0)).isFalse();
     }
 
     @Test
