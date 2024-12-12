@@ -50,7 +50,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -207,47 +206,6 @@ class CachingCatalogTest extends CatalogTestBase {
         ticker.advance(HALF_OF_EXPIRATION);
         assertThat(catalog.ageOf(tableIdent)).get().isEqualTo(HALF_OF_EXPIRATION);
         assertThat(catalog.remainingAgeFor(tableIdent)).get().isEqualTo(HALF_OF_EXPIRATION);
-    }
-
-    @Test
-    public void testCacheExpirationEagerlyRemovesBranch() throws Exception {
-        TestableCachingCatalog catalog =
-                new TestableCachingCatalog(this.catalog, EXPIRATION_TTL, ticker);
-
-        Identifier tableIdent = new Identifier("db", "tbl");
-        catalog.createTable(tableIdent, DEFAULT_TABLE_SCHEMA, false);
-        Table table = catalog.getTable(tableIdent);
-        assertThat(catalog.tableCache().asMap()).containsKey(tableIdent);
-        assertThat(catalog.ageOf(tableIdent)).get().isEqualTo(Duration.ZERO);
-
-        ticker.advance(HALF_OF_EXPIRATION);
-        assertThat(catalog.tableCache().asMap()).containsKey(tableIdent);
-        assertThat(catalog.ageOf(tableIdent)).get().isEqualTo(HALF_OF_EXPIRATION);
-
-        catalog.getTable(tableIdent).createBranch("b1");
-        Identifier branchIdent = new Identifier("db", "tbl$branch_b1");
-        catalog.getTable(branchIdent);
-
-        assertThat(catalog.tableCache().asMap()).containsKeys(branchIdent);
-        assertThat(catalog.ageOf(branchIdent)).get().isEqualTo(Duration.ZERO);
-
-        assertThat(catalog.remainingAgeFor(tableIdent))
-                .as("Loading a non-cached sys table should refresh the main table's age")
-                .isEqualTo(Optional.of(EXPIRATION_TTL));
-
-        // Move time forward and access already cached branch.
-        ticker.advance(HALF_OF_EXPIRATION);
-        catalog.getTable(branchIdent);
-        assertThat(catalog.ageOf(branchIdent)).get().isEqualTo(Duration.ZERO);
-
-        assertThat(catalog.remainingAgeFor(tableIdent))
-                .as("Accessing a cached sys table should not affect the main table's age")
-                .isEqualTo(Optional.of(HALF_OF_EXPIRATION));
-
-        // Move time forward so the data table drops.
-        ticker.advance(HALF_OF_EXPIRATION);
-        assertThat(catalog.tableCache().asMap()).doesNotContainKey(tableIdent);
-        assertThat(catalog.tableCache().asMap()).doesNotContainKey(branchIdent);
     }
 
     @Test

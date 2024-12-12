@@ -135,10 +135,6 @@ public class Identifier implements Serializable {
         return getSystemTableName() != null;
     }
 
-    public Identifier toOriginTable() {
-        return new Identifier(database, getTableName(), getBranchName());
-    }
-
     private void splitObjectName() {
         if (table != null) {
             return;

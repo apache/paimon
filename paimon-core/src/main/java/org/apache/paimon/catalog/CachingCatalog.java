@@ -201,6 +201,9 @@ public class CachingCatalog extends DelegateCatalog {
             throws TableNotExistException {
         super.dropTable(identifier, ignoreIfNotExists);
         invalidateTable(identifier);
+        if (identifier.isMainTable()) {
+            invalidateAttachedTables(identifier);
+        }
     }
 
     @Override
@@ -228,7 +231,13 @@ public class CachingCatalog extends DelegateCatalog {
         // For system table, do not cache it directly. Instead, cache the origin table and then wrap
         // it to generate the system table.
         if (identifier.isSystemTable()) {
-            Table originTable = getTable(identifier.toOriginTable());
+            Identifier originIdentifier =
+                    new Identifier(
+                            identifier.getDatabaseName(),
+                            identifier.getTableName(),
+                            identifier.getBranchName(),
+                            null);
+            Table originTable = getTable(originIdentifier);
             table =
                     SystemTableLoader.load(
                             checkNotNull(identifier.getSystemTableName()),
@@ -298,7 +307,7 @@ public class CachingCatalog extends DelegateCatalog {
         public void onRemoval(Identifier identifier, Table table, @NonNull RemovalCause cause) {
             LOG.debug("Evicted {} from the table cache ({})", identifier, cause);
             if (RemovalCause.EXPIRED.equals(cause)) {
-                tryInvalidateAttachedTables(identifier);
+                // ignore now
             }
         }
     }
@@ -306,19 +315,16 @@ public class CachingCatalog extends DelegateCatalog {
     @Override
     public void invalidateTable(Identifier identifier) {
         tableCache.invalidate(identifier);
-        tryInvalidateAttachedTables(identifier);
         if (partitionCache != null) {
             partitionCache.invalidate(identifier);
         }
     }
 
-    private void tryInvalidateAttachedTables(Identifier identifier) {
-        if (identifier.isMainTable()) {
-            // invalidate cached branches
-            for (@NonNull Identifier i : tableCache.asMap().keySet()) {
-                if (identifier.getTableName().equals(i.getTableName())) {
-                    tableCache.invalidate(i);
-                }
+    /** invalidate attached tables, such as cached branches. */
+    private void invalidateAttachedTables(Identifier identifier) {
+        for (@NonNull Identifier i : tableCache.asMap().keySet()) {
+            if (identifier.getTableName().equals(i.getTableName())) {
+                tableCache.invalidate(i);
             }
         }
     }
