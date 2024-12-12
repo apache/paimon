@@ -123,14 +123,6 @@ public class Identifier implements Serializable {
         return systemTable;
     }
 
-    public boolean isMainTable() {
-        return getBranchName() == null && getSystemTableName() == null;
-    }
-
-    public boolean isBranch() {
-        return getBranchName() != null && getSystemTableName() == null;
-    }
-
     public boolean isSystemTable() {
         return getSystemTableName() != null;
     }

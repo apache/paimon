@@ -30,14 +30,8 @@ import org.apache.paimon.utils.SegmentsCache;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalCause;
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalListener;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Ticker;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Weigher;
-
-import org.checkerframework.checker.nullness.qual.NonNull;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -58,8 +52,6 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** A {@link Catalog} to cache databases and tables and manifests. */
 public class CachingCatalog extends DelegateCatalog {
-
-    private static final Logger LOG = LoggerFactory.getLogger(CachingCatalog.class);
 
     private final Duration expirationInterval;
     private final int snapshotMaxNumPerTable;
@@ -125,7 +117,6 @@ public class CachingCatalog extends DelegateCatalog {
         this.tableCache =
                 Caffeine.newBuilder()
                         .softValues()
-                        .removalListener(new TableInvalidatingRemovalListener())
                         .executor(Runnable::run)
                         .expireAfterAccess(expirationInterval)
                         .ticker(ticker)
@@ -201,8 +192,12 @@ public class CachingCatalog extends DelegateCatalog {
             throws TableNotExistException {
         super.dropTable(identifier, ignoreIfNotExists);
         invalidateTable(identifier);
-        if (identifier.isMainTable()) {
-            invalidateAttachedTables(identifier);
+
+        // clear all branch tables of this table
+        for (Identifier i : tableCache.asMap().keySet()) {
+            if (identifier.getTableName().equals(i.getTableName())) {
+                tableCache.invalidate(i);
+            }
         }
     }
 
@@ -302,30 +297,11 @@ public class CachingCatalog extends DelegateCatalog {
         }
     }
 
-    private class TableInvalidatingRemovalListener implements RemovalListener<Identifier, Table> {
-        @Override
-        public void onRemoval(Identifier identifier, Table table, @NonNull RemovalCause cause) {
-            LOG.debug("Evicted {} from the table cache ({})", identifier, cause);
-            if (RemovalCause.EXPIRED.equals(cause)) {
-                // ignore now
-            }
-        }
-    }
-
     @Override
     public void invalidateTable(Identifier identifier) {
         tableCache.invalidate(identifier);
         if (partitionCache != null) {
             partitionCache.invalidate(identifier);
-        }
-    }
-
-    /** invalidate attached tables, such as cached branches. */
-    private void invalidateAttachedTables(Identifier identifier) {
-        for (@NonNull Identifier i : tableCache.asMap().keySet()) {
-            if (identifier.getTableName().equals(i.getTableName())) {
-                tableCache.invalidate(i);
-            }
         }
     }
 
