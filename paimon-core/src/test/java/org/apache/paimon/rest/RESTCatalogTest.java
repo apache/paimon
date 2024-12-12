@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -35,6 +36,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,13 +44,19 @@ import java.util.Map;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Test for REST Catalog. */
 public class RESTCatalogTest {
 
-    private ObjectMapper mapper = RESTObjectMapper.create();
+    private final ObjectMapper mapper = RESTObjectMapper.create();
     private MockWebServer mockWebServer;
     private RESTCatalog restCatalog;
+    private RESTCatalog mockRestCatalog;
 
     @Before
     public void setUp() throws IOException {
@@ -66,6 +74,7 @@ public class RESTCatalogTest {
                         RESTCatalogInternalOptions.PREFIX.key(), "prefix");
         mockResponse(mockResponse);
         restCatalog = new RESTCatalog(options);
+        mockRestCatalog = spy(restCatalog);
     }
 
     @After
@@ -121,10 +130,38 @@ public class RESTCatalogTest {
     }
 
     @Test
-    public void testDropDatabase() {
+    public void testDropDatabase() throws Exception {
         String name = "name";
         mockResponse("");
-        assertDoesNotThrow(() -> restCatalog.dropDatabase(name, false, false));
+        assertDoesNotThrow(() -> mockRestCatalog.dropDatabase(name, false, true));
+        verify(mockRestCatalog, times(1)).dropDatabase(eq(name), eq(false), eq(true));
+        verify(mockRestCatalog, times(0)).listTables(eq(name));
+    }
+
+    @Test
+    public void testDropDatabaseWhenCascadeIsFalseAndNoTables() throws Exception {
+        String name = "name";
+        boolean cascade = false;
+        mockResponse("");
+        when(mockRestCatalog.listTables(name)).thenReturn(new ArrayList<>());
+        assertDoesNotThrow(() -> mockRestCatalog.dropDatabase(name, false, cascade));
+        verify(mockRestCatalog, times(1)).dropDatabase(eq(name), eq(false), eq(cascade));
+        verify(mockRestCatalog, times(1)).listTables(eq(name));
+    }
+
+    @Test
+    public void testDropDatabaseWhenCascadeIsFalseAndTablesExist() throws Exception {
+        String name = "name";
+        boolean cascade = false;
+        mockResponse("");
+        List<String> tables = new ArrayList<>();
+        tables.add("t1");
+        when(mockRestCatalog.listTables(name)).thenReturn(tables);
+        assertThrows(
+                Catalog.DatabaseNotEmptyException.class,
+                () -> mockRestCatalog.dropDatabase(name, false, cascade));
+        verify(mockRestCatalog, times(1)).dropDatabase(eq(name), eq(false), eq(cascade));
+        verify(mockRestCatalog, times(1)).listTables(eq(name));
     }
 
     private void mockResponse(String mockResponse) {

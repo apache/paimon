@@ -161,7 +161,7 @@ public class RESTCatalog implements Catalog {
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException {
         try {
-            if (!cascade && !listTables(name).isEmpty()) {
+            if (!cascade && !this.listTables(name).isEmpty()) {
                 throw new DatabaseNotEmptyException(name);
             }
             client.delete(resourcePaths.database(name), headers());

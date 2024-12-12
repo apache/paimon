@@ -43,6 +43,7 @@ import static org.mockito.Mockito.verify;
 
 /** Test for {@link HttpClient}. */
 public class HttpClientTest {
+
     private MockWebServer mockWebServer;
     private HttpClient httpClient;
     private ObjectMapper objectMapper = RESTObjectMapper.create();
