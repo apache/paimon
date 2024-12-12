@@ -114,8 +114,8 @@ public class FileUtils {
                             "File '%s' not found, Possible causes: "
                                     + "1.snapshot expires too fast, you can configure 'snapshot.time-retained'"
                                     + " option with a larger value. "
-                                    + "2.consumption is too slow, you can improve the performance of consumption"
-                                    + " (For example, increasing parallelism).",
+                                    + "2.the file was compacted before it was consumed, you can improve the performance of consumption"
+                                    + " (For example, increasing parallelism) or add a consumer id for safe consumption: https://paimon.apache.org/docs/master/flink/consumer-id/",
                             file));
         }
     }
