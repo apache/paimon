@@ -62,6 +62,7 @@ public class OpenAPIConfig {
         return new OpenAPI().info(info).servers(servers);
     }
 
+    /** Sort schemas alphabetically. So the api generate will in same order everytime. */
     @Bean
     public OpenApiCustomiser sortSchemasAlphabetically() {
         return this::sortResponseAlphabetically;
