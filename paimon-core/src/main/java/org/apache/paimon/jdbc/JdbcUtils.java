@@ -30,8 +30,10 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.SQLIntegrityConstraintViolationException;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
@@ -202,6 +204,16 @@ public class JdbcUtils {
                     + " = ? AND "
                     + DATABASE_NAME
                     + " = ? ";
+    static final String DELETE_DATABASE_PROPERTIES_SQL =
+            "DELETE FROM "
+                    + DATABASE_PROPERTIES_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + DATABASE_NAME
+                    + " = ? AND "
+                    + DATABASE_PROPERTY_KEY
+                    + " IN ";
     static final String DELETE_ALL_DATABASE_PROPERTIES_SQL =
             "DELETE FROM "
                     + DATABASE_PROPERTIES_TABLE_NAME
@@ -400,6 +412,27 @@ public class JdbcUtils {
             }
             sqlStatement.append(JdbcUtils.INSERT_PROPERTIES_VALUES_BASE);
         }
+        return sqlStatement.toString();
+    }
+
+    public static boolean deleteProperties(
+            JdbcClientPool connections,
+            String storeKey,
+            String databaseName,
+            Set<String> properties) {
+        String[] args =
+                Stream.concat(Stream.of(storeKey, databaseName), properties.stream())
+                        .toArray(String[]::new);
+
+        return execute(connections, JdbcUtils.deletePropertiesStatement(properties), args) > 0;
+    }
+
+    private static String deletePropertiesStatement(Set<String> properties) {
+        StringBuilder sqlStatement = new StringBuilder(JdbcUtils.DELETE_DATABASE_PROPERTIES_SQL);
+        String values =
+                String.join(",", Collections.nCopies(properties.size(), String.valueOf('?')));
+        sqlStatement.append("(").append(values).append(")");
+
         return sqlStatement.toString();
     }
 

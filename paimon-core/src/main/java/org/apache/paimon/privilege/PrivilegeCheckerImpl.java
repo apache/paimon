@@ -86,6 +86,14 @@ public class PrivilegeCheckerImpl implements PrivilegeChecker {
     }
 
     @Override
+    public void assertCanAlertDatabase(String databaseName) {
+        if (!check(databaseName, PrivilegeType.ALERT_DATABASE)) {
+            throw new NoPrivilegeException(
+                    user, "database", databaseName, PrivilegeType.ALERT_DATABASE);
+        }
+    }
+
+    @Override
     public void assertCanCreateDatabase() {
         if (!check(
                 FileBasedPrivilegeManager.IDENTIFIER_WHOLE_CATALOG,

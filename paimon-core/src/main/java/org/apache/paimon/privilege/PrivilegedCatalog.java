@@ -19,6 +19,7 @@
 package org.apache.paimon.privilege;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.DatabaseChange;
 import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.ConfigOption;
@@ -80,6 +81,13 @@ public class PrivilegedCatalog extends DelegateCatalog {
         privilegeManager.getPrivilegeChecker().assertCanDropDatabase(name);
         wrapped.dropDatabase(name, ignoreIfNotExists, cascade);
         privilegeManager.objectDropped(name);
+    }
+
+    @Override
+    public void alertDatabase(String name, List<DatabaseChange> changes, boolean ignoreIfNotExists)
+            throws DatabaseNotExistException {
+        privilegeManager.getPrivilegeChecker().assertCanAlertDatabase(name);
+        super.alertDatabase(name, changes, ignoreIfNotExists);
     }
 
     @Override

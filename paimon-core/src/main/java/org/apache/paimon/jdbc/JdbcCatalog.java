@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Database;
+import org.apache.paimon.catalog.DatabaseChange;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -38,6 +39,7 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Sets;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,10 +54,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.jdbc.JdbcCatalogLock.acquireTimeout;
 import static org.apache.paimon.jdbc.JdbcCatalogLock.checkMaxSleep;
+import static org.apache.paimon.jdbc.JdbcUtils.deleteProperties;
 import static org.apache.paimon.jdbc.JdbcUtils.execute;
 import static org.apache.paimon.jdbc.JdbcUtils.insertProperties;
 import static org.apache.paimon.jdbc.JdbcUtils.updateTable;
@@ -195,6 +199,28 @@ public class JdbcCatalog extends AbstractCatalog {
         execute(connections, JdbcUtils.DELETE_TABLES_SQL, catalogKey, name);
         // Delete properties from paimon_database_properties
         execute(connections, JdbcUtils.DELETE_ALL_DATABASE_PROPERTIES_SQL, catalogKey, name);
+    }
+
+    @Override
+    protected void alertDatabaseImpl(String name, List<DatabaseChange> changes) {
+        Map<String, String> insertProperties = Maps.newHashMap();
+        Set<String> removeProperties = Sets.newHashSet();
+        changes.forEach(
+                change -> {
+                    if (change instanceof DatabaseChange.SetProperty) {
+                        DatabaseChange.SetProperty setProperty =
+                                (DatabaseChange.SetProperty) change;
+                        insertProperties.put(setProperty.property(), setProperty.value());
+                    } else {
+                        removeProperties.add(((DatabaseChange.RemoveProperty) change).property());
+                    }
+                });
+        if (!insertProperties.isEmpty()) {
+            insertProperties(connections, catalogKey, name, insertProperties);
+        }
+        if (!removeProperties.isEmpty()) {
+            deleteProperties(connections, catalogKey, name, removeProperties);
+        }
     }
 
     @Override
