@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSource;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
 import org.apache.paimon.flink.source.SimpleSourceSplit;
+import org.apache.paimon.flink.source.SplitListState;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.connector.source.Boundedness;
@@ -30,9 +31,8 @@ import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.core.io.InputStatus;
 import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * A stream source that: 1) emits a list of elements without allowing checkpoints, 2) then waits for
@@ -70,6 +70,9 @@ public class FiniteTestSource<T> extends AbstractNonCoordinatedSource<T> {
         private final List<T> elements;
 
         private final boolean emitOnce;
+
+        private final SplitListState<Integer> checkpointedState =
+                new SplitListState<>("emit-times", x -> Integer.toString(x), Integer::parseInt);
 
         private int numTimesEmitted = 0;
 
@@ -117,17 +120,18 @@ public class FiniteTestSource<T> extends AbstractNonCoordinatedSource<T> {
 
         @Override
         public void addSplits(List<SimpleSourceSplit> list) {
-            List<Integer> retrievedStates =
-                    list.stream()
-                            .map(x -> Integer.parseInt(x.value()))
-                            .collect(Collectors.toList());
+            checkpointedState.restoreState(list);
+            List<Integer> retrievedStates = new ArrayList<>();
+            for (Integer entry : this.checkpointedState.get()) {
+                retrievedStates.add(entry);
+            }
 
             // given that the parallelism of the function is 1, we can only have 1 state
             Preconditions.checkArgument(
                     retrievedStates.size() == 1,
                     getClass().getSimpleName() + " retrieved invalid state.");
 
-            numTimesEmitted = retrievedStates.get(0);
+            this.numTimesEmitted = retrievedStates.get(0);
             Preconditions.checkArgument(
                     numTimesEmitted <= 2,
                     getClass().getSimpleName()
@@ -137,8 +141,9 @@ public class FiniteTestSource<T> extends AbstractNonCoordinatedSource<T> {
 
         @Override
         public List<SimpleSourceSplit> snapshotState(long l) {
-            return Collections.singletonList(
-                    new SimpleSourceSplit(Integer.toString(numTimesEmitted)));
+            this.checkpointedState.clear();
+            this.checkpointedState.add(this.numTimesEmitted);
+            return this.checkpointedState.snapshotState();
         }
 
         @Override

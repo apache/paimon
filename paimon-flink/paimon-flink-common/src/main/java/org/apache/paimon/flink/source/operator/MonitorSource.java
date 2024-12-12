@@ -21,6 +21,7 @@ package org.apache.paimon.flink.source.operator;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSource;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
 import org.apache.paimon.flink.source.SimpleSourceSplit;
+import org.apache.paimon.flink.source.SplitListState;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.ChannelComputer;
@@ -52,8 +53,6 @@ import java.util.List;
 import java.util.NavigableMap;
 import java.util.OptionalLong;
 import java.util.TreeMap;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.BucketMode.BUCKET_UNAWARE;
 
@@ -111,10 +110,10 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
         private static final String NEXT_SNAPSHOT_STATE = "NSS";
 
         private final StreamTableScan scan = readBuilder.newStreamScan();
-        private final SplitState<Long> checkpointState =
-                new SplitState<>(CHECKPOINT_STATE, x -> Long.toString(x), Long::parseLong);
-        private final SplitState<Tuple2<Long, Long>> nextSnapshotState =
-                new SplitState<>(
+        private final SplitListState<Long> checkpointState =
+                new SplitListState<>(CHECKPOINT_STATE, x -> Long.toString(x), Long::parseLong);
+        private final SplitListState<Tuple2<Long, Long>> nextSnapshotState =
+                new SplitListState<>(
                         NEXT_SNAPSHOT_STATE,
                         x -> x.f0 + ":" + x.f1,
                         x ->
@@ -200,56 +199,6 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
                 Thread.sleep(monitorInterval);
             }
             return InputStatus.MORE_AVAILABLE;
-        }
-    }
-
-    private static class SplitState<T> {
-        private final String identifier;
-        private final List<T> values;
-        private final Function<T, String> serializer;
-        private final Function<String, T> deserializer;
-
-        private SplitState(
-                String identifier,
-                Function<T, String> serializer,
-                Function<String, T> deserializer) {
-            this.identifier = identifier;
-            this.serializer = serializer;
-            this.deserializer = deserializer;
-            this.values = new ArrayList<>();
-        }
-
-        private void add(T value) {
-            values.add(value);
-        }
-
-        private List<T> get() {
-            return new ArrayList<>(values);
-        }
-
-        private void update(List<T> values) {
-            this.values.clear();
-            this.values.addAll(values);
-        }
-
-        private void clear() {
-            values.clear();
-        }
-
-        private List<SimpleSourceSplit> snapshotState() {
-            return values.stream()
-                    .map(x -> new SimpleSourceSplit(identifier + serializer.apply(x)))
-                    .collect(Collectors.toList());
-        }
-
-        private void restoreState(List<SimpleSourceSplit> splits) {
-            values.clear();
-            splits.stream()
-                    .map(SimpleSourceSplit::value)
-                    .filter(x -> x.startsWith(identifier))
-                    .map(x -> x.substring(identifier.length()))
-                    .map(this.deserializer)
-                    .forEach(values::add);
         }
     }
 

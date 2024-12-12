@@ -35,7 +35,7 @@ public class SimpleSourceSplit implements SourceSplit {
         this(UUID.randomUUID().toString(), value);
     }
 
-    SimpleSourceSplit(String splitId, String value) {
+    public SimpleSourceSplit(String splitId, String value) {
         this.splitId = splitId;
         this.value = value;
     }

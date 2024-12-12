@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSource;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
 import org.apache.paimon.flink.source.SimpleSourceSplit;
+import org.apache.paimon.flink.source.SplitListState;
 
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.ReaderOutput;
@@ -29,7 +30,6 @@ import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.core.io.InputStatus;
 
 import java.util.Collection;
-import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
@@ -66,6 +66,8 @@ public class TestCdcSource extends AbstractNonCoordinatedSource<TestCdcEvent> {
         private final int totalSubtasks;
 
         private final LinkedList<TestCdcEvent> events;
+        private final SplitListState<Integer> remainingEventsCount =
+                new SplitListState<>("events", x -> Integer.toString(x), Integer::parseInt);
 
         private final int numRecordsPerCheckpoint;
         private final AtomicInteger recordsThisCheckpoint;
@@ -104,17 +106,18 @@ public class TestCdcSource extends AbstractNonCoordinatedSource<TestCdcEvent> {
         @Override
         public List<SimpleSourceSplit> snapshotState(long l) {
             recordsThisCheckpoint.set(0);
-            return Collections.singletonList(
-                    new SimpleSourceSplit(Integer.toString(events.size())));
+            remainingEventsCount.clear();
+            remainingEventsCount.add(events.size());
+            return remainingEventsCount.snapshotState();
         }
 
         @Override
         public void addSplits(List<SimpleSourceSplit> list) {
-            int count =
-                    list.stream()
-                            .map(x -> Integer.parseInt(x.value()))
-                            .reduce(Integer::sum)
-                            .orElse(0);
+            remainingEventsCount.restoreState(list);
+            int count = 0;
+            for (int c : remainingEventsCount.get()) {
+                count += c;
+            }
             while (events.size() > count) {
                 events.poll();
             }
