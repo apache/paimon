@@ -42,7 +42,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.AsyncRecordReader;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FormatReaderMapping;
-import org.apache.paimon.utils.FormatReaderMapping.BulkFormatMappingBuilder;
 
 import javax.annotation.Nullable;
 
@@ -64,11 +63,11 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
     private final RowType keyType;
     private final RowType valueType;
 
-    private final BulkFormatMappingBuilder bulkFormatMappingBuilder;
+    private final FormatReaderMapping.Builder formatReaderMappingBuilder;
     private final DataFilePathFactory pathFactory;
     private final long asyncThreshold;
 
-    private final Map<FormatKey, FormatReaderMapping> bulkFormatMappings;
+    private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final BinaryRow partition;
     private final DeletionVector.Factory dvFactory;
 
@@ -78,7 +77,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             TableSchema schema,
             RowType keyType,
             RowType valueType,
-            BulkFormatMappingBuilder bulkFormatMappingBuilder,
+            FormatReaderMapping.Builder formatReaderMappingBuilder,
             DataFilePathFactory pathFactory,
             long asyncThreshold,
             BinaryRow partition,
@@ -88,11 +87,11 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         this.schema = schema;
         this.keyType = keyType;
         this.valueType = valueType;
-        this.bulkFormatMappingBuilder = bulkFormatMappingBuilder;
+        this.formatReaderMappingBuilder = formatReaderMappingBuilder;
         this.pathFactory = pathFactory;
         this.asyncThreshold = asyncThreshold;
         this.partition = partition;
-        this.bulkFormatMappings = new HashMap<>();
+        this.formatReaderMappings = new HashMap<>();
         this.dvFactory = dvFactory;
     }
 
@@ -122,14 +121,14 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
 
         Supplier<FormatReaderMapping> formatSupplier =
                 () ->
-                        bulkFormatMappingBuilder.build(
+                        formatReaderMappingBuilder.build(
                                 formatIdentifier,
                                 schema,
                                 schemaId == schema.id() ? schema : schemaManager.schema(schemaId));
 
         FormatReaderMapping formatReaderMapping =
                 reuseFormat
-                        ? bulkFormatMappings.computeIfAbsent(
+                        ? formatReaderMappings.computeIfAbsent(
                                 new FormatKey(schemaId, formatIdentifier),
                                 key -> formatSupplier.get())
                         : formatSupplier.get();
@@ -276,7 +275,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     schema,
                     finalReadKeyType,
                     readValueType,
-                    new BulkFormatMappingBuilder(
+                    new FormatReaderMapping.Builder(
                             formatDiscover, readTableFields, fieldsExtractor, filters),
                     pathFactory.createDataFilePathFactory(partition, bucket),
                     options.fileReaderAsyncThreshold().getBytes(),

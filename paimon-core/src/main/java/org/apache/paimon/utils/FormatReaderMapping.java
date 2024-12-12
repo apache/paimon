@@ -124,14 +124,14 @@ public class FormatReaderMapping {
     }
 
     /** Builder for {@link FormatReaderMapping}. */
-    public static class BulkFormatMappingBuilder {
+    public static class Builder {
 
         private final FileFormatDiscover formatDiscover;
         private final List<DataField> readTableFields;
         private final Function<TableSchema, List<DataField>> fieldsExtractor;
         @Nullable private final List<Predicate> filters;
 
-        public BulkFormatMappingBuilder(
+        public Builder(
                 FileFormatDiscover formatDiscover,
                 List<DataField> readTableFields,
                 Function<TableSchema, List<DataField>> fieldsExtractor,
@@ -143,7 +143,7 @@ public class FormatReaderMapping {
         }
 
         /**
-         * There are three steps here to build BulkFormatMapping:
+         * There are three steps here to build {@link FormatReaderMapping}:
          *
          * <p>1. Calculate the readDataFields, which is what we intend to read from the data schema.
          * Meanwhile, generate the indexCastMapping, which is used to map the index of the

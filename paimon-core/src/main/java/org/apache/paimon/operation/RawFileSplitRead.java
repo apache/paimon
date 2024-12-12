@@ -48,7 +48,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FormatReaderMapping;
-import org.apache.paimon.utils.FormatReaderMapping.BulkFormatMappingBuilder;
+import org.apache.paimon.utils.FormatReaderMapping.Builder;
 import org.apache.paimon.utils.IOExceptionSupplier;
 
 import org.slf4j.Logger;
@@ -75,7 +75,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final TableSchema schema;
     private final FileFormatDiscover formatDiscover;
     private final FileStorePathFactory pathFactory;
-    private final Map<FormatKey, FormatReaderMapping> bulkFormatMappings;
+    private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final boolean fileIndexReadEnabled;
 
     private RowType readRowType;
@@ -94,7 +94,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         this.schema = schema;
         this.formatDiscover = formatDiscover;
         this.pathFactory = pathFactory;
-        this.bulkFormatMappings = new HashMap<>();
+        this.formatReaderMappings = new HashMap<>();
         this.fileIndexReadEnabled = fileIndexReadEnabled;
         this.readRowType = rowType;
     }
@@ -150,9 +150,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
 
         List<DataField> readTableFields = readRowType.getFields();
-        BulkFormatMappingBuilder bulkFormatMappingBuilder =
-                new BulkFormatMappingBuilder(
-                        formatDiscover, readTableFields, TableSchema::fields, filters);
+        Builder formatReaderMappingBuilder =
+                new Builder(formatDiscover, readTableFields, TableSchema::fields, filters);
 
         for (int i = 0; i < files.size(); i++) {
             DataFileMeta file = files.get(i);
@@ -161,7 +160,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
             Supplier<FormatReaderMapping> formatSupplier =
                     () ->
-                            bulkFormatMappingBuilder.build(
+                            formatReaderMappingBuilder.build(
                                     formatIdentifier,
                                     schema,
                                     schemaId == schema.id()
@@ -169,7 +168,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                                             : schemaManager.schema(schemaId));
 
             FormatReaderMapping formatReaderMapping =
-                    bulkFormatMappings.computeIfAbsent(
+                    formatReaderMappings.computeIfAbsent(
                             new FormatKey(file.schemaId(), formatIdentifier),
                             key -> formatSupplier.get());
 

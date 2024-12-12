@@ -31,7 +31,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Test for {@link FormatReaderMapping.BulkFormatMappingBuilder}. */
+/** Test for {@link FormatReaderMapping.Builder}. */
 public class FormatReaderMappingTest {
 
     @Test
@@ -79,8 +79,7 @@ public class FormatReaderMappingTest {
         testFields.add(new DataField(1, String.valueOf(1), DataTypes.STRING()));
         testFields.add(new DataField(6, String.valueOf(6), DataTypes.STRING()));
 
-        Pair<int[], RowType> res =
-                FormatReaderMapping.BulkFormatMappingBuilder.trimKeyFields(testFields, allFields);
+        Pair<int[], RowType> res = FormatReaderMapping.Builder.trimKeyFields(testFields, allFields);
 
         Assertions.assertThat(res.getKey()).containsExactly(0, 1, 2, 3, 1, 4, 2, 0, 5);
 
@@ -124,8 +123,7 @@ public class FormatReaderMappingTest {
 
         // map from key fields reading to value fields reading
         Pair<int[], RowType> trimmedKeyPair =
-                FormatReaderMapping.BulkFormatMappingBuilder.trimKeyFields(
-                        readDataFields, readDataFields);
+                FormatReaderMapping.Builder.trimKeyFields(readDataFields, readDataFields);
 
         FormatReaderMapping formatReaderMapping =
                 new FormatReaderMapping(
