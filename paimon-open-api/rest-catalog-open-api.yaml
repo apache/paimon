@@ -75,7 +75,7 @@ paths:
         "409":
           description: Resource has exist
           content:
-            '*/*':
+            application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
@@ -107,7 +107,7 @@ paths:
         "404":
           description: Resource not found
           content:
-            '*/*':
+            application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
@@ -132,7 +132,7 @@ paths:
         "404":
           description: Resource not found
           content:
-            '*/*':
+            application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
