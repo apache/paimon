@@ -131,7 +131,7 @@ public class RESTCatalogTest {
 
     @Test
     public void testDropDatabase() throws Exception {
-        String name = "name";
+        String name = MockRESTMessage.databaseName();
         mockResponse("");
         assertDoesNotThrow(() -> mockRestCatalog.dropDatabase(name, false, true));
         verify(mockRestCatalog, times(1)).dropDatabase(eq(name), eq(false), eq(true));
@@ -140,7 +140,7 @@ public class RESTCatalogTest {
 
     @Test
     public void testDropDatabaseWhenCascadeIsFalseAndNoTables() throws Exception {
-        String name = "name";
+        String name = MockRESTMessage.databaseName();
         boolean cascade = false;
         mockResponse("");
         when(mockRestCatalog.listTables(name)).thenReturn(new ArrayList<>());
@@ -151,7 +151,7 @@ public class RESTCatalogTest {
 
     @Test
     public void testDropDatabaseWhenCascadeIsFalseAndTablesExist() throws Exception {
-        String name = "name";
+        String name = MockRESTMessage.databaseName();
         boolean cascade = false;
         mockResponse("");
         List<String> tables = new ArrayList<>();
