@@ -72,13 +72,8 @@ public class BinlogTable extends AuditLogTable {
         List<DataField> fields = new ArrayList<>();
         fields.add(SpecialFields.ROW_KIND);
         for (DataField field : wrapped.rowType().getFields()) {
-            DataField newField =
-                    new DataField(
-                            field.id(),
-                            field.name(),
-                            new ArrayType(field.type().nullable()), // convert to nullable
-                            field.description());
-            fields.add(newField);
+            // convert to nullable
+            fields.add(field.newType(new ArrayType(field.type().nullable())));
         }
         return new RowType(fields);
     }
@@ -97,6 +92,19 @@ public class BinlogTable extends AuditLogTable {
 
         private BinlogRead(InnerTableRead dataRead) {
             super(dataRead);
+        }
+
+        @Override
+        public InnerTableRead withReadType(RowType readType) {
+            List<DataField> fields = new ArrayList<>();
+            for (DataField field : readType.getFields()) {
+                if (field.name().equals(SpecialFields.ROW_KIND.name())) {
+                    fields.add(field);
+                } else {
+                    fields.add(field.newType(((ArrayType) field.type()).getElementType()));
+                }
+            }
+            return super.withReadType(readType.copy(fields));
         }
 
         @Override
