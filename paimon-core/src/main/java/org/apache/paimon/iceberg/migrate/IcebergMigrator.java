@@ -142,7 +142,7 @@ public class IcebergMigrator implements Migrator {
         Schema paimonSchema = icebergSchemaToPaimonSchema(icebergMetadata);
         Identifier paimonIdentifier = Identifier.create(paimonDatabaseName, paimonTableName);
 
-        paimonCatalog.createDatabase(paimonDatabaseName, false);
+        paimonCatalog.createDatabase(paimonDatabaseName, true);
         paimonCatalog.createTable(paimonIdentifier, paimonSchema, false);
 
         try {
