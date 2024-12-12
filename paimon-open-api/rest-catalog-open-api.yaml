@@ -165,6 +165,15 @@ components:
           type: object
           additionalProperties:
             type: string
+    CreateDatabaseResponse:
+      type: object
+      properties:
+        name:
+          type: string
+        options:
+          type: object
+          additionalProperties:
+            type: string
     ErrorResponse:
       type: object
       properties:
@@ -176,15 +185,6 @@ components:
         stack:
           type: array
           items:
-            type: string
-    CreateDatabaseResponse:
-      type: object
-      properties:
-        name:
-          type: string
-        options:
-          type: object
-          additionalProperties:
             type: string
     DatabaseName:
       type: object

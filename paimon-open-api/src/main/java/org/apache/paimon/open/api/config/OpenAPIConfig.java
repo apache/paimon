@@ -19,8 +19,6 @@
 package org.apache.paimon.open.api.config;
 
 import io.swagger.v3.oas.models.OpenAPI;
-import io.swagger.v3.oas.models.Operation;
-import io.swagger.v3.oas.models.PathItem;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.info.License;
 import io.swagger.v3.oas.models.responses.ApiResponses;
@@ -37,6 +35,7 @@ import java.util.List;
 /** Config for OpenAPI. */
 @Configuration
 public class OpenAPIConfig {
+
     @Value("${openapi.url}")
     private String devUrl;
 
@@ -62,30 +61,35 @@ public class OpenAPIConfig {
         return new OpenAPI().info(info).servers(servers);
     }
 
-    /** Sort schemas alphabetically. So the api generate will in same order everytime. */
+    /** Sort response alphabetically. So the api generate will in same order everytime. */
     @Bean
-    public OpenApiCustomiser sortSchemasAlphabetically() {
-        return this::sortResponseAlphabetically;
-    }
+    public OpenApiCustomiser sortResponseAlphabetically() {
+        return openApi -> {
+            openApi.getPaths()
+                    .values()
+                    .forEach(
+                            path ->
+                                    path.readOperations()
+                                            .forEach(
+                                                    operation -> {
+                                                        ApiResponses responses =
+                                                                operation.getResponses();
+                                                        if (responses != null) {
+                                                            ApiResponses sortedResponses =
+                                                                    new ApiResponses();
+                                                            List<String> keys =
+                                                                    new ArrayList<>(
+                                                                            responses.keySet());
+                                                            keys.sort(Comparator.naturalOrder());
 
-    private void sortResponseAlphabetically(OpenAPI openApi) {
-        for (PathItem path : openApi.getPaths().values()) {
-            for (Operation operation : path.readOperations()) {
-                ApiResponses responses = operation.getResponses();
-                if (responses == null) {
-                    continue;
-                }
+                                                            for (String key : keys) {
+                                                                sortedResponses.addApiResponse(
+                                                                        key, responses.get(key));
+                                                            }
 
-                ApiResponses sortedResponses = new ApiResponses();
-                List<String> keys = new ArrayList<>(responses.keySet());
-                keys.sort(Comparator.naturalOrder());
-
-                for (String key : keys) {
-                    sortedResponses.addApiResponse(key, responses.get(key));
-                }
-
-                operation.setResponses(sortedResponses);
-            }
-        }
+                                                            operation.setResponses(sortedResponses);
+                                                        }
+                                                    }));
+        };
     }
 }
