@@ -19,7 +19,6 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
-import org.apache.paimon.rest.requests.DropDatabaseRequest;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.DatabaseName;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
@@ -44,12 +43,6 @@ public class MockRESTMessage {
         Map<String, String> options = new HashMap<>();
         options.put("a", "b");
         return new CreateDatabaseRequest(name, ignoreIfExists, options);
-    }
-
-    public static DropDatabaseRequest dropDatabaseRequest() {
-        boolean ignoreIfNotExists = true;
-        boolean cascade = true;
-        return new DropDatabaseRequest(ignoreIfNotExists, cascade);
     }
 
     public static CreateDatabaseResponse createDatabaseResponse(String name) {

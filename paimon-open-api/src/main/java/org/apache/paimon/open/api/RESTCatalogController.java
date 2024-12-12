@@ -20,7 +20,6 @@ package org.apache.paimon.open.api;
 
 import org.apache.paimon.rest.ResourcePaths;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
-import org.apache.paimon.rest.requests.DropDatabaseRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.DatabaseName;
@@ -88,7 +87,7 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @GetMapping("/api/v1/{prefix}/databases")
+    @GetMapping("/v1/{prefix}/databases")
     public ListDatabasesResponse listDatabases(@PathVariable String prefix) {
         return new ListDatabasesResponse(ImmutableList.of(new DatabaseName("account")));
     }
@@ -112,7 +111,7 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @PostMapping("/api/v1/{prefix}/databases")
+    @PostMapping("/v1/{prefix}/databases")
     public CreateDatabaseResponse createDatabases(
             @PathVariable String prefix, @RequestBody CreateDatabaseRequest request) {
         Map<String, String> properties = new HashMap<>();
@@ -138,7 +137,7 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @GetMapping("/api/v1/{prefix}/databases/{database}")
+    @GetMapping("/v1/{prefix}/databases/{database}")
     public GetDatabaseResponse getDatabases(
             @PathVariable String prefix, @PathVariable String database) {
         Map<String, String> options = new HashMap<>();
@@ -157,9 +156,6 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @DeleteMapping("/api/v1/{prefix}/databases/{database}")
-    public void dropDatabases(
-            @PathVariable String prefix,
-            @PathVariable String database,
-            @RequestBody DropDatabaseRequest request) {}
+    @DeleteMapping("/v1/{prefix}/databases/{database}")
+    public void dropDatabases(@PathVariable String prefix, @PathVariable String database) {}
 }

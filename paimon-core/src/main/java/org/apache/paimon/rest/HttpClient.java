@@ -96,14 +96,12 @@ public class HttpClient implements RESTClient {
     }
 
     @Override
-    public <T extends RESTResponse> T delete(
-            String path, RESTRequest body, Map<String, String> headers) {
+    public <T extends RESTResponse> T delete(String path, Map<String, String> headers) {
         try {
-            RequestBody requestBody = buildRequestBody(body);
             Request request =
                     new Request.Builder()
                             .url(uri + path)
-                            .delete(requestBody)
+                            .delete()
                             .headers(Headers.of(headers))
                             .build();
             return exec(request, null);

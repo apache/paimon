@@ -124,6 +124,14 @@ public class HttpClientTest {
         verify(errorHandler, times(1)).accept(any());
     }
 
+    @Test
+    public void testAddRESTRequestToUrlAsQueryParam() throws Exception {
+        String url = "http://localhost:8080/v1/api/mock";
+        RESTRequest obj = new MockRESTData("test");
+        String result = HttpClient.addRESTRequestToUrlAsQueryParam(url, obj);
+        assertEquals("http://localhost:8080/v1/api/mock?data=test", result);
+    }
+
     private Map<String, String> headers(String token) {
         Map<String, String> header = new HashMap<>();
         header.put("Authorization", "Bearer " + token);
