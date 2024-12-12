@@ -113,23 +113,15 @@ public class HttpClientTest {
     @Test
     public void testDeleteSuccess() {
         mockHttpCallWithCode(mockResponseDataStr, 200);
-        MockRESTData response = httpClient.delete(MOCK_PATH, mockResponseData, headers);
+        MockRESTData response = httpClient.delete(MOCK_PATH, headers);
         verify(errorHandler, times(0)).accept(any());
     }
 
     @Test
     public void testDeleteFail() {
         mockHttpCallWithCode(mockResponseDataStr, 400);
-        httpClient.delete(MOCK_PATH, mockResponseData, headers);
+        httpClient.delete(MOCK_PATH, headers);
         verify(errorHandler, times(1)).accept(any());
-    }
-
-    @Test
-    public void testAddRESTRequestToUrlAsQueryParam() throws Exception {
-        String url = "http://localhost:8080/v1/api/mock";
-        RESTRequest obj = new MockRESTData("test");
-        String result = HttpClient.addRESTRequestToUrlAsQueryParam(url, obj);
-        assertEquals("http://localhost:8080/v1/api/mock?data=test", result);
     }
 
     private Map<String, String> headers(String token) {

@@ -19,14 +19,19 @@
 package org.apache.paimon.open.api.config;
 
 import io.swagger.v3.oas.models.OpenAPI;
+import io.swagger.v3.oas.models.Operation;
+import io.swagger.v3.oas.models.PathItem;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.info.License;
+import io.swagger.v3.oas.models.responses.ApiResponses;
 import io.swagger.v3.oas.models.servers.Server;
+import org.springdoc.core.customizers.OpenApiCustomiser;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 /** Config for OpenAPI. */
@@ -55,5 +60,31 @@ public class OpenAPIConfig {
         List<Server> servers = new ArrayList<>();
         servers.add(server);
         return new OpenAPI().info(info).servers(servers);
+    }
+
+    @Bean
+    public OpenApiCustomiser sortSchemasAlphabetically() {
+        return this::sortResponseAlphabetically;
+    }
+
+    private void sortResponseAlphabetically(OpenAPI openApi) {
+        for (PathItem path : openApi.getPaths().values()) {
+            for (Operation operation : path.readOperations()) {
+                ApiResponses responses = operation.getResponses();
+                if (responses == null) {
+                    continue;
+                }
+
+                ApiResponses sortedResponses = new ApiResponses();
+                List<String> keys = new ArrayList<>(responses.keySet());
+                keys.sort(Comparator.naturalOrder());
+
+                for (String key : keys) {
+                    sortedResponses.addApiResponse(key, responses.get(key));
+                }
+
+                operation.setResponses(sortedResponses);
+            }
+        }
     }
 }

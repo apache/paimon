@@ -46,6 +46,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -160,7 +161,9 @@ public class RESTCatalog implements Catalog {
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException {
         try {
-            // todo: support cascade when table api is ready
+            if (!cascade && !listTables(name).isEmpty()) {
+                throw new DatabaseNotEmptyException(name);
+            }
             client.delete(resourcePaths.database(name), headers());
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
@@ -181,7 +184,7 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
-        throw new UnsupportedOperationException();
+        return new ArrayList<String>();
     }
 
     @Override

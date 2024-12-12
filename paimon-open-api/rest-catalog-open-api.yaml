@@ -28,7 +28,7 @@ servers:
   - url: http://localhost:8080
     description: Server URL in Development environment
 paths:
-  /api/v1/{prefix}/databases:
+  /v1/{prefix}/databases:
     get:
       tags:
         - database
@@ -66,21 +66,21 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateDatabaseRequest'
       responses:
-        "500":
-          description: Internal Server Error
-        "409":
-          description: Resource has exist
-          content:
-            '*/*':
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
         "200":
           description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/CreateDatabaseResponse'
-  /api/v1/{prefix}/databases/{database}:
+        "409":
+          description: Resource has exist
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}:
     get:
       tags:
         - database
@@ -128,11 +128,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/DropDatabaseRequest'
       responses:
         "404":
           description: Resource not found
@@ -142,21 +137,21 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /api/v1/config:
+  /v1/config:
     get:
       tags:
         - config
       summary: Get Config
       operationId: getConfig
       responses:
-        "500":
-          description: Internal Server Error
         "200":
           description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConfigResponse'
+        "500":
+          description: Internal Server Error
 components:
   schemas:
     CreateDatabaseRequest:
@@ -223,10 +218,3 @@ components:
           type: object
           additionalProperties:
             type: string
-    DropDatabaseRequest:
-      type: object
-      properties:
-        ignoreIfNotExists:
-          type: boolean
-        cascade:
-          type: boolean
