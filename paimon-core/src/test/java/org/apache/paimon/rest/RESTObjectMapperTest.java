@@ -19,7 +19,6 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
-import org.apache.paimon.rest.requests.DropDatabaseRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
@@ -71,15 +70,6 @@ public class RESTObjectMapperTest {
         assertEquals(request.getName(), parseData.getName());
         assertEquals(request.getIgnoreIfExists(), parseData.getIgnoreIfExists());
         assertEquals(request.getOptions().size(), parseData.getOptions().size());
-    }
-
-    @Test
-    public void dropDatabaseRequestParseTest() throws Exception {
-        DropDatabaseRequest request = MockRESTMessage.dropDatabaseRequest();
-        String requestStr = mapper.writeValueAsString(request);
-        DropDatabaseRequest parseData = mapper.readValue(requestStr, DropDatabaseRequest.class);
-        assertEquals(request.getIgnoreIfNotExists(), parseData.getIgnoreIfNotExists());
-        assertEquals(request.getCascade(), parseData.getCascade());
     }
 
     @Test

@@ -23,7 +23,7 @@ import java.util.StringJoiner;
 /** Resource paths for REST catalog. */
 public class ResourcePaths {
 
-    public static final String V1_CONFIG = "/api/v1/config";
+    public static final String V1_CONFIG = "/v1/config";
     private static final StringJoiner SLASH = new StringJoiner("/");
 
     public static ResourcePaths forCatalogProperties(String prefix) {
@@ -37,10 +37,10 @@ public class ResourcePaths {
     }
 
     public String databases() {
-        return SLASH.add("api").add("v1").add(prefix).add("databases").toString();
+        return SLASH.add("v1").add(prefix).add("databases").toString();
     }
 
     public String database(String databaseName) {
-        return SLASH.add("api").add("v1").add(prefix).add("databases").add(databaseName).toString();
+        return SLASH.add("v1").add(prefix).add("databases").add(databaseName).toString();
     }
 }
