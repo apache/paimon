@@ -20,6 +20,7 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Database;
+import org.apache.paimon.catalog.DatabaseChange;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -170,6 +171,12 @@ public class RESTCatalog implements Catalog {
                 throw new DatabaseNotExistException(name);
             }
         }
+    }
+
+    @Override
+    public void alertDatabase(String name, List<DatabaseChange> changes, boolean ignoreIfNotExists)
+            throws DatabaseNotExistException {
+        throw new UnsupportedOperationException();
     }
 
     @Override

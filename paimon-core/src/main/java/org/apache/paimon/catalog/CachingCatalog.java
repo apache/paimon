@@ -188,6 +188,13 @@ public class CachingCatalog extends DelegateCatalog {
     }
 
     @Override
+    public void alertDatabase(String name, List<DatabaseChange> changes, boolean ignoreIfNotExists)
+            throws DatabaseNotExistException {
+        super.alertDatabase(name, changes, ignoreIfNotExists);
+        databaseCache.invalidate(name);
+    }
+
+    @Override
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
             throws TableNotExistException {
         super.dropTable(identifier, ignoreIfNotExists);

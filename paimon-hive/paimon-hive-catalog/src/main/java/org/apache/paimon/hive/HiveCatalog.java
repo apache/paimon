@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
+import org.apache.paimon.catalog.DatabaseChange;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.data.BinaryRow;
@@ -52,6 +53,8 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.apache.flink.table.hive.LegacyHiveClasses;
 import org.apache.hadoop.conf.Configuration;
@@ -402,6 +405,24 @@ public class HiveCatalog extends AbstractCatalog {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted in call to dropDatabase " + name, e);
+        }
+    }
+
+    @Override
+    protected void alertDatabaseImpl(String name, List<DatabaseChange> changes) {
+        try {
+            Database database = clients.run(client -> client.getDatabase(name));
+            Map<String, String> parameter = Maps.newHashMap();
+            parameter.putAll(database.getParameters());
+            changes.forEach(change -> change.apply(parameter));
+            Map<String, String> newProperties = Collections.unmodifiableMap(parameter);
+            Database alertDatabase = convertToHiveDatabase(name, newProperties);
+            clients.execute(client -> client.alterDatabase(name, alertDatabase));
+        } catch (TException e) {
+            throw new RuntimeException("Failed to alert database " + name, e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted in call to alertDatabase " + name, e);
         }
     }
 

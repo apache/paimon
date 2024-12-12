@@ -230,6 +230,22 @@ public abstract class AbstractCatalog implements Catalog {
     protected abstract void dropDatabaseImpl(String name);
 
     @Override
+    public void alertDatabase(String name, List<DatabaseChange> changes, boolean ignoreIfNotExists)
+            throws DatabaseNotExistException {
+        checkNotSystemDatabase(name);
+        try {
+            getDatabase(name);
+        } catch (DatabaseNotExistException e) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new DatabaseNotExistException(name);
+        }
+    }
+
+    protected abstract void alertDatabaseImpl(String name, List<DatabaseChange> changes);
+
+    @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         if (isSystemDatabase(databaseName)) {
             return SystemTableLoader.loadGlobalTableNames();

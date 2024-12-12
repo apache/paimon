@@ -53,6 +53,8 @@ public interface PrivilegeChecker extends Serializable {
 
     void assertCanDropDatabase(String databaseName);
 
+    void assertCanAlertDatabase(String databaseName);
+
     void assertCanCreateDatabase();
 
     void assertCanCreateUser();
