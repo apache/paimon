@@ -212,6 +212,9 @@ public abstract class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<Inte
         if (ioManager == null) {
             return;
         }
+        if (forceBufferSpill) {
+            return;
+        }
         forceBufferSpill = true;
         LOG.info(
                 "Force buffer spill for append-only file store write, writer number is: {}",

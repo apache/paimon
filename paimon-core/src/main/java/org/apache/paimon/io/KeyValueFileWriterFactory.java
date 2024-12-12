@@ -32,6 +32,8 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
+import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.StatsCollectorFactories;
@@ -39,10 +41,13 @@ import org.apache.paimon.utils.StatsCollectorFactories;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /** A factory to create {@link FileWriter}s for writing {@link KeyValue} files. */
 public class KeyValueFileWriterFactory {
@@ -59,15 +64,13 @@ public class KeyValueFileWriterFactory {
     private KeyValueFileWriterFactory(
             FileIO fileIO,
             long schemaId,
-            RowType keyType,
-            RowType valueType,
             WriteFormatContext formatContext,
             long suggestedFileSize,
             CoreOptions options) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
-        this.keyType = keyType;
-        this.valueType = valueType;
+        this.keyType = formatContext.keyType;
+        this.valueType = formatContext.valueType;
         this.formatContext = formatContext;
         this.suggestedFileSize = suggestedFileSize;
         this.options = options;
@@ -108,7 +111,7 @@ public class KeyValueFileWriterFactory {
 
     private KeyValueDataFileWriter createDataFileWriter(
             Path path, int level, FileSource fileSource) {
-        return options.dataFileThinMode()
+        return formatContext.thinModeEnabled()
                 ? new KeyValueThinDataFileWriterImpl(
                         fileIO,
                         formatContext.writerFactory(level),
@@ -211,13 +214,12 @@ public class KeyValueFileWriterFactory {
                             partition,
                             bucket,
                             keyType,
-                            KeyValue.schema(
-                                    options.dataFileThinMode() ? RowType.of() : keyType, valueType),
+                            valueType,
                             fileFormat,
                             format2PathFactory,
                             options);
             return new KeyValueFileWriterFactory(
-                    fileIO, schemaId, keyType, valueType, context, suggestedFileSize, options);
+                    fileIO, schemaId, context, suggestedFileSize, options);
         }
     }
 
@@ -230,14 +232,24 @@ public class KeyValueFileWriterFactory {
         private final Map<String, DataFilePathFactory> format2PathFactory;
         private final Map<String, FormatWriterFactory> format2WriterFactory;
 
+        private final RowType keyType;
+        private final RowType valueType;
+        private final boolean thinModeEnabled;
+
         private WriteFormatContext(
                 BinaryRow partition,
                 int bucket,
                 RowType keyType,
-                RowType rowType,
+                RowType valueType,
                 FileFormat defaultFormat,
                 Map<String, FileStorePathFactory> parentFactories,
                 CoreOptions options) {
+            this.keyType = keyType;
+            this.valueType = valueType;
+            this.thinModeEnabled =
+                    options.dataFileThinMode() && supportsThinMode(keyType, valueType);
+            RowType writeRowType =
+                    KeyValue.schema(thinModeEnabled ? RowType.of() : keyType, valueType);
             Map<Integer, String> fileFormatPerLevel = options.fileFormatPerLevel();
             this.level2Format =
                     level ->
@@ -254,7 +266,9 @@ public class KeyValueFileWriterFactory {
             this.format2WriterFactory = new HashMap<>();
             SimpleColStatsCollector.Factory[] statsCollectorFactories =
                     StatsCollectorFactories.createStatsFactories(
-                            options, rowType.getFieldNames(), keyType.getFieldNames());
+                            options,
+                            writeRowType.getFieldNames(),
+                            thinModeEnabled ? Collections.emptyList() : keyType.getFieldNames());
             for (String format : parentFactories.keySet()) {
                 format2PathFactory.put(
                         format,
@@ -270,9 +284,28 @@ public class KeyValueFileWriterFactory {
                         format.equals("avro")
                                 ? Optional.empty()
                                 : fileFormat.createStatsExtractor(
-                                        rowType, statsCollectorFactories));
-                format2WriterFactory.put(format, fileFormat.createWriterFactory(rowType));
+                                        writeRowType, statsCollectorFactories));
+                format2WriterFactory.put(format, fileFormat.createWriterFactory(writeRowType));
             }
+        }
+
+        private boolean supportsThinMode(RowType keyType, RowType valueType) {
+            Set<Integer> keyFieldIds =
+                    valueType.getFields().stream().map(DataField::id).collect(Collectors.toSet());
+
+            for (DataField field : keyType.getFields()) {
+                if (!SpecialFields.isKeyField(field.name())) {
+                    return false;
+                }
+                if (!keyFieldIds.contains(field.id() - SpecialFields.KEY_FIELD_ID_START)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private boolean thinModeEnabled() {
+            return thinModeEnabled;
         }
 
         @Nullable
