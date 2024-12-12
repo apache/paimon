@@ -33,7 +33,6 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
 
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -101,12 +100,14 @@ public class StatsTableTest extends TableTestBase {
         assertThat(keyStats.maxValues().isNullAt(0)).isFalse();
     }
 
-    @Test
-    public void testPartitionStatsDenseMode() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testPartitionStatsDenseMode(boolean thinMode) throws Exception {
         Identifier identifier = identifier("T");
         Options options = new Options();
         options.set(METADATA_STATS_MODE, "NONE");
         options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.DATA_FILE_THIN_MODE, thinMode);
         Schema schema =
                 Schema.newBuilder()
                         .column("pt", DataTypes.INT())
@@ -143,9 +144,10 @@ public class StatsTableTest extends TableTestBase {
         DataFileMeta file =
                 manifestFile.read(manifest.fileName(), manifest.fileSize()).get(0).file();
         SimpleStats recordStats = file.valueStats();
-        assertThat(file.valueStatsCols().size()).isEqualTo(1);
-        assertThat(recordStats.minValues().getFieldCount()).isEqualTo(1);
-        assertThat(recordStats.maxValues().getFieldCount()).isEqualTo(1);
-        assertThat(recordStats.nullCounts().size()).isEqualTo(1);
+        int count = thinMode ? 1 : 0;
+        assertThat(file.valueStatsCols().size()).isEqualTo(count);
+        assertThat(recordStats.minValues().getFieldCount()).isEqualTo(count);
+        assertThat(recordStats.maxValues().getFieldCount()).isEqualTo(count);
+        assertThat(recordStats.nullCounts().size()).isEqualTo(count);
     }
 }
