@@ -45,8 +45,8 @@ import java.util.function.Function;
 import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_ID_START;
 
-/** Class with index mapping and bulk format. */
-public class BulkFormatMapping {
+/** Class with index mapping and format reader. */
+public class FormatReaderMapping {
 
     // Index mapping from data schema fields to table schema fields, this is used to realize paimon
     // schema evolution. And it combines trimeedKeyMapping, which maps key fields to the value
@@ -56,21 +56,21 @@ public class BulkFormatMapping {
     @Nullable private final CastFieldGetter[] castMapping;
     // partition fields mapping, add partition fields to the read fields
     @Nullable private final Pair<int[], RowType> partitionPair;
-    private final FormatReaderFactory bulkFormat;
+    private final FormatReaderFactory readerFactory;
     private final TableSchema dataSchema;
     private final List<Predicate> dataFilters;
 
-    public BulkFormatMapping(
+    public FormatReaderMapping(
             @Nullable int[] indexMapping,
             @Nullable CastFieldGetter[] castMapping,
             @Nullable int[] trimmedKeyMapping,
             @Nullable Pair<int[], RowType> partitionPair,
-            FormatReaderFactory bulkFormat,
+            FormatReaderFactory readerFactory,
             TableSchema dataSchema,
             List<Predicate> dataFilters) {
         this.indexMapping = combine(indexMapping, trimmedKeyMapping);
         this.castMapping = castMapping;
-        this.bulkFormat = bulkFormat;
+        this.readerFactory = readerFactory;
         this.partitionPair = partitionPair;
         this.dataSchema = dataSchema;
         this.dataFilters = dataFilters;
@@ -112,7 +112,7 @@ public class BulkFormatMapping {
     }
 
     public FormatReaderFactory getReaderFactory() {
-        return bulkFormat;
+        return readerFactory;
     }
 
     public TableSchema getDataSchema() {
@@ -123,7 +123,7 @@ public class BulkFormatMapping {
         return dataFilters;
     }
 
-    /** Builder for {@link BulkFormatMapping}. */
+    /** Builder for {@link FormatReaderMapping}. */
     public static class BulkFormatMappingBuilder {
 
         private final FileFormatDiscover formatDiscover;
@@ -160,7 +160,7 @@ public class BulkFormatMapping {
          * fields. We generate the partitionMappingAndFieldsWithoutPartitionPair which helps reduce
          * the real read fields and tell us how to map it back.
          */
-        public BulkFormatMapping build(
+        public FormatReaderMapping build(
                 String formatIdentifier, TableSchema tableSchema, TableSchema dataSchema) {
 
             // extract the whole data fields in logic.
@@ -187,7 +187,7 @@ public class BulkFormatMapping {
             // build read filters
             List<Predicate> readFilters = readFilters(filters, tableSchema, dataSchema);
 
-            return new BulkFormatMapping(
+            return new FormatReaderMapping(
                     indexCastMapping.getIndexMapping(),
                     indexCastMapping.getCastMapping(),
                     trimmedKeyPair.getLeft(),

@@ -46,9 +46,9 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.BulkFormatMapping;
-import org.apache.paimon.utils.BulkFormatMapping.BulkFormatMappingBuilder;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.FormatReaderMapping;
+import org.apache.paimon.utils.FormatReaderMapping.BulkFormatMappingBuilder;
 import org.apache.paimon.utils.IOExceptionSupplier;
 
 import org.slf4j.Logger;
@@ -75,7 +75,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final TableSchema schema;
     private final FileFormatDiscover formatDiscover;
     private final FileStorePathFactory pathFactory;
-    private final Map<FormatKey, BulkFormatMapping> bulkFormatMappings;
+    private final Map<FormatKey, FormatReaderMapping> bulkFormatMappings;
     private final boolean fileIndexReadEnabled;
 
     private RowType readRowType;
@@ -159,7 +159,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
             long schemaId = file.schemaId();
 
-            Supplier<BulkFormatMapping> formatSupplier =
+            Supplier<FormatReaderMapping> formatSupplier =
                     () ->
                             bulkFormatMappingBuilder.build(
                                     formatIdentifier,
@@ -168,7 +168,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                                             ? schema
                                             : schemaManager.schema(schemaId));
 
-            BulkFormatMapping bulkFormatMapping =
+            FormatReaderMapping formatReaderMapping =
                     bulkFormatMappings.computeIfAbsent(
                             new FormatKey(file.schemaId(), formatIdentifier),
                             key -> formatSupplier.get());
@@ -181,7 +181,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                                     partition,
                                     file,
                                     dataFilePathFactory,
-                                    bulkFormatMapping,
+                                    formatReaderMapping,
                                     dvFactory));
         }
 
@@ -192,7 +192,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             BinaryRow partition,
             DataFileMeta file,
             DataFilePathFactory dataFilePathFactory,
-            BulkFormatMapping bulkFormatMapping,
+            FormatReaderMapping formatReaderMapping,
             IOExceptionSupplier<DeletionVector> dvFactory)
             throws IOException {
         FileIndexResult fileIndexResult = null;
@@ -200,8 +200,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             fileIndexResult =
                     FileIndexEvaluator.evaluate(
                             fileIO,
-                            bulkFormatMapping.getDataSchema(),
-                            bulkFormatMapping.getDataFilters(),
+                            formatReaderMapping.getDataSchema(),
+                            formatReaderMapping.getDataFilters(),
                             dataFilePathFactory,
                             file);
             if (!fileIndexResult.remain()) {
@@ -217,11 +217,11 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         fileIndexResult);
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
-                        bulkFormatMapping.getReaderFactory(),
+                        formatReaderMapping.getReaderFactory(),
                         formatReaderContext,
-                        bulkFormatMapping.getIndexMapping(),
-                        bulkFormatMapping.getCastMapping(),
-                        PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
+                        formatReaderMapping.getIndexMapping(),
+                        formatReaderMapping.getCastMapping(),
+                        PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition));
 
         if (fileIndexResult instanceof BitmapIndexResult) {
             fileRecordReader =

@@ -40,9 +40,9 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.AsyncRecordReader;
-import org.apache.paimon.utils.BulkFormatMapping;
-import org.apache.paimon.utils.BulkFormatMapping.BulkFormatMappingBuilder;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.FormatReaderMapping;
+import org.apache.paimon.utils.FormatReaderMapping.BulkFormatMappingBuilder;
 
 import javax.annotation.Nullable;
 
@@ -68,7 +68,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
     private final DataFilePathFactory pathFactory;
     private final long asyncThreshold;
 
-    private final Map<FormatKey, BulkFormatMapping> bulkFormatMappings;
+    private final Map<FormatKey, FormatReaderMapping> bulkFormatMappings;
     private final BinaryRow partition;
     private final DeletionVector.Factory dvFactory;
 
@@ -120,14 +120,14 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             throws IOException {
         String formatIdentifier = DataFilePathFactory.formatIdentifier(fileName);
 
-        Supplier<BulkFormatMapping> formatSupplier =
+        Supplier<FormatReaderMapping> formatSupplier =
                 () ->
                         bulkFormatMappingBuilder.build(
                                 formatIdentifier,
                                 schema,
                                 schemaId == schema.id() ? schema : schemaManager.schema(schemaId));
 
-        BulkFormatMapping bulkFormatMapping =
+        FormatReaderMapping formatReaderMapping =
                 reuseFormat
                         ? bulkFormatMappings.computeIfAbsent(
                                 new FormatKey(schemaId, formatIdentifier),
@@ -137,14 +137,14 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
 
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
-                        bulkFormatMapping.getReaderFactory(),
+                        formatReaderMapping.getReaderFactory(),
                         orcPoolSize == null
                                 ? new FormatReaderContext(fileIO, filePath, fileSize)
                                 : new OrcFormatReaderContext(
                                         fileIO, filePath, fileSize, orcPoolSize),
-                        bulkFormatMapping.getIndexMapping(),
-                        bulkFormatMapping.getCastMapping(),
-                        PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
+                        formatReaderMapping.getIndexMapping(),
+                        formatReaderMapping.getCastMapping(),
+                        PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition));
 
         Optional<DeletionVector> deletionVector = dvFactory.create(fileName);
         if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
