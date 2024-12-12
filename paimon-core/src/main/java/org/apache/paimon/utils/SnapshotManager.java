@@ -21,6 +21,7 @@ package org.apache.paimon.utils;
 import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileIOUtils;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 
@@ -883,6 +884,6 @@ public class SnapshotManager implements Serializable {
 
     private void commitHint(long snapshotId, String fileName, Path dir) throws IOException {
         Path hintFile = new Path(dir, fileName);
-        fileIO.overwriteFileUtf8(hintFile, String.valueOf(snapshotId));
+        FileIOUtils.overwriteFileUtf8WithRetry(fileIO, hintFile, String.valueOf(snapshotId), 3);
     }
 }
