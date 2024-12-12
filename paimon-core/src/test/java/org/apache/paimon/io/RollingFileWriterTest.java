@@ -67,6 +67,7 @@ public class RollingFileWriterTest {
     }
 
     public void initialize(String identifier, boolean statsDenseStore) {
+        TablePathProvider tablePathProvider = new TablePathProvider(new Path(tempDir.toString()));
         FileFormat fileFormat = FileFormat.fromIdentifier(identifier, new Options());
         rollingFileWriter =
                 new RollingFileWriter<>(
@@ -75,7 +76,11 @@ public class RollingFileWriterTest {
                                         LocalFileIO.create(),
                                         fileFormat.createWriterFactory(SCHEMA),
                                         new DataFilePathFactory(
-                                                        new Path(tempDir + "/bucket-0"),
+                                                        tablePathProvider.getDataFileExternalPath(),
+                                                        new Path(
+                                                                tablePathProvider
+                                                                                .getReleativeTableWritePath()
+                                                                        + "/bucket-0"),
                                                         CoreOptions.FILE_FORMAT
                                                                 .defaultValue()
                                                                 .toString(),
@@ -103,7 +108,8 @@ public class RollingFileWriterTest {
                                         new FileIndexOptions(),
                                         FileSource.APPEND,
                                         true,
-                                        statsDenseStore),
+                                        statsDenseStore,
+                                        tablePathProvider.getTableWritePath()),
                         TARGET_FILE_SIZE);
     }
 

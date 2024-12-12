@@ -21,14 +21,14 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.HybridFileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.io.TablePathProvider;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.StringUtils;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.PATH;
@@ -39,11 +39,8 @@ public class FileStoreTableFactory {
 
     public static FileStoreTable create(CatalogContext context) {
         FileIO fileIO;
-        try {
-            fileIO = FileIO.get(CoreOptions.path(context.options()), context);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        fileIO = new HybridFileIO();
+        fileIO.configure(context);
         return create(fileIO, context.options());
     }
 
@@ -86,9 +83,17 @@ public class FileStoreTableFactory {
             TableSchema tableSchema,
             Options dynamicOptions,
             CatalogEnvironment catalogEnvironment) {
+        CoreOptions coreOptions = CoreOptions.fromMap(tableSchema.options());
+        Path dataFileExternalPath = null;
+        String dataFileExternalPathString = coreOptions.getDataFileExternalPath();
+        if (dataFileExternalPathString != null) {
+            dataFileExternalPath = new Path(dataFileExternalPathString);
+        }
+        TablePathProvider tablePathProvider =
+                new TablePathProvider(tablePath, dataFileExternalPath);
         FileStoreTable table =
                 createWithoutFallbackBranch(
-                        fileIO, tablePath, tableSchema, dynamicOptions, catalogEnvironment);
+                        fileIO, tablePathProvider, tableSchema, dynamicOptions, catalogEnvironment);
 
         Options options = new Options(table.options());
         String fallbackBranch = options.get(CoreOptions.SCAN_FALLBACK_BRANCH);
@@ -105,7 +110,11 @@ public class FileStoreTableFactory {
                     fallbackBranch);
             FileStoreTable fallbackTable =
                     createWithoutFallbackBranch(
-                            fileIO, tablePath, schema.get(), branchOptions, catalogEnvironment);
+                            fileIO,
+                            tablePathProvider,
+                            schema.get(),
+                            branchOptions,
+                            catalogEnvironment);
             table = new FallbackReadFileStoreTable(table, fallbackTable);
         }
 
@@ -114,16 +123,28 @@ public class FileStoreTableFactory {
 
     public static FileStoreTable createWithoutFallbackBranch(
             FileIO fileIO,
-            Path tablePath,
+            TablePathProvider tablePathProvider,
             TableSchema tableSchema,
             Options dynamicOptions,
             CatalogEnvironment catalogEnvironment) {
         FileStoreTable table =
                 tableSchema.primaryKeys().isEmpty()
                         ? new AppendOnlyFileStoreTable(
-                                fileIO, tablePath, tableSchema, catalogEnvironment)
+                                fileIO, tablePathProvider, tableSchema, catalogEnvironment)
                         : new PrimaryKeyFileStoreTable(
-                                fileIO, tablePath, tableSchema, catalogEnvironment);
+                                fileIO, tablePathProvider, tableSchema, catalogEnvironment);
         return table.copy(dynamicOptions.toMap());
+    }
+
+    private static String getDatabaseFullName(Path tablePath) {
+        return tablePath.getParent().getName();
+    }
+
+    private static String getWarehousePathString(Path tablePath) {
+        return tablePath.getParent().getParent().toString();
+    }
+
+    private static String getTableName(Path tablePath) {
+        return tablePath.getName();
     }
 }

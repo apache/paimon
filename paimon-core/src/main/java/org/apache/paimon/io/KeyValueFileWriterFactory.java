@@ -121,7 +121,8 @@ public class KeyValueFileWriterFactory {
                 formatContext.compression(level),
                 options,
                 fileSource,
-                fileIndexOptions);
+                fileIndexOptions,
+                formatContext.pathFactory(level).getDefaultWriteRootPath());
     }
 
     public void deleteFile(String filename, int level) {

@@ -131,6 +131,13 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("The file path of this table in the filesystem.");
 
+    @ExcludeFromDocumentation("Internal use only")
+    public static final ConfigOption<String> WAREHOUSE_ROOT_PATH =
+            key("warehouse.root-path")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("The file path of the warehouse in the filesystem.");
+
     public static final ConfigOption<String> BRANCH =
             key("branch").stringType().defaultValue("main").withDescription("Specify branch name.");
 
@@ -1514,6 +1521,13 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("The serialized refresh handler of materialized table.");
 
+    public static final ConfigOption<String> DATA_FILE_EXTERNAL_PATH =
+            key("data-file.external-path")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The location where the data of this table is currently written.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -2350,6 +2364,21 @@ public class CoreOptions implements Serializable {
 
     public boolean asyncFileWrite() {
         return options.get(ASYNC_FILE_WRITE);
+    }
+
+    public String getDataFileExternalPath() {
+        return options.get(DATA_FILE_EXTERNAL_PATH);
+    }
+
+    public String getWarehouseRootPath() {
+        return options.get(WAREHOUSE_ROOT_PATH);
+    }
+
+    public String getDataWriteRootPath() {
+        if (getDataFileExternalPath() == null || getDataFileExternalPath().isEmpty()) {
+            return getWarehouseRootPath();
+        }
+        return getDataFileExternalPath();
     }
 
     public boolean statsDenseStore() {

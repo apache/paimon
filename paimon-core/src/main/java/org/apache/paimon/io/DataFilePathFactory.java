@@ -32,6 +32,8 @@ public class DataFilePathFactory {
 
     public static final String INDEX_PATH_SUFFIX = ".index";
 
+    private final Path defaultWriteRootPath;
+    private final Path relativeDataFilePath;
     private final Path parent;
     private final String uuid;
 
@@ -43,13 +45,15 @@ public class DataFilePathFactory {
     private final String fileCompression;
 
     public DataFilePathFactory(
-            Path parent,
+            Path defaultWriteRootPath,
+            Path relativeDataFilePath,
             String formatIdentifier,
             String dataFilePrefix,
             String changelogFilePrefix,
             boolean fileSuffixIncludeCompression,
             String fileCompression) {
-        this.parent = parent;
+        this.defaultWriteRootPath = defaultWriteRootPath;
+        this.relativeDataFilePath = relativeDataFilePath;
         this.uuid = UUID.randomUUID().toString();
         this.pathCount = new AtomicInteger(0);
         this.formatIdentifier = formatIdentifier;
@@ -57,6 +61,7 @@ public class DataFilePathFactory {
         this.changelogFilePrefix = changelogFilePrefix;
         this.fileSuffixIncludeCompression = fileSuffixIncludeCompression;
         this.fileCompression = fileCompression;
+        this.parent = new Path(this.defaultWriteRootPath, this.relativeDataFilePath);
     }
 
     public Path newPath() {
@@ -80,6 +85,19 @@ public class DataFilePathFactory {
 
     public Path toPath(String fileName) {
         return new Path(parent + "/" + fileName);
+    }
+
+    /**
+     * @param rootLocation the root location of the file
+     * @param fileName the file name
+     * @return the path of the file
+     */
+    public Path toPath(Path rootLocation, String fileName) {
+        if (rootLocation == null || rootLocation.toString().isEmpty()) {
+            return new Path(parent + "/" + fileName);
+        }
+        Path tmpParent = new Path(rootLocation, relativeDataFilePath);
+        return new Path(tmpParent + "/" + fileName);
     }
 
     @VisibleForTesting
@@ -117,5 +135,9 @@ public class DataFilePathFactory {
         }
 
         return fileName.substring(index + 1);
+    }
+
+    public Path getDefaultWriteRootPath() {
+        return defaultWriteRootPath;
     }
 }

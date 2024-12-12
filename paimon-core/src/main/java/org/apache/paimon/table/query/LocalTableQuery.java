@@ -166,7 +166,8 @@ public class LocalTableQuery implements TableQuery {
                                             file.schemaId(),
                                             file.fileName(),
                                             file.fileSize(),
-                                            file.level());
+                                            file.level(),
+                                            file.getDataRootLocation());
                             if (cacheRowFilter != null) {
                                 reader =
                                         reader.filter(

@@ -24,6 +24,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.HashIndexFile;
 import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.io.TablePathProvider;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
@@ -82,6 +83,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Nullable private final SegmentsCache<Path> writeManifestCache;
     @Nullable private SegmentsCache<Path> readManifestCache;
     @Nullable private Cache<Path, Snapshot> snapshotCache;
+    private final TablePathProvider tablePathProvider;
 
     protected AbstractFileStore(
             FileIO fileIO,
@@ -90,7 +92,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             String tableName,
             CoreOptions options,
             RowType partitionType,
-            CatalogEnvironment catalogEnvironment) {
+            CatalogEnvironment catalogEnvironment,
+            TablePathProvider tablePathProvider) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
@@ -101,6 +104,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         this.writeManifestCache =
                 SegmentsCache.create(
                         options.pageSize(), options.writeManifestCache(), Long.MAX_VALUE);
+        this.tablePathProvider = tablePathProvider;
     }
 
     @Override
@@ -110,7 +114,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     protected FileStorePathFactory pathFactory(String format) {
         return new FileStorePathFactory(
-                options.path(),
+                tablePathProvider,
                 partitionType,
                 options.partitionDefaultName(),
                 format,

@@ -35,6 +35,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.TablePathProvider;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryPoolFactory;
@@ -125,7 +126,7 @@ public class AppendOnlyWriterTest {
         DataFileMeta meta = increment.newFilesIncrement().newFiles().get(0);
         assertThat(meta).isNotNull();
 
-        Path path = pathFactory.toPath(meta.fileName());
+        Path path = pathFactory.toPath(meta.getDataRootLocation(), meta.fileName());
         assertThat(LocalFileIO.create().exists(path)).isTrue();
 
         assertThat(meta.rowCount()).isEqualTo(1L);
@@ -186,7 +187,7 @@ public class AppendOnlyWriterTest {
             assertThat(inc.newFilesIncrement().newFiles().size()).isEqualTo(1);
             DataFileMeta meta = inc.newFilesIncrement().newFiles().get(0);
 
-            Path path = pathFactory.toPath(meta.fileName());
+            Path path = pathFactory.toPath(meta.getDataRootLocation(), meta.fileName());
             assertThat(LocalFileIO.create().exists(path)).isTrue();
 
             assertThat(meta.rowCount()).isEqualTo(100L);
@@ -227,7 +228,7 @@ public class AppendOnlyWriterTest {
 
         int id = 0;
         for (DataFileMeta meta : firstInc.newFilesIncrement().newFiles()) {
-            Path path = pathFactory.toPath(meta.fileName());
+            Path path = pathFactory.toPath(meta.getDataRootLocation(), meta.fileName());
             assertThat(LocalFileIO.create().exists(path)).isTrue();
 
             assertThat(meta.rowCount()).isEqualTo(1000L);
@@ -518,8 +519,14 @@ public class AppendOnlyWriterTest {
     }
 
     private DataFilePathFactory createPathFactory() {
+        TablePathProvider tablePathProvider = new TablePathProvider(new Path(tempDir.toString()));
         return new DataFilePathFactory(
-                new Path(tempDir + "/dt=" + PART + "/bucket-0"),
+                tablePathProvider.getDataFileExternalPath(),
+                new Path(
+                        tablePathProvider.getReleativeTableWritePath()
+                                + "/dt="
+                                + PART
+                                + "/bucket-0"),
                 CoreOptions.FILE_FORMAT.defaultValue().toString(),
                 CoreOptions.DATA_FILE_PREFIX.defaultValue(),
                 CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
@@ -647,7 +654,10 @@ public class AppendOnlyWriterTest {
         long minSeq = toCompact.get(0).minSequenceNumber();
         long maxSeq = toCompact.get(size - 1).maxSequenceNumber();
         String fileName = "compact-" + UUID.randomUUID();
-        LocalFileIO.create().newOutputStream(pathFactory.toPath(fileName), false).close();
+        LocalFileIO.create()
+                .newOutputStream(
+                        pathFactory.toPath(pathFactory.getDefaultWriteRootPath(), fileName), false)
+                .close();
         return DataFileMeta.forAppend(
                 fileName,
                 toCompact.stream().mapToLong(DataFileMeta::fileSize).sum(),
@@ -680,6 +690,7 @@ public class AppendOnlyWriterTest {
                 Collections.emptyList(),
                 null,
                 FileSource.APPEND,
-                null);
+                null,
+                pathFactory.getDefaultWriteRootPath());
     }
 }

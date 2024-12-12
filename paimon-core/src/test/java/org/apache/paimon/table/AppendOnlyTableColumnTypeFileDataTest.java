@@ -35,7 +35,8 @@ public class AppendOnlyTableColumnTypeFileDataTest extends ColumnTypeFileDataTes
     @Override
     protected FileStoreTable createFileStoreTable(Map<Long, TableSchema> tableSchemas) {
         SchemaManager schemaManager = new TestingSchemaManager(tablePath, tableSchemas);
-        return new AppendOnlyFileStoreTable(fileIO, tablePath, schemaManager.latest().get()) {
+        return new AppendOnlyFileStoreTable(
+                fileIO, tablePathProvider, schemaManager.latest().get()) {
             @Override
             public SchemaManager schemaManager() {
                 return schemaManager;

@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.TablePathProvider;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -54,9 +55,10 @@ public class FileStorePathFactory {
     private final AtomicInteger indexManifestCount;
     private final AtomicInteger indexFileCount;
     private final AtomicInteger statsFileCount;
+    private final TablePathProvider tablePathProvider;
 
     public FileStorePathFactory(
-            Path root,
+            TablePathProvider tablePathProvider,
             RowType partitionType,
             String defaultPartValue,
             String formatIdentifier,
@@ -66,7 +68,6 @@ public class FileStorePathFactory {
             boolean fileSuffixIncludeCompression,
             String fileCompression,
             @Nullable String dataFilePathDirectory) {
-        this.root = root;
         this.dataFilePathDirectory = dataFilePathDirectory;
         this.uuid = UUID.randomUUID().toString();
 
@@ -83,6 +84,8 @@ public class FileStorePathFactory {
         this.indexManifestCount = new AtomicInteger(0);
         this.indexFileCount = new AtomicInteger(0);
         this.statsFileCount = new AtomicInteger(0);
+        this.tablePathProvider = tablePathProvider;
+        this.root = tablePathProvider.getTableWritePath();
     }
 
     public Path root() {
@@ -121,12 +124,21 @@ public class FileStorePathFactory {
 
     public DataFilePathFactory createDataFilePathFactory(BinaryRow partition, int bucket) {
         return new DataFilePathFactory(
-                bucketPath(partition, bucket),
+                tablePathProvider.getDataFileExternalPath(),
+                relativeDataFilePath(partition, bucket),
                 formatIdentifier,
                 dataFilePrefix,
                 changelogFilePrefix,
                 fileSuffixIncludeCompression,
                 fileCompression);
+    }
+
+    public Path relativeDataFilePath(BinaryRow partition, int bucket) {
+        Path relativeDataFile = tablePathProvider.getReleativeTableWritePath();
+        if (dataFilePathDirectory != null) {
+            relativeDataFile = new Path(relativeDataFile, dataFilePathDirectory);
+        }
+        return new Path(relativeDataFile + "/" + relativePartitionAndBucketPath(partition, bucket));
     }
 
     public Path bucketPath(BinaryRow partition, int bucket) {

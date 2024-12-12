@@ -112,7 +112,9 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                 table.store()
                         .pathFactory()
                         .createDataFilePathFactory(split.partition(), split.bucket())
-                        .toPath(split.dataFiles().get(0).fileName());
+                        .toPath(
+                                split.dataFiles().get(0).getDataRootLocation(),
+                                split.dataFiles().get(0).fileName());
         table.fileIO().deleteQuietly(path);
 
         // read
@@ -1100,7 +1102,8 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                 Collections.emptyList(),
                                 conf.toMap(),
                                 ""));
-        return new AppendOnlyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
+        return new AppendOnlyFileStoreTable(
+                FileIOFinder.find(tablePath), tablePathProvider, tableSchema);
     }
 
     @Override
@@ -1122,7 +1125,8 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                 Collections.emptyList(),
                                 conf.toMap(),
                                 ""));
-        return new AppendOnlyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
+        return new AppendOnlyFileStoreTable(
+                FileIOFinder.find(tablePath), tablePathProvider, tableSchema);
     }
 
     @Override
@@ -1138,7 +1142,8 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                 Collections.emptyList(),
                                 conf.toMap(),
                                 ""));
-        return new AppendOnlyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
+        return new AppendOnlyFileStoreTable(
+                FileIOFinder.find(tablePath), tablePathProvider, tableSchema);
     }
 
     protected FileStoreTable createUnawareBucketFileStoreTable(Consumer<Options> configure)
@@ -1156,7 +1161,8 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                 Collections.emptyList(),
                                 conf.toMap(),
                                 ""));
-        return new AppendOnlyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
+        return new AppendOnlyFileStoreTable(
+                FileIOFinder.find(tablePath), tablePathProvider, tableSchema);
     }
 
     protected FileStoreTable createUnawareBucketFileStoreTable(
@@ -1174,6 +1180,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                 Collections.emptyList(),
                                 conf.toMap(),
                                 ""));
-        return new AppendOnlyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
+        return new AppendOnlyFileStoreTable(
+                FileIOFinder.find(tablePath), tablePathProvider, tableSchema);
     }
 }

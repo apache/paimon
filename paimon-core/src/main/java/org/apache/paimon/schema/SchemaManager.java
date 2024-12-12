@@ -237,7 +237,6 @@ public class SchemaManager implements Serializable {
                             primaryKeys,
                             options,
                             schema.comment());
-
             // validate table from creating table
             FileStoreTableFactory.create(fileIO, tableRoot, newSchema).store();
 

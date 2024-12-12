@@ -26,6 +26,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.HashIndexMaintainer;
 import org.apache.paimon.index.IndexMaintainer;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
+import org.apache.paimon.io.TablePathProvider;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.BucketSelectConverter;
@@ -84,8 +85,17 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             KeyValueFieldsExtractor keyValueFieldsExtractor,
             MergeFunctionFactory<KeyValue> mfFactory,
             String tableName,
-            CatalogEnvironment catalogEnvironment) {
-        super(fileIO, schemaManager, schema, tableName, options, partitionType, catalogEnvironment);
+            CatalogEnvironment catalogEnvironment,
+            TablePathProvider tablePathProvider) {
+        super(
+                fileIO,
+                schemaManager,
+                schema,
+                tableName,
+                options,
+                partitionType,
+                catalogEnvironment,
+                tablePathProvider);
         this.crossPartitionUpdate = crossPartitionUpdate;
         this.bucketKeyType = bucketKeyType;
         this.keyType = keyType;

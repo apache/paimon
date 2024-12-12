@@ -33,6 +33,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.TablePathProvider;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.schema.SchemaManager;
@@ -152,7 +153,7 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
         SchemaManager schemaManager = new SchemaManager(fileIO, tableRoot);
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
-                        tableRoot,
+                        new TablePathProvider(tableRoot),
                         RowType.of(),
                         new CoreOptions(new Options()).partitionDefaultName(),
                         CoreOptions.FILE_FORMAT.defaultValue(),

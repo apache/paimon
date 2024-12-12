@@ -98,16 +98,31 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
 
     @Override
     public RecordReader<KeyValue> createRecordReader(DataFileMeta file) throws IOException {
-        return createRecordReader(file.schemaId(), file.fileName(), file.fileSize(), file.level());
+        return createRecordReader(
+                file.schemaId(),
+                file.fileName(),
+                file.fileSize(),
+                file.level(),
+                file.getDataRootLocation());
     }
 
     public RecordReader<KeyValue> createRecordReader(
-            long schemaId, String fileName, long fileSize, int level) throws IOException {
+            long schemaId, String fileName, long fileSize, int level, Path dataRootLocation)
+            throws IOException {
         if (fileSize >= asyncThreshold && fileName.endsWith(".orc")) {
             return new AsyncRecordReader<>(
-                    () -> createRecordReader(schemaId, fileName, level, false, 2, fileSize));
+                    () ->
+                            createRecordReader(
+                                    schemaId,
+                                    fileName,
+                                    level,
+                                    false,
+                                    2,
+                                    fileSize,
+                                    dataRootLocation));
         }
-        return createRecordReader(schemaId, fileName, level, true, null, fileSize);
+        return createRecordReader(
+                schemaId, fileName, level, true, null, fileSize, dataRootLocation);
     }
 
     private FileRecordReader<KeyValue> createRecordReader(
@@ -116,7 +131,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             int level,
             boolean reuseFormat,
             @Nullable Integer orcPoolSize,
-            long fileSize)
+            long fileSize,
+            Path dataRootLocation)
             throws IOException {
         String formatIdentifier = DataFilePathFactory.formatIdentifier(fileName);
 
@@ -133,7 +149,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                                 new FormatKey(schemaId, formatIdentifier),
                                 key -> formatSupplier.get())
                         : formatSupplier.get();
-        Path filePath = pathFactory.toPath(fileName);
+        Path filePath = pathFactory.toPath(dataRootLocation, fileName);
 
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
@@ -146,6 +162,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                         bulkFormatMapping.getCastMapping(),
                         PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
 
+        // TODO@HOULIANGQI
         Optional<DeletionVector> deletionVector = dvFactory.create(fileName);
         if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
             fileRecordReader =

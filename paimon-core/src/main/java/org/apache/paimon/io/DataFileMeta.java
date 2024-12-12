@@ -120,6 +120,10 @@ public class DataFileMeta {
 
     private final @Nullable List<String> valueStatsCols;
 
+    // the external path that the file resides in, if it is null,
+    // the file is in the default warehouse path
+    private final @Nullable Path dataRootLocation;
+
     public static DataFileMeta forAppend(
             String fileName,
             long fileSize,
@@ -131,7 +135,8 @@ public class DataFileMeta {
             List<String> extraFiles,
             @Nullable byte[] embeddedIndex,
             @Nullable FileSource fileSource,
-            @Nullable List<String> valueStatsCols) {
+            @Nullable List<String> valueStatsCols,
+            @Nullable Path dataRootLocation) {
         return new DataFileMeta(
                 fileName,
                 fileSize,
@@ -149,7 +154,8 @@ public class DataFileMeta {
                 0L,
                 embeddedIndex,
                 fileSource,
-                valueStatsCols);
+                valueStatsCols,
+                dataRootLocation);
     }
 
     public DataFileMeta(
@@ -186,7 +192,47 @@ public class DataFileMeta {
                 deleteRowCount,
                 embeddedIndex,
                 fileSource,
-                valueStatsCols);
+                valueStatsCols,
+                null);
+    }
+
+    public DataFileMeta(
+            String fileName,
+            long fileSize,
+            long rowCount,
+            BinaryRow minKey,
+            BinaryRow maxKey,
+            SimpleStats keyStats,
+            SimpleStats valueStats,
+            long minSequenceNumber,
+            long maxSequenceNumber,
+            long schemaId,
+            int level,
+            List<String> extraFiles,
+            @Nullable Long deleteRowCount,
+            @Nullable byte[] embeddedIndex,
+            @Nullable FileSource fileSource,
+            @Nullable List<String> valueStatsCols,
+            Path dataRootLocation) {
+        this(
+                fileName,
+                fileSize,
+                rowCount,
+                minKey,
+                maxKey,
+                keyStats,
+                valueStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                level,
+                extraFiles,
+                Timestamp.fromLocalDateTime(LocalDateTime.now()).toMillisTimestamp(),
+                deleteRowCount,
+                embeddedIndex,
+                fileSource,
+                valueStatsCols,
+                dataRootLocation);
     }
 
     public DataFileMeta(
@@ -222,7 +268,8 @@ public class DataFileMeta {
                 deleteRowCount,
                 embeddedIndex,
                 fileSource,
-                valueStatsCols);
+                valueStatsCols,
+                null);
     }
 
     public DataFileMeta(
@@ -243,6 +290,46 @@ public class DataFileMeta {
             @Nullable byte[] embeddedIndex,
             @Nullable FileSource fileSource,
             @Nullable List<String> valueStatsCols) {
+        this(
+                fileName,
+                fileSize,
+                rowCount,
+                minKey,
+                maxKey,
+                keyStats,
+                valueStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                level,
+                extraFiles,
+                creationTime,
+                deleteRowCount,
+                embeddedIndex,
+                fileSource,
+                valueStatsCols,
+                null);
+    }
+
+    public DataFileMeta(
+            String fileName,
+            long fileSize,
+            long rowCount,
+            BinaryRow minKey,
+            BinaryRow maxKey,
+            SimpleStats keyStats,
+            SimpleStats valueStats,
+            long minSequenceNumber,
+            long maxSequenceNumber,
+            long schemaId,
+            int level,
+            List<String> extraFiles,
+            Timestamp creationTime,
+            @Nullable Long deleteRowCount,
+            @Nullable byte[] embeddedIndex,
+            @Nullable FileSource fileSource,
+            @Nullable List<String> valueStatsCols,
+            @Nullable Path dataRootLocation) {
         this.fileName = fileName;
         this.fileSize = fileSize;
 
@@ -264,6 +351,7 @@ public class DataFileMeta {
         this.deleteRowCount = deleteRowCount;
         this.fileSource = fileSource;
         this.valueStatsCols = valueStatsCols;
+        this.dataRootLocation = dataRootLocation;
     }
 
     public String fileName() {
@@ -276,6 +364,11 @@ public class DataFileMeta {
 
     public long rowCount() {
         return rowCount;
+    }
+
+    @Nullable
+    public Path getDataRootLocation() {
+        return dataRootLocation;
     }
 
     public Optional<Long> addRowCount() {
@@ -385,7 +478,8 @@ public class DataFileMeta {
                 deleteRowCount,
                 embeddedIndex,
                 fileSource,
-                valueStatsCols);
+                valueStatsCols,
+                dataRootLocation);
     }
 
     public DataFileMeta rename(String newFileName) {
@@ -406,7 +500,8 @@ public class DataFileMeta {
                 deleteRowCount,
                 embeddedIndex,
                 fileSource,
-                valueStatsCols);
+                valueStatsCols,
+                dataRootLocation);
     }
 
     public DataFileMeta copyWithoutStats() {
@@ -427,13 +522,14 @@ public class DataFileMeta {
                 deleteRowCount,
                 embeddedIndex,
                 fileSource,
-                Collections.emptyList());
+                Collections.emptyList(),
+                dataRootLocation);
     }
 
     public List<Path> collectFiles(DataFilePathFactory pathFactory) {
         List<Path> paths = new ArrayList<>();
-        paths.add(pathFactory.toPath(fileName));
-        extraFiles.forEach(f -> paths.add(pathFactory.toPath(f)));
+        paths.add(pathFactory.toPath(dataRootLocation, fileName));
+        extraFiles.forEach(f -> paths.add(pathFactory.toPath(dataRootLocation, f)));
         return paths;
     }
 
@@ -455,7 +551,8 @@ public class DataFileMeta {
                 deleteRowCount,
                 embeddedIndex,
                 fileSource,
-                valueStatsCols);
+                valueStatsCols,
+                dataRootLocation);
     }
 
     public DataFileMeta copy(byte[] newEmbeddedIndex) {
@@ -476,7 +573,8 @@ public class DataFileMeta {
                 deleteRowCount,
                 newEmbeddedIndex,
                 fileSource,
-                valueStatsCols);
+                valueStatsCols,
+                dataRootLocation);
     }
 
     @Override

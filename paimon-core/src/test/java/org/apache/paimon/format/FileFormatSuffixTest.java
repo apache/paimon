@@ -32,6 +32,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.KeyValueFileReadWriteTest;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
+import org.apache.paimon.io.TablePathProvider;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -64,10 +65,11 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
         Path path = writerFactory.pathFactory(0).newPath();
         assertThat(path.toString().endsWith(format)).isTrue();
-
+        TablePathProvider tablePathProvider = new TablePathProvider(new Path(tempDir.toString()));
         DataFilePathFactory dataFilePathFactory =
                 new DataFilePathFactory(
-                        new Path(tempDir + "/dt=1/bucket-1"),
+                        tablePathProvider.getDataFileExternalPath(),
+                        new Path(tablePathProvider.getReleativeTableWritePath() + "/dt=1/bucket-1"),
                         format,
                         CoreOptions.DATA_FILE_PREFIX.defaultValue(),
                         CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),

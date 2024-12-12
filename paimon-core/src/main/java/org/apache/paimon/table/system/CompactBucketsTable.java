@@ -28,6 +28,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.io.TablePathProvider;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -139,6 +140,11 @@ public class CompactBucketsTable implements DataTable, ReadonlyTable {
     @Override
     public Path location() {
         return wrapped.location();
+    }
+
+    @Override
+    public TablePathProvider pathProvider() {
+        return wrapped.pathProvider();
     }
 
     @Override

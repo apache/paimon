@@ -33,9 +33,11 @@ public class DataFilePathFactoryTest {
 
     @Test
     public void testNoPartition() {
+        TablePathProvider tablePathProvider = new TablePathProvider(new Path(tempDir.toString()));
         DataFilePathFactory pathFactory =
                 new DataFilePathFactory(
-                        new Path(tempDir + "/bucket-123"),
+                        tablePathProvider.getDataFileExternalPath(),
+                        new Path(tablePathProvider.getReleativeTableWritePath() + "/bucket-123"),
                         CoreOptions.FILE_FORMAT.defaultValue().toString(),
                         CoreOptions.DATA_FILE_PREFIX.defaultValue(),
                         CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
@@ -61,9 +63,13 @@ public class DataFilePathFactoryTest {
 
     @Test
     public void testWithPartition() {
+        TablePathProvider tablePathProvider = new TablePathProvider(new Path(tempDir.toString()));
         DataFilePathFactory pathFactory =
                 new DataFilePathFactory(
-                        new Path(tempDir + "/dt=20211224/bucket-123"),
+                        tablePathProvider.getDataFileExternalPath(),
+                        new Path(
+                                tablePathProvider.getReleativeTableWritePath()
+                                        + "/dt=20211224/bucket-123"),
                         CoreOptions.FILE_FORMAT.defaultValue().toString(),
                         CoreOptions.DATA_FILE_PREFIX.defaultValue(),
                         CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),

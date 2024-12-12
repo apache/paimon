@@ -31,6 +31,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.IndexIncrement;
+import org.apache.paimon.io.TablePathProvider;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.schema.Schema;
@@ -70,7 +71,8 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
             RowType partitionType,
             RowType bucketType,
             RowType rowType,
-            String tableName) {
+            String tableName,
+            TablePathProvider tablePathProvider) {
         super(
                 fileIO,
                 schemaManage,
@@ -80,7 +82,8 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
                 bucketType,
                 rowType,
                 tableName,
-                CatalogEnvironment.empty());
+                CatalogEnvironment.empty(),
+                tablePathProvider);
 
         this.fileIO = fileIO;
         this.commitUser = UUID.randomUUID().toString();
@@ -173,6 +176,7 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
                 TestKeyValueGenerator.DEFAULT_PART_TYPE,
                 RowType.of(),
                 TestKeyValueGenerator.DEFAULT_ROW_TYPE,
-                (new Path(root)).getName());
+                (new Path(root)).getName(),
+                new TablePathProvider(new Path(root)));
     }
 }
