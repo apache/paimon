@@ -85,8 +85,6 @@ public class IcebergMigrator implements Migrator {
     // metadata for newest iceberg snapshot
     private final IcebergMetadata icebergMetadata;
 
-    private final boolean ignoreDelete;
-
     public IcebergMigrator(
             Catalog paimonCatalog,
             String paimonDatabaseName,
@@ -94,7 +92,6 @@ public class IcebergMigrator implements Migrator {
             String icebergDatabaseName,
             String icebergTableName,
             Options icebergOptions,
-            boolean ignoreDelete,
             Integer parallelism) {
         this.paimonCatalog = paimonCatalog;
         this.paimonFileIO = paimonCatalog.fileIO();
@@ -132,8 +129,6 @@ public class IcebergMigrator implements Migrator {
         this.icebergMetaPathFactory =
                 new IcebergPathFactory(new Path(icebergLatestMetadataLocation).getParent());
 
-        this.ignoreDelete = ignoreDelete;
-
         this.executor = createCachedThreadPool(parallelism, "ICEBERG_MIGRATOR");
     }
 
@@ -157,7 +152,7 @@ public class IcebergMigrator implements Migrator {
                     manifestList.read(icebergMetadata.currentSnapshot().manifestList());
 
             // check manifest file with 'DELETE' kind
-            icebergManifestFileMetas = checkAndFilterManifestFiles(icebergManifestFileMetas);
+            checkAndFilterManifestFiles(icebergManifestFileMetas);
 
             // get all live iceberg entries
             List<IcebergManifestEntry> icebergEntries =
@@ -178,8 +173,8 @@ public class IcebergMigrator implements Migrator {
                             .map(IcebergManifestEntry::file)
                             .collect(Collectors.toList());
 
-            // Again, check if the file is a Delete File
-            icebergDataFileMetas = checkAndFilterDataFiles(icebergDataFileMetas);
+            // Again, check if delete File exists
+            checkAndFilterDataFiles(icebergDataFileMetas);
 
             LOG.info(
                     "Begin to create Migrate Task, the number of iceberg data files is {}",
@@ -260,39 +255,24 @@ public class IcebergMigrator implements Migrator {
                 dataFields, partitionKeys, Collections.emptyList(), Collections.emptyMap(), null);
     }
 
-    private List<IcebergManifestFileMeta> checkAndFilterManifestFiles(
+    private void checkAndFilterManifestFiles(
             List<IcebergManifestFileMeta> icebergManifestFileMetas) {
-        if (!ignoreDelete) {
-            for (IcebergManifestFileMeta meta : icebergManifestFileMetas) {
-                if (meta.content() == IcebergManifestFileMeta.Content.DELETES) {
-                    throw new RuntimeException(
-                            "IcebergMigrator don't support analyzing manifest file with 'DELETE' content. "
-                                    + "You can set 'ignore-delete' to ignore manifest file with 'DELETE' content.");
-                }
+
+        for (IcebergManifestFileMeta meta : icebergManifestFileMetas) {
+            if (meta.content() == IcebergManifestFileMeta.Content.DELETES) {
+                throw new RuntimeException(
+                        "IcebergMigrator don't support analyzing manifest file with 'DELETE' content.");
             }
-            return icebergManifestFileMetas;
-        } else {
-            return icebergManifestFileMetas.stream()
-                    .filter(meta -> meta.content() != IcebergManifestFileMeta.Content.DELETES)
-                    .collect(Collectors.toList());
         }
     }
 
-    private List<IcebergDataFileMeta> checkAndFilterDataFiles(
-            List<IcebergDataFileMeta> icebergDataFileMetas) {
-        if (!ignoreDelete) {
-            for (IcebergDataFileMeta meta : icebergDataFileMetas) {
-                if (meta.content() != IcebergDataFileMeta.Content.DATA) {
-                    throw new RuntimeException(
-                            "IcebergMigrator don't support analyzing iceberg delete file. "
-                                    + "You can set 'ignore-delete' to ignore iceberg delete files.");
-                }
+    private void checkAndFilterDataFiles(List<IcebergDataFileMeta> icebergDataFileMetas) {
+
+        for (IcebergDataFileMeta meta : icebergDataFileMetas) {
+            if (meta.content() != IcebergDataFileMeta.Content.DATA) {
+                throw new RuntimeException(
+                        "IcebergMigrator don't support analyzing iceberg delete file.");
             }
-            return icebergDataFileMetas;
-        } else {
-            return icebergDataFileMetas.stream()
-                    .filter(meta -> meta.content() == IcebergDataFileMeta.Content.DATA)
-                    .collect(Collectors.toList());
         }
     }
 

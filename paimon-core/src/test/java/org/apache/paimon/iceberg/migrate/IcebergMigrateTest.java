@@ -58,7 +58,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
@@ -151,7 +150,6 @@ public class IcebergMigrateTest {
                         iceDatabase,
                         iceTable,
                         new Options(icebergProperties),
-                        false,
                         1);
         icebergMigrator.executeMigrate();
 
@@ -207,7 +205,6 @@ public class IcebergMigrateTest {
                         iceDatabase,
                         iceTable,
                         new Options(icebergProperties),
-                        false,
                         1);
         icebergMigrator.executeMigrate();
 
@@ -224,10 +221,9 @@ public class IcebergMigrateTest {
                                 .collect(Collectors.toList()));
     }
 
-    @ParameterizedTest
-    @CsvSource({"true, true", "true, false", "false, true", "false, false"})
-    public void testMigrateWithDeleteFile(boolean isPartitioned, boolean ignoreDelete)
-            throws Exception {
+    @ParameterizedTest(name = "isPartitioned = {0}")
+    @ValueSource(booleans = {true, false})
+    public void testMigrateWithDeleteFile(boolean isPartitioned) throws Exception {
         // only support create delete file with parquet format
         Table icebergTable = createIcebergTable(isPartitioned);
         String format = "parquet";
@@ -266,31 +262,13 @@ public class IcebergMigrateTest {
                         iceDatabase,
                         iceTable,
                         new Options(icebergProperties),
-                        ignoreDelete,
                         1);
-        if (!ignoreDelete) {
-            assertThatThrownBy(icebergMigrator::executeMigrate)
-                    .rootCause()
-                    .isInstanceOf(RuntimeException.class)
-                    .hasMessage(
-                            "IcebergMigrator don't support analyzing manifest file with 'DELETE' content. "
-                                    + "You can set 'ignore-delete' to ignore manifest file with 'DELETE' content.");
-            return;
-        } else {
-            icebergMigrator.executeMigrate();
-        }
 
-        FileStoreTable paimonTable =
-                (FileStoreTable) paiCatalog.getTable(Identifier.create(paiDatabase, paiTable));
-        List<String> paiResults = getPaimonResult(paimonTable);
-        assertThat(
-                        paiResults.stream()
-                                .map(row -> String.format("Record(%s)", row))
-                                .collect(Collectors.toList()))
-                .hasSameElementsAs(
-                        Stream.concat(records1.stream(), records2.stream())
-                                .map(GenericRecord::toString)
-                                .collect(Collectors.toList()));
+        assertThatThrownBy(icebergMigrator::executeMigrate)
+                .rootCause()
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage(
+                        "IcebergMigrator don't support analyzing manifest file with 'DELETE' content.");
     }
 
     @ParameterizedTest(name = "isPartitioned = {0}")
@@ -349,7 +327,6 @@ public class IcebergMigrateTest {
                         iceDatabase,
                         iceTable,
                         new Options(icebergProperties),
-                        false,
                         1);
         icebergMigrator.executeMigrate();
 
@@ -416,7 +393,6 @@ public class IcebergMigrateTest {
                         iceDatabase,
                         iceTable,
                         new Options(icebergProperties),
-                        false,
                         1);
         icebergMigrator.executeMigrate();
 
