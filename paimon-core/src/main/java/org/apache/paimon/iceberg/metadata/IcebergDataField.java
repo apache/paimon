@@ -200,6 +200,9 @@ public class IcebergDataField {
     }
 
     public DataType getDataType() {
+        if (dataType != null) {
+            return dataType;
+        }
         String simpleType = type.toString();
         String delimiter = "(";
         if (simpleType.contains("[")) {
