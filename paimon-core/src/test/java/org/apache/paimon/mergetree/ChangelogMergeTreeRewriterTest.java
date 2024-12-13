@@ -193,7 +193,6 @@ public class ChangelogMergeTreeRewriterTest {
     private KeyValueFileWriterFactory createWriterFactory(
             Path path, RowType keyType, RowType valueType) {
         Options options = new Options();
-        options.set(CoreOptions.DATA_FILE_THIN_MODE, false);
 
         return KeyValueFileWriterFactory.builder(
                         LocalFileIO.create(),

@@ -293,7 +293,7 @@ public class MergeFileSplitReadTest {
                                                                                 "")),
                                                 partitionType.getFieldNames().stream())
                                         .collect(Collectors.toList()),
-                        Collections.singletonMap("data-file.thin-mode", "false"),
+                        Collections.emptyMap(),
                         null);
         TableSchema tableSchema = schemaManager.createTable(schema);
         return new TestFileStore.Builder(
