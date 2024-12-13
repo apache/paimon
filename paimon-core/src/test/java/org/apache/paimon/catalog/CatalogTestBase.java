@@ -964,28 +964,47 @@ public abstract class CatalogTestBase {
 
     protected void alterDatabaseWhenSupportAlter() throws Exception {
         // Alter database
-        String databaseName = "db_to_alter_alert";
+        String databaseName = "db_to_alter";
         catalog.createDatabase(databaseName, false);
-        String key = "key";
+        String key = "key1";
+        String key2 = "key2";
         // Add property
         catalog.alterDatabase(
-                databaseName, Lists.newArrayList(DatabaseChange.setProperty(key, "value")), false);
+                databaseName,
+                Lists.newArrayList(
+                        DatabaseChange.setProperty(key, "value"),
+                        DatabaseChange.setProperty(key2, "value")),
+                false);
         Database db = catalog.getDatabase(databaseName);
         assertEquals("value", db.options().get(key));
+        assertEquals("value", db.options().get(key2));
         // Update property
         catalog.alterDatabase(
-                databaseName, Lists.newArrayList(DatabaseChange.setProperty(key, "value1")), false);
+                databaseName,
+                Lists.newArrayList(
+                        DatabaseChange.setProperty(key, "value1"),
+                        DatabaseChange.setProperty(key2, "value1")),
+                false);
         db = catalog.getDatabase(databaseName);
         assertEquals("value1", db.options().get(key));
+        assertEquals("value1", db.options().get(key2));
         // remove property
         catalog.alterDatabase(
-                databaseName, Lists.newArrayList(DatabaseChange.removeProperty(key)), false);
+                databaseName,
+                Lists.newArrayList(
+                        DatabaseChange.removeProperty(key), DatabaseChange.removeProperty(key2)),
+                false);
         db = catalog.getDatabase(databaseName);
         assertEquals(false, db.options().containsKey(key));
+        assertEquals(false, db.options().containsKey(key2));
         // Remove non-existent property
         catalog.alterDatabase(
-                databaseName, Lists.newArrayList(DatabaseChange.removeProperty(key)), false);
+                databaseName,
+                Lists.newArrayList(
+                        DatabaseChange.removeProperty(key), DatabaseChange.removeProperty(key2)),
+                false);
         db = catalog.getDatabase(databaseName);
         assertEquals(false, db.options().containsKey(key));
+        assertEquals(false, db.options().containsKey(key2));
     }
 }
