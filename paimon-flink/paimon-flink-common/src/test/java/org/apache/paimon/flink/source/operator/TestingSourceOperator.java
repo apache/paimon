@@ -51,7 +51,16 @@ import org.apache.flink.streaming.util.MockStreamingRuntimeContext;
 import java.util.ArrayList;
 import java.util.Collections;
 
-/** A SourceOperator extension to simplify test setup. */
+/**
+ * A SourceOperator extension to simplify test setup.
+ *
+ * <p>This class is implemented in reference to {@link
+ * org.apache.flink.streaming.api.operators.source.TestingSourceOperator}.
+ *
+ * <p>See <a
+ * href="https://github.com/apache/flink/pull/12306/files#diff-bb7687690ffa79fd86950aa23171431fcf707246ca4620d79361a6612ba7b828">Flink
+ * PR that introduced this class</a>
+ */
 public class TestingSourceOperator<T> extends SourceOperator<T, SimpleSourceSplit> {
 
     private static final long serialVersionUID = 1L;
