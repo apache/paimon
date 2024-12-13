@@ -94,7 +94,7 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     protected void alterDatabaseImpl(String name, List<DatabaseChange> changes) {
-        throw new UnsupportedOperationException("Alert database is not supported.");
+        throw new UnsupportedOperationException("Alter database is not supported.");
     }
 
     @Override

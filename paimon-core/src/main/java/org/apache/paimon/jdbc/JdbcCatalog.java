@@ -203,15 +203,15 @@ public class JdbcCatalog extends AbstractCatalog {
 
     @Override
     protected void alterDatabaseImpl(String name, List<DatabaseChange> changes) {
-        Pair<Map<String, String>, Set<String>> insertProperties2removeProperties =
-                DatabaseChange.getAddAndRemoveProperties(changes);
-        Map<String, String> insertProperties = insertProperties2removeProperties.getLeft();
-        Set<String> removeProperties = insertProperties2removeProperties.getRight();
+        Pair<Map<String, String>, Set<String>> insertProperties2removeKeys =
+                DatabaseChange.getAddPropertiesAndRemoveKeys(changes);
+        Map<String, String> insertProperties = insertProperties2removeKeys.getLeft();
+        Set<String> removeKeys = insertProperties2removeKeys.getRight();
         if (!insertProperties.isEmpty()) {
             insertProperties(connections, catalogKey, name, insertProperties);
         }
-        if (!removeProperties.isEmpty()) {
-            deleteProperties(connections, catalogKey, name, removeProperties);
+        if (!removeKeys.isEmpty()) {
+            deleteProperties(connections, catalogKey, name, removeKeys);
         }
     }
 

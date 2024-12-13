@@ -38,10 +38,10 @@ public interface DatabaseChange {
         return new RemoveProperty(property);
     }
 
-    static Pair<Map<String, String>, Set<String>> getAddAndRemoveProperties(
+    static Pair<Map<String, String>, Set<String>> getAddPropertiesAndRemoveKeys(
             List<DatabaseChange> changes) {
         Map<String, String> insertProperties = Maps.newHashMap();
-        Set<String> removeProperties = Sets.newHashSet();
+        Set<String> removeKeys = Sets.newHashSet();
         changes.forEach(
                 change -> {
                     if (change instanceof DatabaseChange.SetProperty) {
@@ -49,10 +49,10 @@ public interface DatabaseChange {
                                 (DatabaseChange.SetProperty) change;
                         insertProperties.put(setProperty.property(), setProperty.value());
                     } else {
-                        removeProperties.add(((DatabaseChange.RemoveProperty) change).property());
+                        removeKeys.add(((DatabaseChange.RemoveProperty) change).property());
                     }
                 });
-        return Pair.of(insertProperties, removeProperties);
+        return Pair.of(insertProperties, removeKeys);
     }
 
     /** Set property for database change. */

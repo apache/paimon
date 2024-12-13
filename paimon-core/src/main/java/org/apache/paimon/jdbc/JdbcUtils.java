@@ -419,19 +419,19 @@ public class JdbcUtils {
             JdbcClientPool connections,
             String storeKey,
             String databaseName,
-            Set<String> properties) {
+            Set<String> removeKeys) {
         String[] args =
-                Stream.concat(Stream.of(storeKey, databaseName), properties.stream())
+                Stream.concat(Stream.of(storeKey, databaseName), removeKeys.stream())
                         .toArray(String[]::new);
 
         int deleteRecords =
-                execute(connections, JdbcUtils.deletePropertiesStatement(properties), args);
+                execute(connections, JdbcUtils.deletePropertiesStatement(removeKeys), args);
         if (deleteRecords > 0) {
             return true;
         }
         throw new IllegalStateException(
                 String.format(
-                        "Failed to delete: %d of %d succeeded", deleteRecords, properties.size()));
+                        "Failed to delete: %d of %d succeeded", deleteRecords, removeKeys.size()));
     }
 
     public static void createDistributedLockTable(JdbcClientPool connections, Options options)

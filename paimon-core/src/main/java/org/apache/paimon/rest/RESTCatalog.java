@@ -183,12 +183,12 @@ public class RESTCatalog implements Catalog {
     public void alterDatabase(String name, List<DatabaseChange> changes, boolean ignoreIfNotExists)
             throws DatabaseNotExistException {
         try {
-            Pair<Map<String, String>, Set<String>> insertProperties2removeProperties =
-                    DatabaseChange.getAddAndRemoveProperties(changes);
-            Map<String, String> insertProperties = insertProperties2removeProperties.getLeft();
-            Set<String> removeProperties = insertProperties2removeProperties.getRight();
+            Pair<Map<String, String>, Set<String>> insertProperties2removeKeys =
+                    DatabaseChange.getAddPropertiesAndRemoveKeys(changes);
+            Map<String, String> insertProperties = insertProperties2removeKeys.getLeft();
+            Set<String> removeKeys = insertProperties2removeKeys.getRight();
             AlterDatabaseRequest request =
-                    new AlterDatabaseRequest(new ArrayList<>(removeProperties), insertProperties);
+                    new AlterDatabaseRequest(new ArrayList<>(removeKeys), insertProperties);
             AlterDatabaseResponse response =
                     client.post(
                             resourcePaths.databaseProperties(name),
