@@ -43,9 +43,9 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
-import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
 import java.util.function.Consumer;
@@ -73,7 +73,6 @@ public class SnapshotManager implements Serializable {
     public static final String LATEST = "LATEST";
     private static final int READ_HINT_RETRY_NUM = 3;
     private static final int READ_HINT_RETRY_INTERVAL = 1;
-    private static final Random RANDOM = new Random();
 
     private final FileIO fileIO;
     private final Path tablePath;
@@ -892,8 +891,9 @@ public class SnapshotManager implements Serializable {
                 return;
             } catch (IOException e) {
                 try {
-                    Thread.sleep(RANDOM.nextInt(1000) + 500);
+                    Thread.sleep(ThreadLocalRandom.current().nextInt(1000) + 500);
                 } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
                     // throw root cause
                     throw new RuntimeException(e);
                 }
