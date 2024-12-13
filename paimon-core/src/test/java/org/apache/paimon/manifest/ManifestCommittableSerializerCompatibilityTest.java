@@ -19,6 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -27,7 +28,6 @@ import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.IOUtils;
-import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.Test;
 
@@ -78,11 +78,11 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         Arrays.asList("field1", "field2", "field3"));
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
-        LinkedHashMap<String, Pair<Integer, Integer>> dvRanges = new LinkedHashMap<>();
-        dvRanges.put("dv_key1", Pair.of(1, 2));
-        dvRanges.put("dv_key2", Pair.of(3, 4));
+        LinkedHashMap<String, DeletionVectorMeta> dvMetas = new LinkedHashMap<>();
+        dvMetas.put("dv_key1", new DeletionVectorMeta("dv_key1", 1, 2, 3L));
+        dvMetas.put("dv_key2", new DeletionVectorMeta("dv_key2", 3, 4, 5L));
         IndexFileMeta indexFile =
-                new IndexFileMeta("my_index_type", "my_index_file", 1024 * 100, 1002, dvRanges);
+                new IndexFileMeta("my_index_type", "my_index_file", 1024 * 100, 1002, dvMetas);
         List<IndexFileMeta> indexFiles = Collections.singletonList(indexFile);
 
         CommitMessageImpl commitMessage =
@@ -139,11 +139,11 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
-        LinkedHashMap<String, Pair<Integer, Integer>> dvRanges = new LinkedHashMap<>();
-        dvRanges.put("dv_key1", Pair.of(1, 2));
-        dvRanges.put("dv_key2", Pair.of(3, 4));
+        LinkedHashMap<String, DeletionVectorMeta> dvMetas = new LinkedHashMap<>();
+        dvMetas.put("dv_key1", new DeletionVectorMeta("dv_key1", 1, 2, null));
+        dvMetas.put("dv_key2", new DeletionVectorMeta("dv_key2", 3, 4, null));
         IndexFileMeta indexFile =
-                new IndexFileMeta("my_index_type", "my_index_file", 1024 * 100, 1002, dvRanges);
+                new IndexFileMeta("my_index_type", "my_index_file", 1024 * 100, 1002, dvMetas);
         List<IndexFileMeta> indexFiles = Collections.singletonList(indexFile);
 
         CommitMessageImpl commitMessage =
@@ -209,11 +209,11 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
-        LinkedHashMap<String, Pair<Integer, Integer>> dvRanges = new LinkedHashMap<>();
-        dvRanges.put("dv_key1", Pair.of(1, 2));
-        dvRanges.put("dv_key2", Pair.of(3, 4));
+        LinkedHashMap<String, DeletionVectorMeta> dvMetas = new LinkedHashMap<>();
+        dvMetas.put("dv_key1", new DeletionVectorMeta("dv_key1", 1, 2, null));
+        dvMetas.put("dv_key2", new DeletionVectorMeta("dv_key2", 3, 4, null));
         IndexFileMeta indexFile =
-                new IndexFileMeta("my_index_type", "my_index_file", 1024 * 100, 1002, dvRanges);
+                new IndexFileMeta("my_index_type", "my_index_file", 1024 * 100, 1002, dvMetas);
         List<IndexFileMeta> indexFiles = Collections.singletonList(indexFile);
 
         CommitMessageImpl commitMessage =

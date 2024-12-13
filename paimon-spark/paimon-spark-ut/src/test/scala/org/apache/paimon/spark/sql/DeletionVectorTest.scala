@@ -631,6 +631,27 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
     )
   }
 
+  test("Paimon deletionVector: get cardinality") {
+    sql(s"""
+           |CREATE TABLE T (id INT)
+           |TBLPROPERTIES (
+           | 'deletion-vectors.enabled' = 'true',
+           | 'bucket-key' = 'id',
+           | 'bucket' = '1'
+           |)
+           |""".stripMargin)
+
+    sql("INSERT INTO T SELECT /*+ REPARTITION(1) */ id FROM range (1, 50000)")
+    sql("DELETE FROM T WHERE id >= 111 and id <= 444")
+
+    val fileStore = loadTable("T").store()
+    val indexManifest = fileStore.snapshotManager().latestSnapshot().indexManifest()
+    val entry = fileStore.newIndexFileHandler().readManifest(indexManifest).get(0)
+    val dvMeta = entry.indexFile().deletionVectorMetas().values().iterator().next()
+
+    assert(dvMeta.cardinality() == 334)
+  }
+
   private def getPathName(path: String): String = {
     new Path(path).getName
   }

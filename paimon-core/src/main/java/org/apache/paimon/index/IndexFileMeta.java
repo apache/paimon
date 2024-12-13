@@ -23,9 +23,7 @@ import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
 
@@ -54,12 +52,7 @@ public class IndexFileMeta {
                             new DataField(
                                     4,
                                     "_DELETIONS_VECTORS_RANGES",
-                                    new ArrayType(
-                                            true,
-                                            RowType.of(
-                                                    newStringType(false),
-                                                    new IntType(false),
-                                                    new IntType(false))))));
+                                    new ArrayType(true, DeletionVectorMeta.SCHEMA))));
 
     private final String indexType;
     private final String fileName;
@@ -68,9 +61,9 @@ public class IndexFileMeta {
 
     /**
      * Metadata only used by {@link DeletionVectorsIndexFile}, use LinkedHashMap to ensure that the
-     * order of DeletionVectorRanges and the written DeletionVectors is consistent.
+     * order of DeletionVectorMetas and the written DeletionVectors is consistent.
      */
-    private final @Nullable LinkedHashMap<String, Pair<Integer, Integer>> deletionVectorsRanges;
+    private final @Nullable LinkedHashMap<String, DeletionVectorMeta> deletionVectorMetas;
 
     public IndexFileMeta(String indexType, String fileName, long fileSize, long rowCount) {
         this(indexType, fileName, fileSize, rowCount, null);
@@ -81,12 +74,12 @@ public class IndexFileMeta {
             String fileName,
             long fileSize,
             long rowCount,
-            @Nullable LinkedHashMap<String, Pair<Integer, Integer>> deletionVectorsRanges) {
+            @Nullable LinkedHashMap<String, DeletionVectorMeta> deletionVectorMetas) {
         this.indexType = indexType;
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.rowCount = rowCount;
-        this.deletionVectorsRanges = deletionVectorsRanges;
+        this.deletionVectorMetas = deletionVectorMetas;
     }
 
     public String indexType() {
@@ -105,8 +98,8 @@ public class IndexFileMeta {
         return rowCount;
     }
 
-    public @Nullable LinkedHashMap<String, Pair<Integer, Integer>> deletionVectorsRanges() {
-        return deletionVectorsRanges;
+    public @Nullable LinkedHashMap<String, DeletionVectorMeta> deletionVectorMetas() {
+        return deletionVectorMetas;
     }
 
     @Override
@@ -122,12 +115,12 @@ public class IndexFileMeta {
                 && Objects.equals(fileName, that.fileName)
                 && fileSize == that.fileSize
                 && rowCount == that.rowCount
-                && Objects.equals(deletionVectorsRanges, that.deletionVectorsRanges);
+                && Objects.equals(deletionVectorMetas, that.deletionVectorMetas);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(indexType, fileName, fileSize, rowCount, deletionVectorsRanges);
+        return Objects.hash(indexType, fileName, fileSize, rowCount, deletionVectorMetas);
     }
 
     @Override
@@ -142,8 +135,8 @@ public class IndexFileMeta {
                 + fileSize
                 + ", rowCount="
                 + rowCount
-                + ", deletionVectorsRanges="
-                + deletionVectorsRanges
+                + ", deletionVectorMetas="
+                + deletionVectorMetas
                 + '}';
     }
 }
