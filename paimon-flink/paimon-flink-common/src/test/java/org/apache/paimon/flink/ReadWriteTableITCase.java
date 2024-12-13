@@ -802,6 +802,43 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
+    public void testStreamingReadOverwriteWithDeleteRecords() throws Exception {
+        String table =
+                createTable(
+                        Arrays.asList("currency STRING", "rate BIGINT", "dt STRING"),
+                        Collections.singletonList("currency"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        streamingReadOverwrite);
+
+        insertInto(
+                table,
+                "('US Dollar', 102, '2022-01-01')",
+                "('Yen', 1, '2022-01-02')",
+                "('Euro', 119, '2022-01-02')");
+
+        bEnv.executeSql(String.format("DELETE FROM %s WHERE currency = 'Euro'", table)).await();
+
+        checkFileStorePath(table, Collections.emptyList());
+
+        // test projection and filter
+        BlockingIterator<Row, Row> streamingItr =
+                testStreamingRead(
+                        buildQuery(table, "currency, rate", "WHERE dt = '2022-01-02'"),
+                        Collections.singletonList(changelogRow("+I", "Yen", 1L)));
+
+        insertOverwrite(table, "('US Dollar', 100, '2022-01-02')", "('Yen', 10, '2022-01-01')");
+
+        validateStreamingReadResult(
+                streamingItr,
+                Arrays.asList(
+                        changelogRow("-D", "Yen", 1L), changelogRow("+I", "US Dollar", 100L)));
+        assertNoMoreRecords(streamingItr);
+
+        streamingItr.close();
+    }
+
+    @Test
     public void testUnsupportStreamingReadOverwriteWithoutPk() {
         assertThatThrownBy(
                         () ->

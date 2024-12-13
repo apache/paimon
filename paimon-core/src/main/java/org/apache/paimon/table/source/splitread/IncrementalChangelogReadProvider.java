@@ -60,20 +60,20 @@ public class IncrementalChangelogReadProvider implements SplitReadProvider {
                             ConcatRecordReader.create(
                                     () ->
                                             new ReverseReader(
-                                                    read.createNoMergeReader(
+                                                    read.createMergeReader(
                                                             split.partition(),
                                                             split.bucket(),
                                                             split.beforeFiles(),
                                                             split.beforeDeletionFiles()
                                                                     .orElse(null),
-                                                            true)),
+                                                            false)),
                                     () ->
-                                            read.createNoMergeReader(
+                                            read.createMergeReader(
                                                     split.partition(),
                                                     split.bucket(),
                                                     split.dataFiles(),
                                                     split.deletionFiles().orElse(null),
-                                                    true));
+                                                    false));
                     return unwrap(reader);
                 };
 
