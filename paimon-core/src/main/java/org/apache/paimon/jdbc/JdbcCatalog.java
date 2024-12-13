@@ -205,16 +205,16 @@ public class JdbcCatalog extends AbstractCatalog {
 
     @Override
     protected void alterDatabaseImpl(String name, List<DatabaseChange> changes) {
-        Pair<Map<String, String>, Set<String>> insertProperties2removeKeys =
-                DatabaseChange.getAddPropertiesAndRemoveKeys(changes);
-        Map<String, String> insertProperties = insertProperties2removeKeys.getLeft();
-        Set<String> removeKeys = insertProperties2removeKeys.getRight();
+        Pair<Map<String, String>, Set<String>> setPropertiesToRemoveKeys =
+                DatabaseChange.getSetPropertiesToRemoveKeys(changes);
+        Map<String, String> setProperties = setPropertiesToRemoveKeys.getLeft();
+        Set<String> removeKeys = setPropertiesToRemoveKeys.getRight();
         Map<String, String> startingProperties = fetchProperties(name);
         Map<String, String> inserts = Maps.newHashMap();
         Map<String, String> updates = Maps.newHashMap();
         Set<String> removes = Sets.newHashSet();
-        if (!insertProperties.isEmpty()) {
-            insertProperties.forEach(
+        if (!setProperties.isEmpty()) {
+            setProperties.forEach(
                     (k, v) -> {
                         if (!startingProperties.containsKey(k)) {
                             inserts.put(k, v);

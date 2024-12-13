@@ -38,21 +38,21 @@ public interface DatabaseChange {
         return new RemoveProperty(property);
     }
 
-    static Pair<Map<String, String>, Set<String>> getAddPropertiesAndRemoveKeys(
+    static Pair<Map<String, String>, Set<String>> getSetPropertiesToRemoveKeys(
             List<DatabaseChange> changes) {
-        Map<String, String> insertProperties = Maps.newHashMap();
+        Map<String, String> setProperties = Maps.newHashMap();
         Set<String> removeKeys = Sets.newHashSet();
         changes.forEach(
                 change -> {
                     if (change instanceof DatabaseChange.SetProperty) {
                         DatabaseChange.SetProperty setProperty =
                                 (DatabaseChange.SetProperty) change;
-                        insertProperties.put(setProperty.property(), setProperty.value());
+                        setProperties.put(setProperty.property(), setProperty.value());
                     } else {
                         removeKeys.add(((DatabaseChange.RemoveProperty) change).property());
                     }
                 });
-        return Pair.of(insertProperties, removeKeys);
+        return Pair.of(setProperties, removeKeys);
     }
 
     /** Set property for database change. */

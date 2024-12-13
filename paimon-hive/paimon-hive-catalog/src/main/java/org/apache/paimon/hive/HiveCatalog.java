@@ -414,12 +414,12 @@ public class HiveCatalog extends AbstractCatalog {
             Database database = clients.run(client -> client.getDatabase(name));
             Map<String, String> parameter = Maps.newHashMap();
             parameter.putAll(database.getParameters());
-            Pair<Map<String, String>, Set<String>> insertProperties2removeProperties =
-                    DatabaseChange.getAddPropertiesAndRemoveKeys(changes);
-            Map<String, String> insertProperties = insertProperties2removeProperties.getLeft();
-            Set<String> removeKeys = insertProperties2removeProperties.getRight();
-            if (insertProperties.size() > 0) {
-                parameter.putAll(insertProperties);
+            Pair<Map<String, String>, Set<String>> setPropertiesToRemoveKeys =
+                    DatabaseChange.getSetPropertiesToRemoveKeys(changes);
+            Map<String, String> setProperties = setPropertiesToRemoveKeys.getLeft();
+            Set<String> removeKeys = setPropertiesToRemoveKeys.getRight();
+            if (setProperties.size() > 0) {
+                parameter.putAll(setProperties);
             }
             if (removeKeys.size() > 0) {
                 parameter.keySet().removeAll(removeKeys);
