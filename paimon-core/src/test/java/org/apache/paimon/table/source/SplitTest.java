@@ -279,16 +279,16 @@ public class SplitTest {
                         11L,
                         new byte[] {1, 2, 4},
                         FileSource.COMPACT,
-                        null);
+                        Arrays.asList("field1", "field2", "field3"));
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
+
+        DeletionFile deletionFile = new DeletionFile("deletion_file", 100, 22, null);
+        List<DeletionFile> deletionFiles = Collections.singletonList(deletionFile);
 
         BinaryRow partition = new BinaryRow(1);
         BinaryRowWriter binaryRowWriter = new BinaryRowWriter(partition);
         binaryRowWriter.writeString(0, BinaryString.fromString("aaaaa"));
         binaryRowWriter.complete();
-
-        DeletionFile deletionFile = new DeletionFile("deletion_file", 100, 22, null);
-        List<DeletionFile> deletionFiles = Collections.singletonList(deletionFile);
 
         DataSplit split =
                 DataSplit.builder()
