@@ -152,7 +152,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema())})
     })
     @DeleteMapping("/v1/{prefix}/databases/{database}")
-    public void dropDatabases(@PathVariable String prefix, @PathVariable String database) {}
+    public void dropDatabase(@PathVariable String prefix, @PathVariable String database) {}
 
     @Operation(
             summary = "Alter Database",

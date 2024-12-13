@@ -102,6 +102,30 @@ public class DropDatabase {
 }
 ```
 
+## Alter Database
+
+You can use the catalog to alter databases.(ps: only support hive and jdbc catalog)
+
+```java
+import java.util.ArrayList;
+import org.apache.paimon.catalog.Catalog;
+
+public class AlterDatabase {
+
+    public static void main(String[] args) {
+        try {
+            Catalog catalog = CreateCatalog.createHiveCatalog();
+            List<DatabaseChange> changes = new ArrayList<>();
+            changes.add(DatabaseChange.setProperty("k1", "v1"));
+            changes.add(DatabaseChange.removeProperty("k2"));
+            catalog.alterDatabase("my_db", changes, true);
+        } catch (Catalog.DatabaseNotExistException e) {
+            // do something
+        }
+    }
+}
+```
+
 ## Determine Whether Table Exists
 
 You can use the catalog to determine whether the table exists
