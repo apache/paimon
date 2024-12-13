@@ -100,15 +100,16 @@ public class IndexFileHandler {
             if (meta.indexType().equals(DELETION_VECTORS_INDEX)
                     && file.partition().equals(partition)
                     && file.bucket() == bucket) {
-                LinkedHashMap<String, Pair<Integer, Integer>> dvRanges =
-                        meta.deletionVectorsRanges();
-                checkNotNull(dvRanges);
-                for (String dataFile : dvRanges.keySet()) {
-                    Pair<Integer, Integer> pair = dvRanges.get(dataFile);
-                    DeletionFile deletionFile =
+                LinkedHashMap<String, DeletionVectorMeta> dvMetas = meta.deletionVectorMetas();
+                checkNotNull(dvMetas);
+                for (DeletionVectorMeta dvMeta : dvMetas.values()) {
+                    result.put(
+                            dvMeta.dataFileName(),
                             new DeletionFile(
-                                    filePath(meta).toString(), pair.getLeft(), pair.getRight());
-                    result.put(dataFile, deletionFile);
+                                    filePath(meta).toString(),
+                                    dvMeta.offset(),
+                                    dvMeta.length(),
+                                    dvMeta.cardinality()));
                 }
             }
         }

@@ -111,5 +111,9 @@ The index file meta is:
 2. fileName: file name.
 3. fileSize: file size.
 4. rowCount: total number of rows.
-5. deletionVectorsRanges: Metadata only used by "DELETION_VECTORS", Stores offset and length of each data file,
-   The schema is `ARRAY<ROW<f0: STRING, f1: INT, f2: INT>>`.
+5. deletionVectorsRanges: Metadata only used by "DELETION_VECTORS", is an array of deletion vector meta, the schema of each deletion vector meta is:
+   1. f0: the data file name corresponding to this deletion vector.
+   2. f1: the starting offset of this deletion vector in the index file.
+   3. f2: the length of this deletion vector in the index file.
+   4. cardinality: the number of deleted rows.
+

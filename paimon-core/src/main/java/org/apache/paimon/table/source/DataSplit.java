@@ -50,7 +50,7 @@ public class DataSplit implements Split {
 
     private static final long serialVersionUID = 7L;
     private static final long MAGIC = -2394839472490812314L;
-    private static final int VERSION = 3;
+    private static final int VERSION = 4;
 
     private long snapshotId = 0;
     private BinaryRow partition;
@@ -272,13 +272,16 @@ public class DataSplit implements Split {
 
         FunctionWithIOException<DataInputView, DataFileMeta> dataFileSer =
                 getFileMetaSerde(version);
+        FunctionWithIOException<DataInputView, DeletionFile> deletionFileSerde =
+                getDeletionFileSerde(version);
         int beforeNumber = in.readInt();
         List<DataFileMeta> beforeFiles = new ArrayList<>(beforeNumber);
         for (int i = 0; i < beforeNumber; i++) {
             beforeFiles.add(dataFileSer.apply(in));
         }
 
-        List<DeletionFile> beforeDeletionFiles = DeletionFile.deserializeList(in);
+        List<DeletionFile> beforeDeletionFiles =
+                DeletionFile.deserializeList(in, deletionFileSerde);
 
         int fileNumber = in.readInt();
         List<DataFileMeta> dataFiles = new ArrayList<>(fileNumber);
@@ -286,7 +289,7 @@ public class DataSplit implements Split {
             dataFiles.add(dataFileSer.apply(in));
         }
 
-        List<DeletionFile> dataDeletionFiles = DeletionFile.deserializeList(in);
+        List<DeletionFile> dataDeletionFiles = DeletionFile.deserializeList(in, deletionFileSerde);
 
         boolean isStreaming = in.readBoolean();
         boolean rawConvertible = in.readBoolean();
@@ -319,16 +322,22 @@ public class DataSplit implements Split {
         } else if (version == 2) {
             DataFileMeta09Serializer serializer = new DataFileMeta09Serializer();
             return serializer::deserialize;
-        } else if (version == 3) {
+        } else if (version >= 3) {
             DataFileMetaSerializer serializer = new DataFileMetaSerializer();
             return serializer::deserialize;
         } else {
-            throw new UnsupportedOperationException(
-                    "Expecting DataSplit version to be smaller or equal than "
-                            + VERSION
-                            + ", but found "
-                            + version
-                            + ".");
+            throw new UnsupportedOperationException("Unsupported version: " + version);
+        }
+    }
+
+    private static FunctionWithIOException<DataInputView, DeletionFile> getDeletionFileSerde(
+            int version) {
+        if (version >= 1 && version <= 3) {
+            return DeletionFile::deserializeV3;
+        } else if (version >= 4) {
+            return DeletionFile::deserialize;
+        } else {
+            throw new UnsupportedOperationException("Unsupported version: " + version);
         }
     }
 
