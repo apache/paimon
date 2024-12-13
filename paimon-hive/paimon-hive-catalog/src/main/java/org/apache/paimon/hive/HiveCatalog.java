@@ -409,13 +409,13 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void alertDatabaseImpl(String name, List<DatabaseChange> changes) {
+    protected void alterDatabaseImpl(String name, List<DatabaseChange> changes) {
         try {
             Database database = clients.run(client -> client.getDatabase(name));
             Map<String, String> parameter = Maps.newHashMap();
             parameter.putAll(database.getParameters());
             Pair<Map<String, String>, Set<String>> insertProperties2removeProperties =
-                    getAddAndRemovePropertiesFromDatabaseChanges(changes);
+                    DatabaseChange.getAddAndRemoveProperties(changes);
             Map<String, String> insertProperties = insertProperties2removeProperties.getLeft();
             Set<String> removeProperties = insertProperties2removeProperties.getRight();
             if (insertProperties.size() > 0) {
@@ -425,13 +425,13 @@ public class HiveCatalog extends AbstractCatalog {
                 parameter.keySet().removeAll(removeProperties);
             }
             Map<String, String> newProperties = Collections.unmodifiableMap(parameter);
-            Database alertDatabase = convertToHiveDatabase(name, newProperties);
-            clients.execute(client -> client.alterDatabase(name, alertDatabase));
+            Database alterDatabase = convertToHiveDatabase(name, newProperties);
+            clients.execute(client -> client.alterDatabase(name, alterDatabase));
         } catch (TException e) {
-            throw new RuntimeException("Failed to alert database " + name, e);
+            throw new RuntimeException("Failed to alter database " + name, e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted in call to alertDatabase " + name, e);
+            throw new RuntimeException("Interrupted in call to alterDatabase " + name, e);
         }
     }
 

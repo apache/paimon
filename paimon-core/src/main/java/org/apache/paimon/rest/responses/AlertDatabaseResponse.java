@@ -22,7 +22,7 @@ import org.apache.paimon.rest.RESTResponse;
 
 import java.util.List;
 
-/** Response for alerting database. */
+/** Response for altering database. */
 public class AlertDatabaseResponse implements RESTResponse {
 
     // List of namespace property keys that were removed

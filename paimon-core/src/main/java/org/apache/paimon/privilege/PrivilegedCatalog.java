@@ -84,10 +84,10 @@ public class PrivilegedCatalog extends DelegateCatalog {
     }
 
     @Override
-    public void alertDatabase(String name, List<DatabaseChange> changes, boolean ignoreIfNotExists)
+    public void alterDatabase(String name, List<DatabaseChange> changes, boolean ignoreIfNotExists)
             throws DatabaseNotExistException {
         privilegeManager.getPrivilegeChecker().assertCanAlertDatabase(name);
-        super.alertDatabase(name, changes, ignoreIfNotExists);
+        super.alterDatabase(name, changes, ignoreIfNotExists);
     }
 
     @Override

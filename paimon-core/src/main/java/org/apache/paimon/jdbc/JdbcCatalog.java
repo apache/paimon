@@ -202,9 +202,9 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void alertDatabaseImpl(String name, List<DatabaseChange> changes) {
+    protected void alterDatabaseImpl(String name, List<DatabaseChange> changes) {
         Pair<Map<String, String>, Set<String>> insertProperties2removeProperties =
-                getAddAndRemovePropertiesFromDatabaseChanges(changes);
+                DatabaseChange.getAddAndRemoveProperties(changes);
         Map<String, String> insertProperties = insertProperties2removeProperties.getLeft();
         Set<String> removeProperties = insertProperties2removeProperties.getRight();
         if (!insertProperties.isEmpty()) {

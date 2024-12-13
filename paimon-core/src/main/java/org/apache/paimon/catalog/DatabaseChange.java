@@ -18,6 +18,15 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.utils.Pair;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Sets;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 /** define change to the database property. */
 public interface DatabaseChange {
 
@@ -27,6 +36,23 @@ public interface DatabaseChange {
 
     static DatabaseChange removeProperty(String property) {
         return new RemoveProperty(property);
+    }
+
+    static Pair<Map<String, String>, Set<String>> getAddAndRemoveProperties(
+            List<DatabaseChange> changes) {
+        Map<String, String> insertProperties = Maps.newHashMap();
+        Set<String> removeProperties = Sets.newHashSet();
+        changes.forEach(
+                change -> {
+                    if (change instanceof DatabaseChange.SetProperty) {
+                        DatabaseChange.SetProperty setProperty =
+                                (DatabaseChange.SetProperty) change;
+                        insertProperties.put(setProperty.property(), setProperty.value());
+                    } else {
+                        removeProperties.add(((DatabaseChange.RemoveProperty) change).property());
+                    }
+                });
+        return Pair.of(insertProperties, removeProperties);
     }
 
     /** Set property for database change. */

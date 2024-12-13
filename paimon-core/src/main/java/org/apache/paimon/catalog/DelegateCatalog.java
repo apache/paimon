@@ -85,9 +85,9 @@ public class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public void alertDatabase(String name, List<DatabaseChange> changes, boolean ignoreIfNotExists)
+    public void alterDatabase(String name, List<DatabaseChange> changes, boolean ignoreIfNotExists)
             throws DatabaseNotExistException {
-        wrapped.alertDatabase(name, changes, ignoreIfNotExists);
+        wrapped.alterDatabase(name, changes, ignoreIfNotExists);
     }
 
     @Override

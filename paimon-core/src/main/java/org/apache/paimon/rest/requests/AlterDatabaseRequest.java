@@ -24,31 +24,31 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCre
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
-/** Request for alerting database. */
-public class AlertDatabaseRequest implements RESTRequest {
+/** Request for altering database. */
+public class AlterDatabaseRequest implements RESTRequest {
 
     private static final String FIELD_REMOVALS = "removals";
     private static final String FIELD_UPDATES = "updates";
 
     @JsonProperty(FIELD_REMOVALS)
-    private List<String> removals;
+    private Set<String> removals;
 
     @JsonProperty(FIELD_UPDATES)
     private Map<String, String> updates;
 
     @JsonCreator
-    public AlertDatabaseRequest(
-            @JsonProperty(FIELD_REMOVALS) List<String> removals,
+    public AlterDatabaseRequest(
+            @JsonProperty(FIELD_REMOVALS) Set<String> removals,
             @JsonProperty(FIELD_UPDATES) Map<String, String> updates) {
         this.removals = removals;
         this.updates = updates;
     }
 
     @JsonGetter(FIELD_REMOVALS)
-    public List<String> getRemovals() {
+    public Set<String> getRemovals() {
         return removals;
     }
 

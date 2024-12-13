@@ -42,11 +42,7 @@ import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
-
-import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
-import org.apache.paimon.shade.guava30.com.google.common.collect.Sets;
 
 import javax.annotation.Nullable;
 
@@ -60,7 +56,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.TYPE;
@@ -235,11 +230,11 @@ public abstract class AbstractCatalog implements Catalog {
     protected abstract void dropDatabaseImpl(String name);
 
     @Override
-    public void alertDatabase(String name, List<DatabaseChange> changes, boolean ignoreIfNotExists)
+    public void alterDatabase(String name, List<DatabaseChange> changes, boolean ignoreIfNotExists)
             throws DatabaseNotExistException {
         checkNotSystemDatabase(name);
         try {
-            alertDatabaseImpl(name, changes);
+            alterDatabaseImpl(name, changes);
         } catch (DatabaseNotExistException e) {
             if (ignoreIfNotExists) {
                 return;
@@ -248,25 +243,8 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
-    protected abstract void alertDatabaseImpl(String name, List<DatabaseChange> changes)
+    protected abstract void alterDatabaseImpl(String name, List<DatabaseChange> changes)
             throws DatabaseNotExistException;
-
-    protected Pair<Map<String, String>, Set<String>> getAddAndRemovePropertiesFromDatabaseChanges(
-            List<DatabaseChange> changes) {
-        Map<String, String> insertProperties = Maps.newHashMap();
-        Set<String> removeProperties = Sets.newHashSet();
-        changes.forEach(
-                change -> {
-                    if (change instanceof DatabaseChange.SetProperty) {
-                        DatabaseChange.SetProperty setProperty =
-                                (DatabaseChange.SetProperty) change;
-                        insertProperties.put(setProperty.property(), setProperty.value());
-                    } else {
-                        removeProperties.add(((DatabaseChange.RemoveProperty) change).property());
-                    }
-                });
-        return Pair.of(insertProperties, removeProperties);
-    }
 
     @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {

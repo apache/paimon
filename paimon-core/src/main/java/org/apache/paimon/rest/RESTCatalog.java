@@ -32,7 +32,7 @@ import org.apache.paimon.rest.auth.CredentialsProvider;
 import org.apache.paimon.rest.auth.CredentialsProviderFactory;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
-import org.apache.paimon.rest.requests.AlertDatabaseRequest;
+import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.responses.AlertDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -43,11 +43,10 @@ import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.shade.guava30.com.google.common.annotations.VisibleForTesting;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
-import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
-import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.Duration;
@@ -55,6 +54,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.stream.Collectors;
 
@@ -180,24 +180,15 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void alertDatabase(String name, List<DatabaseChange> changes, boolean ignoreIfNotExists)
+    public void alterDatabase(String name, List<DatabaseChange> changes, boolean ignoreIfNotExists)
             throws DatabaseNotExistException {
         try {
-            Map<String, String> insertProperties = Maps.newHashMap();
-            List<String> removeProperties = Lists.newArrayList();
-            changes.forEach(
-                    change -> {
-                        if (change instanceof DatabaseChange.SetProperty) {
-                            DatabaseChange.SetProperty setProperty =
-                                    (DatabaseChange.SetProperty) change;
-                            insertProperties.put(setProperty.property(), setProperty.value());
-                        } else {
-                            removeProperties.add(
-                                    ((DatabaseChange.RemoveProperty) change).property());
-                        }
-                    });
-            AlertDatabaseRequest request =
-                    new AlertDatabaseRequest(removeProperties, insertProperties);
+            Pair<Map<String, String>, Set<String>> insertProperties2removeProperties =
+                    DatabaseChange.getAddAndRemoveProperties(changes);
+            Map<String, String> insertProperties = insertProperties2removeProperties.getLeft();
+            Set<String> removeProperties = insertProperties2removeProperties.getRight();
+            AlterDatabaseRequest request =
+                    new AlterDatabaseRequest(removeProperties, insertProperties);
             AlertDatabaseResponse response =
                     client.post(
                             resourcePaths.database(name),
