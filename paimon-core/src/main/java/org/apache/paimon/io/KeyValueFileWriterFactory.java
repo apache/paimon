@@ -268,7 +268,7 @@ public class KeyValueFileWriterFactory {
                     StatsCollectorFactories.createStatsFactories(
                             options,
                             writeRowType.getFieldNames(),
-                            thinModeEnabled ? Collections.emptyList() : keyType.getFieldNames());
+                            thinModeEnabled ? keyType.getFieldNames() : Collections.emptyList());
             for (String format : parentFactories.keySet()) {
                 format2PathFactory.put(
                         format,
