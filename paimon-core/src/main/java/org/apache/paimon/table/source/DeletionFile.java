@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
+import org.apache.paimon.utils.FunctionWithIOException;
 
 import javax.annotation.Nullable;
 
@@ -47,7 +48,7 @@ import java.util.Optional;
 @Public
 public class DeletionFile implements Serializable {
 
-    private static final long serialVersionUID = 2L;
+    private static final long serialVersionUID = 1L;
 
     private final String path;
     private final long offset;
@@ -122,13 +123,27 @@ public class DeletionFile implements Serializable {
     }
 
     @Nullable
-    public static List<DeletionFile> deserializeList(DataInputView in) throws IOException {
+    public static DeletionFile deserializeV3(DataInputView in) throws IOException {
+        if (in.readByte() == 0) {
+            return null;
+        }
+
+        String path = in.readUTF();
+        long offset = in.readLong();
+        long length = in.readLong();
+        return new DeletionFile(path, offset, length, null);
+    }
+
+    @Nullable
+    public static List<DeletionFile> deserializeList(
+            DataInputView in, FunctionWithIOException<DataInputView, DeletionFile> deserialize)
+            throws IOException {
         List<DeletionFile> files = null;
         if (in.readByte() == 1) {
             int size = in.readInt();
             files = new ArrayList<>(size);
             for (int i = 0; i < size; i++) {
-                files.add(DeletionFile.deserialize(in));
+                files.add(deserialize.apply(in));
             }
         }
         return files;

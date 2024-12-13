@@ -47,7 +47,7 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 /** {@link VersionedSerializer} for {@link CommitMessage}. */
 public class CommitMessageSerializer implements VersionedSerializer<CommitMessage> {
 
-    private static final int CURRENT_VERSION = 4;
+    private static final int CURRENT_VERSION = 5;
 
     private final DataFileMetaSerializer dataFileSerializer;
     private final IndexFileMetaSerializer indexEntrySerializer;
@@ -129,7 +129,7 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
 
     private IOExceptionSupplier<List<DataFileMeta>> fileDeserializer(
             int version, DataInputView view) {
-        if (version > 3) {
+        if (version >= 4) {
             return () -> dataFileSerializer.deserializeList(view);
         } else if (version == 3) {
             if (dataFile09Serializer == null) {
@@ -146,7 +146,7 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
 
     private IOExceptionSupplier<List<IndexFileMeta>> indexEntryDeserializer(
             int version, DataInputView view) {
-        if (version > 3) {
+        if (version >= 5) {
             return () -> indexEntrySerializer.deserializeList(view);
         } else {
             if (indexEntry09Serializer == null) {

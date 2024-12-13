@@ -31,8 +31,6 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 /** A {@link VersionedObjectSerializer} for {@link IndexManifestEntry}. */
 public class IndexManifestEntrySerializer extends VersionedObjectSerializer<IndexManifestEntry> {
 
-    private static final long serialVersionUID = 2L;
-
     public IndexManifestEntrySerializer() {
         super(IndexManifestEntry.SCHEMA);
     }
