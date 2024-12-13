@@ -54,6 +54,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.Assert.assertEquals;
 
 /** Base test class of paimon catalog in {@link Catalog}. */
 public abstract class CatalogTestBase {
@@ -959,5 +960,33 @@ public abstract class CatalogTestBase {
         assertThat(uuid).startsWith(identifier.getFullName() + ".");
         assertThat(Long.parseLong(uuid.substring((identifier.getFullName() + ".").length())))
                 .isGreaterThan(0);
+    }
+
+    protected void alterDatabaseAddPropertyWhenSupport() throws Exception {
+        // Alter database
+        String databaseName = "db_to_alter_add";
+        catalog.createDatabase(databaseName, false);
+        catalog.alterDatabase(
+                databaseName,
+                Lists.newArrayList(DatabaseChange.setProperty("key", "value")),
+                false);
+        Database db = catalog.getDatabase(databaseName);
+        assertEquals("value", db.options().get("key"));
+    }
+
+    protected void alterDatabaseRemovePropertyWhenSupport() throws Exception {
+        // Alter database
+        String databaseName = "db_to_alter_remove";
+        String key = "key";
+        String value = "value";
+        catalog.createDatabase(databaseName, false);
+        catalog.alterDatabase(
+                databaseName, Lists.newArrayList(DatabaseChange.setProperty(key, value)), false);
+        Database db = catalog.getDatabase(databaseName);
+        assertEquals(value, db.options().get(key));
+        catalog.alterDatabase(
+                databaseName, Lists.newArrayList(DatabaseChange.removeProperty(key)), false);
+        db = catalog.getDatabase(databaseName);
+        assertEquals(false, db.options().containsKey(key));
     }
 }

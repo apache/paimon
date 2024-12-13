@@ -34,7 +34,7 @@ import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
-import org.apache.paimon.rest.responses.AlertDatabaseResponse;
+import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.DatabaseName;
@@ -188,18 +188,20 @@ public class RESTCatalog implements Catalog {
             Map<String, String> insertProperties = insertProperties2removeProperties.getLeft();
             Set<String> removeProperties = insertProperties2removeProperties.getRight();
             AlterDatabaseRequest request =
-                    new AlterDatabaseRequest(removeProperties, insertProperties);
-            AlertDatabaseResponse response =
+                    new AlterDatabaseRequest(new ArrayList<>(removeProperties), insertProperties);
+            AlterDatabaseResponse response =
                     client.post(
                             resourcePaths.database(name),
                             request,
-                            AlertDatabaseResponse.class,
+                            AlterDatabaseResponse.class,
                             headers());
             if (response.getUpdated().isEmpty()) {
                 throw new IllegalStateException("Failed to update properties");
             }
         } catch (NoSuchResourceException e) {
-            throw new DatabaseNotExistException(name);
+            if (!ignoreIfNotExists) {
+                throw new DatabaseNotExistException(name);
+            }
         }
     }
 

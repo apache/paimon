@@ -20,33 +20,49 @@ package org.apache.paimon.rest.responses;
 
 import org.apache.paimon.rest.RESTResponse;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.List;
 
 /** Response for altering database. */
-public class AlertDatabaseResponse implements RESTResponse {
+public class AlterDatabaseResponse implements RESTResponse {
 
-    // List of namespace property keys that were removed
+    private static final String FIELD_REMOVED = "removed";
+    private static final String FIELD_UPDATED = "updated";
+    private static final String FIELD_MISSING = "missing";
+
+    @JsonProperty(FIELD_REMOVED)
     private List<String> removed;
-    // List of namespace property keys that were added or updated
+
+    @JsonProperty(FIELD_UPDATED)
     private List<String> updated;
-    // List of properties that were requested for removal that were not found in the namespace's
-    // properties
+
+    @JsonProperty(FIELD_MISSING)
     private List<String> missing;
 
-    public AlertDatabaseResponse(List<String> removed, List<String> updated, List<String> missing) {
+    @JsonCreator
+    public AlterDatabaseResponse(
+            @JsonProperty(FIELD_REMOVED) List<String> removed,
+            @JsonProperty(FIELD_UPDATED) List<String> updated,
+            @JsonProperty(FIELD_MISSING) List<String> missing) {
         this.removed = removed;
         this.updated = updated;
         this.missing = missing;
     }
 
+    @JsonGetter(FIELD_REMOVED)
     public List<String> getRemoved() {
         return removed;
     }
 
+    @JsonGetter(FIELD_UPDATED)
     public List<String> getUpdated() {
         return updated;
     }
 
+    @JsonGetter(FIELD_MISSING)
     public List<String> getMissing() {
         return missing;
     }

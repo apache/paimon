@@ -174,6 +174,16 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testAlterDatabaseAddProperty() throws Exception {
+        this.alterDatabaseAddPropertyWhenSupport();
+    }
+
+    @Test
+    public void testAlterDatabaseRemoveProperty() throws Exception {
+        this.alterDatabaseRemovePropertyWhenSupport();
+    }
+
+    @Test
     public void testAddHiveTableParameters() {
         try {
             // Create a new database for the test

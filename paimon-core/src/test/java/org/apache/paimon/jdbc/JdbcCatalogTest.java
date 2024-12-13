@@ -122,4 +122,14 @@ public class JdbcCatalogTest extends CatalogTestBase {
                     }
                 });
     }
+
+    @Test
+    public void testAlterDatabaseAddProperty() throws Exception {
+        this.alterDatabaseAddPropertyWhenSupport();
+    }
+
+    @Test
+    public void testAlterDatabaseRemoveProperty() throws Exception {
+        this.alterDatabaseRemovePropertyWhenSupport();
+    }
 }

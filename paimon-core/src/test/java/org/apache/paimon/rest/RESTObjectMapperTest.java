@@ -18,7 +18,9 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
@@ -102,5 +104,26 @@ public class RESTObjectMapperTest {
                 mapper.readValue(responseStr, ListDatabasesResponse.class);
         assertEquals(response.getDatabases().size(), parseData.getDatabases().size());
         assertEquals(name, parseData.getDatabases().get(0).getName());
+    }
+
+    @Test
+    public void alterDatabaseRequestParseTest() throws Exception {
+        AlterDatabaseRequest request = MockRESTMessage.alterDatabaseRequest();
+        String requestStr = mapper.writeValueAsString(request);
+        AlterDatabaseRequest parseData = mapper.readValue(requestStr, AlterDatabaseRequest.class);
+        assertEquals(request.getRemovals().size(), parseData.getRemovals().size());
+        assertEquals(request.getUpdates().size(), parseData.getUpdates().size());
+    }
+
+    @Test
+    public void alertDatabaseResponseParseTest() throws Exception {
+        String name = MockRESTMessage.databaseName();
+        AlterDatabaseResponse response = MockRESTMessage.alterDatabaseResponse();
+        String responseStr = mapper.writeValueAsString(response);
+        AlterDatabaseResponse parseData =
+                mapper.readValue(responseStr, AlterDatabaseResponse.class);
+        assertEquals(response.getRemoved().size(), parseData.getRemoved().size());
+        assertEquals(response.getUpdated().size(), parseData.getUpdated().size());
+        assertEquals(response.getMissing().size(), parseData.getMissing().size());
     }
 }
