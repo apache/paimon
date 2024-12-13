@@ -42,7 +42,7 @@ public class AllGrantedPrivilegeChecker implements PrivilegeChecker {
     public void assertCanDropDatabase(String databaseName) {}
 
     @Override
-    public void assertCanAlertDatabase(String databaseName) {}
+    public void assertCanAlterDatabase(String databaseName) {}
 
     @Override
     public void assertCanCreateDatabase() {}

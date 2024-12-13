@@ -34,7 +34,7 @@ public enum PrivilegeType {
 
     CREATE_TABLE(PrivilegeTarget.DATABASE),
     DROP_DATABASE(PrivilegeTarget.DATABASE),
-    ALERT_DATABASE(PrivilegeTarget.DATABASE),
+    ALTER_DATABASE(PrivilegeTarget.DATABASE),
 
     CREATE_DATABASE(PrivilegeTarget.CATALOG),
     // you can create and drop users, grant and revoke any privileges to or from others

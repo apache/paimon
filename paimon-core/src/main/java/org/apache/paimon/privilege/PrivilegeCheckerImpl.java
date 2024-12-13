@@ -86,10 +86,10 @@ public class PrivilegeCheckerImpl implements PrivilegeChecker {
     }
 
     @Override
-    public void assertCanAlertDatabase(String databaseName) {
-        if (!check(databaseName, PrivilegeType.ALERT_DATABASE)) {
+    public void assertCanAlterDatabase(String databaseName) {
+        if (!check(databaseName, PrivilegeType.ALTER_DATABASE)) {
             throw new NoPrivilegeException(
-                    user, "database", databaseName, PrivilegeType.ALERT_DATABASE);
+                    user, "database", databaseName, PrivilegeType.ALTER_DATABASE);
         }
     }
 

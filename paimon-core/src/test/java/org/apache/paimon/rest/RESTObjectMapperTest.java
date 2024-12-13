@@ -116,8 +116,7 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void alertDatabaseResponseParseTest() throws Exception {
-        String name = MockRESTMessage.databaseName();
+    public void alterDatabaseResponseParseTest() throws Exception {
         AlterDatabaseResponse response = MockRESTMessage.alterDatabaseResponse();
         String responseStr = mapper.writeValueAsString(response);
         AlterDatabaseResponse parseData =
