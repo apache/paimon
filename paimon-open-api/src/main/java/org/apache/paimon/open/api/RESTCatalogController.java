@@ -19,7 +19,9 @@
 package org.apache.paimon.open.api;
 
 import org.apache.paimon.rest.ResourcePaths;
+import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.DatabaseName;
@@ -28,6 +30,7 @@ import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -150,4 +153,32 @@ public class RESTCatalogController {
     })
     @DeleteMapping("/v1/{prefix}/databases/{database}")
     public void dropDatabases(@PathVariable String prefix, @PathVariable String database) {}
+
+    @Operation(
+            summary = "Alter Database",
+            tags = {"database"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {
+                    @Content(schema = @Schema(implementation = AlterDatabaseResponse.class))
+                }),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @PostMapping("/v1/{prefix}/databases/{database}/properties")
+    public AlterDatabaseResponse alterDatabase(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @RequestBody AlterDatabaseRequest request) {
+        return new AlterDatabaseResponse(
+                Lists.newArrayList("remove"),
+                Lists.newArrayList("add"),
+                Lists.newArrayList("missing"));
+    }
 }

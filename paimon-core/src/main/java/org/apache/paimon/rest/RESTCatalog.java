@@ -191,7 +191,7 @@ public class RESTCatalog implements Catalog {
                     new AlterDatabaseRequest(new ArrayList<>(removeProperties), insertProperties);
             AlterDatabaseResponse response =
                     client.post(
-                            resourcePaths.database(name),
+                            resourcePaths.databaseProperties(name),
                             request,
                             AlterDatabaseResponse.class,
                             headers());
