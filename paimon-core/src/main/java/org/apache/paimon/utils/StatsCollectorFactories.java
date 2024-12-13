@@ -55,7 +55,7 @@ public class StatsCollectorFactories {
                 modes[i] = SimpleColStatsCollector.from(fieldMode);
             } else if (SpecialFields.isSystemField(field)
                     ||
-                    // If we config METADATA_STATS_MODE to true, we need to maintain the
+                    // If we config DATA_FILE_THIN_MODE to true, we need to maintain the
                     // stats for key fields.
                     keyNames.contains(SpecialFields.KEY_FIELD_PREFIX + field)) {
                 modes[i] = () -> new TruncateSimpleColStatsCollector(128);

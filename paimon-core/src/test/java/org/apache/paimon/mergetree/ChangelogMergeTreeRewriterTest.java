@@ -192,8 +192,6 @@ public class ChangelogMergeTreeRewriterTest {
 
     private KeyValueFileWriterFactory createWriterFactory(
             Path path, RowType keyType, RowType valueType) {
-        Options options = new Options();
-
         return KeyValueFileWriterFactory.builder(
                         LocalFileIO.create(),
                         0,
@@ -202,7 +200,7 @@ public class ChangelogMergeTreeRewriterTest {
                         new FlushingFileFormat("avro"),
                         Collections.singletonMap("avro", createNonPartFactory(path)),
                         VALUE_128_MB.getBytes())
-                .build(BinaryRow.EMPTY_ROW, 0, new CoreOptions(options));
+                .build(BinaryRow.EMPTY_ROW, 0, new CoreOptions(new Options()));
     }
 
     private KeyValueFileReaderFactory createReaderFactory(

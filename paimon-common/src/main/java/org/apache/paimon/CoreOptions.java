@@ -1455,7 +1455,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Boolean> DATA_FILE_THIN_MODE =
             key("data-file.thin-mode")
                     .booleanType()
-                    .defaultValue(false)
+                    .defaultValue(true)
                     .withDescription(
                             "Enable data file thin mode to avoid duplicate columns storage.");
 
