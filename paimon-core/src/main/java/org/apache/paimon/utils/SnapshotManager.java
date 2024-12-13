@@ -892,7 +892,7 @@ public class SnapshotManager implements Serializable {
                 return;
             } catch (IOException e) {
                 try {
-                    Thread.sleep(RANDOM.nextInt(1000));
+                    Thread.sleep(RANDOM.nextInt(1000) + 500);
                 } catch (InterruptedException ex) {
                     // throw root cause
                     throw new RuntimeException(e);
