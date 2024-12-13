@@ -186,8 +186,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     @Test
     public void testBatchWriteBuilder() throws Exception {
-        FileStoreTable table =
-                createFileStoreTable();
+        FileStoreTable table = createFileStoreTable();
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         BatchTableWrite write = writeBuilder.newWrite();
         BatchTableCommit commit = writeBuilder.newCommit();
