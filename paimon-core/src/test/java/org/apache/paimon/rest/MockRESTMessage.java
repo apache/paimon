@@ -40,10 +40,9 @@ public class MockRESTMessage {
     }
 
     public static CreateDatabaseRequest createDatabaseRequest(String name) {
-        boolean ignoreIfExists = true;
         Map<String, String> options = new HashMap<>();
         options.put("a", "b");
-        return new CreateDatabaseRequest(name, ignoreIfExists, options);
+        return new CreateDatabaseRequest(name, options);
     }
 
     public static CreateDatabaseResponse createDatabaseResponse(String name) {

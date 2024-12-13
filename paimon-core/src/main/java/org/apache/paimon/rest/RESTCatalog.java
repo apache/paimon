@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest;
 
+import java.util.ArrayList;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.DatabaseChange;
@@ -32,7 +33,9 @@ import org.apache.paimon.rest.auth.CredentialsProvider;
 import org.apache.paimon.rest.auth.CredentialsProviderFactory;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
+import org.apache.paimon.rest.requests.AlertDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.responses.AlertDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.DatabaseName;
@@ -44,10 +47,11 @@ import org.apache.paimon.table.Table;
 
 import org.apache.paimon.shade.guava30.com.google.common.annotations.VisibleForTesting;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -137,12 +141,14 @@ public class RESTCatalog implements Catalog {
     @Override
     public void createDatabase(String name, boolean ignoreIfExists, Map<String, String> properties)
             throws DatabaseAlreadyExistException {
-        CreateDatabaseRequest request = new CreateDatabaseRequest(name, ignoreIfExists, properties);
+        CreateDatabaseRequest request = new CreateDatabaseRequest(name, properties);
         try {
             client.post(
                     resourcePaths.databases(), request, CreateDatabaseResponse.class, headers());
         } catch (AlreadyExistsException e) {
-            throw new DatabaseAlreadyExistException(name);
+            if (!ignoreIfExists) {
+                throw new DatabaseAlreadyExistException(name);
+            }
         }
     }
 
@@ -176,7 +182,34 @@ public class RESTCatalog implements Catalog {
     @Override
     public void alertDatabase(String name, List<DatabaseChange> changes, boolean ignoreIfNotExists)
             throws DatabaseNotExistException {
-        throw new UnsupportedOperationException();
+        try {
+            Map<String, String> insertProperties = Maps.newHashMap();
+            List<String> removeProperties = Lists.newArrayList();
+            changes.forEach(
+                    change -> {
+                        if (change instanceof DatabaseChange.SetProperty) {
+                            DatabaseChange.SetProperty setProperty =
+                                    (DatabaseChange.SetProperty) change;
+                            insertProperties.put(setProperty.property(), setProperty.value());
+                        } else {
+                            removeProperties.add(
+                                    ((DatabaseChange.RemoveProperty) change).property());
+                        }
+                    });
+            AlertDatabaseRequest request =
+                    new AlertDatabaseRequest(removeProperties, insertProperties);
+            AlertDatabaseResponse response =
+                    client.post(
+                            resourcePaths.database(name),
+                            request,
+                            AlertDatabaseResponse.class,
+                            headers());
+            if (response.getUpdated().isEmpty()) {
+                throw new IllegalStateException("Failed to update properties");
+            }
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(name);
+        }
     }
 
     @Override

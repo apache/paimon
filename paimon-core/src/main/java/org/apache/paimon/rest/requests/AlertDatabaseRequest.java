@@ -24,35 +24,36 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCre
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.List;
 import java.util.Map;
 
-/** Request for creating database. */
-public class CreateDatabaseRequest implements RESTRequest {
+/** Request for alerting database. */
+public class AlertDatabaseRequest implements RESTRequest {
 
-    private static final String FIELD_NAME = "name";
-    private static final String FIELD_OPTIONS = "options";
+    private static final String FIELD_REMOVALS = "removals";
+    private static final String FIELD_UPDATES = "updates";
 
-    @JsonProperty(FIELD_NAME)
-    private String name;
+    @JsonProperty(FIELD_REMOVALS)
+    private List<String> removals;
 
-    @JsonProperty(FIELD_OPTIONS)
-    private Map<String, String> options;
+    @JsonProperty(FIELD_UPDATES)
+    private Map<String, String> updates;
 
     @JsonCreator
-    public CreateDatabaseRequest(
-            @JsonProperty(FIELD_NAME) String name,
-            @JsonProperty(FIELD_OPTIONS) Map<String, String> options) {
-        this.name = name;
-        this.options = options;
+    public AlertDatabaseRequest(
+            @JsonProperty(FIELD_REMOVALS) List<String> removals,
+            @JsonProperty(FIELD_UPDATES) Map<String, String> updates) {
+        this.removals = removals;
+        this.updates = updates;
     }
 
-    @JsonGetter(FIELD_NAME)
-    public String getName() {
-        return name;
+    @JsonGetter(FIELD_REMOVALS)
+    public List<String> getRemovals() {
+        return removals;
     }
 
-    @JsonGetter(FIELD_OPTIONS)
-    public Map<String, String> getOptions() {
-        return options;
+    @JsonGetter(FIELD_UPDATES)
+    public Map<String, String> getUpdates() {
+        return updates;
     }
 }

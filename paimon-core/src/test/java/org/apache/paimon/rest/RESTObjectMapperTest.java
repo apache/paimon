@@ -68,7 +68,6 @@ public class RESTObjectMapperTest {
         String requestStr = mapper.writeValueAsString(request);
         CreateDatabaseRequest parseData = mapper.readValue(requestStr, CreateDatabaseRequest.class);
         assertEquals(request.getName(), parseData.getName());
-        assertEquals(request.getIgnoreIfExists(), parseData.getIgnoreIfExists());
         assertEquals(request.getOptions().size(), parseData.getOptions().size());
     }
 
