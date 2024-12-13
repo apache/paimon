@@ -21,7 +21,6 @@ package org.apache.paimon.utils;
 import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FileIOUtils;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 
@@ -44,6 +43,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
+import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -73,6 +73,7 @@ public class SnapshotManager implements Serializable {
     public static final String LATEST = "LATEST";
     private static final int READ_HINT_RETRY_NUM = 3;
     private static final int READ_HINT_RETRY_INTERVAL = 1;
+    private static final Random RANDOM = new Random();
 
     private final FileIO fileIO;
     private final Path tablePath;
@@ -884,6 +885,22 @@ public class SnapshotManager implements Serializable {
 
     private void commitHint(long snapshotId, String fileName, Path dir) throws IOException {
         Path hintFile = new Path(dir, fileName);
-        FileIOUtils.overwriteFileUtf8WithRetry(fileIO, hintFile, String.valueOf(snapshotId), 3);
+        int loopTime = 3;
+        while (loopTime-- > 0) {
+            try {
+                fileIO.overwriteFileUtf8(hintFile, String.valueOf(snapshotId));
+                return;
+            } catch (IOException e) {
+                try {
+                    Thread.sleep(RANDOM.nextInt(1000));
+                } catch (InterruptedException ex) {
+                    // throw root cause
+                    throw new RuntimeException(e);
+                }
+                if (loopTime == 0) {
+                    throw e;
+                }
+            }
+        }
     }
 }

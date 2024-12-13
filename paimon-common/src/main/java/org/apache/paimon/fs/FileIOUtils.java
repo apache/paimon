@@ -44,19 +44,4 @@ public class FileIOUtils {
         io.exists(path);
         return fileIO;
     }
-
-    public static void overwriteFileUtf8WithRetry(
-            FileIO fileIO, Path path, String content, int times) throws IOException {
-        int loopTime = times;
-        while (loopTime-- > 0) {
-            try {
-                fileIO.overwriteFileUtf8(path, content);
-                return;
-            } catch (IOException e) {
-                if (loopTime == 0) {
-                    throw e;
-                }
-            }
-        }
-    }
 }
