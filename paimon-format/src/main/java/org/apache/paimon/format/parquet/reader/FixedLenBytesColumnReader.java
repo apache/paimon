@@ -18,11 +18,7 @@
 
 package org.apache.paimon.format.parquet.reader;
 
-import org.apache.paimon.data.columnar.writable.WritableBytesVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
-import org.apache.paimon.data.columnar.writable.WritableIntVector;
-import org.apache.paimon.data.columnar.writable.WritableLongVector;
-import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReadStore;
@@ -33,10 +29,10 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 
 /** Fixed length bytes {@link ColumnReader}, just for Decimal. */
-public class FixedLenBytesColumnReader<VECTOR extends WritableColumnVector>
+public abstract class FixedLenBytesColumnReader<VECTOR extends WritableColumnVector>
         extends AbstractColumnReader<VECTOR> {
 
-    private final int precision;
+    protected final int precision;
 
     public FixedLenBytesColumnReader(
             ColumnDescriptor descriptor, PageReadStore pageReadStore, int precision)
@@ -46,116 +42,11 @@ public class FixedLenBytesColumnReader<VECTOR extends WritableColumnVector>
         this.precision = precision;
     }
 
-    @Override
-    protected void readBatch(int rowId, int num, VECTOR column) {
-        int bytesLen = descriptor.getPrimitiveType().getTypeLength();
-        if (ParquetSchemaConverter.is32BitDecimal(precision)) {
-            WritableIntVector intVector = (WritableIntVector) column;
-            for (int i = 0; i < num; i++) {
-                if (runLenDecoder.readInteger() == maxDefLevel) {
-                    intVector.setInt(rowId + i, (int) heapBinaryToLong(readDataBinary(bytesLen)));
-                } else {
-                    intVector.setNullAt(rowId + i);
-                }
-            }
-        } else if (ParquetSchemaConverter.is64BitDecimal(precision)) {
-            WritableLongVector longVector = (WritableLongVector) column;
-            for (int i = 0; i < num; i++) {
-                if (runLenDecoder.readInteger() == maxDefLevel) {
-                    longVector.setLong(rowId + i, heapBinaryToLong(readDataBinary(bytesLen)));
-                } else {
-                    longVector.setNullAt(rowId + i);
-                }
-            }
-        } else {
-            WritableBytesVector bytesVector = (WritableBytesVector) column;
-            for (int i = 0; i < num; i++) {
-                if (runLenDecoder.readInteger() == maxDefLevel) {
-                    byte[] bytes = readDataBinary(bytesLen).getBytesUnsafe();
-                    bytesVector.appendBytes(rowId + i, bytes, 0, bytes.length);
-                } else {
-                    bytesVector.setNullAt(rowId + i);
-                }
-            }
-        }
-    }
-
-    @Override
-    protected void skipBatch(int num) {
-        int bytesLen = descriptor.getPrimitiveType().getTypeLength();
-        if (ParquetSchemaConverter.is32BitDecimal(precision)) {
-            for (int i = 0; i < num; i++) {
-                if (runLenDecoder.readInteger() == maxDefLevel) {
-                    skipDataBinary(bytesLen);
-                }
-            }
-        } else if (ParquetSchemaConverter.is64BitDecimal(precision)) {
-
-            for (int i = 0; i < num; i++) {
-                if (runLenDecoder.readInteger() == maxDefLevel) {
-                    skipDataBinary(bytesLen);
-                }
-            }
-        } else {
-            for (int i = 0; i < num; i++) {
-                if (runLenDecoder.readInteger() == maxDefLevel) {
-                    skipDataBinary(bytesLen);
-                }
-            }
-        }
-    }
-
-    private void skipDataBinary(int len) {
+    protected void skipDataBinary(int len) {
         skipDataBuffer(len);
     }
 
-    @Override
-    protected void readBatchFromDictionaryIds(
-            int rowId, int num, VECTOR column, WritableIntVector dictionaryIds) {
-        if (ParquetSchemaConverter.is32BitDecimal(precision)) {
-            WritableIntVector intVector = (WritableIntVector) column;
-            for (int i = rowId; i < rowId + num; ++i) {
-                if (!intVector.isNullAt(i)) {
-                    Binary v = dictionary.decodeToBinary(dictionaryIds.getInt(i));
-                    intVector.setInt(i, (int) heapBinaryToLong(v));
-                }
-            }
-        } else if (ParquetSchemaConverter.is64BitDecimal(precision)) {
-            WritableLongVector longVector = (WritableLongVector) column;
-            for (int i = rowId; i < rowId + num; ++i) {
-                if (!longVector.isNullAt(i)) {
-                    Binary v = dictionary.decodeToBinary(dictionaryIds.getInt(i));
-                    longVector.setLong(i, heapBinaryToLong(v));
-                }
-            }
-        } else {
-            WritableBytesVector bytesVector = (WritableBytesVector) column;
-            for (int i = rowId; i < rowId + num; ++i) {
-                if (!bytesVector.isNullAt(i)) {
-                    byte[] v = dictionary.decodeToBinary(dictionaryIds.getInt(i)).getBytesUnsafe();
-                    bytesVector.appendBytes(i, v, 0, v.length);
-                }
-            }
-        }
-    }
-
-    private long heapBinaryToLong(Binary binary) {
-        ByteBuffer buffer = binary.toByteBuffer();
-        byte[] bytes = buffer.array();
-        int start = buffer.arrayOffset() + buffer.position();
-        int end = buffer.arrayOffset() + buffer.limit();
-
-        long unscaled = 0L;
-
-        for (int i = start; i < end; i++) {
-            unscaled = (unscaled << 8) | (bytes[i] & 0xff);
-        }
-
-        int bits = 8 * (end - start);
-        return (unscaled << (64 - bits)) >> (64 - bits);
-    }
-
-    private Binary readDataBinary(int len) {
+    protected Binary readDataBinary(int len) {
         ByteBuffer buffer = readDataBuffer(len);
         if (buffer.hasArray()) {
             return Binary.fromConstantByteArray(

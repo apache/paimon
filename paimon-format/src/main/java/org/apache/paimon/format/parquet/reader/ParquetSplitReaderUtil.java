@@ -36,6 +36,7 @@ import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.format.parquet.type.ParquetGroupField;
 import org.apache.paimon.format.parquet.type.ParquetPrimitiveField;
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
@@ -106,6 +107,11 @@ public class ParquetSplitReaderUtil {
             case VARCHAR:
             case BINARY:
             case VARBINARY:
+                if (descriptors.get(0).getPrimitiveType().getPrimitiveTypeName()
+                        == PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY) {
+                    return new FixedLenBytesBinaryColumnReader(
+                            descriptors.get(0), pages, ((BinaryType) fieldType).getLength());
+                }
                 return new BytesColumnReader(descriptors.get(0), pages);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
@@ -123,7 +129,7 @@ public class ParquetSplitReaderUtil {
                     case BINARY:
                         return new BytesColumnReader(descriptors.get(0), pages);
                     case FIXED_LEN_BYTE_ARRAY:
-                        return new FixedLenBytesColumnReader(
+                        return new FixedLenBytesDecimalColumnReader(
                                 descriptors.get(0),
                                 pages,
                                 ((DecimalType) fieldType).getPrecision());
@@ -195,10 +201,16 @@ public class ParquetSplitReaderUtil {
                 return new HeapShortVector(batchSize);
             case CHAR:
             case VARCHAR:
-            case BINARY:
             case VARBINARY:
                 checkArgument(
                         typeName == PrimitiveType.PrimitiveTypeName.BINARY,
+                        "Unexpected type: %s",
+                        typeName);
+                return new HeapBytesVector(batchSize);
+            case BINARY:
+                checkArgument(
+                        typeName == PrimitiveType.PrimitiveTypeName.BINARY
+                                || typeName == PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY,
                         "Unexpected type: %s",
                         typeName);
                 return new HeapBytesVector(batchSize);
