@@ -18,10 +18,9 @@
 
 package org.apache.paimon.catalog;
 
-import java.util.Map;
-
 /** define change to the database property. */
 public interface DatabaseChange {
+
     static DatabaseChange setProperty(String property, String value) {
         return new SetProperty(property, value);
     }
@@ -30,10 +29,9 @@ public interface DatabaseChange {
         return new RemoveProperty(property);
     }
 
-    String apply(Map<String, String> parameter);
-
     /** Set property for database change. */
     final class SetProperty implements DatabaseChange {
+
         private final String property;
         private final String value;
 
@@ -49,15 +47,11 @@ public interface DatabaseChange {
         public String value() {
             return this.value;
         }
-
-        @Override
-        public String apply(Map<String, String> parameter) {
-            return parameter.put(property, value);
-        }
     }
 
     /** Remove property for database change. */
     final class RemoveProperty implements DatabaseChange {
+
         private final String property;
 
         private RemoveProperty(String property) {
@@ -66,11 +60,6 @@ public interface DatabaseChange {
 
         public String property() {
             return this.property;
-        }
-
-        @Override
-        public String apply(Map<String, String> parameter) {
-            return parameter.remove(property);
         }
     }
 }

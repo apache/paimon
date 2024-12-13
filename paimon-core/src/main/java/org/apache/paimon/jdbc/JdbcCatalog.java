@@ -34,12 +34,12 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
-import org.apache.paimon.shade.guava30.com.google.common.collect.Sets;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -203,18 +203,10 @@ public class JdbcCatalog extends AbstractCatalog {
 
     @Override
     protected void alertDatabaseImpl(String name, List<DatabaseChange> changes) {
-        Map<String, String> insertProperties = Maps.newHashMap();
-        Set<String> removeProperties = Sets.newHashSet();
-        changes.forEach(
-                change -> {
-                    if (change instanceof DatabaseChange.SetProperty) {
-                        DatabaseChange.SetProperty setProperty =
-                                (DatabaseChange.SetProperty) change;
-                        insertProperties.put(setProperty.property(), setProperty.value());
-                    } else {
-                        removeProperties.add(((DatabaseChange.RemoveProperty) change).property());
-                    }
-                });
+        Pair<Map<String, String>, Set<String>> insertProperties2removeProperties =
+                getAddAndRemovePropertiesFromDatabaseChanges(changes);
+        Map<String, String> insertProperties = insertProperties2removeProperties.getLeft();
+        Set<String> removeProperties = insertProperties2removeProperties.getRight();
         if (!insertProperties.isEmpty()) {
             insertProperties(connections, catalogKey, name, insertProperties);
         }
