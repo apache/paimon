@@ -424,16 +424,14 @@ public class JdbcUtils {
                 Stream.concat(Stream.of(storeKey, databaseName), properties.stream())
                         .toArray(String[]::new);
 
-        return execute(connections, JdbcUtils.deletePropertiesStatement(properties), args) > 0;
-    }
-
-    private static String deletePropertiesStatement(Set<String> properties) {
-        StringBuilder sqlStatement = new StringBuilder(JdbcUtils.DELETE_DATABASE_PROPERTIES_SQL);
-        String values =
-                String.join(",", Collections.nCopies(properties.size(), String.valueOf('?')));
-        sqlStatement.append("(").append(values).append(")");
-
-        return sqlStatement.toString();
+        int deleteRecords =
+                execute(connections, JdbcUtils.deletePropertiesStatement(properties), args);
+        if (deleteRecords > 0) {
+            return true;
+        }
+        throw new IllegalStateException(
+                String.format(
+                        "Failed to delete: %d of %d succeeded", deleteRecords, properties.size()));
     }
 
     public static void createDistributedLockTable(JdbcClientPool connections, Options options)
@@ -459,5 +457,14 @@ public class JdbcUtils {
             throws SQLException, InterruptedException {
         DistributedLockDialectFactory.create(connections.getProtocol())
                 .releaseLock(connections, lockId);
+    }
+
+    private static String deletePropertiesStatement(Set<String> properties) {
+        StringBuilder sqlStatement = new StringBuilder(JdbcUtils.DELETE_DATABASE_PROPERTIES_SQL);
+        String values =
+                String.join(",", Collections.nCopies(properties.size(), String.valueOf('?')));
+        sqlStatement.append("(").append(values).append(")");
+
+        return sqlStatement.toString();
     }
 }
