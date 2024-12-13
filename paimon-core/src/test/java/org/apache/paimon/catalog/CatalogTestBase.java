@@ -962,36 +962,22 @@ public abstract class CatalogTestBase {
                 .isGreaterThan(0);
     }
 
-    protected void alterDatabaseAddPropertyWhenSupportAlter() throws Exception {
+    protected void alterDatabaseWhenSupportAlter() throws Exception {
         // Alter database
-        String databaseName = "db_to_alter_add";
+        String databaseName = "db_to_alter_alert";
         catalog.createDatabase(databaseName, false);
+        String key = "key";
         // Add property
         catalog.alterDatabase(
-                databaseName,
-                Lists.newArrayList(DatabaseChange.setProperty("key", "value")),
-                false);
+                databaseName, Lists.newArrayList(DatabaseChange.setProperty(key, "value")), false);
         Database db = catalog.getDatabase(databaseName);
-        assertEquals("value", db.options().get("key"));
+        assertEquals("value", db.options().get(key));
         // Update property
         catalog.alterDatabase(
-                databaseName,
-                Lists.newArrayList(DatabaseChange.setProperty("key", "value1")),
-                false);
+                databaseName, Lists.newArrayList(DatabaseChange.setProperty(key, "value1")), false);
         db = catalog.getDatabase(databaseName);
-        assertEquals("value1", db.options().get("key"));
-    }
-
-    protected void alterDatabaseRemovePropertyWhenSupportAlter() throws Exception {
-        // Alter database
-        String databaseName = "db_to_alter_remove";
-        String key = "key";
-        String value = "value";
-        catalog.createDatabase(databaseName, false);
-        catalog.alterDatabase(
-                databaseName, Lists.newArrayList(DatabaseChange.setProperty(key, value)), false);
-        Database db = catalog.getDatabase(databaseName);
-        assertEquals(value, db.options().get(key));
+        assertEquals("value1", db.options().get(key));
+        // remove property
         catalog.alterDatabase(
                 databaseName, Lists.newArrayList(DatabaseChange.removeProperty(key)), false);
         db = catalog.getDatabase(databaseName);

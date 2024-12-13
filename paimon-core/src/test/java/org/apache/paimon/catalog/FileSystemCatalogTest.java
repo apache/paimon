@@ -27,7 +27,10 @@ import org.apache.paimon.types.DataTypes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FileSystemCatalog}. */
 public class FileSystemCatalogTest extends CatalogTestBase {
@@ -66,5 +69,13 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         assertThatExceptionOfType(IllegalArgumentException.class)
                 .isThrownBy(() -> catalog.createTable(identifier, schema, false))
                 .withMessage("Field name [Pk1, Col1] cannot contain upper case in the catalog.");
+    }
+
+    @Test
+    public void testAlterDatabase() throws Exception {
+        String databaseName = "test_alter_db";
+        catalog.createDatabase(databaseName, false);
+        assertThatThrownBy(() -> catalog.alterDatabase(databaseName, new ArrayList<>(), false))
+                .isInstanceOf(UnsupportedOperationException.class);
     }
 }
