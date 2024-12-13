@@ -962,19 +962,27 @@ public abstract class CatalogTestBase {
                 .isGreaterThan(0);
     }
 
-    protected void alterDatabaseAddPropertyWhenSupport() throws Exception {
+    protected void alterDatabaseAddPropertyWhenSupportAlter() throws Exception {
         // Alter database
         String databaseName = "db_to_alter_add";
         catalog.createDatabase(databaseName, false);
+        // Add property
         catalog.alterDatabase(
                 databaseName,
                 Lists.newArrayList(DatabaseChange.setProperty("key", "value")),
                 false);
         Database db = catalog.getDatabase(databaseName);
         assertEquals("value", db.options().get("key"));
+        // Update property
+        catalog.alterDatabase(
+                databaseName,
+                Lists.newArrayList(DatabaseChange.setProperty("key", "value1")),
+                false);
+        db = catalog.getDatabase(databaseName);
+        assertEquals("value1", db.options().get("key"));
     }
 
-    protected void alterDatabaseRemovePropertyWhenSupport() throws Exception {
+    protected void alterDatabaseRemovePropertyWhenSupportAlter() throws Exception {
         // Alter database
         String databaseName = "db_to_alter_remove";
         String key = "key";
@@ -984,6 +992,11 @@ public abstract class CatalogTestBase {
                 databaseName, Lists.newArrayList(DatabaseChange.setProperty(key, value)), false);
         Database db = catalog.getDatabase(databaseName);
         assertEquals(value, db.options().get(key));
+        catalog.alterDatabase(
+                databaseName, Lists.newArrayList(DatabaseChange.removeProperty(key)), false);
+        db = catalog.getDatabase(databaseName);
+        assertEquals(false, db.options().containsKey(key));
+        // Remove non-existent property
         catalog.alterDatabase(
                 databaseName, Lists.newArrayList(DatabaseChange.removeProperty(key)), false);
         db = catalog.getDatabase(databaseName);

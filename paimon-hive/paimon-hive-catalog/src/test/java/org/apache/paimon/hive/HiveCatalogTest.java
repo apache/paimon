@@ -175,12 +175,12 @@ public class HiveCatalogTest extends CatalogTestBase {
 
     @Test
     public void testAlterDatabaseAddProperty() throws Exception {
-        this.alterDatabaseAddPropertyWhenSupport();
+        this.alterDatabaseAddPropertyWhenSupportAlter();
     }
 
     @Test
     public void testAlterDatabaseRemoveProperty() throws Exception {
-        this.alterDatabaseRemovePropertyWhenSupport();
+        this.alterDatabaseRemovePropertyWhenSupportAlter();
     }
 
     @Test

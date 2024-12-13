@@ -415,6 +415,56 @@ public class JdbcUtils {
         return sqlStatement.toString();
     }
 
+    public static boolean updateProperties(
+            JdbcClientPool connections,
+            String storeKey,
+            String databaseName,
+            Map<String, String> properties) {
+        Stream<String> caseArgs =
+                properties.entrySet().stream()
+                        .flatMap(entry -> Stream.of(entry.getKey(), entry.getValue()));
+        Stream<String> whereArgs =
+                Stream.concat(Stream.of(storeKey, databaseName), properties.keySet().stream());
+
+        String[] args = Stream.concat(caseArgs, whereArgs).toArray(String[]::new);
+
+        int updatedRecords =
+                execute(connections, JdbcUtils.updatePropertiesStatement(properties.size()), args);
+        if (updatedRecords == properties.size()) {
+            return true;
+        }
+        throw new IllegalStateException(
+                String.format(
+                        "Failed to update: %d of %d succeeded", updatedRecords, properties.size()));
+    }
+
+    private static String updatePropertiesStatement(int size) {
+        StringBuilder sqlStatement =
+                new StringBuilder(
+                        "UPDATE "
+                                + DATABASE_PROPERTIES_TABLE_NAME
+                                + " SET "
+                                + DATABASE_PROPERTY_VALUE
+                                + " = CASE");
+        for (int i = 0; i < size; i += 1) {
+            sqlStatement.append(" WHEN " + DATABASE_PROPERTY_KEY + " = ? THEN ?");
+        }
+
+        sqlStatement.append(
+                " END WHERE "
+                        + CATALOG_KEY
+                        + " = ? AND "
+                        + DATABASE_NAME
+                        + " = ? AND "
+                        + DATABASE_PROPERTY_KEY
+                        + " IN ");
+
+        String values = String.join(",", Collections.nCopies(size, String.valueOf('?')));
+        sqlStatement.append("(").append(values).append(")");
+
+        return sqlStatement.toString();
+    }
+
     public static boolean deleteProperties(
             JdbcClientPool connections,
             String storeKey,
