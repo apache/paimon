@@ -150,22 +150,28 @@ public class TagAutoCreation {
     private void tryToCreateTags(Snapshot snapshot) {
         Optional<LocalDateTime> timeOptional =
                 timeExtractor.extract(snapshot.timeMillis(), snapshot.watermark());
+        LOG.info("Starting to create a tag for snapshot {}.", snapshot.id());
         if (!timeOptional.isPresent()) {
             return;
         }
 
         LocalDateTime time = timeOptional.get();
+        LOG.info("The time of snapshot {} is {}.", snapshot.id(), time);
+        LOG.info("The next tag time is {}.", nextTag);
         if (nextTag == null
                 || isAfterOrEqual(time.minus(delay), periodHandler.nextTagTime(nextTag))) {
             LocalDateTime thisTag = periodHandler.normalizeToPreviousTag(time);
+            LOG.info("Create tag for snapshot {} with time {}.", snapshot.id(), thisTag);
             if (automaticCompletion && nextTag != null) {
                 thisTag = nextTag;
             }
             String tagName = periodHandler.timeToTag(thisTag);
+            LOG.info("The tag name is {}.", tagName);
             if (!tagManager.tagExists(tagName)) {
                 tagManager.createTag(snapshot, tagName, defaultTimeRetained, callbacks);
             }
             nextTag = periodHandler.nextTagTime(thisTag);
+            LOG.info("The next tag time after this is {}.", nextTag);
 
             if (numRetainedMax != null) {
                 // only handle auto-created tags here
