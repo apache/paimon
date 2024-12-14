@@ -153,6 +153,11 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
       ctx.identifier(1).getText)
   }
 
+  /** Create a command for purge table. */
+  override def visitPurgeTable(ctx: PurgeTableContext): PurgeTableCommand = withOrigin(ctx) {
+    PurgeTableCommand(typedVisit[Seq[String]](ctx.multipartIdentifier))
+  }
+
   private def toBuffer[T](list: java.util.List[T]) = list.asScala
 
   private def toSeq[T](list: java.util.List[T]) = toBuffer(list)

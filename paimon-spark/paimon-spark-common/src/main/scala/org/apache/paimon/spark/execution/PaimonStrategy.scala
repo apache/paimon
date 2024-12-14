@@ -21,7 +21,7 @@ package org.apache.paimon.spark.execution
 import org.apache.paimon.spark.{SparkCatalog, SparkUtils}
 import org.apache.paimon.spark.catalog.SupportView
 import org.apache.paimon.spark.catalyst.analysis.ResolvedPaimonView
-import org.apache.paimon.spark.catalyst.plans.logical.{CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, PaimonCallCommand, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand}
+import org.apache.paimon.spark.catalyst.plans.logical.{CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, PaimonCallCommand, PurgeTableCommand, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand}
 
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.InternalRow
@@ -49,6 +49,9 @@ case class PaimonStrategy(spark: SparkSession)
     case c @ PaimonCallCommand(procedure, args) =>
       val input = buildInternalRow(args)
       PaimonCallExec(c.output, procedure, input) :: Nil
+
+    case p @ PurgeTableCommand(PaimonCatalogAndIdentifier(catalog, ident)) =>
+      PurgeTableExec(catalog, ident, p.output) :: Nil
 
     case t @ ShowTagsCommand(PaimonCatalogAndIdentifier(catalog, ident)) =>
       ShowTagsExec(catalog, ident, t.output) :: Nil

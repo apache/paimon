@@ -121,7 +121,8 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
       (normalized.contains("create tag") ||
         normalized.contains("replace tag") ||
         normalized.contains("rename tag") ||
-        normalized.contains("delete tag")))
+        normalized.contains("delete tag"))) ||
+    normalized.contains("purge table")
   }
 
   protected def parse[T](command: String)(toResult: PaimonSqlExtensionsParser => T): T = {

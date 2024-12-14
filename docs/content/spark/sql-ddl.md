@@ -258,6 +258,15 @@ CREATE VIEW v1 AS SELECT * FROM t1;
 CREATE OR REPLACE VIEW v1 AS SELECT * FROM t1;
 ```
 
+### Purge Table
+
+Purge table with delete data and metadata directly.
+
+```sql
+-- purge a table
+PURGE TABLE t1;
+```
+
 ### Drop View
 
 DROP VIEW removes the metadata associated with a specified view from the catalog.

@@ -74,7 +74,8 @@ statement
     | ALTER TABLE multipartIdentifier createReplaceTagClause                                #createOrReplaceTag
     | ALTER TABLE multipartIdentifier DELETE TAG (IF EXISTS)? identifier                    #deleteTag
     | ALTER TABLE multipartIdentifier RENAME TAG identifier TO identifier                   #renameTag
-  ;
+    | PURGE TABLE multipartIdentifier                                                       #purgeTable
+    ;
 
 callArgument
     : expression                    #positionalArgument
@@ -179,6 +180,7 @@ TAG: 'TAG';
 TAGS: 'TAGS';
 TO: 'TO';
 VERSION: 'VERSION';
+PURGE: 'PURGE';
 
 TRUE: 'TRUE';
 FALSE: 'FALSE';
