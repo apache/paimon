@@ -21,6 +21,7 @@ package org.apache.paimon.spark.execution
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
 import org.apache.paimon.table.FileStoreTable
+
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.util.UTF8StringUtils
