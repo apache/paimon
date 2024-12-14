@@ -126,7 +126,7 @@ public class RecordReaderImpl implements RecordReader {
     private final TypeReader.ReadPhase startReadPhase;
     // identifies that follow columns bytes must be read
     private boolean needsFollowColumnsRead;
-    private boolean noSelectedVector = false;
+    private final boolean noSelectedVector;
     // identifies whether the file has bad bloom filters that we should not use.
     private final boolean skipBloomFilters;
     @Nullable private final FileIndexResult fileIndexResult;
