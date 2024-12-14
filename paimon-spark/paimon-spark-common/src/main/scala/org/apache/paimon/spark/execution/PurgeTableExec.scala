@@ -32,7 +32,6 @@ case class PurgeTableExec(catalog: TableCatalog, ident: Identifier, out: Seq[Att
     val table = catalog.loadTable(ident)
     assert(table.isInstanceOf[SparkTable])
 
-    var tags: Seq[InternalRow] = Nil
     table.asInstanceOf[SparkTable].getTable match {
       case paimonTable: FileStoreTable =>
         val fileIO = paimonTable.fileIO()
@@ -46,7 +45,7 @@ case class PurgeTableExec(catalog: TableCatalog, ident: Identifier, out: Seq[Att
         throw new UnsupportedOperationException(
           s"Only support purge table command for FileStoreTable: $t")
     }
-    tags
+    
   }
 
   override def output: Seq[Attribute] = out
