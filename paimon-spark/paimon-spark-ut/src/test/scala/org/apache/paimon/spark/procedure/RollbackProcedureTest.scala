@@ -39,11 +39,7 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
                        |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
                        |""".stripMargin)
           val location = loadTable("T").location().toString
-
-          val table: FileStoreTable = loadTable("T")
-          val fileIO = table.fileIO()
-          table.snapshotManager().tablePath()
-
+          
           val inputData = MemoryStream[(Int, String)]
           val stream = inputData
             .toDS()
