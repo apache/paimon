@@ -21,10 +21,11 @@ package org.apache.paimon.spark.execution
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
 import org.apache.paimon.table.FileStoreTable
-
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.Attribute
+import org.apache.spark.sql.catalyst.util.UTF8StringUtils
 import org.apache.spark.sql.connector.catalog.{Identifier, TableCatalog}
+import org.apache.spark.unsafe.types.UTF8String
 
 case class PurgeTableExec(catalog: TableCatalog, ident: Identifier, out: Seq[Attribute])
   extends PaimonLeafV2CommandExec {
@@ -45,7 +46,8 @@ case class PurgeTableExec(catalog: TableCatalog, ident: Identifier, out: Seq[Att
         throw new UnsupportedOperationException(
           s"Only support purge table command for FileStoreTable: $t")
     }
-    
+
+    Seq(InternalRow(UTF8String.fromString("true")))
   }
 
   override def output: Seq[Attribute] = out
