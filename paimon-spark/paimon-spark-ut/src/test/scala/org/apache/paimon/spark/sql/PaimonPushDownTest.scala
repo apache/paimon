@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.{PaimonBatch, PaimonInputPartition, PaimonScan, PaimonSparkTestBase, SparkTable}
+import org.apache.paimon.spark.{PaimonScan, PaimonSparkTestBase, SparkTable}
 import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.Row
@@ -28,8 +28,6 @@ import org.apache.spark.sql.catalyst.trees.TreePattern.DYNAMIC_PRUNING_SUBQUERY
 import org.apache.spark.sql.connector.read.{ScanBuilder, SupportsPushDownLimit}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.junit.jupiter.api.Assertions
-
-import scala.collection.JavaConverters._
 
 class PaimonPushDownTest extends PaimonSparkTestBase {
 
@@ -64,7 +62,7 @@ class PaimonPushDownTest extends PaimonSparkTestBase {
     checkAnswer(spark.sql(q), Row(1, "a", "p1") :: Nil)
 
     // case 2
-    // filter "id = '1' or pt = 'p1'" can't push down completely, it still need to be evaluated after scanning
+    // filter "id = '1' or pt = 'p1'" can't push down completely, it still needs to be evaluated after scanning
     q = "SELECT * FROM T WHERE id = '1' or pt = 'p1'"
     Assertions.assertTrue(checkEqualToFilterExists(q, "pt", Literal("p1")))
     checkAnswer(spark.sql(q), Row(1, "a", "p1") :: Row(2, "b", "p1") :: Nil)
@@ -121,7 +119,7 @@ class PaimonPushDownTest extends PaimonSparkTestBase {
     val dataSplitsWithoutLimit = scanBuilder.build().asInstanceOf[PaimonScan].getOriginSplits
     Assertions.assertTrue(dataSplitsWithoutLimit.length >= 2)
 
-    // It still return false even it can push down limit.
+    // It still returns false even it can push down limit.
     Assertions.assertFalse(scanBuilder.asInstanceOf[SupportsPushDownLimit].pushLimit(1))
     val dataSplitsWithLimit = scanBuilder.build().asInstanceOf[PaimonScan].getOriginSplits
     Assertions.assertEquals(1, dataSplitsWithLimit.length)
@@ -169,12 +167,7 @@ class PaimonPushDownTest extends PaimonSparkTestBase {
     // Now, we have 4 dataSplits, and 2 dataSplit is nonRawConvertible, 2 dataSplit is rawConvertible.
     Assertions.assertEquals(
       2,
-      dataSplitsWithoutLimit2
-        .filter(
-          split => {
-            split.asInstanceOf[DataSplit].rawConvertible()
-          })
-        .length)
+      dataSplitsWithoutLimit2.count(split => { split.asInstanceOf[DataSplit].rawConvertible() }))
 
     // Return 2 dataSplits.
     Assertions.assertFalse(scanBuilder2.asInstanceOf[SupportsPushDownLimit].pushLimit(2))
@@ -206,7 +199,40 @@ class PaimonPushDownTest extends PaimonSparkTestBase {
     // Need to scan all dataSplits.
     Assertions.assertEquals(4, dataSplitsWithLimit3.length)
     Assertions.assertEquals(1, spark.sql("SELECT * FROM T LIMIT 1").count())
+  }
 
+  test("Paimon pushDown: limit for table with deletion vector") {
+    Seq(true, false).foreach(
+      deletionVectorsEnabled => {
+        Seq(true, false).foreach(
+          primaryKeyTable => {
+            withTable("T") {
+              sql(s"""
+                     |CREATE TABLE T (id INT)
+                     |TBLPROPERTIES (
+                     | 'deletion-vectors.enabled' = $deletionVectorsEnabled,
+                     | '${if (primaryKeyTable) "primary-key" else "bucket-key"}' = 'id',
+                     | 'bucket' = '10'
+                     |)
+                     |""".stripMargin)
+
+              sql("INSERT INTO T SELECT id FROM range (1, 50000)")
+              sql("DELETE FROM T WHERE id % 13 = 0")
+
+              val withoutLimit = getScanBuilder().build().asInstanceOf[PaimonScan].getOriginSplits
+              assert(withoutLimit.length == 10)
+
+              val scanBuilder = getScanBuilder().asInstanceOf[SupportsPushDownLimit]
+              scanBuilder.pushLimit(1)
+              val withLimit = scanBuilder.build().asInstanceOf[PaimonScan].getOriginSplits
+              if (deletionVectorsEnabled || !primaryKeyTable) {
+                assert(withLimit.length == 1)
+              } else {
+                assert(withLimit.length == 10)
+              }
+            }
+          })
+      })
   }
 
   test("Paimon pushDown: runtime filter") {
@@ -250,8 +276,7 @@ class PaimonPushDownTest extends PaimonSparkTestBase {
   }
 
   private def getScanBuilder(tableName: String = "T"): ScanBuilder = {
-    new SparkTable(loadTable(tableName))
-      .newScanBuilder(CaseInsensitiveStringMap.empty())
+    SparkTable(loadTable(tableName)).newScanBuilder(CaseInsensitiveStringMap.empty())
   }
 
   private def checkFilterExists(sql: String): Boolean = {
@@ -272,5 +297,4 @@ class PaimonPushDownTest extends PaimonSparkTestBase {
       case _ => false
     }
   }
-
 }

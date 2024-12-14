@@ -44,6 +44,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.io.DataFilePathFactory.INDEX_PATH_SUFFIX;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Input splits. Needed by most batch computation engines. */
 public class DataSplit implements Split {
@@ -124,6 +125,45 @@ public class DataSplit implements Split {
             rowCount += file.rowCount();
         }
         return rowCount;
+    }
+
+    /** Whether it is possible to calculate the merged row count. */
+    public boolean mergedRowCountAvailable() {
+        return rawConvertible
+                && (dataDeletionFiles == null
+                        || dataDeletionFiles.stream()
+                                .allMatch(f -> f == null || f.cardinality() != null));
+    }
+
+    public long mergedRowCount() {
+        checkState(mergedRowCountAvailable());
+        return partialMergedRowCount();
+    }
+
+    /**
+     * Obtain merged row count as much as possible. There are two scenarios where accurate row count
+     * can be calculated:
+     *
+     * <p>1. raw file and no deletion file.
+     *
+     * <p>2. raw file + deletion file with cardinality.
+     */
+    public long partialMergedRowCount() {
+        long sum = 0L;
+        if (rawConvertible) {
+            List<RawFile> rawFiles = convertToRawFiles().orElse(null);
+            if (rawFiles != null) {
+                for (int i = 0; i < rawFiles.size(); i++) {
+                    RawFile rawFile = rawFiles.get(i);
+                    if (dataDeletionFiles == null || dataDeletionFiles.get(i) == null) {
+                        sum += rawFile.rowCount();
+                    } else if (dataDeletionFiles.get(i).cardinality() != null) {
+                        sum += rawFile.rowCount() - dataDeletionFiles.get(i).cardinality();
+                    }
+                }
+            }
+        }
+        return sum;
     }
 
     @Override
