@@ -43,6 +43,10 @@ abstract class PaimonPurgeTableTestBase extends PaimonSparkTestBase {
       "PURGE TABLE T"
     )
 
+    spark.sql(
+      "REFRESH TABLE T"
+    )
+
     checkAnswer(
       spark.sql("select * from `T`"),
       Nil
