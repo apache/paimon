@@ -47,7 +47,7 @@ case class PurgeTableExec(catalog: TableCatalog, ident: Identifier, out: Seq[Att
           s"Only support purge table command for FileStoreTable: $t")
     }
 
-    Seq(InternalRow(UTF8String.fromString("true")))
+    Seq(InternalRow(UTF8String.fromString(s"${table.name()} had been purged success.")))
   }
 
   override def output: Seq[Attribute] = out
