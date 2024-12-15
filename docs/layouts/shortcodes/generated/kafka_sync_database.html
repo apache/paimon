@@ -42,12 +42,20 @@ under the License.
         <td>The table name mapping between source database and Paimon. For example, if you want to synchronize a source table named "test" to a Paimon table named "paimon_test", you can specify "--table_mapping test=paimon_test". Multiple mappings could be specified with multiple "--table_mapping" options. "--table_mapping" has higher priority than "--table_prefix" and "--table_suffix".</td>
     </tr>
     <tr>
+        <td><h5>--table_prefix_db</h5></td>
+        <td>The prefix of the Paimon tables to be synchronized from the specified db. For example, if you want to prefix the tables from db1 with "ods_db1_", you can specify "--table_prefix_db db1=ods_db1_". "--table_prefix_db" has higher priority than "--table_prefix".</td>
+    </tr>
+    <tr>
         <td><h5>--table_prefix</h5></td>
-        <td>The prefix of all Paimon tables to be synchronized. For example, if you want all synchronized tables to have "ods_" as prefix, you can specify "--table_prefix ods_".</td>
+        <td>The prefix of all Paimon tables to be synchronized except those specified by "--table_mapping" or "--table_prefix_db". For example, if you want all synchronized tables to have "ods_" as prefix, you can specify "--table_prefix ods_".</td>
+    </tr>
+    <tr>
+        <td><h5>--table_suffix_db</h5></td>
+        <td>The suffix of the Paimon tables to be synchronized from the specified db. The usage is same as "--table_prefix_db".</td>
     </tr>
     <tr>
         <td><h5>--table_suffix</h5></td>
-        <td>The suffix of all Paimon tables to be synchronized. The usage is same as "--table_prefix".</td>
+        <td>The suffix of all Paimon tables to be synchronized except those specified by "--table_mapping" or "--table_suffix_db". The usage is same as "--table_prefix".</td>
     </tr>
     <tr>
         <td><h5>--including_tables</h5></td>
