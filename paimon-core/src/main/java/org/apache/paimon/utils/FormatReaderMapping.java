@@ -243,11 +243,13 @@ public class FormatReaderMapping {
                         .filter(f -> f.id() == dataField.id())
                         .findFirst()
                         .ifPresent(
-                                field ->
-                                        readDataFields.add(
-                                                dataField.newType(
-                                                        pruneDataType(
-                                                                field.type(), dataField.type()))));
+                                field -> {
+                                    DataType prunedType =
+                                            pruneDataType(field.type(), dataField.type());
+                                    if (prunedType != null) {
+                                        readDataFields.add(dataField.newType(prunedType));
+                                    }
+                                });
             }
             return readDataFields;
         }
@@ -261,25 +263,40 @@ public class FormatReaderMapping {
                     for (DataField rf : r.getFields()) {
                         if (d.containsField(rf.id())) {
                             DataField df = d.getField(rf.id());
-                            newFields.add(df.newType(pruneDataType(rf.type(), df.type())));
+                            DataType newType = pruneDataType(rf.type(), df.type());
+                            if (newType == null) {
+                                continue;
+                            }
+                            newFields.add(df.newType(newType));
                         }
+                    }
+                    if (newFields.isEmpty()) {
+                        // When all fields are pruned, we should not return an empty row type
+                        return null;
                     }
                     return d.copy(newFields);
                 case MAP:
-                    return ((MapType) dataType)
-                            .newKeyValueType(
-                                    pruneDataType(
-                                            ((MapType) readType).getKeyType(),
-                                            ((MapType) dataType).getKeyType()),
-                                    pruneDataType(
-                                            ((MapType) readType).getValueType(),
-                                            ((MapType) dataType).getValueType()));
+                    DataType keyType =
+                            pruneDataType(
+                                    ((MapType) readType).getKeyType(),
+                                    ((MapType) dataType).getKeyType());
+                    DataType valueType =
+                            pruneDataType(
+                                    ((MapType) readType).getValueType(),
+                                    ((MapType) dataType).getValueType());
+                    if (keyType == null || valueType == null) {
+                        return null;
+                    }
+                    return ((MapType) dataType).newKeyValueType(keyType, valueType);
                 case ARRAY:
-                    return ((ArrayType) dataType)
-                            .newElementType(
-                                    pruneDataType(
-                                            ((ArrayType) readType).getElementType(),
-                                            ((ArrayType) dataType).getElementType()));
+                    DataType elementType =
+                            pruneDataType(
+                                    ((ArrayType) readType).getElementType(),
+                                    ((ArrayType) dataType).getElementType());
+                    if (elementType == null) {
+                        return null;
+                    }
+                    return ((ArrayType) dataType).newElementType(elementType);
                 default:
                     return dataType;
             }
