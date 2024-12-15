@@ -561,17 +561,33 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
         String sql = "SELECT COUNT(*) FROM count_append_dv";
         assertThat(sql(sql)).containsOnly(Row.of(2L));
-        validateCount1NotPushDown(sql);
+        validateCount1PushDown(sql);
     }
 
     @Test
     public void testCountStarPK() {
-        sql("CREATE TABLE count_pk (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING)");
-        sql("INSERT INTO count_pk VALUES (1, 'a'), (2, 'b')");
+        sql(
+                "CREATE TABLE count_pk (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING) WITH ('file.format' = 'avro')");
+        sql("INSERT INTO count_pk VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd')");
+        sql("INSERT INTO count_pk VALUES (1, 'e')");
 
         String sql = "SELECT COUNT(*) FROM count_pk";
-        assertThat(sql(sql)).containsOnly(Row.of(2L));
+        assertThat(sql(sql)).containsOnly(Row.of(4L));
         validateCount1NotPushDown(sql);
+    }
+
+    @Test
+    public void testCountStarPKDv() {
+        sql(
+                "CREATE TABLE count_pk_dv (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING) WITH ("
+                        + "'file.format' = 'avro', "
+                        + "'deletion-vectors.enabled' = 'true')");
+        sql("INSERT INTO count_pk_dv VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd')");
+        sql("INSERT INTO count_pk_dv VALUES (1, 'e')");
+
+        String sql = "SELECT COUNT(*) FROM count_pk_dv";
+        assertThat(sql(sql)).containsOnly(Row.of(4L));
+        validateCount1PushDown(sql);
     }
 
     @Test

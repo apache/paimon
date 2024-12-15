@@ -153,7 +153,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         null,
                         null,
                         null,
-                        false);
+                        null);
         Assertions.assertThat(partitionFilterSource.reportStatistics().getRowCount()).isEqualTo(5L);
         Map<String, ColStats<?>> colStatsMap = new HashMap<>();
         colStatsMap.put("pt", ColStats.newColStats(0, 1L, 1, 2, 0L, null, null));
@@ -232,7 +232,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         null,
                         null,
                         null,
-                        false);
+                        null);
         Assertions.assertThat(keyFilterSource.reportStatistics().getRowCount()).isEqualTo(2L);
         Map<String, ColStats<?>> colStatsMap = new HashMap<>();
         colStatsMap.put("pt", ColStats.newColStats(0, 1L, 2, 2, 0L, null, null));
@@ -311,7 +311,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         null,
                         null,
                         null,
-                        false);
+                        null);
         Assertions.assertThat(keyFilterSource.reportStatistics().getRowCount()).isEqualTo(4L);
         Map<String, ColStats<?>> colStatsMap = new HashMap<>();
         colStatsMap.put("pt", ColStats.newColStats(0, 4L, 2, 2, 0L, null, null));
