@@ -95,7 +95,7 @@ public class TableNameConverter implements Serializable {
         }
 
         // third priority: normal prefix and suffix
-        String tableName = toLowerCaseIfNeed(originDbName, caseSensitive);
+        String tableName = toLowerCaseIfNeed(originTblName, caseSensitive);
         return tblPrefix + tableName + tblSuffix;
     }
 
