@@ -778,6 +778,82 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
+    public void testDeletionVectorsWithDynamicBloomFileIndexInMeta() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(BUCKET, 1);
+                            conf.set(DELETION_VECTORS_ENABLED, true);
+                            conf.set(TARGET_FILE_SIZE, MemorySize.ofBytes(1));
+                            conf.set("file-index.dynamic-bloom-filter.columns", "b");
+                            conf.set("file-index.dynamic-bloom-filter.b.items", "20");
+                            conf.set("file-index.dynamic-bloom-filter.b.max_items", "20");
+                        });
+
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 1, 300L));
+        write.write(rowData(1, 2, 400L));
+        write.write(rowData(1, 3, 200L));
+        write.write(rowData(1, 4, 500L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(rowData(1, 5, 100L));
+        write.write(rowData(1, 6, 600L));
+        write.write(rowData(1, 7, 400L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
+        Predicate predicate = builder.equal(2, 300L);
+
+        List<Split> splits =
+                toSplits(table.newSnapshotReader().withFilter(predicate).read().dataSplits());
+
+        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(1);
+    }
+
+    @Test
+    public void testDeletionVectorsWithDynamicBloomFileIndexInFile() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(BUCKET, 1);
+                            conf.set(DELETION_VECTORS_ENABLED, true);
+                            conf.set(TARGET_FILE_SIZE, MemorySize.ofBytes(1));
+                            conf.set("file-index.dynamic-bloom-filter.columns", "b");
+                        });
+
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 1, 300L));
+        write.write(rowData(1, 2, 400L));
+        write.write(rowData(1, 3, 200L));
+        write.write(rowData(1, 4, 500L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(rowData(1, 5, 100L));
+        write.write(rowData(1, 6, 600L));
+        write.write(rowData(1, 7, 400L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(2);
+        TableRead read = table.newRead().withFilter(builder.equal(2, 300L));
+        assertThat(getResult(read, splits, BATCH_ROW_TO_STRING))
+                .hasSameElementsAs(
+                        Arrays.asList(
+                                "1|1|300|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|2|400|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|3|200|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|4|500|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
     public void testDeletionVectorsWithFileIndexInFile() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
@@ -1289,7 +1365,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                                DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
                         },
                         new String[] {"pt", "a", "b", "c"});
         FileStoreTable table =
@@ -1346,13 +1422,13 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT(),
-                            DataTypes.INT(),
-                            DataTypes.INT(),
-                            DataTypes.INT(),
-                            DataTypes.INT(),
-                            DataTypes.INT(),
-                            DataTypes.INT()
+                                DataTypes.INT(),
+                                DataTypes.INT(),
+                                DataTypes.INT(),
+                                DataTypes.INT(),
+                                DataTypes.INT(),
+                                DataTypes.INT(),
+                                DataTypes.INT()
                         },
                         new String[] {"pt", "a", "b", "seq1", "c", "d", "seq2"});
         FileStoreTable table =
@@ -1430,7 +1506,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                                DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
                         },
                         new String[] {"pt", "a", "b", "c"});
         FileStoreTable table =
@@ -1481,7 +1557,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                                DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
                         },
                         new String[] {"pt", "a", "b", "c"});
         FileStoreTable table =
@@ -1526,7 +1602,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                                DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
                         },
                         new String[] {"pt", "a", "b", "c"});
         FileStoreTable table =
@@ -1552,7 +1628,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                                DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
                         },
                         new String[] {"pt", "a", "b", "c"});
         FileStoreTable table =
@@ -1580,10 +1656,10 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 + "|"
                                 + getField.apply(row, 3);
         assertThat(
-                        getResult(
-                                readBuilder.newRead(),
-                                readBuilder.newScan().plan().splits(),
-                                toString))
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        toString))
                 .containsExactly("1|1|3|null");
     }
 
@@ -1604,10 +1680,10 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         ReadBuilder readBuilder = table.newReadBuilder();
         assertThat(
-                        getResult(
-                                readBuilder.newRead(),
-                                readBuilder.newScan().plan().splits(),
-                                BATCH_ROW_TO_STRING))
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        BATCH_ROW_TO_STRING))
                 .containsExactly("1|10|100|binary|varbinary|mapKey:mapVal|multiset");
 
         write.write(rowData(1, 10, 200L));
@@ -1624,10 +1700,10 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         commit.close();
 
         assertThat(
-                        getResult(
-                                readBuilder.newRead(),
-                                readBuilder.newScan().plan().splits(),
-                                BATCH_ROW_TO_STRING))
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        BATCH_ROW_TO_STRING))
                 .containsExactly("1|10|200|binary|varbinary|mapKey:mapVal|multiset");
     }
 
@@ -1995,12 +2071,12 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(latestSnapshot.totalRecordCount()).isEqualTo(1);
 
         assertThat(
-                        getResult(
-                                table.newRead(),
-                                toSplits(table.newSnapshotReader().read().dataSplits()),
-                                binaryRow(1),
-                                0,
-                                BATCH_ROW_TO_STRING))
+                getResult(
+                        table.newRead(),
+                        toSplits(table.newSnapshotReader().read().dataSplits()),
+                        binaryRow(1),
+                        0,
+                        BATCH_ROW_TO_STRING))
                 .isEqualTo(
                         Collections.singletonList(
                                 "1|2|200|binary|varbinary|mapKey:mapVal|multiset"));
