@@ -227,3 +227,11 @@ The following SQL modifies the watermark strategy to `ts - INTERVAL '2' HOUR`.
 ```sql
 ALTER TABLE my_table MODIFY WATERMARK FOR ts AS ts - INTERVAL '2' HOUR
 ```
+
+# ALTER DATABASE
+
+The following SQL sets one or more properties in the specified database. If a particular property is already set in the database, override the old value with the new one.
+
+```sql
+ALTER DATABASE [catalog_name.]db_name SET (key1=val1, key2=val2, ...)
+```

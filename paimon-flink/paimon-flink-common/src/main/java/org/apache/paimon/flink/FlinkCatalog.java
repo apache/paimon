@@ -239,19 +239,19 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public void createDatabase(String name, CatalogDatabase database, boolean ignoreIfExists)
             throws DatabaseAlreadyExistException, CatalogException {
+        Map<String, String> properties;
         if (database != null) {
+            properties = new HashMap<>(database.getProperties());
             if (database.getDescription().isPresent()
                     && !database.getDescription().get().equals("")) {
-                throw new UnsupportedOperationException(
-                        "Create database with description is unsupported.");
+                properties.put(Catalog.COMMENT_PROP, database.getDescription().get());
             }
+        } else {
+            properties = Collections.emptyMap();
         }
 
         try {
-            catalog.createDatabase(
-                    name,
-                    ignoreIfExists,
-                    database == null ? Collections.emptyMap() : database.getProperties());
+            catalog.createDatabase(name, ignoreIfExists, properties);
         } catch (Catalog.DatabaseAlreadyExistException e) {
             throw new DatabaseAlreadyExistException(getName(), e.database());
         }

@@ -99,6 +99,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatCollection;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.spy;
@@ -581,11 +582,9 @@ public class FlinkCatalogTest {
     }
 
     @Test
-    public void testCreateDb_DatabaseWithCommentException() {
+    public void testCreateDb_DatabaseWithCommentSuccessful() throws DatabaseAlreadyExistException {
         CatalogDatabaseImpl database = new CatalogDatabaseImpl(Collections.emptyMap(), "haha");
-        assertThatThrownBy(() -> catalog.createDatabase(path1.getDatabaseName(), database, false))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Create database with description is unsupported.");
+        assertDoesNotThrow(() -> catalog.createDatabase(path1.getDatabaseName(), database, false));
     }
 
     @ParameterizedTest
@@ -612,6 +611,8 @@ public class FlinkCatalogTest {
         catalog.createDatabase(path1.getDatabaseName(), database, false);
         Map<String, String> properties = Collections.singletonMap("haa", "ccc");
         CatalogDatabaseImpl newDatabase = new CatalogDatabaseImpl(properties, "haha");
+        // as file system catalog don't support alter database, so we have to use mock to overview
+        // this method to test
         Catalog mockCatalog = spy(catalog);
         doNothing().when(mockCatalog).alterDatabase(path1.getDatabaseName(), newDatabase, false);
         when(mockCatalog.getDatabase(path1.getDatabaseName())).thenReturn(database);
