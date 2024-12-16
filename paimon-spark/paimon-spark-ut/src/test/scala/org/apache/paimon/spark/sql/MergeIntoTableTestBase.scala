@@ -113,6 +113,35 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
     }
   }
 
+  test(s"Paimon MergeInto: update + insert with data file path") {
+    withTable("source", "target") {
+
+      Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
+
+      createTable(
+        "target",
+        "a INT, b INT, c STRING",
+        Seq("a"),
+        Seq(),
+        Map("data-file.path-directory" -> "data"))
+      spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
+
+      spark.sql(s"""
+                   |MERGE INTO target
+                   |USING source
+                   |ON target.a = source.a
+                   |WHEN MATCHED THEN
+                   |UPDATE SET a = source.a, b = source.b, c = source.c
+                   |WHEN NOT MATCHED
+                   |THEN INSERT (a, b, c) values (a, b, c)
+                   |""".stripMargin)
+
+      checkAnswer(
+        spark.sql("SELECT * FROM target ORDER BY a, b"),
+        Seq(Row(1, 100, "c11"), Row(2, 20, "c2"), Row(3, 300, "c33")))
+    }
+  }
+
   test(s"Paimon MergeInto: delete + insert") {
     withTable("source", "target") {
 

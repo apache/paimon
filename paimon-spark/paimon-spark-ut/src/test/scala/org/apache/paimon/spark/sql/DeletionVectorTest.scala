@@ -652,6 +652,22 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
     assert(dvMeta.cardinality() == 334)
   }
 
+  test("Paimon deletionVector: delete from non-pk table with data file path") {
+    sql(s"""
+           |CREATE TABLE T (id INT)
+           |TBLPROPERTIES (
+           | 'deletion-vectors.enabled' = 'true',
+           | 'bucket-key' = 'id',
+           | 'bucket' = '1',
+           | 'data-file.path-directory' = 'data'
+           |)
+           |""".stripMargin)
+
+    sql("INSERT INTO T SELECT /*+ REPARTITION(1) */ id FROM range (1, 50000)")
+    sql("DELETE FROM T WHERE id >= 111 and id <= 444")
+    checkAnswer(sql("SELECT count(*) FROM T"), Row(49665))
+  }
+
   private def getPathName(path: String): String = {
     new Path(path).getName
   }
