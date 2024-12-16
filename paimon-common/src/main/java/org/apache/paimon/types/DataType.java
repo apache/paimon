@@ -145,6 +145,10 @@ public abstract class DataType implements Serializable {
         return isNullable == that.isNullable && typeRoot == that.typeRoot;
     }
 
+    public boolean equalsIgnoreFieldId(Object o) {
+        return equals(o);
+    }
+
     /**
      * Determine whether the current type is the result of the target type after pruning (e.g.
      * select some fields from a nested type) or just the same.

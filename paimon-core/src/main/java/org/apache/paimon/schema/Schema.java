@@ -68,7 +68,6 @@ public class Schema {
         this.partitionKeys = normalizePartitionKeys(partitionKeys);
         this.primaryKeys = normalizePrimaryKeys(primaryKeys);
         this.fields = normalizeFields(fields, this.primaryKeys, this.partitionKeys);
-
         this.comment = comment;
     }
 

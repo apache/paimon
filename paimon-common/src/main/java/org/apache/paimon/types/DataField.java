@@ -148,17 +148,29 @@ public final class DataField implements Serializable {
                 && Objects.equals(description, field.description);
     }
 
-    public boolean isPrunedFrom(DataField field) {
-        if (this == field) {
+    public boolean equalsIgnoreFieldId(DataField other) {
+        if (this == other) {
             return true;
         }
-        if (field == null) {
+        if (other == null) {
             return false;
         }
-        return Objects.equals(id, field.id)
-                && Objects.equals(name, field.name)
-                && type.isPrunedFrom(field.type)
-                && Objects.equals(description, field.description);
+        return Objects.equals(name, other.name)
+                && type.equalsIgnoreFieldId(other.type)
+                && Objects.equals(description, other.description);
+    }
+
+    public boolean isPrunedFrom(DataField other) {
+        if (this == other) {
+            return true;
+        }
+        if (other == null) {
+            return false;
+        }
+        return Objects.equals(id, other.id)
+                && Objects.equals(name, other.name)
+                && type.isPrunedFrom(other.type)
+                && Objects.equals(description, other.description);
     }
 
     @Override
