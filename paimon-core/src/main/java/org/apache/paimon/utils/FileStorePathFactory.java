@@ -135,10 +135,7 @@ public class FileStorePathFactory {
 
     public Path relativeDataFilePath(BinaryRow partition, int bucket) {
         Path relativeDataFile = tablePathProvider.getReleativeTableWritePath();
-        if (dataFilePathDirectory != null) {
-            relativeDataFile = new Path(relativeDataFile, dataFilePathDirectory);
-        }
-        return new Path(relativeDataFile + "/" + relativePartitionAndBucketPath(partition, bucket));
+        return new Path(relativeDataFile + "/" + relativeBucketPath(partition, bucket));
     }
 
     public Path bucketPath(BinaryRow partition, int bucket) {
