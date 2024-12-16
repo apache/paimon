@@ -24,10 +24,10 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataTypes;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-
-import java.util.ArrayList;
 
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -75,7 +75,12 @@ public class FileSystemCatalogTest extends CatalogTestBase {
     public void testAlterDatabase() throws Exception {
         String databaseName = "test_alter_db";
         catalog.createDatabase(databaseName, false);
-        assertThatThrownBy(() -> catalog.alterDatabase(databaseName, new ArrayList<>(), false))
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterDatabase(
+                                        databaseName,
+                                        Lists.newArrayList(PropertyChange.removeProperty("a")),
+                                        false))
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 }
