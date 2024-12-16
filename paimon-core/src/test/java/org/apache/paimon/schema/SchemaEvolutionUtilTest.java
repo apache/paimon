@@ -18,6 +18,7 @@
 
 package org.apache.paimon.schema;
 
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.predicate.Equal;
@@ -37,6 +38,7 @@ import org.apache.paimon.utils.Projection;
 
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -263,7 +265,7 @@ public class SchemaEvolutionUtilTest {
     }
 
     @Test
-    public void testCreateDataFilters() {
+    public void testEvolveDataFilters() {
         List<Predicate> predicates = new ArrayList<>();
         predicates.add(
                 new LeafPredicate(
@@ -278,7 +280,7 @@ public class SchemaEvolutionUtilTest {
                         IsNull.INSTANCE, DataTypes.INT(), 7, "a", Collections.emptyList()));
 
         List<Predicate> filters =
-                SchemaEvolutionUtil.createDataFilters(tableFields2, dataFields, predicates);
+                SchemaEvolutionUtil.devolveDataFilters(tableFields2, dataFields, predicates);
         assert filters != null;
         assertThat(filters.size()).isEqualTo(1);
 
@@ -290,24 +292,26 @@ public class SchemaEvolutionUtilTest {
 
     @Test
     public void testColumnTypeFilter() {
-        // (1, b, int) in data schema is updated to (1, c, double) in table2
+        // alter d from INT to DECIMAL(10, 2)
+        // filter d = 11.01 will be devolved to d = 11
         List<Predicate> predicates = new ArrayList<>();
         predicates.add(
                 new LeafPredicate(
                         Equal.INSTANCE,
-                        DataTypes.DOUBLE(),
+                        DataTypes.DECIMAL(10, 2),
                         0,
-                        "c",
-                        Collections.singletonList(1.0D)));
+                        "d",
+                        Collections.singletonList(
+                                Decimal.fromBigDecimal(new BigDecimal("11.01"), 10, 2))));
         List<Predicate> filters =
-                SchemaEvolutionUtil.createDataFilters(tableFields2, dataFields, predicates);
+                SchemaEvolutionUtil.devolveDataFilters(tableFields2, dataFields, predicates);
         assert filters != null;
         assertThat(filters.size()).isEqualTo(1);
 
         LeafPredicate child = (LeafPredicate) filters.get(0);
-        // Validate value 1 with index 1
-        assertThat(child.test(GenericRow.of(0, 1))).isTrue();
-        // Validate value 2 with index 1
-        assertThat(child.test(GenericRow.of(1, 2))).isFalse();
+        // Validate value 11 with index 3
+        assertThat(child.test(GenericRow.of(0, 0, 0, 11))).isTrue();
+        // Validate value 12 with index 3
+        assertThat(child.test(GenericRow.of(1, 0, 0, 12))).isFalse();
     }
 }

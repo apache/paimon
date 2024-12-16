@@ -18,17 +18,32 @@
 
 package org.apache.paimon.casting;
 
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.GreaterOrEqual;
+import org.apache.paimon.predicate.GreaterThan;
+import org.apache.paimon.predicate.In;
+import org.apache.paimon.predicate.LeafFunction;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LessOrEqual;
+import org.apache.paimon.predicate.LessThan;
+import org.apache.paimon.predicate.NotEqual;
+import org.apache.paimon.predicate.NotIn;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.DecimalType;
 
 import javax.annotation.Nullable;
 
+import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /** Cast executors for input type and output type. */
@@ -98,6 +113,147 @@ public class CastExecutors {
 
     public static CastExecutor<?, ?> identityCastExecutor() {
         return IDENTITY_CAST_EXECUTOR;
+    }
+
+    /**
+     * When filter a field witch was evolved from/to a numeric type, we should carefully handle the
+     * precision match and overflow problem.
+     */
+    @Nullable
+    public static List<Object> safelyCastLiteralsWithNumericEvolution(
+            LeafPredicate predicate, DataType outputType) {
+        DataType inputType = predicate.type();
+        if (inputType.equalsIgnoreNullable(outputType)) {
+            return predicate.literals();
+        }
+
+        List<Object> literals = predicate.literals();
+
+        CastRule<?, ?> castRule = INSTANCE.internalResolve(inputType, outputType);
+        if (castRule == null) {
+            return literals;
+        }
+
+        if (castRule instanceof DecimalToDecimalCastRule) {
+            if (((DecimalType) inputType).getPrecision() < ((DecimalType) outputType).getPrecision()
+                    && containsEqualCheck(predicate)) {
+                // For example, alter 111.321 from DECIMAL(6, 3) to DECIMAL(5, 2).
+                // The query result is 111.32 which is truncated from 111.321.
+                // If we query with filter f = 111.32 and push down it, 111.321 will be filtered
+                // out mistakenly.
+                // But if we query with filter f > 111.32, although 111.321 will be retrieved,
+                // the engine will filter out it finally.
+                return null;
+            }
+            // Pushing down higher precision filter is always correct.
+            return literals;
+        } else if (castRule instanceof NumericPrimitiveToDecimalCastRule) {
+            if (inputType.is(DataTypeFamily.INTEGER_NUMERIC) && containsEqualCheck(predicate)) {
+                // the reason is same as DecimalToDecimalCastRule
+                return null;
+            }
+            return literals.stream()
+                    .map(literal -> (Number) literal)
+                    .map(
+                            literal ->
+                                    inputType.is(DataTypeFamily.INTEGER_NUMERIC)
+                                            ? BigDecimal.valueOf(literal.longValue())
+                                            : BigDecimal.valueOf(literal.doubleValue()))
+                    .map(bd -> Decimal.fromBigDecimal(bd, bd.precision(), bd.scale()))
+                    .collect(Collectors.toList());
+        } else if (castRule instanceof DecimalToNumericPrimitiveCastRule) {
+            if (outputType.is(DataTypeFamily.INTEGER_NUMERIC)
+                    && (containsPartialCheck(predicate) || containsNotEqualCheck(predicate))) {
+                // For example, alter 111 from INT to DECIMAL(5, 2). The query result is 111.00
+                // If we query with filter f < 111.01 and push down it as f < 111, 111 will be
+                // filtered out mistakenly. Also, we shouldn't push down f <> 111.01.
+                // But if we query with filter f = 111.01 and push down it as f = 111, although 111
+                // will be retrieved, the engine will filter out it finally.
+                // TODO: maybe we can scale the partial filter. For example, f < 111.01 can be
+                // transfer to f < 112.
+                return null;
+            } else if (outputType.is(DataTypeFamily.APPROXIMATE_NUMERIC)
+                    && containsEqualCheck(predicate)) {
+                // For example, alter 111.321 from DOUBLE to DECIMAL(5, 2). The query result is
+                // 111.32.
+                // If we query with filter f = 111.32 and push down it, 111.321 will be filtered
+                // out mistakenly.
+                // But if we query with filter f > 111.32 or f <> 111.32, although 111.321 will be
+                // retrieved, the engine will filter out it finally.
+                return null;
+            }
+            castLiterals(castRule, inputType, outputType, literals);
+        } else if (castRule instanceof NumericPrimitiveCastRule) {
+            if (inputType.is(DataTypeFamily.INTEGER_NUMERIC)
+                    && outputType.is(DataTypeFamily.INTEGER_NUMERIC)) {
+                if (integerScaleLargerThan(inputType.getTypeRoot(), outputType.getTypeRoot())) {
+                    // Pushing down higher scale integer numeric filter is always correct.
+                    return literals;
+                }
+            }
+
+            // Pushing down float filter is dangerous because the filter result is unpredictable.
+            // For example, (double) 0.1F in Java is 0.10000000149011612.
+
+            // Pushing down lower scale filter is also dangerous because of overflow.
+            // For example, alter 383 from INT to TINYINT, the query result is (byte) 383 == 127.
+            // If we push down filter f = 127, 383 will be filtered out which is wrong.
+
+            // So we don't push down these filters.
+            return null;
+        } else if (castRule instanceof NumericToStringCastRule
+                || castRule instanceof StringToDecimalCastRule
+                || castRule instanceof StringToNumericPrimitiveCastRule) {
+            // Pushing down filters related to STRING is dangerous because string comparison is
+            // different from number comparison and string literal to number might have precision
+            // and overflow problem.
+            // For example, alter '111' from STRING to INT, the query result is 111.
+            // If we query with filter f > 2 and push down it as f > '2', '111' will be filtered
+            // out mistakenly.
+            return null;
+        }
+
+        // Non numeric related cast rule
+        return castLiterals(castRule, inputType, outputType, literals);
+    }
+
+    private static List<Object> castLiterals(
+            CastRule<?, ?> castRule,
+            DataType inputType,
+            DataType outputType,
+            List<Object> literals) {
+        CastExecutor<Object, Objects> castExecutor =
+                (CastExecutor<Object, Objects>) castRule.create(inputType, outputType);
+        return literals.stream()
+                .map(l -> castExecutor == null ? l : castExecutor.cast(l))
+                .collect(Collectors.toList());
+    }
+
+    private static boolean containsEqualCheck(LeafPredicate predicate) {
+        LeafFunction function = predicate.function();
+        return function instanceof In
+                || function instanceof Equal
+                || function instanceof GreaterOrEqual
+                || function instanceof LessOrEqual;
+    }
+
+    private static boolean containsPartialCheck(LeafPredicate predicate) {
+        LeafFunction function = predicate.function();
+        return function instanceof LessThan
+                || function instanceof LessOrEqual
+                || function instanceof GreaterThan
+                || function instanceof GreaterOrEqual;
+    }
+
+    private static boolean containsNotEqualCheck(LeafPredicate predicate) {
+        LeafFunction function = predicate.function();
+        return function instanceof NotIn || function instanceof NotEqual;
+    }
+
+    private static boolean integerScaleLargerThan(DataTypeRoot a, DataTypeRoot b) {
+        return (a == DataTypeRoot.SMALLINT && b == DataTypeRoot.TINYINT)
+                || (a == DataTypeRoot.INTEGER && b != DataTypeRoot.BIGINT)
+                || a == DataTypeRoot.BIGINT;
     }
 
     // Map<Target family or root, Map<Input family or root, rule>>

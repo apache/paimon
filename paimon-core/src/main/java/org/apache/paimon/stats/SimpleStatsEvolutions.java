@@ -77,15 +77,18 @@ public class SimpleStatsEvolutions {
                 });
     }
 
-    public Predicate convertFilter(long dataSchemaId, Predicate filter) {
-        return tableSchemaId == dataSchemaId
-                ? filter
-                : Objects.requireNonNull(
-                                SchemaEvolutionUtil.createDataFilters(
-                                        schemaFields.apply(tableSchemaId),
-                                        schemaFields.apply(dataSchemaId),
-                                        Collections.singletonList(filter)))
-                        .get(0);
+    @Nullable
+    public Predicate tryDevolveFilter(long dataSchemaId, Predicate filter) {
+        if (tableSchemaId == dataSchemaId) {
+            return filter;
+        }
+        List<Predicate> evolved =
+                Objects.requireNonNull(
+                        SchemaEvolutionUtil.devolveDataFilters(
+                                schemaFields.apply(tableSchemaId),
+                                schemaFields.apply(dataSchemaId),
+                                Collections.singletonList(filter)));
+        return evolved.isEmpty() ? null : evolved.get(0);
     }
 
     public List<DataField> tableDataFields() {
