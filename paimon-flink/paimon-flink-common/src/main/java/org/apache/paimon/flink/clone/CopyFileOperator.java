@@ -34,6 +34,7 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /** A Operator to copy files. */
@@ -63,6 +64,8 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
                 FlinkCatalogFactory.createPaimonCatalog(Options.fromMap(sourceCatalogConfig));
         targetCatalog =
                 FlinkCatalogFactory.createPaimonCatalog(Options.fromMap(targetCatalogConfig));
+        srcLocations = new HashMap<>();
+        targetLocations = new HashMap<>();
     }
 
     @Override
