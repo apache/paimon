@@ -188,7 +188,7 @@ public class CachingCatalog extends DelegateCatalog {
     }
 
     @Override
-    public void alterDatabase(String name, List<DatabaseChange> changes, boolean ignoreIfNotExists)
+    public void alterDatabase(String name, List<PropertyChange> changes, boolean ignoreIfNotExists)
             throws DatabaseNotExistException {
         super.alterDatabase(name, changes, ignoreIfNotExists);
         databaseCache.invalidate(name);

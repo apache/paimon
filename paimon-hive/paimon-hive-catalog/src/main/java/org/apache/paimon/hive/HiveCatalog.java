@@ -25,8 +25,8 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
-import org.apache.paimon.catalog.DatabaseChange;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
@@ -409,13 +409,13 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void alterDatabaseImpl(String name, List<DatabaseChange> changes) {
+    protected void alterDatabaseImpl(String name, List<PropertyChange> changes) {
         try {
             Database database = clients.run(client -> client.getDatabase(name));
             Map<String, String> parameter = Maps.newHashMap();
             parameter.putAll(database.getParameters());
             Pair<Map<String, String>, Set<String>> setPropertiesToRemoveKeys =
-                    DatabaseChange.getSetPropertiesToRemoveKeys(changes);
+                    PropertyChange.getSetPropertiesToRemoveKeys(changes);
             Map<String, String> setProperties = setPropertiesToRemoveKeys.getLeft();
             Set<String> removeKeys = setPropertiesToRemoveKeys.getRight();
             if (setProperties.size() > 0) {

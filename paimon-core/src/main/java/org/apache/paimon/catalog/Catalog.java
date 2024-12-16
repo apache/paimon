@@ -129,13 +129,13 @@ public interface Catalog extends AutoCloseable {
      * Alter a database.
      *
      * @param name Name of the database to alter.
-     * @param changes a collection of changes to apply to the database.
+     * @param changes the property changes
      * @param ignoreIfNotExists Flag to specify behavior when the database does not exist: if set to
      *     false, throw an exception, if set to true, do nothing.
      * @throws DatabaseNotExistException if the given database is not exist and ignoreIfNotExists is
      *     false
      */
-    void alterDatabase(String name, List<DatabaseChange> changes, boolean ignoreIfNotExists)
+    void alterDatabase(String name, List<PropertyChange> changes, boolean ignoreIfNotExists)
             throws DatabaseNotExistException;
 
     /**

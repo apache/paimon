@@ -972,8 +972,8 @@ public abstract class CatalogTestBase {
         catalog.alterDatabase(
                 databaseName,
                 Lists.newArrayList(
-                        DatabaseChange.setProperty(key, "value"),
-                        DatabaseChange.setProperty(key2, "value")),
+                        PropertyChange.setProperty(key, "value"),
+                        PropertyChange.setProperty(key2, "value")),
                 false);
         Database db = catalog.getDatabase(databaseName);
         assertEquals("value", db.options().get(key));
@@ -982,8 +982,8 @@ public abstract class CatalogTestBase {
         catalog.alterDatabase(
                 databaseName,
                 Lists.newArrayList(
-                        DatabaseChange.setProperty(key, "value1"),
-                        DatabaseChange.setProperty(key2, "value1")),
+                        PropertyChange.setProperty(key, "value1"),
+                        PropertyChange.setProperty(key2, "value1")),
                 false);
         db = catalog.getDatabase(databaseName);
         assertEquals("value1", db.options().get(key));
@@ -992,7 +992,7 @@ public abstract class CatalogTestBase {
         catalog.alterDatabase(
                 databaseName,
                 Lists.newArrayList(
-                        DatabaseChange.removeProperty(key), DatabaseChange.removeProperty(key2)),
+                        PropertyChange.removeProperty(key), PropertyChange.removeProperty(key2)),
                 false);
         db = catalog.getDatabase(databaseName);
         assertEquals(false, db.options().containsKey(key));
@@ -1001,7 +1001,7 @@ public abstract class CatalogTestBase {
         catalog.alterDatabase(
                 databaseName,
                 Lists.newArrayList(
-                        DatabaseChange.removeProperty(key), DatabaseChange.removeProperty(key2)),
+                        PropertyChange.removeProperty(key), PropertyChange.removeProperty(key2)),
                 false);
         db = catalog.getDatabase(databaseName);
         assertEquals(false, db.options().containsKey(key));

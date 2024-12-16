@@ -230,7 +230,7 @@ public abstract class AbstractCatalog implements Catalog {
     protected abstract void dropDatabaseImpl(String name);
 
     @Override
-    public void alterDatabase(String name, List<DatabaseChange> changes, boolean ignoreIfNotExists)
+    public void alterDatabase(String name, List<PropertyChange> changes, boolean ignoreIfNotExists)
             throws DatabaseNotExistException {
         checkNotSystemDatabase(name);
         try {
@@ -243,7 +243,7 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
-    protected abstract void alterDatabaseImpl(String name, List<DatabaseChange> changes)
+    protected abstract void alterDatabaseImpl(String name, List<PropertyChange> changes)
             throws DatabaseNotExistException;
 
     @Override

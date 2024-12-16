@@ -23,8 +23,8 @@ import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Database;
-import org.apache.paimon.catalog.DatabaseChange;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
@@ -204,9 +204,9 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void alterDatabaseImpl(String name, List<DatabaseChange> changes) {
+    protected void alterDatabaseImpl(String name, List<PropertyChange> changes) {
         Pair<Map<String, String>, Set<String>> setPropertiesToRemoveKeys =
-                DatabaseChange.getSetPropertiesToRemoveKeys(changes);
+                PropertyChange.getSetPropertiesToRemoveKeys(changes);
         Map<String, String> setProperties = setPropertiesToRemoveKeys.getLeft();
         Set<String> removeKeys = setPropertiesToRemoveKeys.getRight();
         Map<String, String> startingProperties = fetchProperties(name);

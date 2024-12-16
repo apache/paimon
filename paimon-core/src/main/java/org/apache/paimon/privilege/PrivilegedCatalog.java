@@ -19,9 +19,9 @@
 package org.apache.paimon.privilege;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.DatabaseChange;
 import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
@@ -84,7 +84,7 @@ public class PrivilegedCatalog extends DelegateCatalog {
     }
 
     @Override
-    public void alterDatabase(String name, List<DatabaseChange> changes, boolean ignoreIfNotExists)
+    public void alterDatabase(String name, List<PropertyChange> changes, boolean ignoreIfNotExists)
             throws DatabaseNotExistException {
         privilegeManager.getPrivilegeChecker().assertCanAlterDatabase(name);
         super.alterDatabase(name, changes, ignoreIfNotExists);

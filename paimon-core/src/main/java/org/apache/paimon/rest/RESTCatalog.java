@@ -20,8 +20,8 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Database;
-import org.apache.paimon.catalog.DatabaseChange;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
@@ -180,11 +180,11 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void alterDatabase(String name, List<DatabaseChange> changes, boolean ignoreIfNotExists)
+    public void alterDatabase(String name, List<PropertyChange> changes, boolean ignoreIfNotExists)
             throws DatabaseNotExistException {
         try {
             Pair<Map<String, String>, Set<String>> setPropertiesToRemoveKeys =
-                    DatabaseChange.getSetPropertiesToRemoveKeys(changes);
+                    PropertyChange.getSetPropertiesToRemoveKeys(changes);
             Map<String, String> updateProperties = setPropertiesToRemoveKeys.getLeft();
             Set<String> removeKeys = setPropertiesToRemoveKeys.getRight();
             AlterDatabaseRequest request =

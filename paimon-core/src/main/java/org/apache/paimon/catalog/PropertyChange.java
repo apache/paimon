@@ -28,35 +28,35 @@ import java.util.Map;
 import java.util.Set;
 
 /** define change to the database property. */
-public interface DatabaseChange {
+public interface PropertyChange {
 
-    static DatabaseChange setProperty(String property, String value) {
+    static PropertyChange setProperty(String property, String value) {
         return new SetProperty(property, value);
     }
 
-    static DatabaseChange removeProperty(String property) {
+    static PropertyChange removeProperty(String property) {
         return new RemoveProperty(property);
     }
 
     static Pair<Map<String, String>, Set<String>> getSetPropertiesToRemoveKeys(
-            List<DatabaseChange> changes) {
+            List<PropertyChange> changes) {
         Map<String, String> setProperties = Maps.newHashMap();
         Set<String> removeKeys = Sets.newHashSet();
         changes.forEach(
                 change -> {
-                    if (change instanceof DatabaseChange.SetProperty) {
-                        DatabaseChange.SetProperty setProperty =
-                                (DatabaseChange.SetProperty) change;
+                    if (change instanceof PropertyChange.SetProperty) {
+                        PropertyChange.SetProperty setProperty =
+                                (PropertyChange.SetProperty) change;
                         setProperties.put(setProperty.property(), setProperty.value());
                     } else {
-                        removeKeys.add(((DatabaseChange.RemoveProperty) change).property());
+                        removeKeys.add(((PropertyChange.RemoveProperty) change).property());
                     }
                 });
         return Pair.of(setProperties, removeKeys);
     }
 
     /** Set property for database change. */
-    final class SetProperty implements DatabaseChange {
+    final class SetProperty implements PropertyChange {
 
         private final String property;
         private final String value;
@@ -76,7 +76,7 @@ public interface DatabaseChange {
     }
 
     /** Remove property for database change. */
-    final class RemoveProperty implements DatabaseChange {
+    final class RemoveProperty implements PropertyChange {
 
         private final String property;
 
