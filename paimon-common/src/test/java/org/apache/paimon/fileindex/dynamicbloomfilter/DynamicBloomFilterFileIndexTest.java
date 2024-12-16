@@ -132,7 +132,7 @@ public class DynamicBloomFilterFileIndexTest {
 
     @Test
     public void testCompareFppWithBloomFilter() {
-        // When the amount of data written to the filter exceeds the number of items,
+        // When the amount of data written to the filter exceeds the number of item,
         // the dynamic bloom filter has a smaller error rate than the bloom filter.
 
         DynamicBloomFilterFileIndex dynamicFilter =
