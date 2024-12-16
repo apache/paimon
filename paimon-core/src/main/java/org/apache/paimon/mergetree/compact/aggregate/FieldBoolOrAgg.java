@@ -18,43 +18,22 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.BooleanType;
 
 /** bool_or aggregate a field of a row. */
 public class FieldBoolOrAgg extends FieldAggregator {
 
-    public static final String NAME = "bool_or";
-
     private static final long serialVersionUID = 1L;
 
-    public FieldBoolOrAgg(DataType dataType) {
-        super(dataType);
-    }
-
-    @Override
-    String name() {
-        return NAME;
+    public FieldBoolOrAgg(String name, BooleanType dataType) {
+        super(name, dataType);
     }
 
     @Override
     public Object agg(Object accumulator, Object inputField) {
-        Object boolOr;
-
         if (accumulator == null || inputField == null) {
-            boolOr = (inputField == null) ? accumulator : inputField;
-        } else {
-            switch (fieldType.getTypeRoot()) {
-                case BOOLEAN:
-                    boolOr = (boolean) accumulator || (boolean) inputField;
-                    break;
-                default:
-                    String msg =
-                            String.format(
-                                    "type %s not support in %s",
-                                    fieldType.getTypeRoot().toString(), this.getClass().getName());
-                    throw new IllegalArgumentException(msg);
-            }
+            return accumulator == null ? inputField : accumulator;
         }
-        return boolOr;
+        return (boolean) accumulator || (boolean) inputField;
     }
 }

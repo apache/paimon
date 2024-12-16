@@ -32,13 +32,14 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
-import org.apache.flink.streaming.api.functions.source.SourceFunction;
 
 import java.time.Duration;
 import java.util.HashMap;
@@ -53,6 +54,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGN
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_TIMEOUT;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Base {@link Action} for table/database synchronizing job. */
 public abstract class SynchronizationActionBase extends ActionBase {
@@ -128,7 +130,7 @@ public abstract class SynchronizationActionBase extends ActionBase {
 
     protected void beforeBuildingSourceSink() throws Exception {}
 
-    protected Object buildSource() {
+    protected Source<CdcSourceRecord, ?, ?> buildSource() {
         return syncJobHandler.provideSource();
     }
 
@@ -137,41 +139,39 @@ public abstract class SynchronizationActionBase extends ActionBase {
                 "Unsupported timestamp extractor for current cdc source.");
     }
 
-    private DataStreamSource<CdcSourceRecord> buildDataStreamSource(Object source) {
-        if (source instanceof Source) {
-            boolean isAutomaticWatermarkCreationEnabled =
-                    tableConfig.containsKey(CoreOptions.TAG_AUTOMATIC_CREATION.key())
-                            && Objects.equals(
-                                    tableConfig.get(CoreOptions.TAG_AUTOMATIC_CREATION.key()),
-                                    WATERMARK.toString());
+    protected void validateRuntimeExecutionMode() {
+        checkArgument(
+                env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
+                        == RuntimeExecutionMode.STREAMING,
+                "It's only support STREAMING mode for flink-cdc sync table action.");
+    }
 
-            Options options = Options.fromMap(tableConfig);
-            Duration idleTimeout = options.get(SCAN_WATERMARK_IDLE_TIMEOUT);
-            String watermarkAlignGroup = options.get(SCAN_WATERMARK_ALIGNMENT_GROUP);
-            WatermarkStrategy<CdcSourceRecord> watermarkStrategy =
-                    isAutomaticWatermarkCreationEnabled
-                            ? watermarkAlignGroup != null
-                                    ? new CdcWatermarkStrategy(createCdcTimestampExtractor())
-                                            .withWatermarkAlignment(
-                                                    watermarkAlignGroup,
-                                                    options.get(SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT),
-                                                    options.get(
-                                                            SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL))
-                                    : new CdcWatermarkStrategy(createCdcTimestampExtractor())
-                            : WatermarkStrategy.noWatermarks();
-            if (idleTimeout != null) {
-                watermarkStrategy = watermarkStrategy.withIdleness(idleTimeout);
-            }
-            return env.fromSource(
-                    (Source<CdcSourceRecord, ?, ?>) source,
-                    watermarkStrategy,
-                    syncJobHandler.provideSourceName());
+    private DataStreamSource<CdcSourceRecord> buildDataStreamSource(
+            Source<CdcSourceRecord, ?, ?> source) {
+        boolean isAutomaticWatermarkCreationEnabled =
+                tableConfig.containsKey(CoreOptions.TAG_AUTOMATIC_CREATION.key())
+                        && Objects.equals(
+                                tableConfig.get(CoreOptions.TAG_AUTOMATIC_CREATION.key()),
+                                WATERMARK.toString());
+
+        Options options = Options.fromMap(tableConfig);
+        Duration idleTimeout = options.get(SCAN_WATERMARK_IDLE_TIMEOUT);
+        String watermarkAlignGroup = options.get(SCAN_WATERMARK_ALIGNMENT_GROUP);
+        WatermarkStrategy<CdcSourceRecord> watermarkStrategy =
+                isAutomaticWatermarkCreationEnabled
+                        ? watermarkAlignGroup != null
+                                ? new CdcWatermarkStrategy(createCdcTimestampExtractor())
+                                        .withWatermarkAlignment(
+                                                watermarkAlignGroup,
+                                                options.get(SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT),
+                                                options.get(
+                                                        SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL))
+                                : new CdcWatermarkStrategy(createCdcTimestampExtractor())
+                        : WatermarkStrategy.noWatermarks();
+        if (idleTimeout != null) {
+            watermarkStrategy = watermarkStrategy.withIdleness(idleTimeout);
         }
-        if (source instanceof SourceFunction) {
-            return env.addSource(
-                    (SourceFunction<CdcSourceRecord>) source, syncJobHandler.provideSourceName());
-        }
-        throw new UnsupportedOperationException("Unrecognized source type");
+        return env.fromSource(source, watermarkStrategy, syncJobHandler.provideSourceName());
     }
 
     protected abstract FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> recordParse();

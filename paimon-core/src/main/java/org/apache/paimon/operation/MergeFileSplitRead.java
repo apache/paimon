@@ -44,6 +44,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Projection;
@@ -77,6 +78,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final MergeSorter mergeSorter;
     private final List<String> sequenceFields;
+    private final boolean sequenceOrder;
 
     @Nullable private RowType readKeyType;
 
@@ -106,6 +108,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                 new MergeSorter(
                         CoreOptions.fromMap(tableSchema.options()), keyType, valueType, null);
         this.sequenceFields = options.sequenceField();
+        this.sequenceOrder = options.sequenceFieldSortOrderIsAscending();
     }
 
     public Comparator<InternalRow> keyComparator() {
@@ -129,11 +132,9 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     @Override
     public MergeFileSplitRead withReadType(RowType readType) {
         // todo: replace projectedFields with readType
+        RowType tableRowType = tableSchema.logicalRowType();
         int[][] projectedFields =
-                Arrays.stream(
-                                tableSchema
-                                        .logicalRowType()
-                                        .getFieldIndices(readType.getFieldNames()))
+                Arrays.stream(tableRowType.getFieldIndices(readType.getFieldNames()))
                         .mapToObj(i -> new int[] {i})
                         .toArray(int[][]::new);
         int[][] newProjectedFields = projectedFields;
@@ -159,13 +160,18 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         this.pushdownProjection = projection.pushdownProjection;
         this.outerProjection = projection.outerProjection;
         if (pushdownProjection != null) {
-            RowType pushdownRowType =
-                    tableSchema
-                            .logicalRowType()
-                            .project(
-                                    Arrays.stream(pushdownProjection)
-                                            .mapToInt(arr -> arr[0])
-                                            .toArray());
+            List<DataField> tableFields = tableRowType.getFields();
+            List<DataField> readFields = readType.getFields();
+            List<DataField> finalReadFields = new ArrayList<>();
+            for (int i : Arrays.stream(pushdownProjection).mapToInt(arr -> arr[0]).toArray()) {
+                DataField requiredField = tableFields.get(i);
+                finalReadFields.add(
+                        readFields.stream()
+                                .filter(x -> x.name().equals(requiredField.name()))
+                                .findFirst()
+                                .orElse(requiredField));
+            }
+            RowType pushdownRowType = new RowType(finalReadFields);
             readerFactoryBuilder.withReadValueType(pushdownRowType);
             mergeSorter.setProjectedValueType(pushdownRowType);
         }
@@ -338,6 +344,6 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     @Nullable
     public UserDefinedSeqComparator createUdsComparator() {
         return UserDefinedSeqComparator.create(
-                readerFactoryBuilder.readValueType(), sequenceFields);
+                readerFactoryBuilder.readValueType(), sequenceFields, sequenceOrder);
     }
 }

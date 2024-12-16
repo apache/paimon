@@ -75,6 +75,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final IOFunction<List<DataFileMeta>, RecordReaderIterator<InternalRow>> bucketFileRead;
     private final boolean forceCompact;
     private final boolean asyncFileWrite;
+    private final boolean statsDenseStore;
     private final List<DataFileMeta> newFiles;
     private final List<DataFileMeta> deletedFiles;
     private final List<DataFileMeta> compactBefore;
@@ -111,7 +112,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             SimpleColStatsCollector.Factory[] statsCollectors,
             MemorySize maxDiskSize,
             FileIndexOptions fileIndexOptions,
-            boolean asyncFileWrite) {
+            boolean asyncFileWrite,
+            boolean statsDenseStore) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -122,6 +124,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.bucketFileRead = bucketFileRead;
         this.forceCompact = forceCompact;
         this.asyncFileWrite = asyncFileWrite;
+        this.statsDenseStore = statsDenseStore;
         this.newFiles = new ArrayList<>();
         this.deletedFiles = new ArrayList<>();
         this.compactBefore = new ArrayList<>();
@@ -208,6 +211,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
 
     @Override
     public boolean isCompacting() {
+        compactManager.triggerCompaction(false);
         return compactManager.isCompacting();
     }
 
@@ -286,7 +290,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                 statsCollectors,
                 fileIndexOptions,
                 FileSource.APPEND,
-                asyncFileWrite);
+                asyncFileWrite,
+                statsDenseStore);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

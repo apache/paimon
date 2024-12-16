@@ -31,6 +31,7 @@ import org.apache.paimon.utils.PartitionPathUtils;
 
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
+import org.apache.hadoop.hive.metastore.api.AlreadyExistsException;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.PartitionEventType;
@@ -40,6 +41,8 @@ import org.apache.thrift.TException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /** {@link MetastoreClient} for Hive tables. */
 public class HiveMetastoreClient implements MetastoreClient {
@@ -56,11 +59,13 @@ public class HiveMetastoreClient implements MetastoreClient {
             ClientPool<IMetaStoreClient, TException> clients)
             throws TException, InterruptedException {
         this.identifier = identifier;
+        CoreOptions options = new CoreOptions(schema.options());
         this.partitionComputer =
                 new InternalRowPartitionComputer(
-                        new CoreOptions(schema.options()).partitionDefaultName(),
+                        options.partitionDefaultName(),
                         schema.logicalPartitionType(),
-                        schema.partitionKeys().toArray(new String[0]));
+                        schema.partitionKeys().toArray(new String[0]),
+                        options.legacyPartitionName());
 
         this.clients = clients;
         this.sd =
@@ -79,35 +84,72 @@ public class HiveMetastoreClient implements MetastoreClient {
     }
 
     @Override
+    public void addPartitions(List<BinaryRow> partitions) throws Exception {
+        addPartitionsSpec(
+                partitions.stream()
+                        .map(partitionComputer::generatePartValues)
+                        .collect(Collectors.toList()));
+    }
+
+    @Override
     public void addPartition(LinkedHashMap<String, String> partitionSpec) throws Exception {
+        Partition hivePartition =
+                toHivePartition(partitionSpec, (int) (System.currentTimeMillis() / 1000));
+        clients.execute(
+                client -> {
+                    try {
+                        client.add_partition(hivePartition);
+                    } catch (AlreadyExistsException ignore) {
+                    }
+                });
+    }
+
+    @Override
+    public void addPartitionsSpec(List<LinkedHashMap<String, String>> partitionSpecsList)
+            throws Exception {
+        int currentTime = (int) (System.currentTimeMillis() / 1000);
+        List<Partition> hivePartitions =
+                partitionSpecsList.stream()
+                        .map(partitionSpec -> toHivePartition(partitionSpec, currentTime))
+                        .collect(Collectors.toList());
+        clients.execute(client -> client.add_partitions(hivePartitions, true, false));
+    }
+
+    @Override
+    public void alterPartition(
+            LinkedHashMap<String, String> partitionSpec,
+            Map<String, String> parameters,
+            long modifyTime,
+            boolean ignoreIfNotExist)
+            throws Exception {
         List<String> partitionValues = new ArrayList<>(partitionSpec.values());
+        int currentTime = (int) (modifyTime / 1000);
+        Partition hivePartition;
         try {
-            clients.execute(
-                    client ->
-                            client.getPartition(
-                                    identifier.getDatabaseName(),
-                                    identifier.getTableName(),
-                                    partitionValues));
-            // do nothing if the partition already exists
+            hivePartition =
+                    clients.run(
+                            client ->
+                                    client.getPartition(
+                                            identifier.getDatabaseName(),
+                                            identifier.getObjectName(),
+                                            partitionValues));
         } catch (NoSuchObjectException e) {
-            // partition not found, create new partition
-            StorageDescriptor newSd = new StorageDescriptor(sd);
-            newSd.setLocation(
-                    sd.getLocation()
-                            + "/"
-                            + PartitionPathUtils.generatePartitionPath(partitionSpec));
-
-            Partition hivePartition = new Partition();
-            hivePartition.setDbName(identifier.getDatabaseName());
-            hivePartition.setTableName(identifier.getTableName());
-            hivePartition.setValues(partitionValues);
-            hivePartition.setSd(newSd);
-            int currentTime = (int) (System.currentTimeMillis() / 1000);
-            hivePartition.setCreateTime(currentTime);
-            hivePartition.setLastAccessTime(currentTime);
-
-            clients.execute(client -> client.add_partition(hivePartition));
+            if (ignoreIfNotExist) {
+                return;
+            } else {
+                throw e;
+            }
         }
+
+        hivePartition.setValues(partitionValues);
+        hivePartition.setLastAccessTime(currentTime);
+        hivePartition.getParameters().putAll(parameters);
+        clients.execute(
+                client ->
+                        client.alter_partition(
+                                identifier.getDatabaseName(),
+                                identifier.getObjectName(),
+                                hivePartition));
     }
 
     @Override
@@ -148,6 +190,21 @@ public class HiveMetastoreClient implements MetastoreClient {
 
     public IMetaStoreClient client() throws TException, InterruptedException {
         return clients.run(client -> client);
+    }
+
+    private Partition toHivePartition(
+            LinkedHashMap<String, String> partitionSpec, int currentTime) {
+        Partition hivePartition = new Partition();
+        StorageDescriptor newSd = new StorageDescriptor(sd);
+        newSd.setLocation(
+                sd.getLocation() + "/" + PartitionPathUtils.generatePartitionPath(partitionSpec));
+        hivePartition.setDbName(identifier.getDatabaseName());
+        hivePartition.setTableName(identifier.getTableName());
+        hivePartition.setValues(new ArrayList<>(partitionSpec.values()));
+        hivePartition.setSd(newSd);
+        hivePartition.setCreateTime(currentTime);
+        hivePartition.setLastAccessTime(currentTime);
+        return hivePartition;
     }
 
     /** Factory to create {@link HiveMetastoreClient}. */

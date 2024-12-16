@@ -1,6 +1,6 @@
 ---
 title: "Dedicated Compaction"
-weight: 3
+weight: 4
 type: docs
 aliases:
 - /maintenance/dedicated-compaction.html
@@ -107,6 +107,7 @@ Run the following command to submit a compaction job for the table.
     --database <database-name> \ 
     --table <table-name> \
     [--partition <partition-name>] \
+    [--compact_strategy <minor / full>] \
     [--table_conf <table_conf>] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 ```
@@ -123,10 +124,14 @@ Example: compact table
     --partition dt=20221126,hh=08 \
     --partition dt=20221127,hh=09 \
     --table_conf sink.parallelism=10 \
+    --compact_strategy minor \
     --catalog_conf s3.endpoint=https://****.com \
     --catalog_conf s3.access-key=***** \
     --catalog_conf s3.secret-key=*****
 ```
+* `--compact_strategy` Determines how to pick files to be merged, the default is determined by the runtime execution mode, streaming-mode use `minor` strategy and batch-mode use `full` strategy.
+  * `full` : Only supports batch mode. All files will be selected for merging.
+  * `minor` : Pick the set of files that need to be merged based on specified conditions.
 
 You can use `-D execution.runtime-mode=batch` or `-yD execution.runtime-mode=batch` (for the ON-YARN scenario) to control batch or streaming mode. If you submit a batch job, all
 current table files will be compacted. If you submit a streaming job, the job will continuously monitor new changes
@@ -190,6 +195,7 @@ CALL sys.compact_database(
     [--including_tables <paimon-table-name|name-regular-expr>] \
     [--excluding_tables <paimon-table-name|name-regular-expr>] \
     [--mode <compact-mode>] \
+    [--compact_strategy <minor / full>] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
     [--table_conf <paimon-table_conf> [--table_conf <paimon-table_conf> ...]]
 ```
@@ -346,6 +352,7 @@ CALL sys.compact(`table` => 'default.T', 'partition_idle_time' => '1 d')
     --table <table-name> \
     --partition_idle_time <partition-idle-time> \ 
     [--partition <partition-name>] \
+    [--compact_strategy <minor / full>] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
     [--table_conf <paimon-table-dynamic-conf> [--table_conf <paimon-table-dynamic-conf>] ...]
 ```
@@ -406,6 +413,7 @@ CALL sys.compact_database(
     [--including_tables <paimon-table-name|name-regular-expr>] \
     [--excluding_tables <paimon-table-name|name-regular-expr>] \
     [--mode <compact-mode>] \
+    [--compact_strategy <minor / full>] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
     [--table_conf <paimon-table_conf> [--table_conf <paimon-table_conf> ...]]
 ```

@@ -35,6 +35,7 @@ under the License.
 
     <properties>
         <flink.version>1.19.1</flink.version>
+        <iceberg.flink.version>1.19</iceberg.flink.version>
     </properties>
 
     <dependencies>
@@ -95,7 +96,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-planner_${scala.binary.version}</artifactId>
+            <artifactId>flink-table-planner_${flink.scala.binary.version}</artifactId>
             <version>${flink.version}</version>
             <scope>test</scope>
         </dependency>
@@ -111,6 +112,13 @@ under the License.
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-compress</artifactId>
             <version>1.21</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-flink-${iceberg.flink.version}</artifactId>
+            <version>${iceberg.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

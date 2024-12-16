@@ -21,10 +21,13 @@ org.apache.paimon.flink.action.DropPartitionActionFactory
 org.apache.paimon.flink.action.DeleteActionFactory
 org.apache.paimon.flink.action.MergeIntoActionFactory
 org.apache.paimon.flink.action.RollbackToActionFactory
+org.apache.paimon.flink.action.RollbackToTimestampActionFactory
 org.apache.paimon.flink.action.CreateTagActionFactory
 org.apache.paimon.flink.action.CreateTagFromTimestampActionFactory
 org.apache.paimon.flink.action.CreateTagFromWatermarkActionFactory
 org.apache.paimon.flink.action.DeleteTagActionFactory
+org.apache.paimon.flink.action.ExpireTagsActionFactory
+org.apache.paimon.flink.action.ReplaceTagActionFactory
 org.apache.paimon.flink.action.ResetConsumerActionFactory
 org.apache.paimon.flink.action.MigrateTableActionFactory
 org.apache.paimon.flink.action.MigrateFileActionFactory
@@ -49,12 +52,16 @@ org.apache.paimon.flink.procedure.CreateTagProcedure
 org.apache.paimon.flink.procedure.CreateTagFromTimestampProcedure
 org.apache.paimon.flink.procedure.CreateTagFromWatermarkProcedure
 org.apache.paimon.flink.procedure.DeleteTagProcedure
+org.apache.paimon.flink.procedure.ExpireTagsProcedure
+org.apache.paimon.flink.procedure.ReplaceTagProcedure
 org.apache.paimon.flink.procedure.CreateBranchProcedure
 org.apache.paimon.flink.procedure.DeleteBranchProcedure
 org.apache.paimon.flink.procedure.DropPartitionProcedure
 org.apache.paimon.flink.procedure.MergeIntoProcedure
 org.apache.paimon.flink.procedure.ResetConsumerProcedure
 org.apache.paimon.flink.procedure.RollbackToProcedure
+org.apache.paimon.flink.procedure.RollbackToTimestampProcedure
+org.apache.paimon.flink.procedure.RollbackToWatermarkProcedure
 org.apache.paimon.flink.procedure.MigrateTableProcedure
 org.apache.paimon.flink.procedure.MigrateDatabaseProcedure
 org.apache.paimon.flink.procedure.MigrateFileProcedure
@@ -62,6 +69,7 @@ org.apache.paimon.flink.procedure.RemoveOrphanFilesProcedure
 org.apache.paimon.flink.procedure.QueryServiceProcedure
 org.apache.paimon.flink.procedure.ExpireSnapshotsProcedure
 org.apache.paimon.flink.procedure.ExpirePartitionsProcedure
+org.apache.paimon.flink.procedure.PurgeFilesProcedure
 org.apache.paimon.flink.procedure.privilege.InitFileBasedPrivilegeProcedure
 org.apache.paimon.flink.procedure.privilege.CreatePrivilegedUserProcedure
 org.apache.paimon.flink.procedure.privilege.DropPrivilegedUserProcedure
@@ -72,3 +80,5 @@ org.apache.paimon.flink.procedure.RenameTagProcedure
 org.apache.paimon.flink.procedure.FastForwardProcedure
 org.apache.paimon.flink.procedure.MarkPartitionDoneProcedure
 org.apache.paimon.flink.procedure.CloneProcedure
+org.apache.paimon.flink.procedure.CompactManifestProcedure
+org.apache.paimon.flink.procedure.RefreshObjectTableProcedure

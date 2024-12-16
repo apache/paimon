@@ -18,9 +18,11 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.operation.ManifestFileMerger;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
@@ -39,8 +41,12 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -300,13 +306,13 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         // case5:the sizes of some manifest files are greater than suggestedMetaSize, while the
         // sizes of other manifest files is less than. All manifest files have no delete files
         input.clear();
-        input.addAll(Arrays.asList(manifest1, manifest2, manifest3));
+        input.addAll(Arrays.asList(manifest1, manifest2, manifest3, manifest4));
         List<ManifestFileMeta> newMetas5 = new ArrayList<>();
         List<ManifestFileMeta> fullCompacted5 =
                 ManifestFileMerger.tryFullCompaction(
                                 input, newMetas5, manifestFile, 1800, 100, getPartitionType(), null)
                         .get();
-        assertThat(fullCompacted5.size()).isEqualTo(2);
+        assertThat(fullCompacted5.size()).isEqualTo(3);
         assertThat(newMetas5.size()).isEqualTo(1);
 
         // trigger full compaction
@@ -444,6 +450,135 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         .map(ManifestEntry::identifier)
                         .collect(Collectors.toList());
         containSameIdentifyEntryFile(fullCompacted, entryIdentifierExpected);
+    }
+
+    @RepeatedTest(10)
+    public void testRandomFullCompaction() throws Exception {
+        List<ManifestFileMeta> input = new ArrayList<>();
+        Set<FileEntry.Identifier> manifestEntrySet = new HashSet<>();
+        Set<FileEntry.Identifier> deleteManifestEntrySet = new HashSet<>();
+        int inputSize = ThreadLocalRandom.current().nextInt(100) + 1;
+        int totalEntryNums = 0;
+        for (int i = 0; i < inputSize; i++) {
+            int entryNums = ThreadLocalRandom.current().nextInt(100) + 1;
+            input.add(
+                    generateRandomData(
+                            entryNums, totalEntryNums, manifestEntrySet, deleteManifestEntrySet));
+            totalEntryNums += entryNums;
+        }
+        int suggerstSize = ThreadLocalRandom.current().nextInt(3000) + 1;
+        int sizeTrigger = ThreadLocalRandom.current().nextInt(40000) + 1;
+        List<ManifestFileMeta> newMetas = new ArrayList<>();
+        Optional<List<ManifestFileMeta>> fullCompacted =
+                ManifestFileMerger.tryFullCompaction(
+                        input,
+                        newMetas,
+                        manifestFile,
+                        suggerstSize,
+                        sizeTrigger,
+                        getPartitionType(),
+                        null);
+
+        // *****verify result*****
+        List<ManifestFileMeta> mustMergedFiles =
+                input.stream()
+                        .filter(
+                                manifest ->
+                                        manifest.fileSize() < suggerstSize
+                                                || manifest.numDeletedFiles() > 0)
+                        .collect(Collectors.toList());
+        long mustMergeSize =
+                mustMergedFiles.stream().map(ManifestFileMeta::fileSize).reduce(0L, Long::sum);
+        // manifest files which might be merged
+        List<ManifestFileMeta> toBeMerged = new LinkedList<>(input);
+        if (getPartitionType().getFieldCount() > 0) {
+            Set<BinaryRow> deletePartitions =
+                    deleteManifestEntrySet.stream()
+                            .map(entry -> entry.partition)
+                            .collect(Collectors.toSet());
+            PartitionPredicate predicate =
+                    PartitionPredicate.fromMultiple(getPartitionType(), deletePartitions);
+            if (predicate != null) {
+                Iterator<ManifestFileMeta> iterator = toBeMerged.iterator();
+                while (iterator.hasNext()) {
+                    ManifestFileMeta file = iterator.next();
+                    if (file.fileSize() < suggerstSize || file.numDeletedFiles() > 0) {
+                        continue;
+                    }
+                    if (!predicate.test(
+                            file.numAddedFiles() + file.numDeletedFiles(),
+                            file.partitionStats().minValues(),
+                            file.partitionStats().maxValues(),
+                            file.partitionStats().nullCounts())) {
+                        iterator.remove();
+                    }
+                }
+            }
+        }
+        // manifest files which were not written after full compaction
+        List<ManifestFileMeta> notMergedFiles =
+                input.stream()
+                        .filter(
+                                manifest ->
+                                        manifest.fileSize() >= suggerstSize
+                                                && manifest.numDeletedFiles() == 0)
+                        .filter(
+                                manifest ->
+                                        manifestFile.read(manifest.fileName(), manifest.fileSize())
+                                                .stream()
+                                                .map(ManifestEntry::identifier)
+                                                .noneMatch(deleteManifestEntrySet::contains))
+                        .collect(Collectors.toList());
+
+        if (mustMergeSize < sizeTrigger) {
+            assertThat(fullCompacted).isEmpty();
+            assertThat(newMetas).isEmpty();
+        } else if (toBeMerged.size() <= 1) {
+            assertThat(fullCompacted).isEmpty();
+            assertThat(newMetas).isEmpty();
+        } else {
+            assertThat(fullCompacted.get().size()).isEqualTo(notMergedFiles.size() + 1);
+            assertThat(newMetas).size().isEqualTo(1);
+        }
+    }
+
+    private ManifestFileMeta generateRandomData(
+            int entryNums,
+            int totalEntryNums,
+            Set<FileEntry.Identifier> manifestEntrySet,
+            Set<FileEntry.Identifier> deleteManifestEntrySet) {
+        List<ManifestEntry> entries = new ArrayList<>();
+        for (int i = 0; i < entryNums; i++) {
+            // 70% add, 30% delete
+            boolean isAdd = ThreadLocalRandom.current().nextInt(10) < 7;
+            if (manifestEntrySet.isEmpty() || isAdd) {
+                String fileName = String.format("file-%d", totalEntryNums + i);
+                Integer partition = ThreadLocalRandom.current().nextInt(10);
+                int level = ThreadLocalRandom.current().nextInt(6);
+                List<String> extraFiles = Lists.newArrayList(String.format("index-%s", fileName));
+                byte[] embeddedIndex = new byte[] {1, 2, 3};
+                entries.add(makeEntry(true, fileName, partition, level, extraFiles, embeddedIndex));
+            } else {
+                FileEntry.Identifier identifier =
+                        manifestEntrySet.stream()
+                                .skip(ThreadLocalRandom.current().nextInt(manifestEntrySet.size()))
+                                .findFirst()
+                                .get();
+                entries.add(
+                        makeEntry(
+                                false,
+                                identifier.fileName,
+                                identifier.partition.getInt(0),
+                                identifier.level,
+                                identifier.extraFiles,
+                                new byte[] {1, 2, 3}));
+                manifestEntrySet.remove(identifier);
+                deleteManifestEntrySet.add(identifier);
+            }
+        }
+        manifestEntrySet.addAll(
+                entries.stream().map(ManifestEntry::identifier).collect(Collectors.toSet()));
+        return makeManifest(entries.toArray(new ManifestEntry[0]));
     }
 
     private void createData(

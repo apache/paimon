@@ -76,7 +76,6 @@ import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
-import static org.apache.paimon.flink.AbstractFlinkTableFactory.buildPaimonTable;
 import static org.apache.paimon.flink.FlinkConnectorOptions.INFER_SCAN_MAX_PARALLELISM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.INFER_SCAN_PARALLELISM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARALLELISM;
@@ -798,6 +797,43 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                         changelogRow("-D", "Yen", 1L),
                         changelogRow("-D", "Euro", 119L),
                         changelogRow("+I", "US Dollar", 100L)));
+
+        streamingItr.close();
+    }
+
+    @Test
+    public void testStreamingReadOverwriteWithDeleteRecords() throws Exception {
+        String table =
+                createTable(
+                        Arrays.asList("currency STRING", "rate BIGINT", "dt STRING"),
+                        Collections.singletonList("currency"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        streamingReadOverwrite);
+
+        insertInto(
+                table,
+                "('US Dollar', 102, '2022-01-01')",
+                "('Yen', 1, '2022-01-02')",
+                "('Euro', 119, '2022-01-02')");
+
+        bEnv.executeSql(String.format("DELETE FROM %s WHERE currency = 'Euro'", table)).await();
+
+        checkFileStorePath(table, Collections.emptyList());
+
+        // test projection and filter
+        BlockingIterator<Row, Row> streamingItr =
+                testStreamingRead(
+                        buildQuery(table, "currency, rate", "WHERE dt = '2022-01-02'"),
+                        Collections.singletonList(changelogRow("+I", "Yen", 1L)));
+
+        insertOverwrite(table, "('US Dollar', 100, '2022-01-02')", "('Yen', 10, '2022-01-01')");
+
+        validateStreamingReadResult(
+                streamingItr,
+                Arrays.asList(
+                        changelogRow("-D", "Yen", 1L), changelogRow("+I", "US Dollar", 100L)));
+        assertNoMoreRecords(streamingItr);
 
         streamingItr.close();
     }
@@ -1827,7 +1863,10 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
         DynamicTableSink tableSink =
                 new FlinkTableSink(
-                        context.getObjectIdentifier(), buildPaimonTable(context), context, null);
+                        context.getObjectIdentifier(),
+                        new FlinkTableFactory().buildPaimonTable(context),
+                        context,
+                        null);
         assertThat(tableSink).isInstanceOf(FlinkTableSink.class);
 
         // 2. get sink provider

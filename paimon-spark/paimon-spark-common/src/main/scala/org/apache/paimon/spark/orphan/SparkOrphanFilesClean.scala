@@ -22,15 +22,14 @@ import org.apache.paimon.{utils, Snapshot}
 import org.apache.paimon.catalog.{Catalog, Identifier}
 import org.apache.paimon.fs.Path
 import org.apache.paimon.manifest.{ManifestEntry, ManifestFile}
-import org.apache.paimon.operation.OrphanFilesClean
+import org.apache.paimon.operation.{CleanOrphanFilesResult, OrphanFilesClean}
 import org.apache.paimon.operation.OrphanFilesClean.retryReadingFiles
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.utils.SerializableConsumer
 
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.{Dataset, SparkSession}
+import org.apache.spark.sql.{functions, Dataset, SparkSession}
 import org.apache.spark.sql.catalyst.SQLConfHelper
-import org.apache.spark.sql.functions.sum
 
 import java.util
 import java.util.Collections
@@ -50,19 +49,23 @@ case class SparkOrphanFilesClean(
   with SQLConfHelper
   with Logging {
 
-  def doOrphanClean(): (Dataset[Long], Dataset[BranchAndManifestFile]) = {
+  def doOrphanClean(): (Dataset[(Long, Long)], Dataset[BranchAndManifestFile]) = {
     import spark.implicits._
 
     val branches = validBranches()
-    val deletedInLocal = new AtomicLong(0)
+    val deletedFilesCountInLocal = new AtomicLong(0)
+    val deletedFilesLenInBytesInLocal = new AtomicLong(0)
     // snapshot and changelog files are the root of everything, so they are handled specially
     // here, and subsequently, we will not count their orphan files.
-    cleanSnapshotDir(branches, (_: Path) => deletedInLocal.incrementAndGet)
+    cleanSnapshotDir(
+      branches,
+      (_: Path) => deletedFilesCountInLocal.incrementAndGet,
+      size => deletedFilesLenInBytesInLocal.addAndGet(size))
 
     val maxBranchParallelism = Math.min(branches.size(), parallelism)
     // find snapshots using branch and find manifests(manifest, index, statistics) using snapshot
     val usedManifestFiles = spark.sparkContext
-      .parallelize(branches.asScala, maxBranchParallelism)
+      .parallelize(branches.asScala.toSeq, maxBranchParallelism)
       .mapPartitions(_.flatMap {
         branch => safelyGetAllSnapshots(branch).asScala.map(snapshot => (branch, snapshot.toJson))
       })
@@ -114,17 +117,17 @@ case class SparkOrphanFilesClean(
       .toDF("used_name")
 
     // find candidate files which can be removed
-    val fileDirs = listPaimonFileDirs.asScala.map(_.toUri.toString)
+    val fileDirs = listPaimonFileDirs.asScala.map(_.toUri.toString).toSeq
     val maxFileDirsParallelism = Math.min(fileDirs.size, parallelism)
     val candidates = spark.sparkContext
       .parallelize(fileDirs, maxFileDirsParallelism)
       .flatMap {
         dir =>
           tryBestListingDirs(new Path(dir)).asScala.filter(oldEnough).map {
-            file => (file.getPath.getName, file.getPath.toUri.toString)
+            file => (file.getPath.getName, file.getPath.toUri.toString, file.getLen)
           }
       }
-      .toDF("name", "path")
+      .toDF("name", "path", "len")
       .repartition(parallelism)
 
     // use left anti to filter files which is not used
@@ -132,21 +135,30 @@ case class SparkOrphanFilesClean(
       .join(usedFiles, $"name" === $"used_name", "left_anti")
       .mapPartitions {
         it =>
-          var deleted = 0L
+          var deletedFilesCount = 0L
+          var deletedFilesLenInBytes = 0L
+
           while (it.hasNext) {
-            val pathToClean = it.next().getString(1)
-            specifiedFileCleaner.accept(new Path(pathToClean))
+            val fileInfo = it.next();
+            val pathToClean = fileInfo.getString(1)
+            val deletedPath = new Path(pathToClean)
+            deletedFilesLenInBytes += fileInfo.getLong(2)
+            specifiedFileCleaner.accept(deletedPath)
             logInfo(s"Cleaned file: $pathToClean")
-            deleted += 1
+            deletedFilesCount += 1
           }
-          logInfo(s"Total cleaned files: $deleted");
-          Iterator.single(deleted)
+          logInfo(
+            s"Total cleaned files: $deletedFilesCount, Total cleaned files len : $deletedFilesLenInBytes")
+          Iterator.single((deletedFilesCount, deletedFilesLenInBytes))
       }
-    val finalDeletedDataset = if (deletedInLocal.get() != 0) {
-      deleted.union(spark.createDataset(Seq(deletedInLocal.get())))
-    } else {
-      deleted
-    }
+    val finalDeletedDataset =
+      if (deletedFilesCountInLocal.get() != 0 || deletedFilesLenInBytesInLocal.get() != 0) {
+        deleted.union(
+          spark.createDataset(
+            Seq((deletedFilesCountInLocal.get(), deletedFilesLenInBytesInLocal.get()))))
+      } else {
+        deleted
+      }
 
     (finalDeletedDataset, usedManifestFiles)
   }
@@ -169,7 +181,7 @@ object SparkOrphanFilesClean extends SQLConfHelper {
       tableName: String,
       olderThanMillis: Long,
       fileCleaner: SerializableConsumer[Path],
-      parallelismOpt: Integer): Long = {
+      parallelismOpt: Integer): CleanOrphanFilesResult = {
     val spark = SparkSession.active
     val parallelism = if (parallelismOpt == null) {
       Math.max(spark.sparkContext.defaultParallelism, conf.numShufflePartitions)
@@ -192,7 +204,7 @@ object SparkOrphanFilesClean extends SQLConfHelper {
         table.asInstanceOf[FileStoreTable]
     }
     if (tables.isEmpty) {
-      return 0
+      return new CleanOrphanFilesResult(0, 0)
     }
     val (deleted, waitToRelease) = tables.map {
       table =>
@@ -207,15 +219,15 @@ object SparkOrphanFilesClean extends SQLConfHelper {
     try {
       val result = deleted
         .reduce((l, r) => l.union(r))
-        .toDF("deleted")
-        .agg(sum("deleted"))
+        .toDF("deletedFilesCount", "deletedFilesLenInBytes")
+        .agg(functions.sum("deletedFilesCount"), functions.sum("deletedFilesLenInBytes"))
         .head()
-      assert(result.schema.size == 1, result.schema)
+      assert(result.schema.size == 2, result.schema)
       if (result.isNullAt(0)) {
         // no files can be deleted
-        0
+        new CleanOrphanFilesResult(0, 0)
       } else {
-        result.getLong(0)
+        new CleanOrphanFilesResult(result.getLong(0), result.getLong(1))
       }
     } finally {
       waitToRelease.foreach(_.unpersist())

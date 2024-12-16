@@ -31,23 +31,16 @@ import java.util.Set;
 /** Merge two maps. */
 public class FieldMergeMapAgg extends FieldAggregator {
 
-    public static final String NAME = "merge_map";
-
     private static final long serialVersionUID = 1L;
 
     private final InternalArray.ElementGetter keyGetter;
     private final InternalArray.ElementGetter valueGetter;
 
-    public FieldMergeMapAgg(MapType dataType) {
-        super(dataType);
+    public FieldMergeMapAgg(String name, MapType dataType) {
+        super(name, dataType);
 
         this.keyGetter = InternalArray.createElementGetter(dataType.getKeyType());
         this.valueGetter = InternalArray.createElementGetter(dataType.getValueType());
-    }
-
-    @Override
-    String name() {
-        return NAME;
     }
 
     @Override

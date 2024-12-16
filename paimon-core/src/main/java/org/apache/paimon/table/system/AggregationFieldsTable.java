@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.system;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -27,7 +26,6 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -78,19 +76,13 @@ public class AggregationFieldsTable implements ReadonlyTable {
 
     private final FileIO fileIO;
     private final Path location;
-    private final String branch;
+
+    private final FileStoreTable dataTable;
 
     public AggregationFieldsTable(FileStoreTable dataTable) {
-        this(
-                dataTable.fileIO(),
-                dataTable.location(),
-                CoreOptions.branch(dataTable.schema().options()));
-    }
-
-    public AggregationFieldsTable(FileIO fileIO, Path location, String branchName) {
-        this.fileIO = fileIO;
-        this.location = location;
-        this.branch = branchName;
+        this.fileIO = dataTable.fileIO();
+        this.location = dataTable.location();
+        this.dataTable = dataTable;
     }
 
     @Override
@@ -120,7 +112,7 @@ public class AggregationFieldsTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new AggregationFieldsTable(fileIO, location, branch);
+        return new AggregationFieldsTable(dataTable.copy(dynamicOptions));
     }
 
     private class SchemasScan extends ReadOnceTableScan {
@@ -196,8 +188,7 @@ public class AggregationFieldsTable implements ReadonlyTable {
             if (!(split instanceof AggregationSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
-            Path location = ((AggregationSplit) split).location;
-            TableSchema schemas = new SchemaManager(fileIO, location, branch).latest().get();
+            TableSchema schemas = dataTable.schemaManager().latest().get();
             Iterator<InternalRow> rows = createInternalRowIterator(schemas);
             if (readType != null) {
                 rows =

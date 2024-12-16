@@ -49,6 +49,7 @@ public class ResetConsumerProcedure extends ProcedureBase {
             throws Catalog.TableNotExistException {
         FileStoreTable fileStoreTable =
                 (FileStoreTable) catalog.getTable(Identifier.fromString(tableId));
+        fileStoreTable.snapshotManager().snapshot(nextSnapshotId);
         ConsumerManager consumerManager =
                 new ConsumerManager(
                         fileStoreTable.fileIO(),

@@ -23,8 +23,8 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.manifest.FileSource;
-import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.stats.StatsFileHandler;
@@ -65,15 +65,15 @@ public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
     }
 
     @Override
-    public void cleanUnusedDataFiles(Snapshot snapshot, Predicate<ManifestEntry> skipper) {
+    public void cleanUnusedDataFiles(Snapshot snapshot, Predicate<ExpireFileEntry> skipper) {
         if (changelogDecoupled && !produceChangelog) {
             // Skip clean the 'APPEND' data files.If we do not have the file source information
             // eg: the old version table file, we just skip clean this here, let it done by
             // ExpireChangelogImpl
-            Predicate<ManifestEntry> enriched =
+            Predicate<ExpireFileEntry> enriched =
                     manifestEntry ->
                             skipper.test(manifestEntry)
-                                    || (manifestEntry.file().fileSource().orElse(FileSource.APPEND)
+                                    || (manifestEntry.fileSource().orElse(FileSource.APPEND)
                                             == FileSource.APPEND);
             cleanUnusedDataFiles(snapshot.deltaManifestList(), enriched);
         } else {
@@ -92,8 +92,8 @@ public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
     }
 
     @VisibleForTesting
-    void cleanUnusedDataFile(List<ManifestEntry> dataFileLog) {
-        Map<Path, Pair<ManifestEntry, List<Path>>> dataFileToDelete = new HashMap<>();
+    void cleanUnusedDataFile(List<ExpireFileEntry> dataFileLog) {
+        Map<Path, Pair<ExpireFileEntry, List<Path>>> dataFileToDelete = new HashMap<>();
         getDataFileToDelete(dataFileToDelete, dataFileLog);
         doCleanUnusedDataFile(dataFileToDelete, f -> false);
     }

@@ -93,9 +93,10 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
                                                 .catalogEnvironment()
                                                 .metastoreClientFactory())
                                 .map(MetastoreClient.Factory::create)
-                                .orElse(null));
+                                .orElse(null),
+                        fileStore.options().partitionExpireMaxNum());
         if (maxExpires != null) {
-            partitionExpire.withMaxExpires(maxExpires);
+            partitionExpire.withMaxExpireNum(maxExpires);
         }
         List<Map<String, String>> expired = partitionExpire.expire(Long.MAX_VALUE);
         return expired == null || expired.isEmpty()

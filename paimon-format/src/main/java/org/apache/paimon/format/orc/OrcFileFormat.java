@@ -28,7 +28,6 @@ import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.apache.paimon.format.orc.filter.OrcPredicateFunctionVisitor;
 import org.apache.paimon.format.orc.filter.OrcSimpleStatsExtractor;
-import org.apache.paimon.format.orc.reader.OrcSplitReaderUtil;
 import org.apache.paimon.format.orc.writer.RowDataVectorizer;
 import org.apache.paimon.format.orc.writer.Vectorizer;
 import org.apache.paimon.options.MemorySize;
@@ -56,6 +55,7 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.types.DataTypeChecks.getFieldTypes;
 
 /** Orc {@link FileFormat}. */
@@ -69,6 +69,7 @@ public class OrcFileFormat extends FileFormat {
     private final org.apache.hadoop.conf.Configuration writerConf;
     private final int readBatchSize;
     private final int writeBatchSize;
+    private final boolean deletionVectorsEnabled;
 
     public OrcFileFormat(FormatContext formatContext) {
         super(IDENTIFIER);
@@ -79,6 +80,7 @@ public class OrcFileFormat extends FileFormat {
         this.orcProperties.forEach((k, v) -> writerConf.set(k.toString(), v.toString()));
         this.readBatchSize = formatContext.readBatchSize();
         this.writeBatchSize = formatContext.writeBatchSize();
+        this.deletionVectorsEnabled = formatContext.options().get(DELETION_VECTORS_ENABLED);
     }
 
     @VisibleForTesting
@@ -101,7 +103,6 @@ public class OrcFileFormat extends FileFormat {
     public FormatReaderFactory createReaderFactory(
             RowType projectedRowType, @Nullable List<Predicate> filters) {
         List<OrcFilters.Predicate> orcPredicates = new ArrayList<>();
-
         if (filters != null) {
             for (Predicate pred : filters) {
                 Optional<OrcFilters.Predicate> orcPred =
@@ -114,13 +115,14 @@ public class OrcFileFormat extends FileFormat {
                 readerConf,
                 (RowType) refineDataType(projectedRowType),
                 orcPredicates,
-                readBatchSize);
+                readBatchSize,
+                deletionVectorsEnabled);
     }
 
     @Override
     public void validateDataFields(RowType rowType) {
         DataType refinedType = refineDataType(rowType);
-        OrcSplitReaderUtil.toOrcType(refinedType);
+        OrcTypeUtil.convertToOrcSchema((RowType) refinedType);
     }
 
     /**
@@ -138,9 +140,8 @@ public class OrcFileFormat extends FileFormat {
         DataType refinedType = refineDataType(type);
         DataType[] orcTypes = getFieldTypes(refinedType).toArray(new DataType[0]);
 
-        TypeDescription typeDescription = OrcSplitReaderUtil.toOrcType(refinedType);
-        Vectorizer<InternalRow> vectorizer =
-                new RowDataVectorizer(typeDescription.toString(), orcTypes);
+        TypeDescription typeDescription = OrcTypeUtil.convertToOrcSchema((RowType) refinedType);
+        Vectorizer<InternalRow> vectorizer = new RowDataVectorizer(typeDescription, orcTypes);
 
         return new OrcWriterFactory(vectorizer, orcProperties, writerConf, writeBatchSize);
     }

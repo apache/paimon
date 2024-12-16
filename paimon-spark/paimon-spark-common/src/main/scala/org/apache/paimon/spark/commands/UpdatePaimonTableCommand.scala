@@ -26,13 +26,14 @@ import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.RowKind
 
-import org.apache.spark.sql.{Column, Row, SparkSession}
+import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.expressions.{Alias, Expression, If}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Assignment, Filter, Project, SupportsSubquery}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.lit
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 case class UpdatePaimonTableCommand(
     relation: DataSourceV2Relation,
@@ -133,7 +134,7 @@ case class UpdatePaimonTableCommand(
       touchedDataSplits: Array[DataSplit]): Seq[CommitMessage] = {
     val updateColumns = updateExpressions.zip(relation.output).map {
       case (update, origin) =>
-        new Column(update).as(origin.name, origin.metadata)
+        SparkShimLoader.getSparkShim.column(update).as(origin.name, origin.metadata)
     }
 
     val toUpdateScanRelation = createNewRelation(touchedDataSplits, relation)
@@ -156,7 +157,7 @@ case class UpdatePaimonTableCommand(
         } else {
           If(condition, update, origin)
         }
-        new Column(updated).as(origin.name, origin.metadata)
+        SparkShimLoader.getSparkShim.column(updated).as(origin.name, origin.metadata)
     }
 
     val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)

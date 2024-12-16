@@ -65,6 +65,10 @@ public class Identifier implements Serializable {
         this.object = object;
     }
 
+    public Identifier(String database, String table, @Nullable String branch) {
+        this(database, table, branch, null);
+    }
+
     public Identifier(
             String database, String table, @Nullable String branch, @Nullable String systemTable) {
         this.database = database;
@@ -117,6 +121,10 @@ public class Identifier implements Serializable {
     public @Nullable String getSystemTableName() {
         splitObjectName();
         return systemTable;
+    }
+
+    public boolean isSystemTable() {
+        return getSystemTableName() != null;
     }
 
     private void splitObjectName() {

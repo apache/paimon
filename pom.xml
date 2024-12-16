@@ -69,6 +69,7 @@ under the License.
         <module>paimon-test-utils</module>
         <module>paimon-arrow</module>
         <module>tools/ci/paimon-ci-tools</module>
+        <module>paimon-open-api</module>
     </modules>
 
     <properties>
@@ -80,8 +81,12 @@ under the License.
         <paimon.shade.netty.version>4.1.100.Final</paimon.shade.netty.version>
         <antlr4.version>4.9.3</antlr4.version>
         <hadoop.version>2.8.5</hadoop.version>
-        <scala.version>2.12.15</scala.version>
         <scala.binary.version>2.12</scala.binary.version>
+        <flink.scala.binary.version>2.12</flink.scala.binary.version>
+        <scala212.version>2.12.15</scala212.version>
+        <scala213.version>2.13.14</scala213.version>
+        <scala.version>${scala212.version}</scala.version>
+        <codegen.scala.version>${scala212.version}</codegen.scala.version>
         <snappy.version>1.1.8.4</snappy.version>
         <airlift.version>0.27</airlift.version>
         <lz4.version>1.8.0</lz4.version>
@@ -97,6 +102,10 @@ under the License.
         <flink.forkCount>1C</flink.forkCount>
         <flink.reuseForks>true</flink.reuseForks>
         <testcontainers.version>1.19.1</testcontainers.version>
+        <iceberg.version>1.6.1</iceberg.version>
+        <parquet.version>1.13.1</parquet.version>
+        <orc.version>1.9.2</orc.version>
+        <protobuf-java.version>3.19.6</protobuf-java.version>
 
         <!-- Can be set to any value to reproduce a specific build. -->
         <test.randomization.seed/>
@@ -106,6 +115,12 @@ under the License.
         <!-- TODO upgrade after connector releases x-1.19 version -->
         <test.flink.connector.kafka.version>3.0.1-1.18</test.flink.connector.kafka.version>
         <test.mysql.connector.java.version>8.0.27</test.mysql.connector.java.version>
+
+        <!-- spark profile properties-->
+        <paimon-sparkx-common>paimon-spark3-common</paimon-sparkx-common>
+        <paimon-spark-common.spark.version>3.5.3</paimon-spark-common.spark.version>
+        <test.spark.main.version>3.3</test.spark.main.version>
+        <test.spark.version>3.3.0</test.spark.version>
 
         <zstd-jni.version>1.5.5-11</zstd-jni.version>
         <janino.version>3.0.11</janino.version>
@@ -130,11 +145,13 @@ under the License.
             --add-opens=java.base/java.util=ALL-UNNAMED
             --add-opens=java.base/java.util.concurrent=ALL-UNNAMED
             --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED
+            --add-opens=java.base/jdk.internal.ref=ALL-UNNAMED
             --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
             --add-opens=java.base/sun.nio.cs=ALL-UNNAMED
             --add-opens=java.base/sun.security.action=ALL-UNNAMED
             --add-opens=java.base/sun.util.calendar=ALL-UNNAMED
             -Djdk.reflect.useDirectMethodHandle=false
+            -Dio.netty.tryReflectionSetAccessible=true
         </extraJavaTestArgs>
     </properties>
 
@@ -338,6 +355,55 @@ under the License.
                 </plugins>
             </build>
         </profile>
+
+        <profile>
+            <id>spark3</id>
+            <modules>
+                <module>paimon-spark/paimon-spark3-common</module>
+                <module>paimon-spark/paimon-spark-3.5</module>
+                <module>paimon-spark/paimon-spark-3.4</module>
+                <module>paimon-spark/paimon-spark-3.3</module>
+                <module>paimon-spark/paimon-spark-3.2</module>
+            </modules>
+            <properties>
+                <scala.binary.version>2.12</scala.binary.version>
+                <scala.version>${scala212.version}</scala.version>
+                <paimon-spark-common.spark.version>3.5.3</paimon-spark-common.spark.version>
+                <paimon-sparkx-common>paimon-spark3-common</paimon-sparkx-common>
+                <!-- todo: support the latest spark in paimon e2e test2 -->
+                <test.spark.main.version>3.3</test.spark.main.version>
+                <test.spark.version>3.3.0</test.spark.version>
+            </properties>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+                <property>
+                    <name>spark3</name>
+                </property>
+            </activation>
+        </profile>
+
+        <profile>
+            <id>spark4</id>
+            <modules>
+                <module>paimon-spark/paimon-spark4-common</module>
+                <module>paimon-spark/paimon-spark-4.0</module>
+            </modules>
+            <properties>
+                <target.java.version>17</target.java.version>
+                <antlr4.version>4.13.1</antlr4.version>
+                <scala.binary.version>2.13</scala.binary.version>
+                <scala.version>${scala213.version}</scala.version>
+                <paimon-spark-common.spark.version>4.0.0-preview2</paimon-spark-common.spark.version>
+                <paimon-sparkx-common>paimon-spark4-common</paimon-sparkx-common>
+                <test.spark.main.version>4.0</test.spark.main.version>
+                <test.spark.version>4.0.0-preview2</test.spark.version>
+            </properties>
+            <activation>
+                <property>
+                    <name>spark4</name>
+                </property>
+            </activation>
+        </profile>
     </profiles>
 
     <build>
@@ -463,6 +529,7 @@ under the License.
                         <exclude>release/**</exclude>
                         <!-- antlr grammar files -->
                         <exclude>paimon-common/src/main/antlr4/**</exclude>
+                        <exclude>paimon-core/src/test/resources/compatibility/**</exclude>
                     </excludes>
                 </configuration>
             </plugin>
@@ -493,7 +560,7 @@ under the License.
                         <!-- for junit5 -->
                         <junit.jupiter.extensions.autodetection.enabled>true</junit.jupiter.extensions.autodetection.enabled>
                     </systemPropertyVariables>
-                    <argLine>-Xms256m -Xmx2048m -Dmvn.forkNumber=${surefire.forkNumber} -XX:+UseG1GC</argLine>
+                    <argLine>-Xms256m -Xmx2048m -Dmvn.forkNumber=${surefire.forkNumber} -XX:+UseG1GC ${extraJavaTestArgs}</argLine>
                     <!-- By removing all default exclusions the nested classes get executed too -->
                     <excludes>
                         <exclude/>
@@ -532,7 +599,6 @@ under the License.
                     </execution>
                 </executions>
             </plugin>
-
 
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -615,10 +681,10 @@ under the License.
                             <rules>
                                 <bannedDependencies>
                                     <excludes>
-                                        <exclude>org.apache.flink:flink-table-planner_${scala.binary.version}</exclude>
+                                        <exclude>org.apache.flink:flink-table-planner_${flink.scala.binary.version}</exclude>
                                     </excludes>
                                     <includes>
-                                        <include>org.apache.flink:flink-table-planner_${scala.binary.version}:*:*:test</include>
+                                        <include>org.apache.flink:flink-table-planner_${flink.scala.binary.version}:*:*:test</include>
                                     </includes>
                                     <message>
                                         Direct dependencies on flink-table-planner are not allowed.

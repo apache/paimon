@@ -26,7 +26,7 @@ import org.apache.paimon.flink.Projection;
 import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.sink.FlinkSink;
 import org.apache.paimon.flink.source.align.AlignedContinuousFileStoreSource;
-import org.apache.paimon.flink.source.operator.MonitorFunction;
+import org.apache.paimon.flink.source.operator.MonitorSource;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -34,6 +34,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
@@ -45,7 +46,6 @@ import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.util.DataFormatConverters;
@@ -63,6 +63,8 @@ import java.util.Optional;
 
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 import static org.apache.paimon.CoreOptions.StreamingReadMode.FILE;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SOURCE_OPERATOR_UID_SUFFIX;
+import static org.apache.paimon.flink.FlinkConnectorOptions.generateCustomUid;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -73,6 +75,7 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  * @since 0.8
  */
 public class FlinkSourceBuilder {
+    private static final String SOURCE_NAME = "Source";
 
     private final Table table;
     private final Options conf;
@@ -174,7 +177,7 @@ public class FlinkSourceBuilder {
         if (limit != null) {
             readBuilder.withLimit(limit.intValue());
         }
-        return readBuilder;
+        return readBuilder.dropStats();
     }
 
     private DataStream<RowData> buildStaticFileSource() {
@@ -210,6 +213,14 @@ public class FlinkSourceBuilder {
                                 : watermarkStrategy,
                         sourceName,
                         produceTypeInfo());
+
+        String uidSuffix = table.options().get(SOURCE_OPERATOR_UID_SUFFIX.key());
+        if (!StringUtils.isNullOrWhitespaceOnly(uidSuffix)) {
+            dataStream =
+                    (DataStreamSource<RowData>)
+                            dataStream.uid(generateCustomUid(SOURCE_NAME, table.name(), uidSuffix));
+        }
+
         if (parallelism != null) {
             dataStream.setParallelism(parallelism);
         }
@@ -247,7 +258,9 @@ public class FlinkSourceBuilder {
         if (conf.contains(CoreOptions.CONSUMER_ID)
                 && !conf.contains(CoreOptions.CONSUMER_EXPIRATION_TIME)) {
             throw new IllegalArgumentException(
-                    "consumer.expiration-time should be specified when using consumer-id.");
+                    "You need to configure 'consumer.expiration-time' (ALTER TABLE) and restart your write job for it"
+                            + " to take effect, when you need consumer-id feature. This is to prevent consumers from leaving"
+                            + " too many snapshots that could pose a risk to the file system.");
         }
 
         if (sourceBounded) {
@@ -293,7 +306,7 @@ public class FlinkSourceBuilder {
                     "Cannot limit streaming source, please use batch execution mode.");
         }
         dataStream =
-                MonitorFunction.buildSource(
+                MonitorSource.buildSource(
                         env,
                         sourceName,
                         produceTypeInfo(),
@@ -317,30 +330,25 @@ public class FlinkSourceBuilder {
         checkArgument(
                 checkpointConfig.isCheckpointingEnabled(),
                 "The align mode of paimon source is only supported when checkpoint enabled. Please set "
-                        + ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL.key()
-                        + "larger than 0");
+                        + "execution.checkpointing.interval larger than 0");
         checkArgument(
                 checkpointConfig.getMaxConcurrentCheckpoints() == 1,
                 "The align mode of paimon source supports at most one ongoing checkpoint at the same time. Please set "
-                        + ExecutionCheckpointingOptions.MAX_CONCURRENT_CHECKPOINTS.key()
-                        + " to 1");
+                        + "execution.checkpointing.max-concurrent-checkpoints to 1");
         checkArgument(
                 checkpointConfig.getCheckpointTimeout()
                         > conf.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_TIMEOUT)
                                 .toMillis(),
                 "The align mode of paimon source requires that the timeout of checkpoint is greater than the timeout of the source's snapshot alignment. Please increase "
-                        + ExecutionCheckpointingOptions.CHECKPOINTING_TIMEOUT.key()
-                        + " or decrease "
+                        + "execution.checkpointing.timeout or decrease "
                         + FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_TIMEOUT.key());
         checkArgument(
                 !env.getCheckpointConfig().isUnalignedCheckpointsEnabled(),
                 "The align mode of paimon source currently does not support unaligned checkpoints. Please set "
-                        + ExecutionCheckpointingOptions.ENABLE_UNALIGNED.key()
-                        + " to false.");
+                        + "execution.checkpointing.unaligned.enabled to false.");
         checkArgument(
                 env.getCheckpointConfig().getCheckpointingMode() == CheckpointingMode.EXACTLY_ONCE,
                 "The align mode of paimon source currently only supports EXACTLY_ONCE checkpoint mode. Please set "
-                        + ExecutionCheckpointingOptions.CHECKPOINTING_MODE.key()
-                        + " to exactly-once");
+                        + "execution.checkpointing.mode to exactly-once");
     }
 }

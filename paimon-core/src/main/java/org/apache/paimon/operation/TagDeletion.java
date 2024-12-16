@@ -23,7 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
-import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.stats.StatsFileHandler;
@@ -68,8 +68,8 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
     }
 
     @Override
-    public void cleanUnusedDataFiles(Snapshot taggedSnapshot, Predicate<ManifestEntry> skipper) {
-        Collection<ManifestEntry> manifestEntries;
+    public void cleanUnusedDataFiles(Snapshot taggedSnapshot, Predicate<ExpireFileEntry> skipper) {
+        Collection<ExpireFileEntry> manifestEntries;
         try {
             manifestEntries = readMergedDataFiles(taggedSnapshot);
         } catch (IOException e) {
@@ -78,11 +78,11 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
         }
 
         Set<Path> dataFileToDelete = new HashSet<>();
-        for (ManifestEntry entry : manifestEntries) {
+        for (ExpireFileEntry entry : manifestEntries) {
             if (!skipper.test(entry)) {
                 Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
-                dataFileToDelete.add(new Path(bucketPath, entry.file().fileName()));
-                for (String file : entry.file().extraFiles()) {
+                dataFileToDelete.add(new Path(bucketPath, entry.fileName()));
+                for (String file : entry.extraFiles()) {
                     dataFileToDelete.add(new Path(bucketPath, file));
                 }
 
@@ -98,11 +98,12 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
         cleanUnusedManifests(taggedSnapshot, skippingSet, true, false);
     }
 
-    public Predicate<ManifestEntry> dataFileSkipper(Snapshot fromSnapshot) throws Exception {
+    public Predicate<ExpireFileEntry> dataFileSkipper(Snapshot fromSnapshot) throws Exception {
         return dataFileSkipper(Collections.singletonList(fromSnapshot));
     }
 
-    public Predicate<ManifestEntry> dataFileSkipper(List<Snapshot> fromSnapshots) throws Exception {
+    public Predicate<ExpireFileEntry> dataFileSkipper(List<Snapshot> fromSnapshots)
+            throws Exception {
         Map<BinaryRow, Map<Integer, Set<String>>> skipped = new HashMap<>();
         for (Snapshot snapshot : fromSnapshots) {
             addMergedDataFiles(skipped, snapshot);

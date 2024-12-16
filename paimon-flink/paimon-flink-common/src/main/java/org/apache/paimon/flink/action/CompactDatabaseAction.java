@@ -54,6 +54,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
+import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.rebalance;
 
 /** Database compact action for Flink. */
 public class CompactDatabaseAction extends ActionBase {
@@ -70,6 +71,10 @@ public class CompactDatabaseAction extends ActionBase {
     private Options tableOptions = new Options();
 
     @Nullable private Duration partitionIdleTime = null;
+
+    private Boolean fullCompaction;
+
+    private boolean isStreaming;
 
     public CompactDatabaseAction(String warehouse, Map<String, String> catalogConfig) {
         super(warehouse, catalogConfig);
@@ -109,6 +114,11 @@ public class CompactDatabaseAction extends ActionBase {
         return this;
     }
 
+    public CompactDatabaseAction withFullCompaction(boolean fullCompaction) {
+        this.fullCompaction = fullCompaction;
+        return this;
+    }
+
     private boolean shouldCompactionTable(String paimonFullTableName) {
         boolean shouldCompaction = includingPattern.matcher(paimonFullTableName).matches();
         if (excludingPattern != null) {
@@ -123,6 +133,12 @@ public class CompactDatabaseAction extends ActionBase {
 
     @Override
     public void build() {
+        ReadableConfig conf = env.getConfiguration();
+        isStreaming = conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
+
+        if (fullCompaction == null) {
+            fullCompaction = !isStreaming;
+        }
         if (databaseCompactMode == MultiTablesSinkMode.DIVIDED) {
             buildForDividedMode();
         } else {
@@ -169,24 +185,19 @@ public class CompactDatabaseAction extends ActionBase {
                 !tableMap.isEmpty(),
                 "no tables to be compacted. possible cause is that there are no tables detected after pattern matching");
 
-        ReadableConfig conf = env.getConfiguration();
-        boolean isStreaming =
-                conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
         for (Map.Entry<String, FileStoreTable> entry : tableMap.entrySet()) {
             FileStoreTable fileStoreTable = entry.getValue();
             switch (fileStoreTable.bucketMode()) {
                 case BUCKET_UNAWARE:
                     {
-                        buildForUnawareBucketCompaction(
-                                env, entry.getKey(), fileStoreTable, isStreaming);
+                        buildForUnawareBucketCompaction(env, entry.getKey(), fileStoreTable);
                         break;
                     }
                 case HASH_FIXED:
                 case HASH_DYNAMIC:
                 default:
                     {
-                        buildForTraditionalCompaction(
-                                env, entry.getKey(), fileStoreTable, isStreaming);
+                        buildForTraditionalCompaction(env, entry.getKey(), fileStoreTable);
                     }
             }
         }
@@ -194,9 +205,6 @@ public class CompactDatabaseAction extends ActionBase {
 
     private void buildForCombinedMode() {
 
-        ReadableConfig conf = env.getConfiguration();
-        boolean isStreaming =
-                conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
         CombinedTableCompactorSourceBuilder sourceBuilder =
                 new CombinedTableCompactorSourceBuilder(
                                 catalogLoader(),
@@ -208,6 +216,11 @@ public class CompactDatabaseAction extends ActionBase {
                                         .toMillis())
                         .withPartitionIdleTime(partitionIdleTime);
 
+        Integer parallelism =
+                tableOptions.get(FlinkConnectorOptions.SINK_PARALLELISM) == null
+                        ? env.getParallelism()
+                        : tableOptions.get(FlinkConnectorOptions.SINK_PARALLELISM);
+
         // multi bucket table which has multi bucket in a partition like fix bucket and dynamic
         // bucket
         DataStream<RowData> awareBucketTableSource =
@@ -217,24 +230,28 @@ public class CompactDatabaseAction extends ActionBase {
                                 .withContinuousMode(isStreaming)
                                 .buildAwareBucketTableSource(),
                         new BucketsRowChannelComputer(),
-                        tableOptions.get(FlinkConnectorOptions.SINK_PARALLELISM));
+                        parallelism);
 
         // unaware bucket table
         DataStream<MultiTableUnawareAppendCompactionTask> unawareBucketTableSource =
-                sourceBuilder
-                        .withEnv(env)
-                        .withContinuousMode(isStreaming)
-                        .buildForUnawareBucketsTableSource();
+                rebalance(
+                        sourceBuilder
+                                .withEnv(env)
+                                .withContinuousMode(isStreaming)
+                                .buildForUnawareBucketsTableSource(),
+                        parallelism);
 
-        new CombinedTableCompactorSink(catalogLoader(), tableOptions)
+        new CombinedTableCompactorSink(catalogLoader(), tableOptions, fullCompaction)
                 .sinkFrom(awareBucketTableSource, unawareBucketTableSource);
     }
 
     private void buildForTraditionalCompaction(
-            StreamExecutionEnvironment env,
-            String fullName,
-            FileStoreTable table,
-            boolean isStreaming) {
+            StreamExecutionEnvironment env, String fullName, FileStoreTable table) {
+
+        Preconditions.checkArgument(
+                !(fullCompaction && isStreaming),
+                "The full compact strategy is only supported in batch mode. Please add -Dexecution.runtime-mode=BATCH.");
+
         if (isStreaming) {
             // for completely asynchronous compaction
             HashMap<String, String> dynamicOptions =
@@ -251,7 +268,7 @@ public class CompactDatabaseAction extends ActionBase {
         CompactorSourceBuilder sourceBuilder =
                 new CompactorSourceBuilder(fullName, table)
                         .withPartitionIdleTime(partitionIdleTime);
-        CompactorSinkBuilder sinkBuilder = new CompactorSinkBuilder(table);
+        CompactorSinkBuilder sinkBuilder = new CompactorSinkBuilder(table, fullCompaction);
 
         DataStreamSource<RowData> source =
                 sourceBuilder.withEnv(env).withContinuousMode(isStreaming).build();
@@ -259,10 +276,7 @@ public class CompactDatabaseAction extends ActionBase {
     }
 
     private void buildForUnawareBucketCompaction(
-            StreamExecutionEnvironment env,
-            String fullName,
-            FileStoreTable table,
-            boolean isStreaming) {
+            StreamExecutionEnvironment env, String fullName, FileStoreTable table) {
         UnawareBucketCompactionTopoBuilder unawareBucketCompactionTopoBuilder =
                 new UnawareBucketCompactionTopoBuilder(env, fullName, table);
 

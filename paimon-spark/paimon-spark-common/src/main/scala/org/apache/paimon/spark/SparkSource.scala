@@ -18,11 +18,13 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.catalog.CatalogContext
+import org.apache.paimon.CoreOptions
+import org.apache.paimon.catalog.{CatalogContext, CatalogUtils, Identifier}
 import org.apache.paimon.options.Options
+import org.apache.paimon.spark.SparkSource.NAME
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable
 import org.apache.paimon.spark.sources.PaimonSink
-import org.apache.paimon.spark.util.OptionUtils.mergeSQLConf
+import org.apache.paimon.spark.util.OptionUtils.{extractCatalogName, mergeSQLConfWithIdentifier}
 import org.apache.paimon.table.{DataTable, FileStoreTable, FileStoreTableFactory}
 import org.apache.paimon.table.system.AuditLogTable
 
@@ -80,9 +82,15 @@ class SparkSource
   }
 
   private def loadTable(options: JMap[String, String]): DataTable = {
+    val path = CoreOptions.path(options)
     val catalogContext = CatalogContext.create(
-      Options.fromMap(mergeSQLConf(options)),
-      SparkSession.active.sessionState.newHadoopConf())
+      Options.fromMap(
+        mergeSQLConfWithIdentifier(
+          options,
+          extractCatalogName().getOrElse(NAME),
+          Identifier.create(CatalogUtils.database(path), CatalogUtils.table(path)))),
+      SparkSession.active.sessionState.newHadoopConf()
+    )
     val table = FileStoreTableFactory.create(catalogContext)
     if (Options.fromMap(options).get(SparkConnectorOptions.READ_CHANGELOG)) {
       new AuditLogTable(table)
@@ -110,7 +118,7 @@ object SparkSource {
 
   val NAME = "paimon"
 
-  val FORMAT_NAMES = Seq("csv", "orc", "parquet")
+  val FORMAT_NAMES: Seq[String] = Seq("csv", "orc", "parquet")
 
   def toBaseRelation(table: FileStoreTable, _sqlContext: SQLContext): BaseRelation = {
     new BaseRelation {

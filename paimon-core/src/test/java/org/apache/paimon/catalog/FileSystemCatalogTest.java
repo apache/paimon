@@ -19,14 +19,52 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-class FileSystemCatalogTest extends CatalogTestBase {
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+
+/** Tests for {@link FileSystemCatalog}. */
+public class FileSystemCatalogTest extends CatalogTestBase {
 
     @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
-        catalog = new FileSystemCatalog(fileIO, new Path(warehouse));
+        Options catalogOptions = new Options();
+        catalogOptions.set(CatalogOptions.ALLOW_UPPER_CASE, false);
+        catalog = new FileSystemCatalog(fileIO, new Path(warehouse), catalogOptions);
+    }
+
+    @Test
+    public void testCreateTableAllowUpperCase() throws Exception {
+        catalog.createDatabase("test_db", false);
+        Identifier identifier = Identifier.create("test_db", "new_table");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("Pk1", DataTypes.INT())
+                        .column("pk2", DataTypes.STRING())
+                        .column("pk3", DataTypes.STRING())
+                        .column(
+                                "Col1",
+                                DataTypes.ROW(
+                                        DataTypes.STRING(),
+                                        DataTypes.BIGINT(),
+                                        DataTypes.TIMESTAMP(),
+                                        DataTypes.ARRAY(DataTypes.STRING())))
+                        .column("col2", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT()))
+                        .column("col3", DataTypes.ARRAY(DataTypes.ROW(DataTypes.STRING())))
+                        .partitionKeys("Pk1", "pk2")
+                        .primaryKey("Pk1", "pk2", "pk3")
+                        .build();
+
+        // Create table throws Exception if using uppercase when 'allow-upper-case' is false
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(() -> catalog.createTable(identifier, schema, false))
+                .withMessage("Field name [Pk1, Col1] cannot contain upper case in the catalog.");
     }
 }

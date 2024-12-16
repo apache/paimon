@@ -21,12 +21,15 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.source.assigners.DynamicPartitionPruningAssigner;
+import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
 
 import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.connector.source.SplitsAssignment;
+import org.apache.flink.api.connector.source.SupportsHandleExecutionAttemptSourceEvent;
+import org.apache.flink.table.connector.source.DynamicFilteringEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,7 +42,8 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** A {@link SplitEnumerator} implementation for {@link StaticFileStoreSource} input. */
 public class StaticFileStoreSplitEnumerator
-        implements SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> {
+        implements SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint>,
+                SupportsHandleExecutionAttemptSourceEvent {
 
     private static final Logger LOG = LoggerFactory.getLogger(StaticFileStoreSplitEnumerator.class);
 
@@ -117,6 +121,17 @@ public class StaticFileStoreSplitEnumerator
     }
 
     @Override
+    public void handleSourceEvent(int subtaskId, int attemptNumber, SourceEvent sourceEvent) {
+        // Only recognize events that don't care attemptNumber.
+        handleSourceEvent(subtaskId, sourceEvent);
+    }
+
+    /**
+     * When to support a new kind of event, pay attention that whether the new event can be sent
+     * multiple times from different attempts of one subtask. If so, it should be handled via method
+     * {@link #handleSourceEvent(int, int, SourceEvent)}
+     */
+    @Override
     public void handleSourceEvent(int subtaskId, SourceEvent sourceEvent) {
         if (sourceEvent instanceof ReaderConsumeProgressEvent) {
             // batch reading doesn't handle consumer
@@ -128,13 +143,23 @@ public class StaticFileStoreSplitEnumerator
             checkNotNull(
                     dynamicPartitionFilteringInfo,
                     "Cannot apply dynamic filtering because dynamicPartitionFilteringInfo hasn't been set.");
-            this.splitAssigner =
-                    DynamicPartitionPruningAssigner.createDynamicPartitionPruningAssignerIfNeeded(
-                            subtaskId,
-                            splitAssigner,
-                            dynamicPartitionFilteringInfo.getPartitionRowProjection(),
-                            sourceEvent,
-                            LOG);
+
+            if (splitAssigner instanceof PreAssignSplitAssigner) {
+                this.splitAssigner =
+                        ((PreAssignSplitAssigner) splitAssigner)
+                                .ofDynamicPartitionPruning(
+                                        dynamicPartitionFilteringInfo.getPartitionRowProjection(),
+                                        ((DynamicFilteringEvent) sourceEvent).getData());
+            } else {
+                this.splitAssigner =
+                        DynamicPartitionPruningAssigner
+                                .createDynamicPartitionPruningAssignerIfNeeded(
+                                        subtaskId,
+                                        splitAssigner,
+                                        dynamicPartitionFilteringInfo.getPartitionRowProjection(),
+                                        sourceEvent,
+                                        LOG);
+            }
         } else {
             LOG.error("Received unrecognized event: {}", sourceEvent);
         }

@@ -43,6 +43,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.TraceableFileIO;
 
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Disabled;
@@ -151,8 +152,9 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
                         .allowRestart(enableFailure)
                         .build();
 
-        TestCdcSourceFunction sourceFunction = new TestCdcSourceFunction(testTable.events());
-        DataStreamSource<TestCdcEvent> source = env.addSource(sourceFunction);
+        TestCdcSource testCdcSource = new TestCdcSource(testTable.events());
+        DataStreamSource<TestCdcEvent> source =
+                env.fromSource(testCdcSource, WatermarkStrategy.noWatermarks(), "TestCdcSource");
         source.setParallelism(2);
 
         Options catalogOptions = new Options();

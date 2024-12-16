@@ -1172,7 +1172,7 @@ public class PreAggregationITCase {
                             + "PRIMARY KEY (k, d) NOT ENFORCED) PARTITIONED BY (d) "
                             + " WITH ('merge-engine'='aggregation', "
                             + "'fields.v.aggregate-function'='sum',"
-                            + "'local-merge-buffer-size'='1m'"
+                            + "'local-merge-buffer-size'='5m'"
                             + ");");
         }
 

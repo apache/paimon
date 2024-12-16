@@ -138,11 +138,13 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                         + ", or MySQL database does not exist.");
 
         TableNameConverter tableNameConverter =
-                new TableNameConverter(allowUpperCase, mergeShards, tablePrefix, tableSuffix);
+                new TableNameConverter(
+                        allowUpperCase, mergeShards, tablePrefix, tableSuffix, tableMapping);
         for (JdbcTableInfo tableInfo : jdbcTableInfos) {
             Identifier identifier =
                     Identifier.create(
-                            database, tableNameConverter.convert(tableInfo.toPaimonTableName()));
+                            database,
+                            tableNameConverter.convert("", tableInfo.toPaimonTableName()));
             FileStoreTable table;
             Schema fromMySql =
                     CdcActionCommonUtils.buildPaimonSchema(
@@ -188,6 +190,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
 
     @Override
     protected MySqlSource<CdcSourceRecord> buildSource() {
+        validateRuntimeExecutionMode();
         return MySqlActionUtils.buildMySqlSource(
                 cdcSourceConfig,
                 tableList(

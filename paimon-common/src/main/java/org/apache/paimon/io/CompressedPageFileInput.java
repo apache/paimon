@@ -30,7 +30,7 @@ public class CompressedPageFileInput implements PageFileInput {
 
     private final RandomAccessFile file;
     private final int pageSize;
-    private final long uncompressBytes;
+    private final long uncompressedBytes;
     private final long[] pagePositions;
 
     private final BlockDecompressor decompressor;
@@ -44,11 +44,11 @@ public class CompressedPageFileInput implements PageFileInput {
             RandomAccessFile file,
             int pageSize,
             BlockCompressionFactory compressionFactory,
-            long uncompressBytes,
+            long uncompressedBytes,
             long[] pagePositions) {
         this.file = file;
         this.pageSize = pageSize;
-        this.uncompressBytes = uncompressBytes;
+        this.uncompressedBytes = uncompressedBytes;
         this.pagePositions = pagePositions;
 
         this.uncompressedBuffer = new byte[pageSize];
@@ -67,7 +67,7 @@ public class CompressedPageFileInput implements PageFileInput {
 
     @Override
     public long uncompressBytes() {
-        return uncompressBytes;
+        return uncompressedBytes;
     }
 
     @Override

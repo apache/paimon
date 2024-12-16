@@ -279,6 +279,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     @Override
     public boolean isCompacting() {
+        compactManager.triggerCompaction(false);
         return compactManager.isCompacting();
     }
 
@@ -289,6 +290,9 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     @Override
     public void withInsertOnly(boolean insertOnly) {
+        if (this.isInsertOnly == insertOnly) {
+            return;
+        }
         if (insertOnly && writeBuffer != null && writeBuffer.size() > 0) {
             throw new IllegalStateException(
                     "Insert-only can only be set before any record is received.");

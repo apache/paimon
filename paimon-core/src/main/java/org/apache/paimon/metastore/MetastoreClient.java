@@ -22,6 +22,8 @@ import org.apache.paimon.data.BinaryRow;
 
 import java.io.Serializable;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * A metastore client related to a table. All methods of this interface operate on the same specific
@@ -31,11 +33,33 @@ public interface MetastoreClient extends AutoCloseable {
 
     void addPartition(BinaryRow partition) throws Exception;
 
+    default void addPartitions(List<BinaryRow> partitions) throws Exception {
+        for (BinaryRow partition : partitions) {
+            addPartition(partition);
+        }
+    }
+
     void addPartition(LinkedHashMap<String, String> partitionSpec) throws Exception;
+
+    default void addPartitionsSpec(List<LinkedHashMap<String, String>> partitionSpecsList)
+            throws Exception {
+        for (LinkedHashMap<String, String> partitionSpecs : partitionSpecsList) {
+            addPartition(partitionSpecs);
+        }
+    }
 
     void deletePartition(LinkedHashMap<String, String> partitionSpec) throws Exception;
 
     void markDone(LinkedHashMap<String, String> partitionSpec) throws Exception;
+
+    default void alterPartition(
+            LinkedHashMap<String, String> partitionSpec,
+            Map<String, String> parameters,
+            long modifyTime,
+            boolean ignoreIfNotExist)
+            throws Exception {
+        throw new UnsupportedOperationException();
+    }
 
     /** Factory to create {@link MetastoreClient}. */
     interface Factory extends Serializable {

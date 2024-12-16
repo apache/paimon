@@ -102,7 +102,19 @@ public class MergeIntoProcedure extends ProcedureBase {
                 @ArgumentHint(
                         name = "matched_delete_condition",
                         type = @DataTypeHint("STRING"),
-                        isOptional = true)
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "not_matched_by_source_upsert_condition",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "not_matched_by_source_upsert_setting",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "not_matched_by_source_delete_condition",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
             })
     public String[] call(
             ProcedureContext procedureContext,
@@ -115,7 +127,10 @@ public class MergeIntoProcedure extends ProcedureBase {
             String matchedUpsertSetting,
             String notMatchedInsertCondition,
             String notMatchedInsertValues,
-            String matchedDeleteCondition) {
+            String matchedDeleteCondition,
+            String notMatchedBySourceUpsertCondition,
+            String notMatchedBySourceUpsertSetting,
+            String notMatchedBySourceDeleteCondition) {
         targetAlias = notnull(targetAlias);
         sourceSqls = notnull(sourceSqls);
         sourceTable = notnull(sourceTable);
@@ -125,6 +140,9 @@ public class MergeIntoProcedure extends ProcedureBase {
         notMatchedInsertCondition = notnull(notMatchedInsertCondition);
         notMatchedInsertValues = notnull(notMatchedInsertValues);
         matchedDeleteCondition = notnull(matchedDeleteCondition);
+        notMatchedBySourceUpsertCondition = notnull(notMatchedBySourceUpsertCondition);
+        notMatchedBySourceUpsertSetting = notnull(notMatchedBySourceUpsertSetting);
+        notMatchedBySourceDeleteCondition = notnull(notMatchedBySourceDeleteCondition);
 
         String warehouse = catalog.warehouse();
         Map<String, String> catalogOptions = catalog.options();
@@ -164,6 +182,20 @@ public class MergeIntoProcedure extends ProcedureBase {
 
         if (!matchedDeleteCondition.isEmpty()) {
             action.withMatchedDelete(matchedDeleteCondition);
+        }
+
+        if (!notMatchedBySourceUpsertCondition.isEmpty()
+                || !notMatchedBySourceUpsertSetting.isEmpty()) {
+            String condition = nullable(notMatchedBySourceUpsertCondition);
+            String values = nullable(notMatchedBySourceUpsertSetting);
+            checkArgument(
+                    !"*".equals(values),
+                    "not-matched-by-source-upsert does not support setting notMatchedBySourceUpsertSetting to *.");
+            action.withNotMatchedBySourceUpsert(condition, values);
+        }
+
+        if (!notMatchedBySourceDeleteCondition.isEmpty()) {
+            action.withNotMatchedBySourceDelete(notMatchedBySourceDeleteCondition);
         }
 
         action.withStreamExecutionEnvironment(procedureContext.getExecutionEnvironment());

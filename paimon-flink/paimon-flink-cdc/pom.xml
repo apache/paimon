@@ -34,7 +34,7 @@ under the License.
     <name>Paimon : Flink : CDC</name>
 
     <properties>
-        <flink.version>1.18.1</flink.version>
+        <flink.version>1.20.0</flink.version>
         <flink.cdc.version>3.1.1</flink.cdc.version>
         <flink.mongodb.cdc.version>3.1.1</flink.mongodb.cdc.version>
         <avro.version>1.11.4</avro.version>
@@ -43,7 +43,7 @@ under the License.
         <mongodb.testcontainers.version>1.19.1</mongodb.testcontainers.version>
         <flink.connector.pulsar.version>4.0.0-1.17</flink.connector.pulsar.version>
         <confluent.platform.version>7.5.0</confluent.platform.version>
-        <flink.connector.kafka.version>3.0.1-1.18</flink.connector.kafka.version>
+        <flink.connector.kafka.version>3.3.0-1.20</flink.connector.kafka.version>
     </properties>
 
     <repositories>
@@ -168,6 +168,13 @@ under the License.
         <!-- test dependencies -->
 
         <dependency>
+            <groupId>commons-codec</groupId>
+            <artifactId>commons-codec</artifactId>
+            <version>1.9</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-common</artifactId>
             <version>${project.version}</version>
@@ -185,14 +192,14 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-planner_${scala.binary.version}</artifactId>
+            <artifactId>flink-table-planner_${flink.scala.binary.version}</artifactId>
             <version>${flink.version}</version>
             <scope>test</scope>
         </dependency>
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-planner_${scala.binary.version}</artifactId>
+            <artifactId>flink-table-planner_${flink.scala.binary.version}</artifactId>
             <version>${flink.version}</version>
             <scope>test</scope>
             <type>test-jar</type>

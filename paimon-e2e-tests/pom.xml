@@ -34,7 +34,7 @@ under the License.
     <properties>
         <flink.shaded.hadoop.version>2.8.3-10.0</flink.shaded.hadoop.version>
         <flink.cdc.version>3.1.1</flink.cdc.version>
-        <flink.sql.connector.hive>flink-sql-connector-hive-2.3.10_${scala.binary.version}</flink.sql.connector.hive>
+        <flink.sql.connector.hive>flink-sql-connector-hive-2.3.10_${flink.scala.binary.version}</flink.sql.connector.hive>
     </properties>
 
     <dependencies>
@@ -63,7 +63,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-spark-3.2</artifactId>
+            <artifactId>paimon-spark-${test.spark.main.version}</artifactId>
             <version>${project.version}</version>
             <scope>runtime</scope>
         </dependency>
@@ -185,7 +185,7 @@ under the License.
                         </artifactItem>
                         <artifactItem>
                             <groupId>org.apache.paimon</groupId>
-                            <artifactId>paimon-spark-3.2</artifactId>
+                            <artifactId>paimon-spark-${test.spark.main.version}</artifactId>
                             <version>${project.version}</version>
                             <destFileName>paimon-spark.jar</destFileName>
                             <type>jar</type>

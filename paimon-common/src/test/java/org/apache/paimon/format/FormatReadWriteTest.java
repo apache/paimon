@@ -60,8 +60,8 @@ public abstract class FormatReadWriteTest {
 
     private final String formatType;
 
-    private FileIO fileIO;
-    private Path file;
+    protected FileIO fileIO;
+    protected Path file;
 
     protected FormatReadWriteTest(String formatType) {
         this.formatType = formatType;

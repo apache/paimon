@@ -23,12 +23,15 @@ import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
+import org.apache.paimon.fileindex.FileIndexResult;
+import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.OrcFormatReaderContext;
 import org.apache.paimon.format.fs.HadoopReadOnlyFileSystem;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
@@ -45,28 +48,27 @@ import org.apache.orc.OrcFile;
 import org.apache.orc.RecordReader;
 import org.apache.orc.StripeInformation;
 import org.apache.orc.TypeDescription;
+import org.apache.orc.impl.ReaderImpl;
+import org.apache.orc.impl.RecordReaderImpl;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
 
+import static org.apache.paimon.format.orc.OrcTypeUtil.convertToOrcSchema;
 import static org.apache.paimon.format.orc.reader.AbstractOrcColumnVector.createPaimonVector;
-import static org.apache.paimon.format.orc.reader.OrcSplitReaderUtil.toOrcType;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** An ORC reader that produces a stream of {@link ColumnarRow} records. */
 public class OrcReaderFactory implements FormatReaderFactory {
 
     protected final Configuration hadoopConfig;
-
     protected final TypeDescription schema;
-
-    private final RowType tableType;
-
+    protected final RowType tableType;
     protected final List<OrcFilters.Predicate> conjunctPredicates;
-
     protected final int batchSize;
+    protected final boolean deletionVectorsEnabled;
 
     /**
      * @param hadoopConfig the hadoop config for orc reader.
@@ -77,12 +79,14 @@ public class OrcReaderFactory implements FormatReaderFactory {
             final org.apache.hadoop.conf.Configuration hadoopConfig,
             final RowType readType,
             final List<OrcFilters.Predicate> conjunctPredicates,
-            final int batchSize) {
+            final int batchSize,
+            final boolean deletionVectorsEnabled) {
         this.hadoopConfig = checkNotNull(hadoopConfig);
-        this.schema = toOrcType(readType);
+        this.schema = convertToOrcSchema(readType);
         this.tableType = readType;
         this.conjunctPredicates = checkNotNull(conjunctPredicates);
         this.batchSize = batchSize;
+        this.deletionVectorsEnabled = deletionVectorsEnabled;
     }
 
     // ------------------------------------------------------------------------
@@ -104,7 +108,9 @@ public class OrcReaderFactory implements FormatReaderFactory {
                         context.fileIO(),
                         context.filePath(),
                         0,
-                        context.fileSize());
+                        context.fileSize(),
+                        context.fileIndex(),
+                        deletionVectorsEnabled);
         return new OrcVectorizedReader(orcReader, poolOfBatches);
     }
 
@@ -123,7 +129,9 @@ public class OrcReaderFactory implements FormatReaderFactory {
         for (int i = 0; i < vectors.length; i++) {
             String name = tableFieldNames.get(i);
             DataType type = tableFieldTypes.get(i);
-            vectors[i] = createPaimonVector(orcBatch.cols[tableFieldNames.indexOf(name)], type);
+            vectors[i] =
+                    createPaimonVector(
+                            orcBatch.cols[tableFieldNames.indexOf(name)], orcBatch, type);
         }
         return new OrcReaderBatch(filePath, orcBatch, new VectorizedColumnBatch(vectors), recycler);
     }
@@ -178,7 +186,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             return orcVectorizedRowBatch;
         }
 
-        private RecordIterator<InternalRow> convertAndGetIterator(
+        private ColumnarRowIterator convertAndGetIterator(
                 VectorizedRowBatch orcBatch, long rowNumber) {
             // no copying from the ORC column vectors to the Paimon columns vectors necessary,
             // because they point to the same data arrays internally design
@@ -203,8 +211,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
      * batch is addressed by the starting row number of the batch, plus the number of records to be
      * skipped before.
      */
-    private static final class OrcVectorizedReader
-            implements org.apache.paimon.reader.RecordReader<InternalRow> {
+    private static final class OrcVectorizedReader implements FileRecordReader<InternalRow> {
 
         private final RecordReader orcReader;
         private final Pool<OrcReaderBatch> pool;
@@ -216,7 +223,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
 
         @Nullable
         @Override
-        public RecordIterator<InternalRow> readBatch() throws IOException {
+        public ColumnarRowIterator readBatch() throws IOException {
             final OrcReaderBatch batch = getCachedEntry();
             final VectorizedRowBatch orcVectorBatch = batch.orcVectorizedRowBatch();
 
@@ -251,9 +258,11 @@ public class OrcReaderFactory implements FormatReaderFactory {
             FileIO fileIO,
             org.apache.paimon.fs.Path path,
             long splitStart,
-            long splitLength)
+            long splitLength,
+            @Nullable FileIndexResult fileIndexResult,
+            boolean deletionVectorsEnabled)
             throws IOException {
-        org.apache.orc.Reader orcReader = createReader(conf, fileIO, path);
+        org.apache.orc.Reader orcReader = createReader(conf, fileIO, path, fileIndexResult);
         try {
             // get offset and length for the stripes that start in the split
             Pair<Long, Long> offsetAndLength =
@@ -268,7 +277,14 @@ public class OrcReaderFactory implements FormatReaderFactory {
                             .skipCorruptRecords(OrcConf.SKIP_CORRUPT_DATA.getBoolean(conf))
                             .tolerateMissingSchema(
                                     OrcConf.TOLERATE_MISSING_SCHEMA.getBoolean(conf));
-
+            if (!conjunctPredicates.isEmpty()
+                    && !deletionVectorsEnabled
+                    && !(fileIndexResult instanceof BitmapIndexResult)) {
+                // row group filter push down will make row number change incorrect
+                // so deletion vectors mode and bitmap index cannot work with row group push down
+                options.useSelected(OrcConf.READER_USE_SELECTED.getBoolean(conf));
+                options.allowSARGToFilter(OrcConf.ALLOW_SARG_TO_FILTER.getBoolean(conf));
+            }
             // configure filters
             if (!conjunctPredicates.isEmpty()) {
                 SearchArgument.Builder b = SearchArgumentFactory.newBuilder();
@@ -328,7 +344,8 @@ public class OrcReaderFactory implements FormatReaderFactory {
     public static org.apache.orc.Reader createReader(
             org.apache.hadoop.conf.Configuration conf,
             FileIO fileIO,
-            org.apache.paimon.fs.Path path)
+            org.apache.paimon.fs.Path path,
+            @Nullable FileIndexResult fileIndexResult)
             throws IOException {
         // open ORC file and create reader
         org.apache.hadoop.fs.Path hPath = new org.apache.hadoop.fs.Path(path.toUri());
@@ -338,6 +355,11 @@ public class OrcReaderFactory implements FormatReaderFactory {
         // configure filesystem from Paimon FileIO
         readerOptions.filesystem(new HadoopReadOnlyFileSystem(fileIO));
 
-        return OrcFile.createReader(hPath, readerOptions);
+        return new ReaderImpl(hPath, readerOptions) {
+            @Override
+            public RecordReader rows(Options options) throws IOException {
+                return new RecordReaderImpl(this, options, fileIndexResult);
+            }
+        };
     }
 }

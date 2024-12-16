@@ -23,14 +23,27 @@ import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
-/** To maintain compatibility with Hive 3. */
+import java.lang.reflect.Field;
+
+/**
+ * Utils to convert between Hive TimestampLocalTZTypeInfo and Paimon {@link
+ * LocalZonedTimestampType}, using reflection to solve compatibility between Hive 2 and Hive 3.
+ */
 public class LocalZonedTimestampTypeUtils {
 
-    public static boolean isLocalZonedTimestampType(TypeInfo hiveTypeInfo) {
-        return false;
+    public static boolean isHiveLocalZonedTimestampType(TypeInfo hiveTypeInfo) {
+        return "org.apache.hadoop.hive.serde2.typeinfo.TimestampLocalTZTypeInfo"
+                .equals(hiveTypeInfo.getClass().getName());
     }
 
-    public static TypeInfo toHiveType(LocalZonedTimestampType paimonType) {
-        return TypeInfoFactory.timestampTypeInfo;
+    public static TypeInfo hiveLocalZonedTimestampType() {
+        try {
+            Class<?> typeInfoFactoryClass =
+                    Class.forName("org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory");
+            Field field = typeInfoFactoryClass.getField("timestampLocalTZTypeInfo");
+            return (TypeInfo) field.get(null);
+        } catch (Exception e) {
+            return TypeInfoFactory.timestampTypeInfo;
+        }
     }
 }

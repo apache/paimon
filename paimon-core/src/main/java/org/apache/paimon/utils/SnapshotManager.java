@@ -24,6 +24,8 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,8 +44,11 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -52,6 +57,8 @@ import java.util.stream.LongStream;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
+import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
+import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
 
 /** Manager for {@link Snapshot}, providing utility methods related to paths and snapshot hints. */
 public class SnapshotManager implements Serializable {
@@ -70,16 +77,26 @@ public class SnapshotManager implements Serializable {
     private final FileIO fileIO;
     private final Path tablePath;
     private final String branch;
+    @Nullable private final Cache<Path, Snapshot> cache;
 
     public SnapshotManager(FileIO fileIO, Path tablePath) {
         this(fileIO, tablePath, DEFAULT_MAIN_BRANCH);
     }
 
     /** Specify the default branch for data writing. */
-    public SnapshotManager(FileIO fileIO, Path tablePath, String branchName) {
+    public SnapshotManager(FileIO fileIO, Path tablePath, @Nullable String branchName) {
+        this(fileIO, tablePath, branchName, null);
+    }
+
+    public SnapshotManager(
+            FileIO fileIO,
+            Path tablePath,
+            @Nullable String branchName,
+            @Nullable Cache<Path, Snapshot> cache) {
         this.fileIO = fileIO;
         this.tablePath = tablePath;
         this.branch = BranchManager.normalizeBranch(branchName);
+        this.cache = cache;
     }
 
     public SnapshotManager copyWithBranch(String branchName) {
@@ -116,20 +133,34 @@ public class SnapshotManager implements Serializable {
         return new Path(branchPath(tablePath, branch) + "/snapshot");
     }
 
+    public void invalidateCache() {
+        if (cache != null) {
+            cache.invalidateAll();
+        }
+    }
+
     public Snapshot snapshot(long snapshotId) {
-        Path snapshotPath = snapshotPath(snapshotId);
-        return Snapshot.fromPath(fileIO, snapshotPath);
+        Path path = snapshotPath(snapshotId);
+        Snapshot snapshot = cache == null ? null : cache.getIfPresent(path);
+        if (snapshot == null) {
+            snapshot = Snapshot.fromPath(fileIO, path);
+            if (cache != null) {
+                cache.put(path, snapshot);
+            }
+        }
+        return snapshot;
     }
 
     public Snapshot tryGetSnapshot(long snapshotId) throws FileNotFoundException {
-        try {
-            Path snapshotPath = snapshotPath(snapshotId);
-            return Snapshot.fromJson(fileIO.readFileUtf8(snapshotPath));
-        } catch (FileNotFoundException fileNotFoundException) {
-            throw fileNotFoundException;
-        } catch (IOException ioException) {
-            throw new RuntimeException(ioException);
+        Path path = snapshotPath(snapshotId);
+        Snapshot snapshot = cache == null ? null : cache.getIfPresent(path);
+        if (snapshot == null) {
+            snapshot = Snapshot.tryFromPath(fileIO, path);
+            if (cache != null) {
+                cache.put(path, snapshot);
+            }
         }
+        return snapshot;
     }
 
     public Changelog changelog(long snapshotId) {
@@ -336,6 +367,65 @@ public class SnapshotManager implements Serializable {
         return finalSnapshot;
     }
 
+    public @Nullable Snapshot earlierOrEqualWatermark(long watermark) {
+        Long earliest = earliestSnapshotId();
+        Long latest = latestSnapshotId();
+        // If latest == Long.MIN_VALUE don't need next binary search for watermark
+        // which can reduce IO cost with snapshot
+        if (earliest == null || latest == null || snapshot(latest).watermark() == Long.MIN_VALUE) {
+            return null;
+        }
+        Long earliestWatermark = null;
+        // find the first snapshot with watermark
+        if ((earliestWatermark = snapshot(earliest).watermark()) == null) {
+            while (earliest < latest) {
+                earliest++;
+                earliestWatermark = snapshot(earliest).watermark();
+                if (earliestWatermark != null) {
+                    break;
+                }
+            }
+        }
+        if (earliestWatermark == null) {
+            return null;
+        }
+
+        if (earliestWatermark >= watermark) {
+            return snapshot(earliest);
+        }
+        Snapshot finalSnapshot = null;
+
+        while (earliest <= latest) {
+            long mid = earliest + (latest - earliest) / 2; // Avoid overflow
+            Snapshot snapshot = snapshot(mid);
+            Long commitWatermark = snapshot.watermark();
+            if (commitWatermark == null) {
+                // find the first snapshot with watermark
+                while (mid >= earliest) {
+                    mid--;
+                    commitWatermark = snapshot(mid).watermark();
+                    if (commitWatermark != null) {
+                        break;
+                    }
+                }
+            }
+            if (commitWatermark == null) {
+                earliest = mid + 1;
+            } else {
+                if (commitWatermark > watermark) {
+                    latest = mid - 1; // Search in the left half
+                } else if (commitWatermark < watermark) {
+                    earliest = mid + 1; // Search in the right half
+                    finalSnapshot = snapshot;
+                } else {
+                    finalSnapshot = snapshot; // Found the exact match
+                    break;
+                }
+            }
+        }
+        return finalSnapshot;
+    }
+
     public @Nullable Snapshot laterOrEqualWatermark(long watermark) {
         Long earliest = earliestSnapshotId();
         Long latest = latestSnapshotId();
@@ -413,9 +503,15 @@ public class SnapshotManager implements Serializable {
                 .collect(Collectors.toList());
     }
 
+    public Iterator<Snapshot> snapshotsWithId(List<Long> snapshotIds) {
+        return snapshotIds.stream()
+                .map(this::snapshot)
+                .sorted(Comparator.comparingLong(Snapshot::id))
+                .iterator();
+    }
+
     public Iterator<Snapshot> snapshotsWithinRange(
-            Optional<Long> optionalMaxSnapshotId, Optional<Long> optionalMinSnapshotId)
-            throws IOException {
+            Optional<Long> optionalMaxSnapshotId, Optional<Long> optionalMinSnapshotId) {
         Long lowerBoundSnapshotId = earliestSnapshotId();
         Long upperBoundSnapshotId = latestSnapshotId();
         Long lowerId;
@@ -457,7 +553,7 @@ public class SnapshotManager implements Serializable {
 
     public Iterator<Changelog> changelogs() throws IOException {
         return listVersionedFiles(fileIO, changelogDirectory(), CHANGELOG_PREFIX)
-                .map(snapshotId -> changelog(snapshotId))
+                .map(this::changelog)
                 .sorted(Comparator.comparingLong(Changelog::id))
                 .iterator();
     }
@@ -469,16 +565,19 @@ public class SnapshotManager implements Serializable {
     public List<Snapshot> safelyGetAllSnapshots() throws IOException {
         List<Path> paths =
                 listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
-                        .map(id -> snapshotPath(id))
+                        .map(this::snapshotPath)
                         .collect(Collectors.toList());
 
-        List<Snapshot> snapshots = new ArrayList<>();
-        for (Path path : paths) {
-            try {
-                snapshots.add(Snapshot.fromJson(fileIO.readFileUtf8(path)));
-            } catch (FileNotFoundException ignored) {
-            }
-        }
+        List<Snapshot> snapshots = Collections.synchronizedList(new ArrayList<>(paths.size()));
+        collectSnapshots(
+                path -> {
+                    try {
+                        // do not pollution cache
+                        snapshots.add(Snapshot.tryFromPath(fileIO, path));
+                    } catch (FileNotFoundException ignored) {
+                    }
+                },
+                paths);
 
         return snapshots;
     }
@@ -486,34 +585,53 @@ public class SnapshotManager implements Serializable {
     public List<Changelog> safelyGetAllChangelogs() throws IOException {
         List<Path> paths =
                 listVersionedFiles(fileIO, changelogDirectory(), CHANGELOG_PREFIX)
-                        .map(id -> longLivedChangelogPath(id))
+                        .map(this::longLivedChangelogPath)
                         .collect(Collectors.toList());
 
-        List<Changelog> changelogs = new ArrayList<>();
-        for (Path path : paths) {
-            try {
-                String json = fileIO.readFileUtf8(path);
-                changelogs.add(Changelog.fromJson(json));
-            } catch (FileNotFoundException ignored) {
-            }
-        }
+        List<Changelog> changelogs = Collections.synchronizedList(new ArrayList<>(paths.size()));
+        collectSnapshots(
+                path -> {
+                    try {
+                        changelogs.add(Changelog.fromJson(fileIO.readFileUtf8(path)));
+                    } catch (IOException e) {
+                        if (!(e instanceof FileNotFoundException)) {
+                            throw new RuntimeException(e);
+                        }
+                    }
+                },
+                paths);
 
         return changelogs;
+    }
+
+    private void collectSnapshots(Consumer<Path> pathConsumer, List<Path> paths)
+            throws IOException {
+        ExecutorService executor =
+                createCachedThreadPool(
+                        Runtime.getRuntime().availableProcessors(), "SNAPSHOT_COLLECTOR");
+
+        try {
+            randomlyOnlyExecute(executor, pathConsumer, paths);
+        } catch (RuntimeException e) {
+            throw new IOException(e);
+        } finally {
+            executor.shutdown();
+        }
     }
 
     /**
      * Try to get non snapshot files. If any error occurred, just ignore it and return an empty
      * result.
      */
-    public List<Path> tryGetNonSnapshotFiles(Predicate<FileStatus> fileStatusFilter) {
+    public List<Pair<Path, Long>> tryGetNonSnapshotFiles(Predicate<FileStatus> fileStatusFilter) {
         return listPathWithFilter(snapshotDirectory(), fileStatusFilter, nonSnapshotFileFilter());
     }
 
-    public List<Path> tryGetNonChangelogFiles(Predicate<FileStatus> fileStatusFilter) {
+    public List<Pair<Path, Long>> tryGetNonChangelogFiles(Predicate<FileStatus> fileStatusFilter) {
         return listPathWithFilter(changelogDirectory(), fileStatusFilter, nonChangelogFileFilter());
     }
 
-    private List<Path> listPathWithFilter(
+    private List<Pair<Path, Long>> listPathWithFilter(
             Path directory, Predicate<FileStatus> fileStatusFilter, Predicate<Path> fileFilter) {
         try {
             FileStatus[] statuses = fileIO.listStatus(directory);
@@ -523,8 +641,8 @@ public class SnapshotManager implements Serializable {
 
             return Arrays.stream(statuses)
                     .filter(fileStatusFilter)
-                    .map(FileStatus::getPath)
-                    .filter(fileFilter)
+                    .filter(status -> fileFilter.test(status.getPath()))
+                    .map(status -> Pair.of(status.getPath(), status.getLen()))
                     .collect(Collectors.toList());
         } catch (IOException ignored) {
             return Collections.emptyList();
@@ -723,23 +841,6 @@ public class SnapshotManager implements Serializable {
         return listVersionedFiles(fileIO, dir, prefix).reduce(reducer).orElse(null);
     }
 
-    /**
-     * Find the overlapping snapshots between sortedSnapshots and range of [beginInclusive,
-     * endExclusive).
-     */
-    public static List<Snapshot> findOverlappedSnapshots(
-            List<Snapshot> sortedSnapshots, long beginInclusive, long endExclusive) {
-        List<Snapshot> overlappedSnapshots = new ArrayList<>();
-        int right = findPreviousSnapshot(sortedSnapshots, endExclusive);
-        if (right >= 0) {
-            int left = Math.max(findPreviousOrEqualSnapshot(sortedSnapshots, beginInclusive), 0);
-            for (int i = left; i <= right; i++) {
-                overlappedSnapshots.add(sortedSnapshots.get(i));
-            }
-        }
-        return overlappedSnapshots;
-    }
-
     public static int findPreviousSnapshot(List<Snapshot> sortedSnapshots, long targetSnapshotId) {
         for (int i = sortedSnapshots.size() - 1; i >= 0; i--) {
             if (sortedSnapshots.get(i).id() < targetSnapshotId) {
@@ -749,7 +850,7 @@ public class SnapshotManager implements Serializable {
         return -1;
     }
 
-    private static int findPreviousOrEqualSnapshot(
+    public static int findPreviousOrEqualSnapshot(
             List<Snapshot> sortedSnapshots, long targetSnapshotId) {
         for (int i = sortedSnapshots.size() - 1; i >= 0; i--) {
             if (sortedSnapshots.get(i).id() <= targetSnapshotId) {
@@ -783,6 +884,23 @@ public class SnapshotManager implements Serializable {
 
     private void commitHint(long snapshotId, String fileName, Path dir) throws IOException {
         Path hintFile = new Path(dir, fileName);
-        fileIO.overwriteFileUtf8(hintFile, String.valueOf(snapshotId));
+        int loopTime = 3;
+        while (loopTime-- > 0) {
+            try {
+                fileIO.overwriteFileUtf8(hintFile, String.valueOf(snapshotId));
+                return;
+            } catch (IOException e) {
+                try {
+                    Thread.sleep(ThreadLocalRandom.current().nextInt(1000) + 500);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    // throw root cause
+                    throw new RuntimeException(e);
+                }
+                if (loopTime == 0) {
+                    throw e;
+                }
+            }
+        }
     }
 }

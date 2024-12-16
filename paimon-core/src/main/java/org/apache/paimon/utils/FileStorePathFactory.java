@@ -24,6 +24,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.types.RowType;
 
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
 import java.util.List;
@@ -43,6 +44,10 @@ public class FileStorePathFactory {
     private final String formatIdentifier;
     private final String dataFilePrefix;
     private final String changelogFilePrefix;
+    private final boolean fileSuffixIncludeCompression;
+    private final String fileCompression;
+
+    @Nullable private final String dataFilePathDirectory;
 
     private final AtomicInteger manifestFileCount;
     private final AtomicInteger manifestListCount;
@@ -56,14 +61,22 @@ public class FileStorePathFactory {
             String defaultPartValue,
             String formatIdentifier,
             String dataFilePrefix,
-            String changelogFilePrefix) {
+            String changelogFilePrefix,
+            boolean legacyPartitionName,
+            boolean fileSuffixIncludeCompression,
+            String fileCompression,
+            @Nullable String dataFilePathDirectory) {
         this.root = root;
+        this.dataFilePathDirectory = dataFilePathDirectory;
         this.uuid = UUID.randomUUID().toString();
 
-        this.partitionComputer = getPartitionComputer(partitionType, defaultPartValue);
+        this.partitionComputer =
+                getPartitionComputer(partitionType, defaultPartValue, legacyPartitionName);
         this.formatIdentifier = formatIdentifier;
         this.dataFilePrefix = dataFilePrefix;
         this.changelogFilePrefix = changelogFilePrefix;
+        this.fileSuffixIncludeCompression = fileSuffixIncludeCompression;
+        this.fileCompression = fileCompression;
 
         this.manifestFileCount = new AtomicInteger(0);
         this.manifestListCount = new AtomicInteger(0);
@@ -78,9 +91,10 @@ public class FileStorePathFactory {
 
     @VisibleForTesting
     public static InternalRowPartitionComputer getPartitionComputer(
-            RowType partitionType, String defaultPartValue) {
+            RowType partitionType, String defaultPartValue, boolean legacyPartitionName) {
         String[] partitionColumns = partitionType.getFieldNames().toArray(new String[0]);
-        return new InternalRowPartitionComputer(defaultPartValue, partitionType, partitionColumns);
+        return new InternalRowPartitionComputer(
+                defaultPartValue, partitionType, partitionColumns, legacyPartitionName);
     }
 
     public Path newManifestFile() {
@@ -110,20 +124,25 @@ public class FileStorePathFactory {
                 bucketPath(partition, bucket),
                 formatIdentifier,
                 dataFilePrefix,
-                changelogFilePrefix);
+                changelogFilePrefix,
+                fileSuffixIncludeCompression,
+                fileCompression);
     }
 
     public Path bucketPath(BinaryRow partition, int bucket) {
-        return new Path(root + "/" + relativePartitionAndBucketPath(partition, bucket));
+        return new Path(root, relativeBucketPath(partition, bucket));
     }
 
-    public Path relativePartitionAndBucketPath(BinaryRow partition, int bucket) {
+    public Path relativeBucketPath(BinaryRow partition, int bucket) {
+        Path relativeBucketPath = new Path(BUCKET_PATH_PREFIX + bucket);
         String partitionPath = getPartitionString(partition);
-        String fullPath =
-                partitionPath.isEmpty()
-                        ? BUCKET_PATH_PREFIX + bucket
-                        : partitionPath + "/" + BUCKET_PATH_PREFIX + bucket;
-        return new Path(fullPath);
+        if (!partitionPath.isEmpty()) {
+            relativeBucketPath = new Path(partitionPath, relativeBucketPath);
+        }
+        if (dataFilePathDirectory != null) {
+            relativeBucketPath = new Path(dataFilePathDirectory, relativeBucketPath);
+        }
+        return relativeBucketPath;
     }
 
     /** IMPORTANT: This method is NOT THREAD SAFE. */

@@ -39,10 +39,11 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateReplaceVisitor;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
-import org.apache.paimon.table.SystemFields;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -137,7 +138,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     @Override
     public RowType rowType() {
         List<DataField> fields = new ArrayList<>();
-        fields.add(SystemFields.ROW_KIND);
+        fields.add(SpecialFields.ROW_KIND);
         fields.addAll(wrapped.rowType().getFields());
         return new RowType(fields);
     }
@@ -185,6 +186,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     @Override
     public SnapshotManager snapshotManager() {
         return wrapped.snapshotManager();
+    }
+
+    @Override
+    public SchemaManager schemaManager() {
+        return wrapped.schemaManager();
     }
 
     @Override
@@ -320,6 +326,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader enableValueFilter() {
+            wrapped.enableValueFilter();
+            return this;
+        }
+
+        @Override
         public SnapshotReader withManifestEntryFilter(Filter<ManifestEntry> filter) {
             wrapped.withManifestEntryFilter(filter);
             return this;
@@ -339,6 +351,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public SnapshotReader withDataFileNameFilter(Filter<String> fileNameFilter) {
             wrapped.withDataFileNameFilter(fileNameFilter);
+            return this;
+        }
+
+        @Override
+        public SnapshotReader dropStats() {
+            wrapped.dropStats();
             return this;
         }
 
@@ -526,13 +544,13 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
     }
 
-    private class AuditLogRead implements InnerTableRead {
+    class AuditLogRead implements InnerTableRead {
 
-        private final InnerTableRead dataRead;
+        protected final InnerTableRead dataRead;
 
-        private int[] readProjection;
+        protected int[] readProjection;
 
-        private AuditLogRead(InnerTableRead dataRead) {
+        protected AuditLogRead(InnerTableRead dataRead) {
             this.dataRead = dataRead.forceKeepDelete();
             this.readProjection = defaultProjection();
         }
@@ -566,7 +584,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
             boolean rowKindAppeared = false;
             for (int i = 0; i < fields.size(); i++) {
                 String fieldName = fields.get(i).name();
-                if (fieldName.equals(SystemFields.ROW_KIND.name())) {
+                if (fieldName.equals(SpecialFields.ROW_KIND.name())) {
                     rowKindAppeared = true;
                     readProjection[i] = -1;
                 } else {
@@ -600,9 +618,9 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     }
 
     /** A {@link ProjectedRow} which returns row kind when mapping index is negative. */
-    private static class AuditLogRow extends ProjectedRow {
+    static class AuditLogRow extends ProjectedRow {
 
-        private AuditLogRow(int[] indexMapping, InternalRow row) {
+        AuditLogRow(int[] indexMapping, InternalRow row) {
             super(indexMapping);
             replaceRow(row);
         }

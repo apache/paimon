@@ -57,7 +57,8 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 meta.creationTime(),
                 meta.deleteRowCount().orElse(null),
                 meta.embeddedIndex(),
-                meta.fileSource().map(FileSource::toByteValue).orElse(null));
+                meta.fileSource().map(FileSource::toByteValue).orElse(null),
+                toStringArrayData(meta.valueStatsCols()));
     }
 
     @Override
@@ -78,6 +79,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 row.getTimestamp(12, 3),
                 row.isNullAt(13) ? null : row.getLong(13),
                 row.isNullAt(14) ? null : row.getBinary(14),
-                row.isNullAt(15) ? null : FileSource.fromByteValue(row.getByte(15)));
+                row.isNullAt(15) ? null : FileSource.fromByteValue(row.getByte(15)),
+                row.isNullAt(16) ? null : fromStringArrayData(row.getArray(16)));
     }
 }

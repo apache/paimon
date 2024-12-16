@@ -96,6 +96,10 @@ public class Schema {
         return comment;
     }
 
+    public Schema copy(RowType rowType) {
+        return new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, comment);
+    }
+
     private static List<DataField> normalizeFields(
             List<DataField> fields, List<String> primaryKeys, List<String> partitionKeys) {
         List<String> fieldNames = fields.stream().map(DataField::name).collect(Collectors.toList());
@@ -336,14 +340,5 @@ public class Schema {
         public Schema build() {
             return new Schema(columns, partitionKeys, primaryKeys, options, comment);
         }
-    }
-
-    public static Schema fromTableSchema(TableSchema tableSchema) {
-        return new Schema(
-                tableSchema.fields(),
-                tableSchema.partitionKeys(),
-                tableSchema.primaryKeys(),
-                tableSchema.options(),
-                tableSchema.comment());
     }
 }

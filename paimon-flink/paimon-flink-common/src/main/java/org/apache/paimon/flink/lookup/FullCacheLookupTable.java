@@ -37,6 +37,7 @@ import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.ExecutorUtils;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.FileIOUtils;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.PartialRow;
 import org.apache.paimon.utils.TypeUtils;
@@ -85,12 +86,14 @@ public abstract class FullCacheLookupTable implements LookupTable {
     private Future<?> refreshFuture;
     private LookupStreamingReader reader;
     private Predicate specificPartition;
+    @Nullable private Filter<InternalRow> cacheRowFilter;
 
     public FullCacheLookupTable(Context context) {
         this.table = context.table;
         List<String> sequenceFields = new ArrayList<>();
+        CoreOptions coreOptions = new CoreOptions(table.options());
         if (table.primaryKeys().size() > 0) {
-            sequenceFields = new CoreOptions(table.options()).sequenceField();
+            sequenceFields = coreOptions.sequenceField();
         }
         RowType projectedType = TypeUtils.project(table.rowType(), context.projection);
         if (sequenceFields.size() > 0) {
@@ -109,7 +112,10 @@ public abstract class FullCacheLookupTable implements LookupTable {
             projectedType = builder.build();
             context = context.copy(table.rowType().getFieldIndices(projectedType.getFieldNames()));
             this.userDefinedSeqComparator =
-                    UserDefinedSeqComparator.create(projectedType, sequenceFields);
+                    UserDefinedSeqComparator.create(
+                            projectedType,
+                            sequenceFields,
+                            coreOptions.sequenceFieldSortOrderIsAscending());
             this.appendUdsFieldNumber = appendUdsFieldNumber.get();
         } else {
             this.userDefinedSeqComparator = null;
@@ -138,6 +144,11 @@ public abstract class FullCacheLookupTable implements LookupTable {
         this.specificPartition = filter;
     }
 
+    @Override
+    public void specifyCacheRowFilter(Filter<InternalRow> filter) {
+        this.cacheRowFilter = filter;
+    }
+
     protected void openStateFactory() throws Exception {
         this.stateFactory =
                 new RocksDBStateFactory(
@@ -154,7 +165,8 @@ public abstract class FullCacheLookupTable implements LookupTable {
                         context.table,
                         context.projection,
                         scanPredicate,
-                        context.requiredCachedBucketIds);
+                        context.requiredCachedBucketIds,
+                        cacheRowFilter);
         BinaryExternalSortBuffer bulkLoadSorter =
                 RocksDBState.createBulkLoadSorter(
                         IOManager.create(context.tempPath.toString()), context.table.coreOptions());

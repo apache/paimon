@@ -84,6 +84,35 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
     }
 
     @Test
+    public void testCustomConstructorMetastoreClient() throws Exception {
+        path = folder.newFolder().toURI().toString();
+        EnvironmentSettings settings = EnvironmentSettings.newInstance().inBatchMode().build();
+        Class<?>[] customConstructorMetastoreClientClass = {
+            CustomConstructorMetastoreClient.TwoParameterConstructorMetastoreClient.class,
+            CustomConstructorMetastoreClient.OneParameterConstructorMetastoreClient.class,
+            CustomConstructorMetastoreClient.OtherParameterConstructorMetastoreClient.class
+        };
+
+        for (Class<?> clazz : customConstructorMetastoreClientClass) {
+            tEnv = TableEnvironmentImpl.create(settings);
+            tEnv.executeSql(
+                            String.join(
+                                    "\n",
+                                    "CREATE CATALOG my_hive WITH (",
+                                    "  'type' = 'paimon',",
+                                    "  'metastore' = 'hive',",
+                                    "  'uri' = '',",
+                                    "  'warehouse' = '" + path + "',",
+                                    "  'metastore.client.class' = '" + clazz.getName() + "'",
+                                    ")"))
+                    .await();
+            tEnv.executeSql("USE CATALOG my_hive").await();
+            assertThat(collect("SHOW DATABASES"))
+                    .isEqualTo(Arrays.asList(Row.of("default"), Row.of("test_db")));
+        }
+    }
+
+    @Test
     public void testCreateExistTableInHive() throws Exception {
         tEnv.executeSql(
                 String.join(
@@ -104,7 +133,6 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
                                 tEnv.executeSql(
                                                 "CREATE TABLE hive_table(a INT, b INT, c INT, d INT)")
                                         .await())
-                .isInstanceOf(TableException.class)
                 .hasMessage(
                         "Could not execute CreateTable in path `my_hive_custom_client`.`test_db`.`hive_table`");
         assertThat(

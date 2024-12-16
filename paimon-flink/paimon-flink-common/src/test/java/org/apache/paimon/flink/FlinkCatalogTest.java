@@ -28,9 +28,12 @@ import org.apache.paimon.flink.log.LogStoreRegister;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.api.TableDescriptor;
@@ -42,6 +45,7 @@ import org.apache.flink.table.catalog.CatalogMaterializedTable;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.IntervalFreshness;
+import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.ResolvedCatalogMaterializedTable;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
@@ -60,6 +64,7 @@ import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.expressions.utils.ResolvedExpressionMock;
 import org.apache.flink.table.factories.DynamicTableFactory;
+import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.refresh.RefreshHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -88,6 +93,7 @@ import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
 import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
+import static org.apache.paimon.flink.FlinkTestBase.createResolvedTable;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatCollection;
@@ -746,6 +752,52 @@ public class FlinkCatalogTest {
         checkCreateTable(path1, catalogTable, (CatalogTable) catalog.getTable(path1));
     }
 
+    @Test
+    void testBuildPaimonTableWithCustomScheme() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
+        CatalogTable table = createTable(optionProvider(false).iterator().next());
+        catalog.createTable(path1, table, false);
+        checkCreateTable(path1, table, catalog.getTable(path1));
+
+        List<Column> columns =
+                Arrays.asList(
+                        Column.physical("first", DataTypes.STRING()),
+                        Column.physical("second", DataTypes.INT()),
+                        Column.physical("third", DataTypes.STRING()),
+                        Column.physical(
+                                "four",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD("f1", DataTypes.STRING()),
+                                        DataTypes.FIELD("f2", DataTypes.INT()),
+                                        DataTypes.FIELD(
+                                                "f3",
+                                                DataTypes.MAP(
+                                                        DataTypes.STRING(), DataTypes.INT())))));
+        DynamicTableFactory.Context context =
+                new FactoryUtil.DefaultDynamicTableContext(
+                        ObjectIdentifier.of(
+                                "default", path1.getDatabaseName(), path1.getObjectName()),
+                        createResolvedTable(
+                                new HashMap<String, String>() {
+                                    {
+                                        put("path", "unsupported-scheme://foobar");
+                                    }
+                                },
+                                columns,
+                                Collections.emptyList(),
+                                Collections.emptyList()),
+                        Collections.emptyMap(),
+                        new Configuration(),
+                        Thread.currentThread().getContextClassLoader(),
+                        false);
+
+        FlinkTableFactory factory = (FlinkTableFactory) catalog.getFactory().get();
+        Table builtTable = factory.buildPaimonTable(context);
+        assertThat(builtTable).isInstanceOf(FileStoreTable.class);
+        assertThat(((FileStoreTable) builtTable).schema().fieldNames())
+                .containsExactly("first", "second", "third", "four");
+    }
+
     private void checkCreateTable(
             ObjectPath path, CatalogBaseTable expected, CatalogBaseTable actual) {
         checkEquals(
@@ -798,7 +850,7 @@ public class FlinkCatalogTest {
         assertThat(t2.getComment()).isEqualTo(t1.getComment());
         assertThat(t2.getOptions()).isEqualTo(t1.getOptions());
         if (t1.getTableKind() == CatalogBaseTable.TableKind.TABLE) {
-            assertThat(t2.getSchema()).isEqualTo(t1.getSchema());
+            assertThat(t2.getUnresolvedSchema()).isEqualTo(t1.getUnresolvedSchema());
             assertThat(((CatalogTable) (t2)).getPartitionKeys())
                     .isEqualTo(((CatalogTable) (t1)).getPartitionKeys());
             assertThat(((CatalogTable) (t2)).isPartitioned())
@@ -812,7 +864,12 @@ public class FlinkCatalogTest {
                                             t2.getUnresolvedSchema()
                                                     .resolve(new TestSchemaResolver()))
                                     .build())
-                    .isEqualTo(t1.getSchema().toSchema());
+                    .isEqualTo(
+                            Schema.newBuilder()
+                                    .fromResolvedSchema(
+                                            t1.getUnresolvedSchema()
+                                                    .resolve(new TestSchemaResolver()))
+                                    .build());
             assertThat(mt2.getPartitionKeys()).isEqualTo(mt1.getPartitionKeys());
             assertThat(mt2.isPartitioned()).isEqualTo(mt1.isPartitioned());
             // validate definition query

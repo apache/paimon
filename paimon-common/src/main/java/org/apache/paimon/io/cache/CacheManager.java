@@ -21,15 +21,19 @@ package org.apache.paimon.io.cache;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.utils.Preconditions;
 
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalCause;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
+
 /** Cache manager to cache bytes to paged {@link MemorySegment}s. */
 public class CacheManager {
+
+    private static final Logger LOG = LoggerFactory.getLogger(CacheManager.class);
 
     /**
      * Refreshing the cache comes with some costs, so not every time we visit the CacheManager, but
@@ -37,52 +41,75 @@ public class CacheManager {
      */
     public static final int REFRESH_COUNT = 10;
 
-    private final Cache<CacheKey, CacheValue> cache;
+    private final Cache dataCache;
+    private final Cache indexCache;
 
     private int fileReadCount;
 
+    @VisibleForTesting
     public CacheManager(MemorySize maxMemorySize) {
-        this.cache =
-                Caffeine.newBuilder()
-                        .weigher(this::weigh)
-                        .maximumWeight(maxMemorySize.getBytes())
-                        .removalListener(this::onRemoval)
-                        .executor(Runnable::run)
-                        .build();
+        this(Cache.CacheType.GUAVA, maxMemorySize, 0);
+    }
+
+    public CacheManager(MemorySize dataMaxMemorySize, double highPriorityPoolRatio) {
+        this(Cache.CacheType.GUAVA, dataMaxMemorySize, highPriorityPoolRatio);
+    }
+
+    public CacheManager(
+            Cache.CacheType cacheType, MemorySize maxMemorySize, double highPriorityPoolRatio) {
+        Preconditions.checkArgument(
+                highPriorityPoolRatio >= 0 && highPriorityPoolRatio < 1,
+                "The high priority pool ratio should in the range [0, 1).");
+        MemorySize indexCacheSize =
+                MemorySize.ofBytes((long) (maxMemorySize.getBytes() * highPriorityPoolRatio));
+        MemorySize dataCacheSize =
+                MemorySize.ofBytes((long) (maxMemorySize.getBytes() * (1 - highPriorityPoolRatio)));
+        this.dataCache = CacheBuilder.newBuilder(cacheType).maximumWeight(dataCacheSize).build();
+        if (highPriorityPoolRatio == 0) {
+            this.indexCache = dataCache;
+        } else {
+            this.indexCache =
+                    CacheBuilder.newBuilder(cacheType).maximumWeight(indexCacheSize).build();
+        }
         this.fileReadCount = 0;
+        LOG.info(
+                "Initialize cache manager with data cache of {} and index cache of {}.",
+                dataCacheSize,
+                indexCacheSize);
     }
 
     @VisibleForTesting
-    public Cache<CacheKey, ?> cache() {
-        return cache;
+    public Cache dataCache() {
+        return dataCache;
+    }
+
+    @VisibleForTesting
+    public Cache indexCache() {
+        return indexCache;
     }
 
     public MemorySegment getPage(CacheKey key, CacheReader reader, CacheCallback callback) {
-        CacheValue value = cache.getIfPresent(key);
-        while (value == null || value.isClosed) {
-            try {
-                this.fileReadCount++;
-                value = new CacheValue(MemorySegment.wrap(reader.read(key)), callback);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            cache.put(key, value);
-        }
-        return value.segment;
+        Cache cache = key.isIndex() ? indexCache : dataCache;
+        Cache.CacheValue value =
+                cache.get(
+                        key,
+                        k -> {
+                            this.fileReadCount++;
+                            try {
+                                return new Cache.CacheValue(
+                                        MemorySegment.wrap(reader.read(key)), callback);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
+        return checkNotNull(value, String.format("Cache result for key(%s) is null", key)).segment;
     }
 
     public void invalidPage(CacheKey key) {
-        cache.invalidate(key);
-    }
-
-    private int weigh(CacheKey cacheKey, CacheValue cacheValue) {
-        return cacheValue.segment.size();
-    }
-
-    private void onRemoval(CacheKey key, CacheValue value, RemovalCause cause) {
-        if (value != null) {
-            value.isClosed = true;
-            value.callback.onRemoval(key);
+        if (key.isIndex()) {
+            indexCache.invalidate(key);
+        } else {
+            dataCache.invalidate(key);
         }
     }
 
@@ -90,16 +117,25 @@ public class CacheManager {
         return fileReadCount;
     }
 
-    private static class CacheValue {
+    /** The container for the segment. */
+    public static class SegmentContainer {
 
         private final MemorySegment segment;
-        private final CacheCallback callback;
 
-        private boolean isClosed = false;
+        private int accessCount;
 
-        private CacheValue(MemorySegment segment, CacheCallback callback) {
+        public SegmentContainer(MemorySegment segment) {
             this.segment = segment;
-            this.callback = callback;
+            this.accessCount = 0;
+        }
+
+        public MemorySegment access() {
+            this.accessCount++;
+            return segment;
+        }
+
+        public int getAccessCount() {
+            return accessCount;
         }
     }
 }

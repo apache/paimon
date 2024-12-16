@@ -26,12 +26,8 @@ under the License.
 
 # Java API
 
-{{< hint warning >}}
-We do not recommend using the Paimon API naked, unless you are a professional downstream ecosystem developer, and even if you do, there will be significant difficulties.
-
-If you are only using Paimon, we strongly recommend using computing engines such as Flink SQL or Spark SQL.
-
-The following documents are not detailed and are for reference only.
+{{< hint info >}}
+If possible, recommend using computing engines such as Flink SQL or Spark SQL.
 {{< /hint >}}
 
 ## Dependency

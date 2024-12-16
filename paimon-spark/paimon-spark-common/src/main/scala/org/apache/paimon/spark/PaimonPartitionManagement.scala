@@ -18,7 +18,10 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.CoreOptions
+import org.apache.paimon.metastore.MetastoreClient
 import org.apache.paimon.operation.FileStoreCommit
+import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
 import org.apache.paimon.types.RowType
@@ -41,7 +44,8 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
 
   override lazy val partitionSchema: StructType = SparkTypeUtils.fromPaimonRowType(partitionRowType)
 
-  override def dropPartitions(internalRows: Array[InternalRow]): Boolean = {
+  private def toPaimonPartitions(
+      rows: Array[InternalRow]): Array[java.util.LinkedHashMap[String, String]] = {
     table match {
       case fileStoreTable: FileStoreTable =>
         val rowConverter = CatalystTypeConverters
@@ -49,19 +53,38 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
         val rowDataPartitionComputer = new InternalRowPartitionComputer(
           fileStoreTable.coreOptions().partitionDefaultName(),
           partitionRowType,
-          table.partitionKeys().asScala.toArray)
+          table.partitionKeys().asScala.toArray,
+          CoreOptions.fromMap(table.options()).legacyPartitionName)
 
-        val partitions = internalRows.map {
+        rows.map {
           r =>
             rowDataPartitionComputer
               .generatePartValues(new SparkRow(partitionRowType, rowConverter(r).asInstanceOf[Row]))
-              .asInstanceOf[JMap[String, String]]
         }
+      case _ =>
+        throw new UnsupportedOperationException("Only FileStoreTable supports partitions.")
+    }
+  }
+
+  override def dropPartitions(rows: Array[InternalRow]): Boolean = {
+    table match {
+      case fileStoreTable: FileStoreTable =>
+        val partitions = toPaimonPartitions(rows).map(_.asInstanceOf[JMap[String, String]])
         val commit: FileStoreCommit = fileStoreTable.store.newCommit(UUID.randomUUID.toString)
+        var metastoreClient: MetastoreClient = null
+        val clientFactory = fileStoreTable.catalogEnvironment().metastoreClientFactory
         try {
           commit.dropPartitions(partitions.toSeq.asJava, BatchWriteBuilder.COMMIT_IDENTIFIER)
+          // sync to metastore with delete partitions
+          if (clientFactory != null && fileStoreTable.coreOptions().partitionedTableInMetastore()) {
+            metastoreClient = clientFactory.create()
+            toPaimonPartitions(rows).foreach(metastoreClient.deletePartition)
+          }
         } finally {
           commit.close()
+          if (metastoreClient != null) {
+            metastoreClient.close()
+          }
         }
         true
 
@@ -77,7 +100,7 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
   }
 
   override def loadPartitionMetadata(ident: InternalRow): JMap[String, String] = {
-    throw new UnsupportedOperationException("Load partition is not supported")
+    Map.empty[String, String].asJava
   }
 
   override def listPartitionIdentifiers(
@@ -94,7 +117,7 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
         s"the partition schema '${partitionSchema.sql}'."
     )
     table.newReadBuilder.newScan.listPartitions.asScala
-      .map(binaryRow => SparkInternalRow.fromPaimon(binaryRow, partitionRowType))
+      .map(binaryRow => DataConverter.fromPaimon(binaryRow, partitionRowType))
       .filter(
         sparkInternalRow => {
           partitionCols.zipWithIndex
@@ -112,8 +135,26 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
   }
 
   override def createPartitions(
-      internalRows: Array[InternalRow],
+      rows: Array[InternalRow],
       maps: Array[JMap[String, String]]): Unit = {
-    throw new UnsupportedOperationException("Create partition is not supported")
+    table match {
+      case fileStoreTable: FileStoreTable =>
+        val partitions = toPaimonPartitions(rows)
+        val metastoreFactory = fileStoreTable.catalogEnvironment().metastoreClientFactory()
+        if (metastoreFactory == null) {
+          throw new UnsupportedOperationException(
+            "The table must have metastore to create partition.")
+        }
+        val metastoreClient: MetastoreClient = metastoreFactory.create
+        try {
+          if (fileStoreTable.coreOptions().partitionedTableInMetastore()) {
+            partitions.foreach(metastoreClient.addPartition)
+          }
+        } finally {
+          metastoreClient.close()
+        }
+      case _ =>
+        throw new UnsupportedOperationException("Only FileStoreTable supports create partitions.")
+    }
   }
 }

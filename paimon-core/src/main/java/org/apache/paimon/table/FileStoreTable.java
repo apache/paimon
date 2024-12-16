@@ -19,18 +19,20 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.FileStore;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SegmentsCache;
+
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 
 import java.util.List;
 import java.util.Map;
@@ -43,6 +45,10 @@ import java.util.Optional;
 public interface FileStoreTable extends DataTable {
 
     void setManifestCache(SegmentsCache<Path> manifestCache);
+
+    void setSnapshotCache(Cache<Path, Snapshot> cache);
+
+    void setStatsCache(Cache<String, Statistics> cache);
 
     @Override
     default RowType rowType() {
@@ -103,10 +109,6 @@ public interface FileStoreTable extends DataTable {
     TableCommitImpl newCommit(String commitUser);
 
     LocalTableQuery newLocalTableQuery();
-
-    default SimpleStats getSchemaFieldStats(DataFileMeta dataFileMeta) {
-        return dataFileMeta.valueStats();
-    }
 
     boolean supportStreamingReadOverwrite();
 

@@ -21,6 +21,9 @@ package org.apache.paimon.flink.service;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.source.AbstractNonCoordinatedSource;
+import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
+import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.flink.utils.InternalTypeInfo;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -31,10 +34,14 @@ import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.system.FileMonitorTable;
 
-import org.apache.flink.configuration.Configuration;
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.connector.source.Boundedness;
+import org.apache.flink.api.connector.source.ReaderOutput;
+import org.apache.flink.api.connector.source.SourceReader;
+import org.apache.flink.api.connector.source.SourceReaderContext;
+import org.apache.flink.core.io.InputStatus;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -49,18 +56,12 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
  *   <li>Assigning them to downstream tasks for further processing.
  * </ol>
  */
-public class QueryFileMonitor extends RichSourceFunction<InternalRow> {
+public class QueryFileMonitor extends AbstractNonCoordinatedSource<InternalRow> {
 
     private static final long serialVersionUID = 1L;
 
     private final Table table;
     private final long monitorInterval;
-
-    private transient SourceContext<InternalRow> ctx;
-    private transient StreamTableScan scan;
-    private transient TableRead read;
-
-    private volatile boolean isRunning = true;
 
     public QueryFileMonitor(Table table) {
         this.table = table;
@@ -71,55 +72,53 @@ public class QueryFileMonitor extends RichSourceFunction<InternalRow> {
     }
 
     @Override
-    public void open(Configuration parameters) throws Exception {
-        FileMonitorTable monitorTable = new FileMonitorTable((FileStoreTable) table);
-        ReadBuilder readBuilder = monitorTable.newReadBuilder();
-        this.scan = readBuilder.newStreamScan();
-        this.read = readBuilder.newRead();
+    public Boundedness getBoundedness() {
+        return Boundedness.CONTINUOUS_UNBOUNDED;
     }
 
     @Override
-    public void run(SourceContext<InternalRow> ctx) throws Exception {
-        this.ctx = ctx;
-        while (isRunning) {
-            boolean isEmpty;
-            synchronized (ctx.getCheckpointLock()) {
-                if (!isRunning) {
-                    return;
-                }
-                isEmpty = doScan();
-            }
+    public SourceReader<InternalRow, SimpleSourceSplit> createReader(
+            SourceReaderContext sourceReaderContext) throws Exception {
+        return new Reader();
+    }
+
+    private class Reader extends AbstractNonCoordinatedSourceReader<InternalRow> {
+        private transient StreamTableScan scan;
+        private transient TableRead read;
+
+        @Override
+        public void start() {
+            FileMonitorTable monitorTable = new FileMonitorTable((FileStoreTable) table);
+            ReadBuilder readBuilder = monitorTable.newReadBuilder().dropStats();
+            this.scan = readBuilder.newStreamScan();
+            this.read = readBuilder.newRead();
+        }
+
+        @Override
+        public InputStatus pollNext(ReaderOutput<InternalRow> readerOutput) throws Exception {
+            boolean isEmpty = doScan(readerOutput);
 
             if (isEmpty) {
                 Thread.sleep(monitorInterval);
             }
+            return InputStatus.MORE_AVAILABLE;
         }
-    }
 
-    private boolean doScan() throws Exception {
-        List<InternalRow> records = new ArrayList<>();
-        read.createReader(scan.plan()).forEachRemaining(records::add);
-        records.forEach(ctx::collect);
-        return records.isEmpty();
-    }
-
-    @Override
-    public void cancel() {
-        // this is to cover the case where cancel() is called before the run()
-        if (ctx != null) {
-            synchronized (ctx.getCheckpointLock()) {
-                isRunning = false;
-            }
-        } else {
-            isRunning = false;
+        private boolean doScan(ReaderOutput<InternalRow> readerOutput) throws Exception {
+            List<InternalRow> records = new ArrayList<>();
+            read.createReader(scan.plan()).forEachRemaining(records::add);
+            records.forEach(readerOutput::collect);
+            return records.isEmpty();
         }
     }
 
     public static DataStream<InternalRow> build(StreamExecutionEnvironment env, Table table) {
-        return env.addSource(
-                new QueryFileMonitor(table),
-                "FileMonitor-" + table.name(),
-                InternalTypeInfo.fromRowType(FileMonitorTable.getRowType()));
+        return env.fromSource(
+                        new QueryFileMonitor(table),
+                        WatermarkStrategy.noWatermarks(),
+                        "FileMonitor-" + table.name(),
+                        InternalTypeInfo.fromRowType(FileMonitorTable.getRowType()))
+                .setParallelism(1);
     }
 
     public static ChannelComputer<InternalRow> createChannelComputer() {

@@ -73,7 +73,7 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
                 limit,
                 new FutureCompletingBlockingQueue<>(
                         context.getConfiguration()
-                                .getInteger(SourceReaderOptions.ELEMENT_QUEUE_CAPACITY)));
+                                .get(SourceReaderOptions.ELEMENT_QUEUE_CAPACITY)));
     }
 
     @Override

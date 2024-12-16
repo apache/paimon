@@ -77,11 +77,11 @@ trait StatisticsHelperBase extends SQLConfHelper {
   private def toV2Stats(v1Stats: logical.Statistics): Statistics = {
     new Statistics() {
       override def sizeInBytes(): OptionalLong = if (v1Stats.sizeInBytes != null)
-        OptionalLong.of(v1Stats.sizeInBytes.longValue())
+        OptionalLong.of(v1Stats.sizeInBytes.longValue)
       else OptionalLong.empty()
 
       override def numRows(): OptionalLong = if (v1Stats.rowCount.isDefined)
-        OptionalLong.of(v1Stats.rowCount.get.longValue())
+        OptionalLong.of(v1Stats.rowCount.get.longValue)
       else OptionalLong.empty()
 
       override def columnStats(): java.util.Map[NamedReference, ColumnStatistics] = {

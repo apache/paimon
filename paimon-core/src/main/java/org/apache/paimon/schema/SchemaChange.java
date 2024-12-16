@@ -52,28 +52,46 @@ public interface SchemaChange extends Serializable {
     }
 
     static SchemaChange addColumn(String fieldName, DataType dataType, String comment) {
-        return new AddColumn(fieldName, dataType, comment, null);
+        return new AddColumn(new String[] {fieldName}, dataType, comment, null);
     }
 
     static SchemaChange addColumn(String fieldName, DataType dataType, String comment, Move move) {
-        return new AddColumn(fieldName, dataType, comment, move);
+        return new AddColumn(new String[] {fieldName}, dataType, comment, move);
+    }
+
+    static SchemaChange addColumn(
+            String[] fieldNames, DataType dataType, String comment, Move move) {
+        return new AddColumn(fieldNames, dataType, comment, move);
     }
 
     static SchemaChange renameColumn(String fieldName, String newName) {
-        return new RenameColumn(fieldName, newName);
+        return new RenameColumn(new String[] {fieldName}, newName);
+    }
+
+    static SchemaChange renameColumn(String[] fieldNames, String newName) {
+        return new RenameColumn(fieldNames, newName);
     }
 
     static SchemaChange dropColumn(String fieldName) {
-        return new DropColumn(fieldName);
+        return new DropColumn(new String[] {fieldName});
+    }
+
+    static SchemaChange dropColumn(String[] fieldNames) {
+        return new DropColumn(fieldNames);
     }
 
     static SchemaChange updateColumnType(String fieldName, DataType newDataType) {
-        return new UpdateColumnType(fieldName, newDataType, false);
+        return new UpdateColumnType(new String[] {fieldName}, newDataType, false);
     }
 
     static SchemaChange updateColumnType(
             String fieldName, DataType newDataType, boolean keepNullability) {
-        return new UpdateColumnType(fieldName, newDataType, keepNullability);
+        return new UpdateColumnType(new String[] {fieldName}, newDataType, keepNullability);
+    }
+
+    static SchemaChange updateColumnType(
+            String[] fieldNames, DataType newDataType, boolean keepNullability) {
+        return new UpdateColumnType(fieldNames, newDataType, keepNullability);
     }
 
     static SchemaChange updateColumnNullability(String fieldName, boolean newNullability) {
@@ -207,20 +225,20 @@ public interface SchemaChange extends Serializable {
 
         private static final long serialVersionUID = 1L;
 
-        private final String fieldName;
+        private final String[] fieldNames;
         private final DataType dataType;
         private final String description;
         private final Move move;
 
-        private AddColumn(String fieldName, DataType dataType, String description, Move move) {
-            this.fieldName = fieldName;
+        private AddColumn(String[] fieldNames, DataType dataType, String description, Move move) {
+            this.fieldNames = fieldNames;
             this.dataType = dataType;
             this.description = description;
             this.move = move;
         }
 
-        public String fieldName() {
-            return fieldName;
+        public String[] fieldNames() {
+            return fieldNames;
         }
 
         public DataType dataType() {
@@ -246,7 +264,7 @@ public interface SchemaChange extends Serializable {
                 return false;
             }
             AddColumn addColumn = (AddColumn) o;
-            return Objects.equals(fieldName, addColumn.fieldName)
+            return Arrays.equals(fieldNames, addColumn.fieldNames)
                     && dataType.equals(addColumn.dataType)
                     && Objects.equals(description, addColumn.description)
                     && move.equals(addColumn.move);
@@ -255,7 +273,7 @@ public interface SchemaChange extends Serializable {
         @Override
         public int hashCode() {
             int result = Objects.hash(dataType, description);
-            result = 31 * result + Objects.hashCode(fieldName);
+            result = 31 * result + Objects.hashCode(fieldNames);
             result = 31 * result + Objects.hashCode(move);
             return result;
         }
@@ -266,16 +284,16 @@ public interface SchemaChange extends Serializable {
 
         private static final long serialVersionUID = 1L;
 
-        private final String fieldName;
+        private final String[] fieldNames;
         private final String newName;
 
-        private RenameColumn(String fieldName, String newName) {
-            this.fieldName = fieldName;
+        private RenameColumn(String[] fieldNames, String newName) {
+            this.fieldNames = fieldNames;
             this.newName = newName;
         }
 
-        public String fieldName() {
-            return fieldName;
+        public String[] fieldNames() {
+            return fieldNames;
         }
 
         public String newName() {
@@ -291,14 +309,14 @@ public interface SchemaChange extends Serializable {
                 return false;
             }
             RenameColumn that = (RenameColumn) o;
-            return Objects.equals(fieldName, that.fieldName)
+            return Arrays.equals(fieldNames, that.fieldNames)
                     && Objects.equals(newName, that.newName);
         }
 
         @Override
         public int hashCode() {
             int result = Objects.hash(newName);
-            result = 31 * result + Objects.hashCode(fieldName);
+            result = 31 * result + Objects.hashCode(fieldNames);
             return result;
         }
     }
@@ -308,14 +326,14 @@ public interface SchemaChange extends Serializable {
 
         private static final long serialVersionUID = 1L;
 
-        private final String fieldName;
+        private final String[] fieldNames;
 
-        private DropColumn(String fieldName) {
-            this.fieldName = fieldName;
+        private DropColumn(String[] fieldNames) {
+            this.fieldNames = fieldNames;
         }
 
-        public String fieldName() {
-            return fieldName;
+        public String[] fieldNames() {
+            return fieldNames;
         }
 
         @Override
@@ -327,12 +345,12 @@ public interface SchemaChange extends Serializable {
                 return false;
             }
             DropColumn that = (DropColumn) o;
-            return Objects.equals(fieldName, that.fieldName);
+            return Arrays.equals(fieldNames, that.fieldNames);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hashCode(fieldName);
+            return Objects.hashCode(fieldNames);
         }
     }
 
@@ -341,19 +359,20 @@ public interface SchemaChange extends Serializable {
 
         private static final long serialVersionUID = 1L;
 
-        private final String fieldName;
+        private final String[] fieldNames;
         private final DataType newDataType;
         // If true, do not change the target field nullability
         private final boolean keepNullability;
 
-        private UpdateColumnType(String fieldName, DataType newDataType, boolean keepNullability) {
-            this.fieldName = fieldName;
+        private UpdateColumnType(
+                String[] fieldNames, DataType newDataType, boolean keepNullability) {
+            this.fieldNames = fieldNames;
             this.newDataType = newDataType;
             this.keepNullability = keepNullability;
         }
 
-        public String fieldName() {
-            return fieldName;
+        public String[] fieldNames() {
+            return fieldNames;
         }
 
         public DataType newDataType() {
@@ -373,14 +392,14 @@ public interface SchemaChange extends Serializable {
                 return false;
             }
             UpdateColumnType that = (UpdateColumnType) o;
-            return Objects.equals(fieldName, that.fieldName)
+            return Arrays.equals(fieldNames, that.fieldNames)
                     && newDataType.equals(that.newDataType);
         }
 
         @Override
         public int hashCode() {
             int result = Objects.hash(newDataType);
-            result = 31 * result + Objects.hashCode(fieldName);
+            result = 31 * result + Objects.hashCode(fieldNames);
             return result;
         }
     }

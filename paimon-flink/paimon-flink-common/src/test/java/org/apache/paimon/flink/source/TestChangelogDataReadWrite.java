@@ -69,7 +69,7 @@ public class TestChangelogDataReadWrite {
     private static final RowType KEY_TYPE =
             new RowType(singletonList(new DataField(0, "k", new BigIntType())));
     private static final RowType VALUE_TYPE =
-            new RowType(singletonList(new DataField(0, "v", new BigIntType())));
+            new RowType(singletonList(new DataField(1, "v", new BigIntType())));
     private static final RowType PARTITION_TYPE =
             new RowType(singletonList(new DataField(0, "p", new IntType())));
     private static final Comparator<InternalRow> COMPARATOR =
@@ -87,7 +87,7 @@ public class TestChangelogDataReadWrite {
                 @Override
                 public List<DataField> valueFields(TableSchema schema) {
                     return Collections.singletonList(
-                            new DataField(0, "v", new org.apache.paimon.types.BigIntType(false)));
+                            new DataField(1, "v", new org.apache.paimon.types.BigIntType(false)));
                 }
             };
 
@@ -107,7 +107,11 @@ public class TestChangelogDataReadWrite {
                         "default",
                         CoreOptions.FILE_FORMAT.defaultValue().toString(),
                         CoreOptions.DATA_FILE_PREFIX.defaultValue(),
-                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue());
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null);
         this.snapshotManager = new SnapshotManager(LocalFileIO.create(), new Path(root));
         this.commitUser = UUID.randomUUID().toString();
     }

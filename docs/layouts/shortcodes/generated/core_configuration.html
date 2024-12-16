@@ -135,6 +135,12 @@ under the License.
             <td>Maximum number of retries when commit failed.</td>
         </tr>
         <tr>
+            <td><h5>commit.timeout</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>Timeout duration of retry when commit failed.</td>
+        </tr>
+        <tr>
             <td><h5>commit.user-prefix</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -211,6 +217,12 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
             <td>The TTL in rocksdb index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
+        </tr>
+        <tr>
+            <td><h5>data-file.path-directory</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the path directory of data files.</td>
         </tr>
         <tr>
             <td><h5>data-file.prefix</h5></td>
@@ -333,6 +345,12 @@ under the License.
             <td>Define different file format for different level, you can add the conf like this: 'file.format.per.level' = '0:avro,3:parquet', if the file format for level is not provided, the default format which set by `file.format` will be used.</td>
         </tr>
         <tr>
+            <td><h5>file.suffix.include.compression</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to add file compression type in the file name of data file and changelog file.</td>
+        </tr>
+        <tr>
             <td><h5>force-lookup</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -424,6 +442,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Define the default false positive probability for lookup cache bloom filters.</td>
         </tr>
         <tr>
+            <td><h5>lookup.cache.high-priority-pool-ratio</h5></td>
+            <td style="word-wrap: break-word;">0.25</td>
+            <td>Double</td>
+            <td>The fraction of cache memory that is reserved for high-priority data like index, filter.</td>
+        </tr>
+        <tr>
             <td><h5>lookup.hash-load-factor</h5></td>
             <td style="word-wrap: break-word;">0.75</td>
             <td>Float</td>
@@ -431,7 +455,7 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
         </tr>
         <tr>
             <td><h5>lookup.local-file-type</h5></td>
-            <td style="word-wrap: break-word;">hash</td>
+            <td style="word-wrap: break-word;">sort</td>
             <td><p>Enum</p></td>
             <td>The local file type for lookup.<br /><br />Possible values:<ul><li>"sort": Construct a sorted file for lookup.</li><li>"hash": Construct a hash file for lookup.</li></ul></td>
         </tr>
@@ -440,6 +464,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">"zstd"</td>
             <td>String</td>
             <td>Default file compression for manifest.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.delete-file-drop-stats</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>For DELETE manifest entry in manifest file, drop stats to reduce memory and storage. Default value is false only for compatibility of old reader.</td>
         </tr>
         <tr>
             <td><h5>manifest.format</h5></td>
@@ -472,10 +502,10 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Specify the merge engine for table with primary key.<br /><br />Possible values:<ul><li>"deduplicate": De-duplicate and keep the last row.</li><li>"partial-update": Partial update non-null fields.</li><li>"aggregation": Aggregate fields with same primary key.</li><li>"first-row": De-duplicate and keep the first row.</li></ul></td>
         </tr>
         <tr>
-            <td><h5>metadata.iceberg-compatible</h5></td>
-            <td style="word-wrap: break-word;">false</td>
+            <td><h5>metadata.stats-dense-store</h5></td>
+            <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
-            <td>When set to true, produce Iceberg metadata after a snapshot is committed, so that Iceberg readers can read Paimon's raw files.</td>
+            <td>Whether to store statistic densely in metadata (manifest files), which will significantly reduce the storage size of metadata when the none statistic mode is set.<br />Note, when this mode is enabled with 'metadata.stats-mode:none', the Paimon sdk in reading engine requires at least version 0.9.1 or 1.0.0 or higher.</td>
         </tr>
         <tr>
             <td><h5>metadata.stats-mode</h5></td>
@@ -522,6 +552,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>The number of sorted runs that trigger the stopping of writes, the default value is 'num-sorted-run.compaction-trigger' + 3.</td>
         </tr>
         <tr>
+            <td><h5>object-location</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The object location for object table.</td>
+        </tr>
+        <tr>
             <td><h5>page-size</h5></td>
             <td style="word-wrap: break-word;">64 kb</td>
             <td>MemorySize</td>
@@ -540,6 +576,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Whether to remove the whole row in partial-update engine when -D records are received.</td>
         </tr>
         <tr>
+            <td><h5>partial-update.remove-record-on-sequence-group</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>When -D records of the given sequence groups are received, remove the whole row.</td>
+        </tr>
+        <tr>
             <td><h5>partition</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -552,10 +594,22 @@ This config option does not affect the default filesystem metastore.</td>
             <td>The default partition name in case the dynamic partition column value is null/empty string.</td>
         </tr>
         <tr>
+            <td><h5>partition.end-input-to-done</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether mark the done status to indicate that the data is ready when end input.</td>
+        </tr>
+        <tr>
             <td><h5>partition.expiration-check-interval</h5></td>
             <td style="word-wrap: break-word;">1 h</td>
             <td>Duration</td>
             <td>The check interval of partition expiration.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.expiration-max-num</h5></td>
+            <td style="word-wrap: break-word;">100</td>
+            <td>Integer</td>
+            <td>The default deleted num of partition expiration.</td>
         </tr>
         <tr>
             <td><h5>partition.expiration-strategy</h5></td>
@@ -568,6 +622,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
             <td>The expiration interval of a partition. A partition will be expired if it‘s lifetime is over this value. Partition time is extracted from the partition value.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.legacy-name</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>The legacy partition name is using `toString` fpr all types. If false, using cast to string for all types.</td>
         </tr>
         <tr>
             <td><h5>partition.mark-done-action</h5></td>
@@ -609,13 +669,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>record-level.time-field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Time field for record level expire.</td>
-        </tr>
-        <tr>
-            <td><h5>record-level.time-field-type</h5></td>
-            <td style="word-wrap: break-word;">seconds-int</td>
-            <td><p>Enum</p></td>
-            <td>Time field type for record level expire, it can be seconds-int,seconds-long or millis-long.<br /><br />Possible values:<ul><li>"seconds-int": Timestamps in seconds with INT field type.</li><li>"seconds-long": Timestamps in seconds with BIGINT field type.</li><li>"millis-long": Timestamps in milliseconds with BIGINT field type.</li></ul></td>
+            <td>Time field for record level expire. It supports the following types: `timestamps in seconds with INT`,`timestamps in seconds with BIGINT`, `timestamps in milliseconds with BIGINT` or `timestamp`.</td>
         </tr>
         <tr>
             <td><h5>rowkind.field</h5></td>
@@ -702,6 +756,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>The field that generates the sequence number for primary key table, the sequence number determines which data is the most recent.</td>
         </tr>
         <tr>
+            <td><h5>sequence.field.sort-order</h5></td>
+            <td style="word-wrap: break-word;">ascending</td>
+            <td><p>Enum</p></td>
+            <td>Specify the order of sequence.field.<br /><br />Possible values:<ul><li>"ascending": specifies sequence.field sort order is ascending.</li><li>"descending": specifies sequence.field sort order is descending.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>sink.watermark-time-zone</h5></td>
             <td style="word-wrap: break-word;">"UTC"</td>
             <td>String</td>
@@ -721,7 +781,7 @@ This config option does not affect the default filesystem metastore.</td>
         </tr>
         <tr>
             <td><h5>snapshot.expire.limit</h5></td>
-            <td style="word-wrap: break-word;">10</td>
+            <td style="word-wrap: break-word;">50</td>
             <td>Integer</td>
             <td>The maximum number of snapshots allowed to expire at a time.</td>
         </tr>
@@ -805,6 +865,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>Default spill compression zstd level. For higher compression rates, it can be configured to 9, but the read and write speed will significantly decrease.</td>
         </tr>
         <tr>
+            <td><h5>data-file.thin-mode</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Enable data file thin mode to avoid duplicate columns storage.</td>
+        </tr>
+        <tr>
             <td><h5>streaming-read-mode</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td><p>Enum</p></td>
@@ -886,7 +952,7 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td><h5>type</h5></td>
             <td style="word-wrap: break-word;">table</td>
             <td><p>Enum</p></td>
-            <td>Type of the table.<br /><br />Possible values:<ul><li>"table": Normal Paimon table.</li><li>"format-table": A file format table refers to a directory that contains multiple files of the same format.</li><li>"materialized-table": A materialized table.</li></ul></td>
+            <td>Type of the table.<br /><br />Possible values:<ul><li>"table": Normal Paimon table.</li><li>"format-table": A file format table refers to a directory that contains multiple files of the same format.</li><li>"materialized-table": A materialized table combines normal Paimon table and materialized SQL.</li><li>"object-table": A object table combines normal Paimon table and object location.</li></ul></td>
         </tr>
         <tr>
             <td><h5>write-buffer-for-append</h5></td>

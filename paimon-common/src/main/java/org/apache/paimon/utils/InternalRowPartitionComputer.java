@@ -18,15 +18,22 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.casting.CastExecutor;
+import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalRow.FieldGetter;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
 
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.utils.InternalRowUtils.createNullCheckingFieldGetter;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.TypeUtils.castFromString;
 
 /** PartitionComputer for {@link InternalRow}. */
@@ -34,21 +41,29 @@ public class InternalRowPartitionComputer {
 
     protected final String defaultPartValue;
     protected final String[] partitionColumns;
-    protected final InternalRow.FieldGetter[] partitionFieldGetters;
+    protected final FieldGetter[] partitionFieldGetters;
+    protected final CastExecutor[] partitionCastExecutors;
+    protected final List<DataType> types;
+    protected final boolean legacyPartitionName;
 
     public InternalRowPartitionComputer(
-            String defaultPartValue, RowType rowType, String[] partitionColumns) {
+            String defaultPartValue,
+            RowType rowType,
+            String[] partitionColumns,
+            boolean legacyPartitionName) {
         this.defaultPartValue = defaultPartValue;
         this.partitionColumns = partitionColumns;
+        this.types = rowType.getFieldTypes();
+        this.legacyPartitionName = legacyPartitionName;
         List<String> columnList = rowType.getFieldNames();
-        this.partitionFieldGetters =
-                Arrays.stream(partitionColumns)
-                        .mapToInt(columnList::indexOf)
-                        .mapToObj(
-                                i ->
-                                        InternalRowUtils.createNullCheckingFieldGetter(
-                                                rowType.getTypeAt(i), i))
-                        .toArray(InternalRow.FieldGetter[]::new);
+        this.partitionFieldGetters = new FieldGetter[partitionColumns.length];
+        this.partitionCastExecutors = new CastExecutor[partitionColumns.length];
+        for (String partitionColumn : partitionColumns) {
+            int i = columnList.indexOf(partitionColumn);
+            DataType type = rowType.getTypeAt(i);
+            partitionFieldGetters[i] = createNullCheckingFieldGetter(type, i);
+            partitionCastExecutors[i] = CastExecutors.resolve(type, VarCharType.STRING_TYPE);
+        }
     }
 
     public LinkedHashMap<String, String> generatePartValues(InternalRow in) {
@@ -56,7 +71,17 @@ public class InternalRowPartitionComputer {
 
         for (int i = 0; i < partitionFieldGetters.length; i++) {
             Object field = partitionFieldGetters[i].getFieldOrNull(in);
-            String partitionValue = field != null ? field.toString() : null;
+            String partitionValue = null;
+            if (field != null) {
+                if (legacyPartitionName) {
+                    partitionValue = field.toString();
+                } else {
+                    Object casted = partitionCastExecutors[i].cast(field);
+                    if (casted != null) {
+                        partitionValue = casted.toString();
+                    }
+                }
+            }
             if (StringUtils.isNullOrWhitespaceOnly(partitionValue)) {
                 partitionValue = defaultPartValue;
             }
@@ -79,9 +104,25 @@ public class InternalRowPartitionComputer {
         return partValues;
     }
 
+    public static GenericRow convertSpecToInternalRow(
+            Map<String, String> spec, RowType partType, String defaultPartValue) {
+        checkArgument(spec.size() == partType.getFieldCount());
+        GenericRow partRow = new GenericRow(spec.size());
+        List<String> fieldNames = partType.getFieldNames();
+        for (Map.Entry<String, String> entry : spec.entrySet()) {
+            Object value =
+                    defaultPartValue.equals(entry.getValue())
+                            ? null
+                            : castFromString(
+                                    entry.getValue(), partType.getField(entry.getKey()).type());
+            partRow.setField(fieldNames.indexOf(entry.getKey()), value);
+        }
+        return partRow;
+    }
+
     public static String partToSimpleString(
             RowType partitionType, BinaryRow partition, String delimiter, int maxLength) {
-        InternalRow.FieldGetter[] getters = partitionType.fieldGetters();
+        FieldGetter[] getters = partitionType.fieldGetters();
         StringBuilder builder = new StringBuilder();
         for (int i = 0; i < getters.length; i++) {
             Object part = getters[i].getFieldOrNull(partition);

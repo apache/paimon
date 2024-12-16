@@ -154,7 +154,7 @@ public class TableSchemaTest {
         options.put(MERGE_ENGINE.key(), CoreOptions.MergeEngine.FIRST_ROW.toString());
         assertThatThrownBy(() -> validateTableSchema(schema))
                 .hasMessageContaining(
-                        "Do not support use sequence field on FIRST_MERGE merge engine.");
+                        "Do not support use sequence field on FIRST_ROW merge engine.");
 
         options.put(FIELDS_PREFIX + ".f3." + AGG_FUNCTION, "max");
         assertThatThrownBy(() -> validateTableSchema(schema))

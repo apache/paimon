@@ -44,8 +44,6 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  */
 public class FieldNestedUpdateAgg extends FieldAggregator {
 
-    public static final String NAME = "nested_update";
-
     private static final long serialVersionUID = 1L;
 
     private final int nestedFields;
@@ -53,8 +51,8 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
     @Nullable private final Projection keyProjection;
     @Nullable private final RecordEqualiser elementEqualiser;
 
-    public FieldNestedUpdateAgg(ArrayType dataType, List<String> nestedKey) {
-        super(dataType);
+    public FieldNestedUpdateAgg(String name, ArrayType dataType, List<String> nestedKey) {
+        super(name, dataType);
         RowType nestedType = (RowType) dataType.getElementType();
         this.nestedFields = nestedType.getFieldCount();
         if (nestedKey.isEmpty()) {
@@ -67,17 +65,9 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
     }
 
     @Override
-    String name() {
-        return NAME;
-    }
-
-    @Override
     public Object agg(Object accumulator, Object inputField) {
-        if (accumulator == null) {
-            return inputField;
-        }
-        if (inputField == null) {
-            return accumulator;
+        if (accumulator == null || inputField == null) {
+            return accumulator == null ? inputField : accumulator;
         }
 
         InternalArray acc = (InternalArray) accumulator;

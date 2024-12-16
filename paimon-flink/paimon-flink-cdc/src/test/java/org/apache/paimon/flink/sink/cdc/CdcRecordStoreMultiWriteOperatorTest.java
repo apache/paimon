@@ -172,16 +172,14 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         t.start();
 
         // check that records should be processed after table is created
-        Map<String, String> fields = new HashMap<>();
-        fields.put("pt", "0");
-        fields.put("k", "1");
-        fields.put("v", "10");
+        Map<String, String> data = new HashMap<>();
+        data.put("pt", "0");
+        data.put("k", "1");
+        data.put("v", "10");
 
         CdcMultiplexRecord expected =
                 CdcMultiplexRecord.fromCdcRecord(
-                        databaseName,
-                        tableId.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        databaseName, tableId.getObjectName(), new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
         CdcMultiplexRecord actual = runner.poll(1);
 
@@ -192,15 +190,13 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         assertThat(actual).isEqualTo(expected);
 
         // after table is created, record should be processed immediately
-        fields = new HashMap<>();
-        fields.put("pt", "0");
-        fields.put("k", "3");
-        fields.put("v", "30");
+        data = new HashMap<>();
+        data.put("pt", "0");
+        data.put("k", "3");
+        data.put("v", "30");
         expected =
                 CdcMultiplexRecord.fromCdcRecord(
-                        databaseName,
-                        tableId.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        databaseName, tableId.getObjectName(), new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
@@ -227,16 +223,14 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         t.start();
 
         // check that records should be processed after table is created
-        Map<String, String> fields = new HashMap<>();
-        fields.put("pt", "0");
-        fields.put("k", "1");
-        fields.put("v", "10");
+        Map<String, String> data = new HashMap<>();
+        data.put("pt", "0");
+        data.put("k", "1");
+        data.put("v", "10");
 
         CdcMultiplexRecord expected =
                 CdcMultiplexRecord.fromCdcRecord(
-                        databaseName,
-                        tableId.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        databaseName, tableId.getObjectName(), new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
         CdcMultiplexRecord actual = runner.poll(1);
 
@@ -254,15 +248,13 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         assertThat(operator.writes().size()).isEqualTo(1);
 
         // after table is created, record should be processed immediately
-        fields = new HashMap<>();
-        fields.put("pt", "0");
-        fields.put("k", "3");
-        fields.put("v", "30");
+        data = new HashMap<>();
+        data.put("pt", "0");
+        data.put("k", "3");
+        data.put("v", "30");
         expected =
                 CdcMultiplexRecord.fromCdcRecord(
-                        databaseName,
-                        tableId.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        databaseName, tableId.getObjectName(), new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
@@ -302,44 +294,38 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
         // check that records with compatible schema can be processed immediately
 
-        Map<String, String> fields = new HashMap<>();
-        fields.put("pt", "0");
-        fields.put("k", "1");
-        fields.put("v", "10");
+        Map<String, String> data = new HashMap<>();
+        data.put("pt", "0");
+        data.put("k", "1");
+        data.put("v", "10");
 
         CdcMultiplexRecord expected =
                 CdcMultiplexRecord.fromCdcRecord(
-                        databaseName,
-                        tableId.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        databaseName, tableId.getObjectName(), new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
         CdcMultiplexRecord actual = runner.take();
         assertThat(actual).isEqualTo(expected);
 
-        fields = new HashMap<>();
-        fields.put("pt", "0");
-        fields.put("k", "2");
+        data = new HashMap<>();
+        data.put("pt", "0");
+        data.put("k", "2");
         expected =
                 CdcMultiplexRecord.fromCdcRecord(
-                        databaseName,
-                        tableId.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        databaseName, tableId.getObjectName(), new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
 
-        // check that records with new fields should be processed after schema is updated
+        // check that records with new data should be processed after schema is updated
 
-        fields = new HashMap<>();
-        fields.put("pt", "0");
-        fields.put("k", "3");
-        fields.put("v", "30");
-        fields.put("v2", "300");
+        data = new HashMap<>();
+        data.put("pt", "0");
+        data.put("k", "3");
+        data.put("v", "30");
+        data.put("v2", "300");
         expected =
                 CdcMultiplexRecord.fromCdcRecord(
-                        databaseName,
-                        tableId.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        databaseName, tableId.getObjectName(), new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
         actual = runner.poll(1);
         assertThat(actual).isNull();
@@ -383,34 +369,30 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
         // check that records with compatible schema can be processed immediately
 
-        Map<String, String> fields = new HashMap<>();
-        fields.put("k", "1");
-        fields.put("v1", "10");
-        fields.put("v2", "0.625");
-        fields.put("v3", "one");
-        fields.put("v4", "b_one");
+        Map<String, String> data = new HashMap<>();
+        data.put("k", "1");
+        data.put("v1", "10");
+        data.put("v2", "0.625");
+        data.put("v3", "one");
+        data.put("v4", "b_one");
         CdcMultiplexRecord expected =
                 CdcMultiplexRecord.fromCdcRecord(
-                        databaseName,
-                        tableId.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        databaseName, tableId.getObjectName(), new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
         CdcMultiplexRecord actual = runner.take();
         assertThat(actual).isEqualTo(expected);
 
-        // check that records with new fields should be processed after schema is updated
+        // check that records with new data should be processed after schema is updated
 
         // int -> bigint
 
-        fields = new HashMap<>();
-        fields.put("k", "2");
-        fields.put("v1", "12345678987654321");
-        fields.put("v2", "0.25");
+        data = new HashMap<>();
+        data.put("k", "2");
+        data.put("v1", "12345678987654321");
+        data.put("v2", "0.25");
         expected =
                 CdcMultiplexRecord.fromCdcRecord(
-                        databaseName,
-                        tableId.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        databaseName, tableId.getObjectName(), new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
         actual = runner.poll(1);
         assertThat(actual).isNull();
@@ -422,15 +404,13 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
         // float -> double
 
-        fields = new HashMap<>();
-        fields.put("k", "3");
-        fields.put("v1", "100");
-        fields.put("v2", "1.0000000000009095");
+        data = new HashMap<>();
+        data.put("k", "3");
+        data.put("v1", "100");
+        data.put("v2", "1.0000000000009095");
         expected =
                 CdcMultiplexRecord.fromCdcRecord(
-                        databaseName,
-                        tableId.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        databaseName, tableId.getObjectName(), new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
         actual = runner.poll(1);
         assertThat(actual).isNull();
@@ -441,15 +421,13 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
         // varchar(5) -> varchar(10)
 
-        fields = new HashMap<>();
-        fields.put("k", "4");
-        fields.put("v1", "40");
-        fields.put("v3", "long four");
+        data = new HashMap<>();
+        data.put("k", "4");
+        data.put("v1", "40");
+        data.put("v3", "long four");
         expected =
                 CdcMultiplexRecord.fromCdcRecord(
-                        databaseName,
-                        tableId.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        databaseName, tableId.getObjectName(), new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
         actual = runner.poll(1);
         assertThat(actual).isNull();
@@ -460,15 +438,13 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
         // varbinary(5) -> varbinary(10)
 
-        fields = new HashMap<>();
-        fields.put("k", "5");
-        fields.put("v1", "50");
-        fields.put("v4", "long five~");
+        data = new HashMap<>();
+        data.put("k", "5");
+        data.put("v1", "50");
+        data.put("v4", "long five~");
         expected =
                 CdcMultiplexRecord.fromCdcRecord(
-                        databaseName,
-                        tableId.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        databaseName, tableId.getObjectName(), new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
         actual = runner.poll(1);
         assertThat(actual).isNull();
@@ -499,53 +475,53 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         // check that records with compatible schema from different tables
         //     can be processed immediately
 
-        Map<String, String> fields;
+        Map<String, String> data;
 
         // first table record
-        fields = new HashMap<>();
-        fields.put("pt", "0");
-        fields.put("k", "1");
-        fields.put("v", "10");
+        data = new HashMap<>();
+        data.put("pt", "0");
+        data.put("k", "1");
+        data.put("v", "10");
 
         CdcMultiplexRecord expected =
                 CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
                         firstTable.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
         CdcMultiplexRecord actual = runner.take();
         assertThat(actual).isEqualTo(expected);
 
         // second table record
-        fields = new HashMap<>();
-        fields.put("k", "1");
-        fields.put("v1", "10");
-        fields.put("v2", "0.625");
-        fields.put("v3", "one");
-        fields.put("v4", "b_one");
+        data = new HashMap<>();
+        data.put("k", "1");
+        data.put("v1", "10");
+        data.put("v2", "0.625");
+        data.put("v3", "one");
+        data.put("v4", "b_one");
         expected =
                 CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
                         secondTable.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
 
-        // check that records with new fields should be processed after schema is updated
+        // check that records with new data should be processed after schema is updated
 
         // int -> bigint
         SchemaManager schemaManager;
         // first table
-        fields = new HashMap<>();
-        fields.put("pt", "1");
-        fields.put("k", "123456789876543211");
-        fields.put("v", "varchar");
+        data = new HashMap<>();
+        data.put("pt", "1");
+        data.put("k", "123456789876543211");
+        data.put("v", "varchar");
         expected =
                 CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
                         firstTable.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
         actual = runner.poll(1);
         assertThat(actual).isNull();
@@ -556,15 +532,15 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         assertThat(actual).isEqualTo(expected);
 
         // second table
-        fields = new HashMap<>();
-        fields.put("k", "2");
-        fields.put("v1", "12345678987654321");
-        fields.put("v2", "0.25");
+        data = new HashMap<>();
+        data.put("k", "2");
+        data.put("v1", "12345678987654321");
+        data.put("v2", "0.25");
         expected =
                 CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
                         secondTable.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
         actual = runner.poll(1);
         assertThat(actual).isNull();
@@ -577,15 +553,15 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         // below are schema changes only from the second table
         // float -> double
 
-        fields = new HashMap<>();
-        fields.put("k", "3");
-        fields.put("v1", "100");
-        fields.put("v2", "1.0000000000009095");
+        data = new HashMap<>();
+        data.put("k", "3");
+        data.put("v1", "100");
+        data.put("v2", "1.0000000000009095");
         expected =
                 CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
                         secondTable.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
         actual = runner.poll(1);
         assertThat(actual).isNull();
@@ -597,15 +573,15 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
         // varchar(5) -> varchar(10)
 
-        fields = new HashMap<>();
-        fields.put("k", "4");
-        fields.put("v1", "40");
-        fields.put("v3", "long four");
+        data = new HashMap<>();
+        data.put("k", "4");
+        data.put("v1", "40");
+        data.put("v3", "long four");
         expected =
                 CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
                         secondTable.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
         actual = runner.poll(1);
         assertThat(actual).isNull();
@@ -617,15 +593,15 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
         // varbinary(5) -> varbinary(10)
 
-        fields = new HashMap<>();
-        fields.put("k", "5");
-        fields.put("v1", "50");
-        fields.put("v4", "long five~");
+        data = new HashMap<>();
+        data.put("k", "5");
+        data.put("v1", "50");
+        data.put("v4", "long five~");
         expected =
                 CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
                         secondTable.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
         actual = runner.poll(1);
         assertThat(actual).isNull();
@@ -651,33 +627,33 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         t.start();
 
         // write records to two tables thus two FileStoreWrite will be created
-        Map<String, String> fields;
+        Map<String, String> data;
 
         // first table record
-        fields = new HashMap<>();
-        fields.put("pt", "0");
-        fields.put("k", "1");
-        fields.put("v", "10");
+        data = new HashMap<>();
+        data.put("pt", "0");
+        data.put("k", "1");
+        data.put("v", "10");
 
         CdcMultiplexRecord expected =
                 CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
                         firstTable.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
 
         // second table record
-        fields = new HashMap<>();
-        fields.put("k", "1");
-        fields.put("v1", "10");
-        fields.put("v2", "0.625");
-        fields.put("v3", "one");
-        fields.put("v4", "b_one");
+        data = new HashMap<>();
+        data.put("k", "1");
+        data.put("v1", "10");
+        data.put("v2", "0.625");
+        data.put("v3", "one");
+        data.put("v4", "b_one");
         expected =
                 CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
                         secondTable.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
+                        new CdcRecord(RowKind.INSERT, data));
         runner.offer(expected);
 
         // get and check compactExecutor from two FileStoreWrite
@@ -713,8 +689,8 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
     private OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable>
             createTestHarness(Catalog.Loader catalogLoader) throws Exception {
-        CdcRecordStoreMultiWriteOperator operator =
-                new CdcRecordStoreMultiWriteOperator(
+        CdcRecordStoreMultiWriteOperator.Factory operatorFactory =
+                new CdcRecordStoreMultiWriteOperator.Factory(
                         catalogLoader,
                         (t, commitUser, state, ioManager, memoryPoolFactory, metricGroup) ->
                                 new StoreSinkWriteImpl(
@@ -733,7 +709,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         TypeSerializer<MultiTableCommittable> outputSerializer =
                 new MultiTableCommittableTypeInfo().createSerializer(new ExecutionConfig());
         OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable> harness =
-                new OneInputStreamOperatorTestHarness<>(operator, inputSerializer);
+                new OneInputStreamOperatorTestHarness<>(operatorFactory, inputSerializer);
         harness.setup(outputSerializer);
         return harness;
     }

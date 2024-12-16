@@ -132,7 +132,8 @@ public abstract class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<Inte
                 statsCollectors,
                 options.writeBufferSpillDiskSize(),
                 fileIndexOptions,
-                options.asyncFileWrite());
+                options.asyncFileWrite(),
+                options.statsDenseStore());
     }
 
     protected abstract CompactManager getCompactManager(
@@ -193,7 +194,8 @@ public abstract class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<Inte
                 statsCollectors,
                 fileIndexOptions,
                 FileSource.COMPACT,
-                options.asyncFileWrite());
+                options.asyncFileWrite(),
+                options.statsDenseStore());
     }
 
     private RecordReaderIterator<InternalRow> createFilesIterator(
@@ -208,6 +210,9 @@ public abstract class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<Inte
     @Override
     protected void forceBufferSpill() throws Exception {
         if (ioManager == null) {
+            return;
+        }
+        if (forceBufferSpill) {
             return;
         }
         forceBufferSpill = true;

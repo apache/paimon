@@ -33,6 +33,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
@@ -68,6 +69,7 @@ import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_CACHE_MODE;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST;
 import static org.apache.paimon.flink.query.RemoteTableQuery.isRemoteServiceAvailable;
 import static org.apache.paimon.lookup.RocksDBOptions.LOOKUP_CACHE_ROWS;
 import static org.apache.paimon.lookup.RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL;
@@ -86,15 +88,19 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private final List<String> projectFields;
     private final List<String> joinKeys;
     @Nullable private final Predicate predicate;
+    @Nullable private final RefreshBlacklist refreshBlacklist;
 
-    private transient Duration refreshInterval;
     private transient File path;
     private transient LookupTable lookupTable;
 
-    // timestamp when cache expires
-    private transient long nextLoadTime;
+    // interval of refreshing lookup table
+    private transient Duration refreshInterval;
+    // timestamp when refreshing lookup table
+    private transient long nextRefreshTime;
 
     protected FunctionContext functionContext;
+
+    @Nullable private Filter<InternalRow> cacheRowFilter;
 
     public FileStoreLookupFunction(
             Table table, int[] projection, int[] joinKeyIndex, @Nullable Predicate predicate) {
@@ -128,6 +134,10 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         }
 
         this.predicate = predicate;
+
+        this.refreshBlacklist =
+                RefreshBlacklist.create(
+                        table.options().get(LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST.key()));
     }
 
     public void open(FunctionContext context) throws Exception {
@@ -146,11 +156,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     }
 
     private void open() throws Exception {
-        if (partitionLoader != null) {
-            partitionLoader.open();
-        }
-
-        this.nextLoadTime = -1;
+        this.nextRefreshTime = -1;
 
         Options options = Options.fromMap(table.options());
         this.refreshInterval =
@@ -194,7 +200,18 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             this.lookupTable = FullCacheLookupTable.create(context, options.get(LOOKUP_CACHE_ROWS));
         }
 
-        refreshDynamicPartition(false);
+        if (partitionLoader != null) {
+            partitionLoader.open();
+            partitionLoader.checkRefresh();
+            BinaryRow partition = partitionLoader.partition();
+            if (partition != null) {
+                lookupTable.specificPartitionFilter(createSpecificPartFilter(partition));
+            }
+        }
+
+        if (cacheRowFilter != null) {
+            lookupTable.specifyCacheRowFilter(cacheRowFilter);
+        }
         lookupTable.open();
     }
 
@@ -216,15 +233,14 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     public Collection<RowData> lookup(RowData keyRow) {
         try {
-            checkRefresh();
+            tryRefresh();
 
             InternalRow key = new FlinkRowWrapper(keyRow);
             if (partitionLoader != null) {
-                InternalRow partition = refreshDynamicPartition(true);
-                if (partition == null) {
+                if (partitionLoader.partition() == null) {
                     return Collections.emptyList();
                 }
-                key = JoinedRow.join(key, partition);
+                key = JoinedRow.join(key, partitionLoader.partition());
             }
 
             List<InternalRow> results = lookupTable.get(key);
@@ -233,34 +249,12 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 rows.add(new FlinkRowData(matchedRow));
             }
             return rows;
-        } catch (OutOfRangeException e) {
+        } catch (OutOfRangeException | ReopenException e) {
             reopen();
             return lookup(keyRow);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-    }
-
-    @Nullable
-    private BinaryRow refreshDynamicPartition(boolean reopen) throws Exception {
-        if (partitionLoader == null) {
-            return null;
-        }
-
-        boolean partitionChanged = partitionLoader.checkRefresh();
-        BinaryRow partition = partitionLoader.partition();
-        if (partition == null) {
-            return null;
-        }
-
-        lookupTable.specificPartitionFilter(createSpecificPartFilter(partition));
-
-        if (partitionChanged && reopen) {
-            lookupTable.close();
-            lookupTable.open();
-        }
-
-        return partition;
     }
 
     private Predicate createSpecificPartFilter(BinaryRow partition) {
@@ -287,20 +281,51 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         }
     }
 
-    private void checkRefresh() throws Exception {
-        if (nextLoadTime > System.currentTimeMillis()) {
+    @VisibleForTesting
+    void tryRefresh() throws Exception {
+        // 1. check if this time is in black list
+        if (refreshBlacklist != null && !refreshBlacklist.canRefresh()) {
             return;
         }
-        if (nextLoadTime > 0) {
+
+        // 2. refresh dynamic partition
+        if (partitionLoader != null) {
+            boolean partitionChanged = partitionLoader.checkRefresh();
+            BinaryRow partition = partitionLoader.partition();
+            if (partition == null) {
+                // no data to be load, fast exit
+                return;
+            }
+
+            if (partitionChanged) {
+                // reopen with latest partition
+                lookupTable.specificPartitionFilter(createSpecificPartFilter(partition));
+                lookupTable.close();
+                lookupTable.open();
+                // no need to refresh the lookup table because it is reopened
+                return;
+            }
+        }
+
+        // 3. refresh lookup table
+        if (shouldRefreshLookupTable()) {
+            lookupTable.refresh();
+            nextRefreshTime = System.currentTimeMillis() + refreshInterval.toMillis();
+        }
+    }
+
+    private boolean shouldRefreshLookupTable() {
+        if (nextRefreshTime > System.currentTimeMillis()) {
+            return false;
+        }
+
+        if (nextRefreshTime > 0) {
             LOG.info(
                     "Lookup table {} has refreshed after {} second(s), refreshing",
                     table.name(),
                     refreshInterval.toMillis() / 1000);
         }
-
-        refresh();
-
-        nextLoadTime = System.currentTimeMillis() + refreshInterval.toMillis();
+        return true;
     }
 
     @VisibleForTesting
@@ -308,8 +333,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         return lookupTable;
     }
 
-    private void refresh() throws Exception {
-        lookupTable.refresh();
+    @VisibleForTesting
+    long nextBlacklistCheckTime() {
+        return refreshBlacklist == null ? -1 : refreshBlacklist.nextBlacklistCheckTime();
     }
 
     @Override
@@ -360,5 +386,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     protected Set<Integer> getRequireCachedBucketIds() {
         // TODO: Implement the method when Flink support bucket shuffle for lookup join.
         return null;
+    }
+
+    protected void setCacheRowFilter(@Nullable Filter<InternalRow> cacheRowFilter) {
+        this.cacheRowFilter = cacheRowFilter;
     }
 }

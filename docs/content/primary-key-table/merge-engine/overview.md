@@ -3,7 +3,7 @@ title: "Overview"
 weight: 1
 type: docs
 aliases:
-- /cdc-ingestion/merge-engin/overview.html
+- /primary-key-table/merge-engine/overview.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

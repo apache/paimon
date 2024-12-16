@@ -102,12 +102,16 @@ public class PrivilegedCatalog extends DelegateCatalog {
             throws TableNotExistException, TableAlreadyExistException {
         privilegeManager.getPrivilegeChecker().assertCanAlterTable(fromTable);
         wrapped.renameTable(fromTable, toTable, ignoreIfNotExists);
-        Preconditions.checkState(
-                wrapped.tableExists(toTable),
-                "Table "
-                        + toTable
-                        + " does not exist. There might be concurrent renaming. "
-                        + "Aborting updates in privilege system.");
+
+        try {
+            getTable(toTable);
+        } catch (TableNotExistException e) {
+            throw new IllegalStateException(
+                    "Table "
+                            + toTable
+                            + " does not exist. There might be concurrent renaming. "
+                            + "Aborting updates in privilege system.");
+        }
         privilegeManager.objectRenamed(fromTable.getFullName(), toTable.getFullName());
     }
 
@@ -123,7 +127,7 @@ public class PrivilegedCatalog extends DelegateCatalog {
     public Table getTable(Identifier identifier) throws TableNotExistException {
         Table table = wrapped.getTable(identifier);
         if (table instanceof FileStoreTable) {
-            return new PrivilegedFileStoreTable(
+            return PrivilegedFileStoreTable.wrap(
                     (FileStoreTable) table, privilegeManager.getPrivilegeChecker(), identifier);
         } else {
             return table;
@@ -157,8 +161,11 @@ public class PrivilegedCatalog extends DelegateCatalog {
         Preconditions.checkArgument(
                 privilege.canGrantOnDatabase(),
                 "Privilege " + privilege + " can't be granted on a database");
-        Preconditions.checkArgument(
-                databaseExists(databaseName), "Database " + databaseName + " does not exist");
+        try {
+            getDatabase(databaseName);
+        } catch (DatabaseNotExistException e) {
+            throw new IllegalArgumentException("Database " + databaseName + " does not exist");
+        }
         privilegeManager.grant(user, databaseName, privilege);
     }
 
@@ -166,8 +173,12 @@ public class PrivilegedCatalog extends DelegateCatalog {
         Preconditions.checkArgument(
                 privilege.canGrantOnTable(),
                 "Privilege " + privilege + " can't be granted on a table");
-        Preconditions.checkArgument(
-                tableExists(identifier), "Table " + identifier + " does not exist");
+
+        try {
+            getTable(identifier);
+        } catch (TableNotExistException e) {
+            throw new IllegalArgumentException("Table " + identifier + " does not exist");
+        }
         privilegeManager.grant(user, identifier.getFullName(), privilege);
     }
 

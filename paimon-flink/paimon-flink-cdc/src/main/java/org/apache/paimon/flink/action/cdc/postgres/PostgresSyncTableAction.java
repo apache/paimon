@@ -103,6 +103,7 @@ public class PostgresSyncTableAction extends SyncTableActionBase {
 
     @Override
     protected JdbcIncrementalSource<CdcSourceRecord> buildSource() {
+        validateRuntimeExecutionMode();
         List<JdbcSchemasInfo.JdbcSchemaInfo> pkTables = postgresSchemasInfo.pkTables();
         Set<String> schemaList = new HashSet<>();
         String[] tableList = new String[pkTables.size()];

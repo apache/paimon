@@ -23,6 +23,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleStatsExtractor;
@@ -32,6 +33,7 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
 import org.slf4j.Logger;
@@ -40,8 +42,11 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.function.Function;
+
+import static org.apache.paimon.io.DataFilePathFactory.dataFileToFileIndexPath;
 
 /**
  * A {@link StatsCollectingSingleFileWriter} to write data files containing {@link KeyValue}s. Also
@@ -50,13 +55,13 @@ import java.util.function.Function;
  * <p>NOTE: records given to the writer must be sorted because it does not compare the min max keys
  * to produce {@link DataFileMeta}.
  */
-public class KeyValueDataFileWriter
+public abstract class KeyValueDataFileWriter
         extends StatsCollectingSingleFileWriter<KeyValue, DataFileMeta> {
 
     private static final Logger LOG = LoggerFactory.getLogger(KeyValueDataFileWriter.class);
 
-    private final RowType keyType;
-    private final RowType valueType;
+    protected final RowType keyType;
+    protected final RowType valueType;
     private final long schemaId;
     private final int level;
 
@@ -64,6 +69,7 @@ public class KeyValueDataFileWriter
     private final SimpleStatsConverter valueStatsConverter;
     private final InternalRowSerializer keySerializer;
     private final FileSource fileSource;
+    @Nullable private final DataFileIndexWriter dataFileIndexWriter;
 
     private BinaryRow minKey = null;
     private InternalRow maxKey = null;
@@ -78,22 +84,24 @@ public class KeyValueDataFileWriter
             Function<KeyValue, InternalRow> converter,
             RowType keyType,
             RowType valueType,
+            RowType writeRowType,
             @Nullable SimpleStatsExtractor simpleStatsExtractor,
             long schemaId,
             int level,
             String compression,
             CoreOptions options,
-            FileSource fileSource) {
+            FileSource fileSource,
+            FileIndexOptions fileIndexOptions) {
         super(
                 fileIO,
                 factory,
                 path,
                 converter,
-                KeyValue.schema(keyType, valueType),
+                writeRowType,
                 simpleStatsExtractor,
                 compression,
                 StatsCollectorFactories.createStatsFactories(
-                        options, KeyValue.schema(keyType, valueType).getFieldNames()),
+                        options, writeRowType.getFieldNames(), keyType.getFieldNames()),
                 options.asyncFileWrite());
 
         this.keyType = keyType;
@@ -102,14 +110,21 @@ public class KeyValueDataFileWriter
         this.level = level;
 
         this.keyStatsConverter = new SimpleStatsConverter(keyType);
-        this.valueStatsConverter = new SimpleStatsConverter(valueType);
+        this.valueStatsConverter = new SimpleStatsConverter(valueType, options.statsDenseStore());
         this.keySerializer = new InternalRowSerializer(keyType);
         this.fileSource = fileSource;
+        this.dataFileIndexWriter =
+                DataFileIndexWriter.create(
+                        fileIO, dataFileToFileIndexPath(path), valueType, fileIndexOptions);
     }
 
     @Override
     public void write(KeyValue kv) throws IOException {
         super.write(kv);
+
+        if (dataFileIndexWriter != null) {
+            dataFileIndexWriter.write(kv.value());
+        }
 
         updateMinKey(kv);
         updateMaxKey(kv);
@@ -151,15 +166,16 @@ public class KeyValueDataFileWriter
             return null;
         }
 
-        SimpleColStats[] rowStats = fieldStats();
-        int numKeyFields = keyType.getFieldCount();
+        Pair<SimpleColStats[], SimpleColStats[]> keyValueStats = fetchKeyValueStats(fieldStats());
 
-        SimpleColStats[] keyFieldStats = Arrays.copyOfRange(rowStats, 0, numKeyFields);
-        SimpleStats keyStats = keyStatsConverter.toBinary(keyFieldStats);
+        SimpleStats keyStats = keyStatsConverter.toBinaryAllMode(keyValueStats.getKey());
+        Pair<List<String>, SimpleStats> valueStatsPair =
+                valueStatsConverter.toBinary(keyValueStats.getValue());
 
-        SimpleColStats[] valFieldStats =
-                Arrays.copyOfRange(rowStats, numKeyFields + 2, rowStats.length);
-        SimpleStats valueStats = valueStatsConverter.toBinary(valFieldStats);
+        DataFileIndexWriter.FileIndexResult indexResult =
+                dataFileIndexWriter == null
+                        ? DataFileIndexWriter.EMPTY_RESULT
+                        : dataFileIndexWriter.result();
 
         return new DataFileMeta(
                 path.getName(),
@@ -168,14 +184,27 @@ public class KeyValueDataFileWriter
                 minKey,
                 keySerializer.toBinaryRow(maxKey).copy(),
                 keyStats,
-                valueStats,
+                valueStatsPair.getValue(),
                 minSeqNumber,
                 maxSeqNumber,
                 schemaId,
                 level,
+                indexResult.independentIndexFile() == null
+                        ? Collections.emptyList()
+                        : Collections.singletonList(indexResult.independentIndexFile()),
                 deleteRecordCount,
-                // TODO: enable file filter for primary key table (e.g. deletion table).
-                null,
-                fileSource);
+                indexResult.embeddedIndexBytes(),
+                fileSource,
+                valueStatsPair.getKey());
+    }
+
+    abstract Pair<SimpleColStats[], SimpleColStats[]> fetchKeyValueStats(SimpleColStats[] rowStats);
+
+    @Override
+    public void close() throws IOException {
+        if (dataFileIndexWriter != null) {
+            dataFileIndexWriter.close();
+        }
+        super.close();
     }
 }

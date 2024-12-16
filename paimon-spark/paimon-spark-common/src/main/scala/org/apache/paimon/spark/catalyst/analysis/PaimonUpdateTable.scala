@@ -41,7 +41,7 @@ object PaimonUpdateTable
 
         table.getTable match {
           case paimonTable: FileStoreTable =>
-            val primaryKeys = paimonTable.primaryKeys().asScala
+            val primaryKeys = paimonTable.primaryKeys().asScala.toSeq
             if (!validUpdateAssignment(u.table.outputSet, primaryKeys, assignments)) {
               throw new RuntimeException("Can't update the primary key column.")
             }

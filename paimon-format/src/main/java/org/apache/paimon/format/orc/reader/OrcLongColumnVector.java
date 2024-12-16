@@ -19,6 +19,7 @@
 package org.apache.paimon.format.orc.reader;
 
 import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
+import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 
 /**
  * This column vector is used to adapt hive's LongColumnVector to Paimon's boolean, byte, short, int
@@ -33,33 +34,38 @@ public class OrcLongColumnVector extends AbstractOrcColumnVector
 
     private final LongColumnVector vector;
 
-    public OrcLongColumnVector(LongColumnVector vector) {
-        super(vector);
+    public OrcLongColumnVector(LongColumnVector vector, VectorizedRowBatch orcBatch) {
+        super(vector, orcBatch);
         this.vector = vector;
     }
 
     @Override
     public long getLong(int i) {
-        return vector.vector[vector.isRepeating ? 0 : i];
+        i = rowMapper(i);
+        return vector.vector[i];
     }
 
     @Override
     public boolean getBoolean(int i) {
-        return vector.vector[vector.isRepeating ? 0 : i] == 1;
+        i = rowMapper(i);
+        return vector.vector[i] == 1;
     }
 
     @Override
     public byte getByte(int i) {
-        return (byte) vector.vector[vector.isRepeating ? 0 : i];
+        i = rowMapper(i);
+        return (byte) vector.vector[i];
     }
 
     @Override
     public int getInt(int i) {
-        return (int) vector.vector[vector.isRepeating ? 0 : i];
+        i = rowMapper(i);
+        return (int) vector.vector[i];
     }
 
     @Override
     public short getShort(int i) {
-        return (short) vector.vector[vector.isRepeating ? 0 : i];
+        i = rowMapper(i);
+        return (short) vector.vector[i];
     }
 }

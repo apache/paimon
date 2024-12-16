@@ -30,6 +30,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.FunctionWithIOException;
 import org.apache.paimon.utils.TypeUtils;
 
@@ -51,6 +52,7 @@ public class LookupStreamingReader {
 
     private final LookupFileStoreTable table;
     private final int[] projection;
+    @Nullable private final Filter<InternalRow> cacheRowFilter;
     private final ReadBuilder readBuilder;
     @Nullable private final Predicate projectedPredicate;
     private final StreamTableScan scan;
@@ -59,9 +61,11 @@ public class LookupStreamingReader {
             LookupFileStoreTable table,
             int[] projection,
             @Nullable Predicate predicate,
-            Set<Integer> requireCachedBucketIds) {
+            Set<Integer> requireCachedBucketIds,
+            @Nullable Filter<InternalRow> cacheRowFilter) {
         this.table = table;
         this.projection = projection;
+        this.cacheRowFilter = cacheRowFilter;
         this.readBuilder =
                 this.table
                         .newReadBuilder()
@@ -124,6 +128,10 @@ public class LookupStreamingReader {
 
         if (projectedPredicate != null) {
             reader = reader.filter(projectedPredicate::test);
+        }
+
+        if (cacheRowFilter != null) {
+            reader = reader.filter(cacheRowFilter);
         }
         return reader;
     }

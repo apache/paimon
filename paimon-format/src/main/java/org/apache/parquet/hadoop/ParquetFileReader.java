@@ -18,10 +18,13 @@
 
 package org.apache.parquet.hadoop;
 
+import org.apache.paimon.fileindex.FileIndexResult;
+import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.format.parquet.ParquetInputFile;
 import org.apache.paimon.format.parquet.ParquetInputStream;
 import org.apache.paimon.fs.FileRange;
 import org.apache.paimon.fs.VectoredReadable;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.ParquetReadOptions;
@@ -92,6 +95,7 @@ import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
+import java.util.stream.Collectors;
 import java.util.zip.CRC32;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -225,10 +229,14 @@ public class ParquetFileReader implements Closeable {
     private DictionaryPageReader nextDictionaryReader = null;
 
     private InternalFileDecryptor fileDecryptor = null;
+    private FileIndexResult fileIndexResult;
 
-    public ParquetFileReader(InputFile file, ParquetReadOptions options) throws IOException {
+    public ParquetFileReader(
+            InputFile file, ParquetReadOptions options, FileIndexResult fileIndexResult)
+            throws IOException {
         this.converter = new ParquetMetadataConverter(options);
         this.file = (ParquetInputFile) file;
+        this.fileIndexResult = fileIndexResult;
         this.f = this.file.newStream();
         this.options = options;
         try {
@@ -333,22 +341,38 @@ public class ParquetFileReader implements Closeable {
 
     private List<BlockMetaData> filterRowGroups(List<BlockMetaData> blocks) throws IOException {
         FilterCompat.Filter recordFilter = options.getRecordFilter();
-        if (checkRowIndexOffsetExists(blocks) && FilterCompat.isFilteringRequired(recordFilter)) {
-            // set up data filters based on configured levels
-            List<RowGroupFilter.FilterLevel> levels = new ArrayList<>();
+        if (checkRowIndexOffsetExists(blocks)) {
+            if (FilterCompat.isFilteringRequired(recordFilter)) {
+                // set up data filters based on configured levels
+                List<RowGroupFilter.FilterLevel> levels = new ArrayList<>();
 
-            if (options.useStatsFilter()) {
-                levels.add(STATISTICS);
-            }
+                if (options.useStatsFilter()) {
+                    levels.add(STATISTICS);
+                }
 
-            if (options.useDictionaryFilter()) {
-                levels.add(DICTIONARY);
-            }
+                if (options.useDictionaryFilter()) {
+                    levels.add(DICTIONARY);
+                }
 
-            if (options.useBloomFilter()) {
-                levels.add(BLOOMFILTER);
+                if (options.useBloomFilter()) {
+                    levels.add(BLOOMFILTER);
+                }
+                blocks = RowGroupFilter.filterRowGroups(levels, recordFilter, blocks, this);
             }
-            return RowGroupFilter.filterRowGroups(levels, recordFilter, blocks, this);
+            if (fileIndexResult instanceof BitmapIndexResult) {
+                RoaringBitmap32 bitmap = ((BitmapIndexResult) fileIndexResult).get();
+                blocks =
+                        blocks.stream()
+                                .filter(
+                                        it -> {
+                                            long rowIndexOffset = it.getRowIndexOffset();
+                                            return bitmap.rangeCardinality(
+                                                            rowIndexOffset,
+                                                            rowIndexOffset + it.getRowCount())
+                                                    > 0;
+                                        })
+                                .collect(Collectors.toList());
+            }
         }
 
         return blocks;

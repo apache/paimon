@@ -51,7 +51,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.flink.configuration.CoreOptions.DEFAULT_PARALLELISM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SAMPLE_FACTOR;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.MIN_CLUSTERING_SAMPLE_FACTOR;
@@ -223,7 +222,7 @@ public class FlinkSinkBuilder {
                             .transform(
                                     "local merge",
                                     input.getType(),
-                                    new LocalMergeOperator(table.schema()))
+                                    new LocalMergeOperator.Factory(table.schema()))
                             .setParallelism(input.getParallelism());
         }
 
@@ -266,6 +265,16 @@ public class FlinkSinkBuilder {
     }
 
     protected DataStreamSink<?> buildForFixedBucket(DataStream<InternalRow> input) {
+        int bucketNums = table.bucketSpec().getNumBuckets();
+        if (parallelism == null
+                && bucketNums < input.getParallelism()
+                && table.partitionKeys().isEmpty()) {
+            // For non-partitioned table, if the bucketNums is less than job parallelism.
+            LOG.warn(
+                    "For non-partitioned table, if bucketNums is less than the parallelism of inputOperator,"
+                            + " then the parallelism of writerOperator will be set to bucketNums.");
+            parallelism = bucketNums;
+        }
         DataStream<InternalRow> partitioned =
                 partition(
                         input,
@@ -318,11 +327,11 @@ public class FlinkSinkBuilder {
                     parallelismSource = "input parallelism";
                     parallelism = input.getParallelism();
                 } else {
-                    parallelismSource = DEFAULT_PARALLELISM.key();
+                    parallelismSource = "AdaptiveBatchScheduler's default max parallelism";
                     parallelism =
-                            input.getExecutionEnvironment()
-                                    .getConfiguration()
-                                    .get(DEFAULT_PARALLELISM);
+                            AdaptiveParallelism.getDefaultMaxParallelism(
+                                    input.getExecutionEnvironment().getConfiguration(),
+                                    input.getExecutionConfig());
                 }
                 String msg =
                         String.format(

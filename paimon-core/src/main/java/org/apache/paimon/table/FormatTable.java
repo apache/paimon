@@ -34,6 +34,7 @@ import org.apache.paimon.utils.SimpleFileReader;
 import javax.annotation.Nullable;
 
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -68,6 +69,19 @@ public interface FormatTable extends Table {
         ORC,
         PARQUET,
         CSV
+    }
+
+    /** Parses a file format string to a corresponding {@link Format} enum constant. */
+    static Format parseFormat(String fileFormat) {
+        try {
+            return Format.valueOf(fileFormat.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new UnsupportedOperationException(
+                    "Format table unsupported file format: "
+                            + fileFormat
+                            + ". Supported formats: "
+                            + Arrays.toString(Format.values()));
+        }
     }
 
     /** Create a new builder for {@link FormatTable}. */
@@ -268,6 +282,11 @@ public interface FormatTable extends Table {
 
     @Override
     default void renameTag(String tagName, String targetTagName) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    default void replaceTag(String tagName, Long fromSnapshotId, Duration timeRetained) {
         throw new UnsupportedOperationException();
     }
 

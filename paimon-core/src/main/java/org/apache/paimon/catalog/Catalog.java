@@ -21,17 +21,17 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.metastore.MetastoreClient;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.view.View;
 
 import java.io.Serializable;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
@@ -52,10 +52,17 @@ public interface Catalog extends AutoCloseable {
     String SYSTEM_TABLE_SPLITTER = "$";
     String SYSTEM_DATABASE_NAME = "sys";
     String SYSTEM_BRANCH_PREFIX = "branch_";
-    String COMMENT_PROP = "comment";
     String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
-    String DB_LOCATION_PROP = "location";
     String DB_SUFFIX = ".db";
+
+    String COMMENT_PROP = "comment";
+    String OWNER_PROP = "owner";
+    String DB_LOCATION_PROP = "location";
+    String NUM_ROWS_PROP = "numRows";
+    String NUM_FILES_PROP = "numFiles";
+    String TOTAL_SIZE_PROP = "totalSize";
+    String LAST_UPDATE_TIME_PROP = "lastUpdateTime";
+    String HIVE_LAST_UPDATE_TIME_PROP = "transient_lastDdlTime";
 
     /** Warehouse root path containing all database directories in this catalog. */
     String warehouse();
@@ -66,42 +73,11 @@ public interface Catalog extends AutoCloseable {
     FileIO fileIO();
 
     /**
-     * Get lock factory from catalog. Lock is used to support multiple concurrent writes on the
-     * object store.
-     */
-    Optional<CatalogLockFactory> lockFactory();
-
-    /** Get lock context for lock factory to create a lock. */
-    default Optional<CatalogLockContext> lockContext() {
-        return Optional.empty();
-    }
-
-    /** Get metastore client factory for the table specified by {@code identifier}. */
-    default Optional<MetastoreClient.Factory> metastoreClientFactory(Identifier identifier) {
-        return Optional.empty();
-    }
-
-    /**
      * Get the names of all databases in this catalog.
      *
      * @return a list of the names of all databases
      */
     List<String> listDatabases();
-
-    /**
-     * Check if a database exists in this catalog.
-     *
-     * @param databaseName Name of the database
-     * @return true if the given database exists in the catalog false otherwise
-     */
-    default boolean databaseExists(String databaseName) {
-        try {
-            loadDatabaseProperties(databaseName);
-            return true;
-        } catch (DatabaseNotExistException e) {
-            return false;
-        }
-    }
 
     /**
      * Create a database, see {@link Catalog#createDatabase(String name, boolean ignoreIfExists, Map
@@ -127,13 +103,13 @@ public interface Catalog extends AutoCloseable {
             throws DatabaseAlreadyExistException;
 
     /**
-     * Load database properties.
+     * Return a {@link Database} identified by the given name.
      *
      * @param name Database name
-     * @return The requested database's properties
+     * @return The requested {@link Database}
      * @throws DatabaseNotExistException if the requested database does not exist
      */
-    Map<String, String> loadDatabaseProperties(String name) throws DatabaseNotExistException;
+    Database getDatabase(String name) throws DatabaseNotExistException;
 
     /**
      * Drop a database.
@@ -177,20 +153,6 @@ public interface Catalog extends AutoCloseable {
      * @throws DatabaseNotExistException if the database does not exist
      */
     List<String> listTables(String databaseName) throws DatabaseNotExistException;
-
-    /**
-     * Check if a table exists in this catalog.
-     *
-     * @param identifier Path of the table
-     * @return true if the given table exists in the catalog false otherwise
-     */
-    default boolean tableExists(Identifier identifier) {
-        try {
-            return getTable(identifier) != null;
-        } catch (TableNotExistException e) {
-            return false;
-        }
-    }
 
     /**
      * Drop a table.
@@ -263,6 +225,19 @@ public interface Catalog extends AutoCloseable {
     default void invalidateTable(Identifier identifier) {}
 
     /**
+     * Create the partition of the specify table.
+     *
+     * <p>Only catalog with metastore can support this method, and only table with
+     * 'metastore.partitioned-table' can support this method.
+     *
+     * @param identifier path of the table to drop partition
+     * @param partitionSpec the partition to be created
+     * @throws TableNotExistException if the table does not exist
+     */
+    void createPartition(Identifier identifier, Map<String, String> partitionSpec)
+            throws TableNotExistException;
+
+    /**
      * Drop the partition of the specify table.
      *
      * @param identifier path of the table to drop partition
@@ -272,6 +247,14 @@ public interface Catalog extends AutoCloseable {
      */
     void dropPartition(Identifier identifier, Map<String, String> partitions)
             throws TableNotExistException, PartitionNotExistException;
+
+    /**
+     * Get PartitionEntry of all partitions of the table.
+     *
+     * @param identifier path of the table to list partitions
+     * @throws TableNotExistException if the table does not exist
+     */
+    List<PartitionEntry> listPartitions(Identifier identifier) throws TableNotExistException;
 
     /**
      * Modify an existing table from a {@link SchemaChange}.
@@ -287,6 +270,68 @@ public interface Catalog extends AutoCloseable {
     default void alterTable(Identifier identifier, SchemaChange change, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         alterTable(identifier, Collections.singletonList(change), ignoreIfNotExists);
+    }
+
+    /**
+     * Return a {@link View} identified by the given {@link Identifier}.
+     *
+     * @param identifier Path of the view
+     * @return The requested view
+     * @throws ViewNotExistException if the target does not exist
+     */
+    default View getView(Identifier identifier) throws ViewNotExistException {
+        throw new ViewNotExistException(identifier);
+    }
+
+    /**
+     * Drop a view.
+     *
+     * @param identifier Path of the view to be dropped
+     * @param ignoreIfNotExists Flag to specify behavior when the view does not exist: if set to
+     *     false, throw an exception, if set to true, do nothing.
+     * @throws ViewNotExistException if the view does not exist
+     */
+    default void dropView(Identifier identifier, boolean ignoreIfNotExists)
+            throws ViewNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Create a new view.
+     *
+     * @param identifier path of the view to be created
+     * @param view the view definition
+     * @param ignoreIfExists flag to specify behavior when a view already exists at the given path:
+     *     if set to false, it throws a ViewAlreadyExistException, if set to true, do nothing.
+     * @throws ViewAlreadyExistException if view already exists and ignoreIfExists is false
+     * @throws DatabaseNotExistException if the database in identifier doesn't exist
+     */
+    default void createView(Identifier identifier, View view, boolean ignoreIfExists)
+            throws ViewAlreadyExistException, DatabaseNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Get names of all views under this database. An empty list is returned if none exists.
+     *
+     * @return a list of the names of all views in this database
+     * @throws DatabaseNotExistException if the database does not exist
+     */
+    default List<String> listViews(String databaseName) throws DatabaseNotExistException {
+        return Collections.emptyList();
+    }
+
+    /**
+     * Rename a view.
+     *
+     * @param fromView identifier of the view to rename
+     * @param toView new view identifier
+     * @throws ViewNotExistException if the fromView does not exist
+     * @throws ViewAlreadyExistException if the toView already exists
+     */
+    default void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
+            throws ViewNotExistException, ViewAlreadyExistException {
+        throw new UnsupportedOperationException();
     }
 
     /** Return a boolean that indicates whether this catalog allow upper case. */
@@ -519,6 +564,48 @@ public interface Catalog extends AutoCloseable {
 
         public String column() {
             return column;
+        }
+    }
+
+    /** Exception for trying to create a view that already exists. */
+    class ViewAlreadyExistException extends Exception {
+
+        private static final String MSG = "View %s already exists.";
+
+        private final Identifier identifier;
+
+        public ViewAlreadyExistException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public ViewAlreadyExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+    }
+
+    /** Exception for trying to operate on a view that doesn't exist. */
+    class ViewNotExistException extends Exception {
+
+        private static final String MSG = "View %s does not exist.";
+
+        private final Identifier identifier;
+
+        public ViewNotExistException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public ViewNotExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
         }
     }
 

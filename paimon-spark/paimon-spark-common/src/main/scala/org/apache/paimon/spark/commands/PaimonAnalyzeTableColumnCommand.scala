@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.manifest.PartitionEntry
 import org.apache.paimon.schema.TableSchema
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
@@ -25,8 +26,8 @@ import org.apache.paimon.stats.{ColStats, Statistics}
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
 import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.utils.Preconditions.checkState
 
-import org.apache.parquet.Preconditions
 import org.apache.spark.sql.{PaimonStatsUtils, Row, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.logical.ColumnStat
@@ -64,19 +65,15 @@ case class PaimonAnalyzeTableColumnCommand(
     // compute stats
     val totalSize = table
       .newScan()
-      .plan()
-      .splits()
+      .listPartitionEntries()
       .asScala
-      .flatMap { case split: DataSplit => split.dataFiles().asScala }
-      .map(_.fileSize())
+      .map(_.fileSizeInBytes())
       .sum
     val (mergedRecordCount, colStats) =
       PaimonStatsUtils.computeColumnStats(sparkSession, relation, attributes)
 
     val totalRecordCount = currentSnapshot.totalRecordCount()
-    Preconditions.checkState(
-      totalRecordCount >= mergedRecordCount,
-      s"totalRecordCount: $totalRecordCount should be greater or equal than mergedRecordCount: $mergedRecordCount.")
+    checkState(totalRecordCount >= mergedRecordCount)
     val mergedRecordSize = totalSize * (mergedRecordCount.toDouble / totalRecordCount).toLong
 
     // convert to paimon stats
@@ -97,6 +94,7 @@ case class PaimonAnalyzeTableColumnCommand(
     // commit stats
     val commit = table.store.newCommit(UUID.randomUUID.toString)
     commit.commitStatistics(stats, BatchWriteBuilder.COMMIT_IDENTIFIER)
+    commit.close()
 
     Seq.empty[Row]
   }

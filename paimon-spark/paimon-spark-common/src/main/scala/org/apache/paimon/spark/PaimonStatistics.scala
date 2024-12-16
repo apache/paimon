@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.stats.ColStats
 import org.apache.paimon.types.{DataField, DataType, RowType}
 
@@ -118,8 +119,10 @@ object PaimonColumnStats {
   def apply(dateType: DataType, paimonColStats: ColStats[_]): PaimonColumnStats = {
     PaimonColumnStats(
       paimonColStats.nullCount,
-      Optional.ofNullable(SparkInternalRow.fromPaimon(paimonColStats.min().orElse(null), dateType)),
-      Optional.ofNullable(SparkInternalRow.fromPaimon(paimonColStats.max().orElse(null), dateType)),
+      Optional.ofNullable(
+        DataConverter
+          .fromPaimon(paimonColStats.min().orElse(null), dateType)),
+      Optional.ofNullable(DataConverter.fromPaimon(paimonColStats.max().orElse(null), dateType)),
       paimonColStats.distinctCount,
       paimonColStats.avgLen,
       paimonColStats.maxLen
@@ -129,12 +132,12 @@ object PaimonColumnStats {
   def apply(v1ColStats: ColumnStat): PaimonColumnStats = {
     import PaimonImplicits._
     PaimonColumnStats(
-      if (v1ColStats.nullCount.isDefined) OptionalLong.of(v1ColStats.nullCount.get.longValue())
+      if (v1ColStats.nullCount.isDefined) OptionalLong.of(v1ColStats.nullCount.get.longValue)
       else OptionalLong.empty(),
       v1ColStats.min,
       v1ColStats.max,
       if (v1ColStats.distinctCount.isDefined)
-        OptionalLong.of(v1ColStats.distinctCount.get.longValue())
+        OptionalLong.of(v1ColStats.distinctCount.get.longValue)
       else OptionalLong.empty(),
       if (v1ColStats.avgLen.isDefined) OptionalLong.of(v1ColStats.avgLen.get.longValue())
       else OptionalLong.empty(),

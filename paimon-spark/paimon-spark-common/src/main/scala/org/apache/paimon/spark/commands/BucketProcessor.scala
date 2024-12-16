@@ -22,7 +22,7 @@ import org.apache.paimon.crosspartition.{GlobalIndexAssigner, KeyPartOrRow}
 import org.apache.paimon.data.{BinaryRow, GenericRow, InternalRow => PaimonInternalRow, JoinedRow}
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.index.HashBucketAssigner
-import org.apache.paimon.spark.{SparkInternalRow, SparkRow}
+import org.apache.paimon.spark.{DataConverter, SparkRow}
 import org.apache.paimon.spark.SparkUtils.createIOManager
 import org.apache.paimon.spark.util.EncoderUtils
 import org.apache.paimon.table.FileStoreTable
@@ -179,7 +179,7 @@ class GlobalIndexAssignerIterator(
         extraRow.setField(1, bucket)
         queue.enqueue(
           encoderGroup.internalToRow(
-            SparkInternalRow.fromPaimon(new JoinedRow(row, extraRow), rowType)))
+            DataConverter.fromPaimon(new JoinedRow(row, extraRow), rowType)))
       }
     )
     rowIterator.foreach {

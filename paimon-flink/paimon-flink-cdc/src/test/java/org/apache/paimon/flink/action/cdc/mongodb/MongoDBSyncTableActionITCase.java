@@ -34,7 +34,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link MongoDBSyncTableAction}. */
 public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
@@ -397,5 +399,27 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
                 getFileStoreTable(tableName),
                 rowType,
                 Collections.singletonList("_id"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testRuntimeExecutionModeCheckForCdcSync() {
+        Map<String, String> mongodbConfig = getBasicMongoDBConfig();
+        mongodbConfig.put("database", database);
+        mongodbConfig.put("collection", "products");
+        mongodbConfig.put("field.name", "_id,name,description");
+        mongodbConfig.put("parser.path", "$._id,$.name,$.description");
+        mongodbConfig.put("schema.start.mode", "specified");
+
+        MongoDBSyncTableAction action =
+                syncTableActionBuilder(mongodbConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+
+        assertThatThrownBy(() -> runActionWithBatchEnv(action))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "It's only support STREAMING mode for flink-cdc sync table action"));
     }
 }

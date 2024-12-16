@@ -40,12 +40,6 @@ under the License.
             <td>Specify client cache key, multiple elements separated by commas.<br /><ul><li>"ugi":  the Hadoop UserGroupInformation instance that represents the current user using the cache.</li></ul><ul><li>"user_name" similar to UGI but only includes the user's name determined by UserGroupInformation#getUserName.</li></ul><ul><li>"conf": name of an arbitrary configuration. The value of the configuration will be extracted from catalog properties and added to the cache key. A conf element should start with a "conf:" prefix which is followed by the configuration name. E.g. specifying "conf:a.b.c" will add "a.b.c" to the key, and so that configurations with different default catalog wouldn't share the same client pool. Multiple conf elements can be specified.</li></ul></td>
         </tr>
         <tr>
-            <td><h5>format-table.enabled</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether to support format tables, format table corresponds to a regular Hive table, allowing read and write operations. However, during these processes, it does not connect to the metastore; hence, newly added partitions will not be reflected in the metastore and need to be manually added as separate partition operations.</td>
-        </tr>
-        <tr>
             <td><h5>hadoop-conf-dir</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -70,6 +64,13 @@ If not configured, try to load from 'HIVE_CONF_DIR' env.
 If you don't want to access the location by the filesystem of hive when using a object storage such as s3,oss
 you can set this option to true.
 </td>
+        </tr>
+        <tr>
+            <td><h5>metastore.client.class</h5></td>
+            <td style="word-wrap: break-word;">"org.apache.hadoop.hive.metastore.HiveMetaStoreClient"</td>
+            <td>String</td>
+            <td>Class name of Hive metastore client.
+NOTE: This class must directly implements org.apache.hadoop.hive.metastore.IMetaStoreClient.</td>
         </tr>
     </tbody>
 </table>

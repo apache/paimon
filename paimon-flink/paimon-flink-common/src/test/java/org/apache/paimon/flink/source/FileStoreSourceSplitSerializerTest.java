@@ -88,7 +88,8 @@ public class FileStoreSourceSplitSerializerTest {
                 level,
                 0L,
                 null,
-                FileSource.APPEND);
+                FileSource.APPEND,
+                null);
     }
 
     public static FileStoreSourceSplit newSourceSplit(

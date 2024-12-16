@@ -44,7 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.hive.HiveCatalogOptions.FORMAT_TABLE_ENABLED;
+import static org.apache.paimon.options.CatalogOptions.FORMAT_TABLE_ENABLED;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for using Paimon {@link HiveCatalog}. */
@@ -134,6 +134,28 @@ public abstract class HiveCatalogFormatTableITCaseBase {
     public void testPartitionTable() throws Exception {
         hiveShell.execute("CREATE TABLE partition_table (a INT) PARTITIONED BY (b STRING)");
         doTestFormatTable("partition_table");
+    }
+
+    @Test
+    public void testFlinkCreateCsvFormatTable() throws Exception {
+        tEnv.executeSql(
+                        "CREATE TABLE flink_csv_table (a INT, b STRING) with ('type'='format-table', 'file.format'='csv')")
+                .await();
+        doTestFormatTable("flink_csv_table");
+    }
+
+    @Test
+    public void testFlinkCreateFormatTableWithDelimiter() throws Exception {
+        tEnv.executeSql(
+                "CREATE TABLE flink_csv_table_delimiter (a INT, b STRING) with ('type'='format-table', 'file.format'='csv', 'field-delimiter'=';')");
+        doTestFormatTable("flink_csv_table_delimiter");
+    }
+
+    @Test
+    public void testFlinkCreatePartitionTable() throws Exception {
+        tEnv.executeSql(
+                "CREATE TABLE flink_partition_table (a INT,b STRING) PARTITIONED BY (b) with ('type'='format-table', 'file.format'='csv')");
+        doTestFormatTable("flink_partition_table");
     }
 
     private void doTestFormatTable(String tableName) throws Exception {

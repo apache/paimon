@@ -64,6 +64,9 @@ case class SparkTable(table: Table)
         if (table.comment.isPresent) {
           properties.put(TableCatalog.PROP_COMMENT, table.comment.get)
         }
+        if (properties.containsKey(CoreOptions.PATH.key())) {
+          properties.put(TableCatalog.PROP_LOCATION, properties.get(CoreOptions.PATH.key()))
+        }
         properties
       case _ => Collections.emptyMap()
     }
@@ -106,5 +109,9 @@ case class SparkTable(table: Table)
       case _ =>
         throw new RuntimeException("Only FileStoreTable can be written.")
     }
+  }
+
+  override def toString: String = {
+    s"${table.getClass.getSimpleName}[${table.fullName()}]"
   }
 }

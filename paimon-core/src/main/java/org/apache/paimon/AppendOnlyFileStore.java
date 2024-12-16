@@ -49,7 +49,6 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
 
     private final RowType bucketKeyType;
     private final RowType rowType;
-    private final String tableName;
 
     public AppendOnlyFileStore(
             FileIO fileIO,
@@ -61,10 +60,9 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
             RowType rowType,
             String tableName,
             CatalogEnvironment catalogEnvironment) {
-        super(fileIO, schemaManager, schema, options, partitionType, catalogEnvironment);
+        super(fileIO, schemaManager, schema, tableName, options, partitionType, catalogEnvironment);
         this.bucketKeyType = bucketKeyType;
         this.rowType = rowType;
-        this.tableName = tableName;
     }
 
     @Override

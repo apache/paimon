@@ -23,6 +23,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.tag.Tag;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -94,10 +95,7 @@ public class BranchManager {
 
         try {
             TableSchema latestSchema = schemaManager.latest().get();
-            fileIO.copyFile(
-                    schemaManager.toSchemaPath(latestSchema.id()),
-                    schemaManager.copyWithBranch(branchName).toSchemaPath(latestSchema.id()),
-                    true);
+            copySchemasToBranch(branchName, latestSchema.id());
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
@@ -123,10 +121,7 @@ public class BranchManager {
                     snapshotManager.snapshotPath(snapshot.id()),
                     snapshotManager.copyWithBranch(branchName).snapshotPath(snapshot.id()),
                     true);
-            fileIO.copyFile(
-                    schemaManager.toSchemaPath(snapshot.schemaId()),
-                    schemaManager.copyWithBranch(branchName).toSchemaPath(snapshot.schemaId()),
-                    true);
+            copySchemasToBranch(branchName, snapshot.schemaId());
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
@@ -184,7 +179,7 @@ public class BranchManager {
             List<Path> deleteSchemaPaths = schemaManager.schemaPaths(id -> id >= earliestSchemaId);
             List<Path> deleteTagPaths =
                     tagManager.tagPaths(
-                            path -> Snapshot.fromPath(fileIO, path).id() >= earliestSnapshotId);
+                            path -> Tag.fromPath(fileIO, path).id() >= earliestSnapshotId);
 
             List<Path> deletePaths =
                     Stream.of(deleteSnapshotPaths, deleteSchemaPaths, deleteTagPaths)
@@ -207,6 +202,7 @@ public class BranchManager {
                     tagManager.copyWithBranch(branchName).tagDirectory(),
                     tagManager.tagDirectory(),
                     true);
+            snapshotManager.invalidateCache();
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
@@ -248,5 +244,16 @@ public class BranchManager {
                 !branchName.chars().allMatch(Character::isDigit),
                 "Branch name cannot be pure numeric string but is '%s'.",
                 branchName);
+    }
+
+    private void copySchemasToBranch(String branchName, long schemaId) throws IOException {
+        for (int i = 0; i <= schemaId; i++) {
+            if (schemaManager.schemaExists(i)) {
+                fileIO.copyFile(
+                        schemaManager.toSchemaPath(i),
+                        schemaManager.copyWithBranch(branchName).toSchemaPath(i),
+                        true);
+            }
+        }
     }
 }

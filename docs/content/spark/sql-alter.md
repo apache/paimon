@@ -95,12 +95,54 @@ ALTER TABLE my_table ADD COLUMNS (
 );
 ```
 
+The following SQL adds a nested column `f3` to a struct type.
+
+```sql
+-- column v previously has type STRUCT<f1: STRING, f2: INT>
+ALTER TABLE my_table ADD COLUMN v.f3 STRING;
+```
+
+The following SQL adds a nested column `f3` to a struct type, which is the element type of an array type.
+
+```sql
+-- column v previously has type ARRAY<STRUCT<f1: STRING, f2: INT>>
+ALTER TABLE my_table ADD COLUMN v.element.f3 STRING;
+```
+
+The following SQL adds a nested column `f3` to a struct type, which is the value type of a map type.
+
+```sql
+-- column v previously has type MAP<INT, STRUCT<f1: STRING, f2: INT>>
+ALTER TABLE my_table ADD COLUMN v.value.f3 STRING;
+```
+
 ## Renaming Column Name
 
 The following SQL renames column `c0` in table `my_table` to `c1`.
 
 ```sql
 ALTER TABLE my_table RENAME COLUMN c0 TO c1;
+```
+
+The following SQL renames a nested column `f1` to `f100` in a struct type.
+
+```sql
+-- column v previously has type STRUCT<f1: STRING, f2: INT>
+ALTER TABLE my_table RENAME COLUMN v.f1 to f100;
+```
+
+The following SQL renames a nested column `f1` to `f100` in a struct type, which is the element type of an array type.
+
+```sql
+-- column v previously has type ARRAY<STRUCT<f1: STRING, f2: INT>>
+ALTER TABLE my_table RENAME COLUMN v.element.f1 to f100;
+```
+
+The following SQL renames a nested column `f1` to `f100` in a struct type, which is the value type of a map type.
+
+```sql
+-- column v previously has type MAP<INT, STRUCT<f1: STRING, f2: INT>>
+ALTER TABLE my_table RENAME COLUMN v.value.f1 to f100;
 ```
 
 ## Dropping Columns
@@ -111,12 +153,41 @@ The following SQL drops two columns `c1` and `c2` from table `my_table`.
 ALTER TABLE my_table DROP COLUMNS (c1, c2);
 ```
 
+The following SQL drops a nested column `f2` from a struct type.
+
+```sql
+-- column v previously has type STRUCT<f1: STRING, f2: INT>
+ALTER TABLE my_table DROP COLUMN v.f2;
+```
+
+The following SQL drops a nested column `f2` from a struct type, which is the element type of an array type.
+
+```sql
+-- column v previously has type ARRAY<STRUCT<f1: STRING, f2: INT>>
+ALTER TABLE my_table DROP COLUMN v.element.f2;
+```
+
+The following SQL drops a nested column `f2` from a struct type, which is the value type of a map type.
+
+```sql
+-- column v previously has type MAP<INT, STRUCT<f1: STRING, f2: INT>>
+ALTER TABLE my_table DROP COLUMN v.value.f2;
+```
+
 ## Dropping Partitions
 
 The following SQL drops the partitions of the paimon table. For spark sql, you need to specify all the partition columns.
 
 ```sql
 ALTER TABLE my_table DROP PARTITION (`id` = 1, `name` = 'paimon');
+```
+
+## Adding Partitions
+
+The following SQL adds the partitions of the paimon table. For spark sql, you need to specify all the partition columns, only with metastore configured metastore.partitioned-table=true.
+
+```sql
+ALTER TABLE my_table ADD PARTITION (`id` = 1, `name` = 'paimon');
 ```
 
 ## Changing Column Comment
@@ -147,4 +218,25 @@ ALTER TABLE my_table ALTER COLUMN col_a AFTER col_b;
 
 ```sql
 ALTER TABLE my_table ALTER COLUMN col_a TYPE DOUBLE;
+```
+
+The following SQL changes the type of a nested column `f2` to `BIGINT` in a struct type.
+
+```sql
+-- column v previously has type STRUCT<f1: STRING, f2: INT>
+ALTER TABLE my_table ALTER COLUMN v.f2 TYPE BIGINT;
+```
+
+The following SQL changes the type of a nested column `f2` to `BIGINT` in a struct type, which is the element type of an array type.
+
+```sql
+-- column v previously has type ARRAY<STRUCT<f1: STRING, f2: INT>>
+ALTER TABLE my_table ALTER COLUMN v.element.f2 TYPE BIGINT;
+```
+
+The following SQL changes the type of a nested column `f2` to `BIGINT` in a struct type, which is the value type of a map type.
+
+```sql
+-- column v previously has type MAP<INT, STRUCT<f1: STRING, f2: INT>>
+ALTER TABLE my_table ALTER COLUMN v.value.f2 TYPE BIGINT;
 ```

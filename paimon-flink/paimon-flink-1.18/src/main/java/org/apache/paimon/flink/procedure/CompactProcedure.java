@@ -31,6 +31,9 @@ import org.apache.flink.table.procedure.ProcedureContext;
 import java.util.Collections;
 import java.util.Map;
 
+import static org.apache.paimon.flink.action.ActionFactory.FULL;
+import static org.apache.paimon.flink.action.CompactActionFactory.checkCompactStrategy;
+
 /**
  * Stay compatible with 1.18 procedure which doesn't support named argument. Usage:
  *
@@ -44,7 +47,13 @@ import java.util.Map;
  *  CALL sys.compact('tableId', 'pt1=A,pt2=a;pt1=B,pt2=b')
  *
  *  -- compact a table with sorting
+ *  CALL sys.compact('tableId', 'ORDER/ZORDER', 'col1,col2')
+ *
+ *  -- compact specific partitions with sorting
  *  CALL sys.compact('tableId', 'partitions', 'ORDER/ZORDER', 'col1,col2', 'sink.parallelism=6')
+ *
+ *  -- compact with specific compact strategy
+ *  CALL sys.compact('tableId', 'partitions', 'ORDER/ZORDER', 'col1,col2', 'sink.parallelism=6', 'minor')
  *
  * </code></pre>
  */
@@ -59,6 +68,15 @@ public class CompactProcedure extends ProcedureBase {
     public String[] call(ProcedureContext procedureContext, String tableId, String partitions)
             throws Exception {
         return call(procedureContext, tableId, partitions, "", "", "", "");
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext,
+            String tableId,
+            String orderStrategy,
+            String orderByColumns)
+            throws Exception {
+        return call(procedureContext, tableId, "", orderStrategy, orderByColumns, "", "");
     }
 
     public String[] call(
@@ -106,7 +124,8 @@ public class CompactProcedure extends ProcedureBase {
                 orderByColumns,
                 tableOptions,
                 whereSql,
-                "");
+                "",
+                null);
     }
 
     public String[] call(
@@ -117,7 +136,8 @@ public class CompactProcedure extends ProcedureBase {
             String orderByColumns,
             String tableOptions,
             String whereSql,
-            String partitionIdleTime)
+            String partitionIdleTime,
+            String compactStrategy)
             throws Exception {
 
         String warehouse = catalog.warehouse();
@@ -139,6 +159,10 @@ public class CompactProcedure extends ProcedureBase {
                             tableConf);
             if (!(StringUtils.isNullOrWhitespaceOnly(partitionIdleTime))) {
                 action.withPartitionIdleTime(TimeUtils.parseDuration(partitionIdleTime));
+            }
+
+            if (checkCompactStrategy(compactStrategy)) {
+                action.withFullCompaction(compactStrategy.trim().equalsIgnoreCase(FULL));
             }
             jobName = "Compact Job";
         } else if (!orderStrategy.isEmpty() && !orderByColumns.isEmpty()) {

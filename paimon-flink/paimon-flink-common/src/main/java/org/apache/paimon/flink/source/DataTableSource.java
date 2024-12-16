@@ -20,6 +20,8 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.stats.ColStats;
+import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -28,12 +30,17 @@ import org.apache.flink.table.connector.source.abilities.SupportsDynamicFilterin
 import org.apache.flink.table.connector.source.abilities.SupportsStatisticReport;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
+import org.apache.flink.table.plan.stats.ColumnStats;
 import org.apache.flink.table.plan.stats.TableStats;
 
 import javax.annotation.Nullable;
 
+import java.util.AbstractMap;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -63,7 +70,7 @@ public class DataTableSource extends BaseDataTableSource
                 null,
                 null,
                 null,
-                false);
+                null);
     }
 
     public DataTableSource(
@@ -77,7 +84,7 @@ public class DataTableSource extends BaseDataTableSource
             @Nullable Long limit,
             @Nullable WatermarkStrategy<RowData> watermarkStrategy,
             @Nullable List<String> dynamicPartitionFilteringFields,
-            boolean isBatchCountStar) {
+            @Nullable Long countPushed) {
         super(
                 tableIdentifier,
                 table,
@@ -88,7 +95,7 @@ public class DataTableSource extends BaseDataTableSource
                 projectFields,
                 limit,
                 watermarkStrategy,
-                isBatchCountStar);
+                countPushed);
         this.dynamicPartitionFilteringFields = dynamicPartitionFilteringFields;
     }
 
@@ -105,7 +112,7 @@ public class DataTableSource extends BaseDataTableSource
                 limit,
                 watermarkStrategy,
                 dynamicPartitionFilteringFields,
-                isBatchCountStar);
+                countPushed);
     }
 
     @Override
@@ -113,7 +120,21 @@ public class DataTableSource extends BaseDataTableSource
         if (streaming) {
             return TableStats.UNKNOWN;
         }
-
+        Optional<Statistics> optionStatistics = table.statistics();
+        if (optionStatistics.isPresent()) {
+            Statistics statistics = optionStatistics.get();
+            if (statistics.mergedRecordCount().isPresent()) {
+                Map<String, ColumnStats> flinkColStats =
+                        statistics.colStats().entrySet().stream()
+                                .map(
+                                        entry ->
+                                                new AbstractMap.SimpleEntry<>(
+                                                        entry.getKey(),
+                                                        toFlinkColumnStats(entry.getValue())))
+                                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+                return new TableStats(statistics.mergedRecordCount().getAsLong(), flinkColStats);
+            }
+        }
         scanSplitsForInference();
         return new TableStats(splitStatistics.totalRowCount());
     }
@@ -142,5 +163,24 @@ public class DataTableSource extends BaseDataTableSource
     @Override
     protected List<String> dynamicPartitionFilteringFields() {
         return dynamicPartitionFilteringFields;
+    }
+
+    private ColumnStats toFlinkColumnStats(ColStats<?> colStats) {
+        return ColumnStats.Builder.builder()
+                .setNdv(
+                        colStats.distinctCount().isPresent()
+                                ? colStats.distinctCount().getAsLong()
+                                : null)
+                .setNullCount(
+                        colStats.nullCount().isPresent() ? colStats.nullCount().getAsLong() : null)
+                .setAvgLen(
+                        colStats.avgLen().isPresent()
+                                ? (double) colStats.avgLen().getAsLong()
+                                : null)
+                .setMaxLen(
+                        colStats.maxLen().isPresent() ? (int) colStats.maxLen().getAsLong() : null)
+                .setMax(colStats.max().isPresent() ? colStats.max().get() : null)
+                .setMin(colStats.min().isPresent() ? colStats.min().get() : null)
+                .build();
     }
 }

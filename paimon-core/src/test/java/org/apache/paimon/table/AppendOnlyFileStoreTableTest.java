@@ -26,7 +26,9 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fileindex.FileIndexOptions;
+import org.apache.paimon.fileindex.bitmap.BitmapFileIndexFactory;
 import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory;
+import org.apache.paimon.fileindex.bsi.BitSliceIndexBitmapFileIndexFactory;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -58,6 +60,8 @@ import org.apache.paimon.types.RowType;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -74,7 +78,9 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.CoreOptions.DATA_FILE_PATH_DIRECTORY;
 import static org.apache.paimon.CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD;
+import static org.apache.paimon.CoreOptions.METADATA_STATS_MODE;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucket;
 import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucketKeyHashCode;
@@ -136,6 +142,26 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                 "2|21|201|binary|varbinary|mapKey:mapVal|multiset",
                                 "2|22|202|binary|varbinary|mapKey:mapVal|multiset",
                                 "2|21|201|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
+    public void testReadWriteWithDataDirectory() throws Exception {
+        Consumer<Options> optionsSetter = options -> options.set(DATA_FILE_PATH_DIRECTORY, "data");
+        writeData(optionsSetter);
+        FileStoreTable table = createFileStoreTable(optionsSetter);
+
+        assertThat(table.fileIO().exists(new Path(tablePath, "data/pt=1"))).isTrue();
+
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newRead();
+        assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
+                .hasSameElementsAs(
+                        Arrays.asList(
+                                "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|11|101|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|12|102|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|11|101|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|12|102|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     @Test
@@ -220,10 +246,18 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                 .hasSameElementsAs(Arrays.asList("200|20", "201|21", "202|22", "201|21"));
     }
 
-    @Test
-    public void testBatchFilter() throws Exception {
-        writeData();
-        FileStoreTable table = createFileStoreTable();
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testBatchFilter(boolean statsDenseStore) throws Exception {
+        Consumer<Options> optionsSetter =
+                options -> {
+                    if (statsDenseStore) {
+                        options.set(CoreOptions.METADATA_STATS_MODE, "none");
+                        options.set("fields.b.stats-mode", "full");
+                    }
+                };
+        writeData(optionsSetter);
+        FileStoreTable table = createFileStoreTable(optionsSetter);
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
 
         Predicate predicate = builder.equal(2, 201L);
@@ -549,6 +583,146 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
+    public void testBSIAndBitmapIndexInMemory() throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("event", DataTypes.STRING())
+                        .field("price", DataTypes.BIGINT())
+                        .build();
+        // in unaware-bucket mode, we split files into splits all the time
+        FileStoreTable table =
+                createUnawareBucketFileStoreTable(
+                        rowType,
+                        options -> {
+                            options.set(METADATA_STATS_MODE, "NONE");
+                            options.set(
+                                    FileIndexOptions.FILE_INDEX
+                                            + "."
+                                            + BitmapFileIndexFactory.BITMAP_INDEX
+                                            + "."
+                                            + CoreOptions.COLUMNS,
+                                    "event");
+                            options.set(
+                                    FileIndexOptions.FILE_INDEX
+                                            + "."
+                                            + BitSliceIndexBitmapFileIndexFactory.BSI_INDEX
+                                            + "."
+                                            + CoreOptions.COLUMNS,
+                                    "price");
+                            options.set(FILE_INDEX_IN_MANIFEST_THRESHOLD.key(), "1 MB");
+                        });
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        List<CommitMessage> result = new ArrayList<>();
+        write.write(GenericRow.of(1, BinaryString.fromString("A"), 4L));
+        write.write(GenericRow.of(1, BinaryString.fromString("B"), 2L));
+        write.write(GenericRow.of(1, BinaryString.fromString("B"), 3L));
+        write.write(GenericRow.of(1, BinaryString.fromString("C"), 3L));
+        result.addAll(write.prepareCommit(true, 0));
+        write.write(GenericRow.of(1, BinaryString.fromString("A"), 4L));
+        write.write(GenericRow.of(1, BinaryString.fromString("B"), 3L));
+        write.write(GenericRow.of(1, BinaryString.fromString("C"), 4L));
+        write.write(GenericRow.of(1, BinaryString.fromString("D"), 2L));
+        write.write(GenericRow.of(1, BinaryString.fromString("D"), 4L));
+        result.addAll(write.prepareCommit(true, 0));
+        commit.commit(0, result);
+        result.clear();
+
+        // test bitmap index and bsi index
+        Predicate predicate =
+                PredicateBuilder.and(
+                        new PredicateBuilder(rowType).equal(1, BinaryString.fromString("C")),
+                        new PredicateBuilder(rowType).greaterThan(2, 3L));
+        TableScan.Plan plan = table.newScan().withFilter(predicate).plan();
+        List<DataFileMeta> metas =
+                plan.splits().stream()
+                        .flatMap(split -> ((DataSplit) split).dataFiles().stream())
+                        .collect(Collectors.toList());
+        assertThat(metas.size()).isEqualTo(1);
+
+        RecordReader<InternalRow> reader =
+                table.newRead().withFilter(predicate).createReader(plan.splits());
+        reader.forEachRemaining(
+                row -> {
+                    assertThat(row.getString(1).toString()).isEqualTo("C");
+                    assertThat(row.getLong(2)).isEqualTo(4L);
+                });
+    }
+
+    @Test
+    public void testBSIAndBitmapIndexInDisk() throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("event", DataTypes.STRING())
+                        .field("price", DataTypes.BIGINT())
+                        .build();
+        // in unaware-bucket mode, we split files into splits all the time
+        FileStoreTable table =
+                createUnawareBucketFileStoreTable(
+                        rowType,
+                        options -> {
+                            options.set(METADATA_STATS_MODE, "NONE");
+                            options.set(
+                                    FileIndexOptions.FILE_INDEX
+                                            + "."
+                                            + BitmapFileIndexFactory.BITMAP_INDEX
+                                            + "."
+                                            + CoreOptions.COLUMNS,
+                                    "event");
+                            options.set(
+                                    FileIndexOptions.FILE_INDEX
+                                            + "."
+                                            + BitSliceIndexBitmapFileIndexFactory.BSI_INDEX
+                                            + "."
+                                            + CoreOptions.COLUMNS,
+                                    "price");
+                            options.set(FILE_INDEX_IN_MANIFEST_THRESHOLD.key(), "1 B");
+                        });
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        List<CommitMessage> result = new ArrayList<>();
+        write.write(GenericRow.of(1, BinaryString.fromString("A"), 4L));
+        write.write(GenericRow.of(1, BinaryString.fromString("B"), 2L));
+        write.write(GenericRow.of(1, BinaryString.fromString("B"), 3L));
+        write.write(GenericRow.of(1, BinaryString.fromString("C"), 3L));
+        result.addAll(write.prepareCommit(true, 0));
+        write.write(GenericRow.of(1, BinaryString.fromString("A"), 4L));
+        write.write(GenericRow.of(1, BinaryString.fromString("B"), 3L));
+        write.write(GenericRow.of(1, BinaryString.fromString("C"), 4L));
+        write.write(GenericRow.of(1, BinaryString.fromString("D"), 2L));
+        write.write(GenericRow.of(1, BinaryString.fromString("D"), 4L));
+        result.addAll(write.prepareCommit(true, 0));
+        commit.commit(0, result);
+        result.clear();
+
+        // test bitmap index and bsi index
+        Predicate predicate =
+                PredicateBuilder.and(
+                        new PredicateBuilder(rowType).equal(1, BinaryString.fromString("C")),
+                        new PredicateBuilder(rowType).greaterThan(2, 3L));
+        TableScan.Plan plan = table.newScan().withFilter(predicate).plan();
+        List<DataFileMeta> metas =
+                plan.splits().stream()
+                        .flatMap(split -> ((DataSplit) split).dataFiles().stream())
+                        .collect(Collectors.toList());
+        assertThat(metas.size()).isEqualTo(2);
+
+        RecordReader<InternalRow> reader =
+                table.newRead().withFilter(predicate).createReader(plan.splits());
+        reader.forEachRemaining(
+                row -> {
+                    assertThat(row.getString(1).toString()).isEqualTo("C");
+                    assertThat(row.getLong(2)).isEqualTo(4L);
+                });
+    }
+
+    @Test
     public void testWithShardAppendTable() throws Exception {
         FileStoreTable table = createFileStoreTable(conf -> conf.set(BUCKET, -1));
         innerTestWithShard(table);
@@ -858,7 +1032,11 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     private void writeData() throws Exception {
-        FileStoreTable table = createFileStoreTable();
+        writeData(options -> {});
+    }
+
+    private void writeData(Consumer<Options> optionsSetter) throws Exception {
+        FileStoreTable table = createFileStoreTable(optionsSetter);
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
 

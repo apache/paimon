@@ -20,13 +20,14 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.append.UnawareAppendTableCompactionCoordinator;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.ExecutorUtils;
 
 import org.apache.flink.api.common.operators.ProcessingTimeService.ProcessingTimeCallback;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
-import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.types.Either;
@@ -57,17 +58,19 @@ public class AppendBypassCoordinateOperator<CommitT>
     private transient LinkedBlockingQueue<UnawareAppendCompactionTask> compactTasks;
 
     public AppendBypassCoordinateOperator(
-            FileStoreTable table, ProcessingTimeService processingTimeService) {
+            StreamOperatorParameters<Either<CommitT, UnawareAppendCompactionTask>> parameters,
+            FileStoreTable table,
+            ProcessingTimeService processingTimeService) {
         this.table = table;
         this.processingTimeService = processingTimeService;
-        this.chainingStrategy = ChainingStrategy.HEAD;
+        setup(parameters.getContainingTask(), parameters.getStreamConfig(), parameters.getOutput());
     }
 
     @Override
     public void open() throws Exception {
         super.open();
         checkArgument(
-                getRuntimeContext().getNumberOfParallelSubtasks() == 1,
+                RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext()) == 1,
                 "Compaction Coordinator parallelism in paimon MUST be one.");
         long intervalMs = table.coreOptions().continuousDiscoveryInterval().toMillis();
         this.compactTasks = new LinkedBlockingQueue<>();

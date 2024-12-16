@@ -95,13 +95,17 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
       output: Seq[Attribute]): Seq[DataSplit] = {
     // low level snapshot reader, it can not be affected by 'scan.mode'
     val snapshotReader = table.newSnapshotReader()
+    // dropStats after filter push down
+    if (table.coreOptions().manifestDeleteFileDropStats()) {
+      snapshotReader.dropStats()
+    }
     if (condition != TrueLiteral) {
       val filter =
         convertConditionToPaimonPredicate(condition, output, rowType, ignoreFailure = true)
       filter.foreach(snapshotReader.withFilter)
     }
 
-    snapshotReader.read().splits().asScala.collect { case s: DataSplit => s }
+    snapshotReader.read().splits().asScala.collect { case s: DataSplit => s }.toSeq
   }
 
   protected def findTouchedFiles(
@@ -232,7 +236,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
       .as[(String, Long)]
       .groupByKey(_._1)
       .mapGroups {
-        case (filePath, iter) =>
+        (filePath, iter) =>
           val dv = new BitmapDeletionVector()
           while (iter.hasNext) {
             dv.delete(iter.next()._2)
@@ -241,12 +245,12 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
           val relativeFilePath = location.toUri.relativize(new URI(filePath)).toString
           val (partition, bucket) = dataFileToPartitionAndBucket.toMap.apply(relativeFilePath)
           val pathFactory = my_table.store().pathFactory()
-          val partitionAndBucket = pathFactory
-            .relativePartitionAndBucketPath(partition, bucket)
+          val relativeBucketPath = pathFactory
+            .relativeBucketPath(partition, bucket)
             .toString
 
           SparkDeletionVectors(
-            partitionAndBucket,
+            relativeBucketPath,
             SerializationUtils.serializeBinaryRow(partition),
             bucket,
             Seq((new Path(filePath).getName, dv.serializeToBytes()))

@@ -37,8 +37,10 @@ import org.apache.paimon.mergetree.Levels;
 import org.apache.paimon.mergetree.LookupFile;
 import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.Preconditions;
 
@@ -79,6 +81,8 @@ public class LocalTableQuery implements TableQuery {
     private final RowType rowType;
     private final RowType partitionType;
 
+    @Nullable private Filter<InternalRow> cacheRowFilter;
+
     public LocalTableQuery(FileStoreTable table) {
         this.options = table.coreOptions();
         this.tableView = new HashMap<>();
@@ -97,7 +101,9 @@ public class LocalTableQuery implements TableQuery {
         this.lookupStoreFactory =
                 LookupStoreFactory.create(
                         options,
-                        new CacheManager(options.lookupCacheMaxMemory()),
+                        new CacheManager(
+                                options.lookupCacheMaxMemory(),
+                                options.lookupCacheHighPrioPoolRatio()),
                         new RowCompactedSerializer(keyType).createSliceComparator());
 
         if (options.needLookup()) {
@@ -154,12 +160,20 @@ public class LocalTableQuery implements TableQuery {
                         keyComparatorSupplier.get(),
                         readerFactoryBuilder.keyType(),
                         new LookupLevels.KeyValueProcessor(readerFactoryBuilder.readValueType()),
-                        file ->
-                                factory.createRecordReader(
-                                        file.schemaId(),
-                                        file.fileName(),
-                                        file.fileSize(),
-                                        file.level()),
+                        file -> {
+                            RecordReader<KeyValue> reader =
+                                    factory.createRecordReader(
+                                            file.schemaId(),
+                                            file.fileName(),
+                                            file.fileSize(),
+                                            file.level());
+                            if (cacheRowFilter != null) {
+                                reader =
+                                        reader.filter(
+                                                keyValue -> cacheRowFilter.test(keyValue.value()));
+                            }
+                            return reader;
+                        },
                         file ->
                                 Preconditions.checkNotNull(ioManager, "IOManager is required.")
                                         .createChannel(
@@ -203,6 +217,11 @@ public class LocalTableQuery implements TableQuery {
 
     public LocalTableQuery withIOManager(IOManager ioManager) {
         this.ioManager = ioManager;
+        return this;
+    }
+
+    public LocalTableQuery withCacheRowFilter(Filter<InternalRow> cacheRowFilter) {
+        this.cacheRowFilter = cacheRowFilter;
         return this;
     }
 

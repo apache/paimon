@@ -71,14 +71,15 @@ class CodeGenUtilsTest {
     @Test
     public void testRecordComparatorCodegenCache() {
         assertClassEquals(
-                () -> newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}));
+                () -> newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}, true));
     }
 
     @Test
     public void testRecordComparatorCodegenCacheMiss() {
         assertClassNotEquals(
-                newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}),
-                newRecordComparator(Arrays.asList(STRING(), INT(), DOUBLE()), new int[] {0, 1, 2}));
+                newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}, true),
+                newRecordComparator(
+                        Arrays.asList(STRING(), INT(), DOUBLE()), new int[] {0, 1, 2}, true));
     }
 
     @Test
@@ -96,7 +97,7 @@ class CodeGenUtilsTest {
     @Test
     public void testHybridNotEqual() {
         assertClassNotEquals(
-                newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}),
+                newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}, true),
                 newNormalizedKeyComputer(Arrays.asList(STRING(), INT()), new int[] {0, 1}));
     }
 

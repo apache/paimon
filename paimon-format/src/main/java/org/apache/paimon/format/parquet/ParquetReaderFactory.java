@@ -23,16 +23,17 @@ import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
+import org.apache.paimon.data.columnar.heap.ElementCountable;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.parquet.reader.ColumnReader;
 import org.apache.paimon.format.parquet.reader.ParquetDecimalVector;
+import org.apache.paimon.format.parquet.reader.ParquetReadState;
 import org.apache.paimon.format.parquet.reader.ParquetTimestampVector;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.reader.RecordReader.RecordIterator;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -88,8 +89,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     private final Options conf;
 
     private final RowType projectedType;
-    private final String[] projectedFields;
-    private final DataType[] projectedTypes;
+    private final String[] projectedColumnNames;
+    private final DataField[] projectedFields;
     private final int batchSize;
     private final FilterCompat.Filter filter;
     private final Set<Integer> unknownFieldsIndices = new HashSet<>();
@@ -98,14 +99,15 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             Options conf, RowType projectedType, int batchSize, FilterCompat.Filter filter) {
         this.conf = conf;
         this.projectedType = projectedType;
-        this.projectedFields = projectedType.getFieldNames().toArray(new String[0]);
-        this.projectedTypes = projectedType.getFieldTypes().toArray(new DataType[0]);
+        this.projectedColumnNames = projectedType.getFieldNames().toArray(new String[0]);
+        this.projectedFields = projectedType.getFields().toArray(new DataField[0]);
         this.batchSize = batchSize;
         this.filter = filter;
     }
 
     @Override
-    public ParquetReader createReader(FormatReaderFactory.Context context) throws IOException {
+    public FileRecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
+            throws IOException {
         ParquetReadOptions.Builder builder =
                 ParquetReadOptions.builder().withRange(0, context.fileSize());
         setReadOptions(builder);
@@ -113,7 +115,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         ParquetFileReader reader =
                 new ParquetFileReader(
                         ParquetInputFile.fromPath(context.fileIO(), context.filePath()),
-                        builder.build());
+                        builder.build(),
+                        context.fileIndex());
         MessageType fileSchema = reader.getFileMetaData().getSchema();
         MessageType requestedSchema = clipParquetSchema(fileSchema);
         reader.setRequestedSchema(requestedSchema);
@@ -128,7 +131,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 buildFieldsList(projectedType.getFields(), projectedType.getFieldNames(), columnIO);
 
         return new ParquetReader(
-                reader, requestedSchema, reader.getRecordCount(), poolOfBatches, fields);
+                reader, requestedSchema, reader.getFilteredRecordCount(), poolOfBatches, fields);
     }
 
     private void setReadOptions(ParquetReadOptions.Builder builder) {
@@ -153,20 +156,20 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
     /** Clips `parquetSchema` according to `fieldNames`. */
     private MessageType clipParquetSchema(GroupType parquetSchema) {
-        Type[] types = new Type[projectedFields.length];
-        for (int i = 0; i < projectedFields.length; ++i) {
-            String fieldName = projectedFields[i];
+        Type[] types = new Type[projectedColumnNames.length];
+        for (int i = 0; i < projectedColumnNames.length; ++i) {
+            String fieldName = projectedColumnNames[i];
             if (!parquetSchema.containsField(fieldName)) {
                 LOG.warn(
                         "{} does not exist in {}, will fill the field with null.",
                         fieldName,
                         parquetSchema);
                 types[i] =
-                        ParquetSchemaConverter.convertToParquetType(fieldName, projectedTypes[i]);
+                        ParquetSchemaConverter.convertToParquetType(fieldName, projectedFields[i]);
                 unknownFieldsIndices.add(i);
             } else {
                 Type parquetType = parquetSchema.getType(fieldName);
-                types[i] = clipParquetType(projectedTypes[i], parquetType);
+                types[i] = clipParquetType(projectedFields[i].type(), parquetType);
             }
         }
 
@@ -220,7 +223,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
     private void checkSchema(MessageType fileSchema, MessageType requestedSchema)
             throws IOException, UnsupportedOperationException {
-        if (projectedFields.length != requestedSchema.getFieldCount()) {
+        if (projectedColumnNames.length != requestedSchema.getFieldCount()) {
             throw new RuntimeException(
                     "The quality of field type is incompatible with the request schema!");
         }
@@ -268,13 +271,13 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     }
 
     private WritableColumnVector[] createWritableVectors(MessageType requestedSchema) {
-        WritableColumnVector[] columns = new WritableColumnVector[projectedTypes.length];
+        WritableColumnVector[] columns = new WritableColumnVector[projectedFields.length];
         List<Type> types = requestedSchema.getFields();
-        for (int i = 0; i < projectedTypes.length; i++) {
+        for (int i = 0; i < projectedFields.length; i++) {
             columns[i] =
                     createWritableColumnVector(
                             batchSize,
-                            projectedTypes[i],
+                            projectedFields[i].type(),
                             types.get(i),
                             requestedSchema.getColumns(),
                             0);
@@ -290,9 +293,12 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             WritableColumnVector[] writableVectors) {
         ColumnVector[] vectors = new ColumnVector[writableVectors.length];
         for (int i = 0; i < writableVectors.length; i++) {
-            switch (projectedTypes[i].getTypeRoot()) {
+            switch (projectedFields[i].type().getTypeRoot()) {
                 case DECIMAL:
-                    vectors[i] = new ParquetDecimalVector(writableVectors[i]);
+                    vectors[i] =
+                            new ParquetDecimalVector(
+                                    writableVectors[i],
+                                    ((ElementCountable) writableVectors[i]).getLen());
                     break;
                 case TIMESTAMP_WITHOUT_TIME_ZONE:
                 case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
@@ -306,7 +312,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         return new VectorizedColumnBatch(vectors);
     }
 
-    private class ParquetReader implements RecordReader<InternalRow> {
+    private class ParquetReader implements FileRecordReader<InternalRow> {
 
         private ParquetFileReader reader;
 
@@ -331,6 +337,10 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
         private long nextRowPosition;
 
+        private ParquetReadState currentRowGroupReadState;
+
+        private long currentRowGroupFirstRowIndex;
+
         /**
          * For each request column, the reader to read this column. This is NULL if this column is
          * missing from the file, in which case we populate the attribute with NULL.
@@ -354,12 +364,13 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             this.totalCountLoadedSoFar = 0;
             this.currentRowPosition = 0;
             this.nextRowPosition = 0;
+            this.currentRowGroupFirstRowIndex = 0;
             this.fields = fields;
         }
 
         @Nullable
         @Override
-        public RecordIterator<InternalRow> readBatch() throws IOException {
+        public ColumnarRowIterator readBatch() throws IOException {
             final ParquetReaderBatch batch = getCachedEntry();
 
             if (!nextBatch(batch)) {
@@ -385,7 +396,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 currentRowPosition = nextRowPosition;
             }
 
-            int num = (int) Math.min(batchSize, totalCountLoadedSoFar - rowsReturned);
+            int num = getBachSize();
+
             for (int i = 0; i < columnReaders.length; ++i) {
                 if (columnReaders[i] == null) {
                     batch.writableVectors[i].fillWithNulls();
@@ -395,13 +407,13 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 }
             }
             rowsReturned += num;
-            nextRowPosition = currentRowPosition + num;
+            nextRowPosition = getNextRowPosition(num);
             batch.columnarBatch.setNumRows(num);
             return true;
         }
 
         private void readNextRowGroup() throws IOException {
-            PageReadStore rowGroup = reader.readNextRowGroup();
+            PageReadStore rowGroup = reader.readNextFilteredRowGroup();
             if (rowGroup == null) {
                 throw new IOException(
                         "expecting more rows but reached last block. Read "
@@ -410,13 +422,16 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                                 + totalRowCount);
             }
 
+            this.currentRowGroupReadState =
+                    new ParquetReadState(rowGroup.getRowIndexes().orElse(null));
+
             List<Type> types = requestedSchema.getFields();
             columnReaders = new ColumnReader[types.size()];
             for (int i = 0; i < types.size(); ++i) {
                 if (!unknownFieldsIndices.contains(i)) {
                     columnReaders[i] =
                             createColumnReader(
-                                    projectedTypes[i],
+                                    projectedFields[i].type(),
                                     types.get(i),
                                     requestedSchema.getColumns(),
                                     rowGroup,
@@ -424,15 +439,59 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                                     0);
                 }
             }
+
             totalCountLoadedSoFar += rowGroup.getRowCount();
-            if (rowGroup.getRowIndexOffset().isPresent()) {
-                currentRowPosition = rowGroup.getRowIndexOffset().get();
+
+            if (rowGroup.getRowIndexOffset().isPresent()) { // filter
+                currentRowGroupFirstRowIndex = rowGroup.getRowIndexOffset().get();
+                long pageIndex = 0;
+                if (!this.currentRowGroupReadState.isMaxRange()) {
+                    pageIndex = this.currentRowGroupReadState.currentRangeStart();
+                }
+                currentRowPosition = currentRowGroupFirstRowIndex + pageIndex;
             } else {
                 if (reader.rowGroupsFiltered()) {
                     throw new RuntimeException(
                             "There is a bug, rowIndexOffset must be present when row groups are filtered.");
                 }
+                currentRowGroupFirstRowIndex = nextRowPosition;
                 currentRowPosition = nextRowPosition;
+            }
+        }
+
+        private int getBachSize() throws IOException {
+
+            long rangeBatchSize = Long.MAX_VALUE;
+            if (this.currentRowGroupReadState.isFinished()) {
+                throw new IOException(
+                        "expecting more rows but reached last page block. Read "
+                                + rowsReturned
+                                + " out of "
+                                + totalRowCount);
+            } else if (!this.currentRowGroupReadState.isMaxRange()) {
+                long pageIndex = this.currentRowPosition - this.currentRowGroupFirstRowIndex;
+                rangeBatchSize = this.currentRowGroupReadState.currentRangeEnd() - pageIndex + 1;
+            }
+
+            return (int)
+                    Math.min(
+                            batchSize,
+                            Math.min(rangeBatchSize, totalCountLoadedSoFar - rowsReturned));
+        }
+
+        private long getNextRowPosition(int num) {
+            if (this.currentRowGroupReadState.isMaxRange()) {
+                return this.currentRowPosition + num;
+            } else {
+                long pageIndex = this.currentRowPosition - this.currentRowGroupFirstRowIndex;
+                long nextIndex = pageIndex + num;
+
+                if (this.currentRowGroupReadState.currentRangeEnd() < nextIndex) {
+                    this.currentRowGroupReadState.nextRange();
+                    nextIndex = this.currentRowGroupReadState.currentRangeStart();
+                }
+
+                return this.currentRowGroupFirstRowIndex + nextIndex;
             }
         }
 
@@ -487,7 +546,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             recycler.recycle(this);
         }
 
-        public RecordIterator<InternalRow> convertAndGetIterator(long rowNumber) {
+        public ColumnarRowIterator convertAndGetIterator(long rowNumber) {
             result.reset(rowNumber);
             return result;
         }

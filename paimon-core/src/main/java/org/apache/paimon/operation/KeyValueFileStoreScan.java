@@ -21,31 +21,38 @@ package org.apache.paimon.operation;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.KeyValueFileStore;
+import org.apache.paimon.fileindex.FileIndexPredicate;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FilteredManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.stats.SimpleStats;
-import org.apache.paimon.stats.SimpleStatsConverter;
-import org.apache.paimon.stats.SimpleStatsConverters;
+import org.apache.paimon.stats.SimpleStatsEvolution;
+import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
+import javax.annotation.Nullable;
+
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.paimon.CoreOptions.MergeEngine.AGGREGATE;
-import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
 
 /** {@link FileStoreScan} for {@link KeyValueFileStore}. */
 public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
-    private final SimpleStatsConverters fieldKeyStatsConverters;
-    private final SimpleStatsConverters fieldValueStatsConverters;
+    private final SimpleStatsEvolutions fieldKeyStatsConverters;
+    private final SimpleStatsEvolutions fieldValueStatsConverters;
     private final BucketSelectConverter bucketSelectConverter;
 
     private Predicate keyFilter;
@@ -53,6 +60,11 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     private final boolean deletionVectorsEnabled;
     private final MergeEngine mergeEngine;
     private final ChangelogProducer changelogProducer;
+
+    private final boolean fileIndexReadEnabled;
+    private final Map<Long, Predicate> schemaId2DataFilter = new HashMap<>();
+
+    private boolean valueFilterForceEnabled = false;
 
     public KeyValueFileStoreScan(
             ManifestsReader manifestsReader,
@@ -65,7 +77,8 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             Integer scanManifestParallelism,
             boolean deletionVectorsEnabled,
             MergeEngine mergeEngine,
-            ChangelogProducer changelogProducer) {
+            ChangelogProducer changelogProducer,
+            boolean fileIndexReadEnabled) {
         super(
                 manifestsReader,
                 snapshotManager,
@@ -75,16 +88,17 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 scanManifestParallelism);
         this.bucketSelectConverter = bucketSelectConverter;
         this.fieldKeyStatsConverters =
-                new SimpleStatsConverters(
+                new SimpleStatsEvolutions(
                         sid -> keyValueFieldsExtractor.keyFields(scanTableSchema(sid)),
                         schema.id());
         this.fieldValueStatsConverters =
-                new SimpleStatsConverters(
+                new SimpleStatsEvolutions(
                         sid -> keyValueFieldsExtractor.valueFields(scanTableSchema(sid)),
                         schema.id());
         this.deletionVectorsEnabled = deletionVectorsEnabled;
         this.mergeEngine = mergeEngine;
         this.changelogProducer = changelogProducer;
+        this.fileIndexReadEnabled = fileIndexReadEnabled;
     }
 
     public KeyValueFileStoreScan withKeyFilter(Predicate predicate) {
@@ -98,43 +112,68 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         return this;
     }
 
+    @Override
+    public FileStoreScan enableValueFilter() {
+        this.valueFilterForceEnabled = true;
+        return this;
+    }
+
     /** Note: Keep this thread-safe. */
     @Override
     protected boolean filterByStats(ManifestEntry entry) {
-        Predicate filter = null;
-        SimpleStatsConverter serializer = null;
-        SimpleStats stats = null;
-        if (isValueFilterEnabled(entry)) {
-            filter = valueFilter;
-            serializer = fieldValueStatsConverters.getOrCreate(entry.file().schemaId());
-            stats = entry.file().valueStats();
+        DataFileMeta file = entry.file();
+        if (isValueFilterEnabled() && !filterByValueFilter(entry)) {
+            return false;
         }
 
-        if (filter == null && keyFilter != null) {
-            filter = keyFilter;
-            serializer = fieldKeyStatsConverters.getOrCreate(entry.file().schemaId());
-            stats = entry.file().keyStats();
+        if (keyFilter != null) {
+            SimpleStatsEvolution.Result stats =
+                    fieldKeyStatsConverters
+                            .getOrCreate(file.schemaId())
+                            .evolution(file.keyStats(), file.rowCount(), null);
+            return keyFilter.test(
+                    file.rowCount(), stats.minValues(), stats.maxValues(), stats.nullCounts());
         }
 
-        if (filter == null) {
+        return true;
+    }
+
+    @Override
+    protected ManifestEntry dropStats(ManifestEntry entry) {
+        if (!isValueFilterEnabled() && wholeBucketFilterEnabled()) {
+            return new FilteredManifestEntry(entry.copyWithoutStats(), filterByValueFilter(entry));
+        }
+        return entry.copyWithoutStats();
+    }
+
+    private boolean filterByFileIndex(@Nullable byte[] embeddedIndexBytes, ManifestEntry entry) {
+        if (embeddedIndexBytes == null) {
             return true;
         }
 
-        return filter.test(
-                entry.file().rowCount(),
-                serializer.evolution(stats.minValues()),
-                serializer.evolution(stats.maxValues()),
-                serializer.evolution(stats.nullCounts(), entry.file().rowCount()));
+        RowType dataRowType = scanTableSchema(entry.file().schemaId()).logicalRowType();
+        try (FileIndexPredicate predicate =
+                new FileIndexPredicate(embeddedIndexBytes, dataRowType)) {
+            Predicate dataPredicate =
+                    schemaId2DataFilter.computeIfAbsent(
+                            entry.file().schemaId(),
+                            id ->
+                                    fieldValueStatsConverters.convertFilter(
+                                            entry.file().schemaId(), valueFilter));
+            return predicate.evaluate(dataPredicate).remain();
+        } catch (IOException e) {
+            throw new RuntimeException("Exception happens while checking fileIndex predicate.", e);
+        }
     }
 
-    private boolean isValueFilterEnabled(ManifestEntry entry) {
+    private boolean isValueFilterEnabled() {
         if (valueFilter == null) {
             return false;
         }
 
         switch (scanMode) {
             case ALL:
-                return (deletionVectorsEnabled || mergeEngine == FIRST_ROW) && entry.level() > 0;
+                return valueFilterForceEnabled;
             case DELTA:
                 return false;
             case CHANGELOG:
@@ -145,13 +184,13 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         }
     }
 
-    /** Note: Keep this thread-safe. */
+    @Override
+    protected boolean wholeBucketFilterEnabled() {
+        return valueFilter != null && scanMode == ScanMode.ALL;
+    }
+
     @Override
     protected List<ManifestEntry> filterWholeBucketByStats(List<ManifestEntry> entries) {
-        if (valueFilter == null || scanMode != ScanMode.ALL) {
-            return entries;
-        }
-
         return noOverlapping(entries)
                 ? filterWholeBucketPerFile(entries)
                 : filterWholeBucketAllFiles(entries);
@@ -184,14 +223,22 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     }
 
     private boolean filterByValueFilter(ManifestEntry entry) {
-        SimpleStatsConverter serializer =
-                fieldValueStatsConverters.getOrCreate(entry.file().schemaId());
-        SimpleStats stats = entry.file().valueStats();
+        if (entry instanceof FilteredManifestEntry) {
+            return ((FilteredManifestEntry) entry).selected();
+        }
+
+        DataFileMeta file = entry.file();
+        SimpleStatsEvolution.Result result =
+                fieldValueStatsConverters
+                        .getOrCreate(file.schemaId())
+                        .evolution(file.valueStats(), file.rowCount(), file.valueStatsCols());
         return valueFilter.test(
-                entry.file().rowCount(),
-                serializer.evolution(stats.minValues()),
-                serializer.evolution(stats.maxValues()),
-                serializer.evolution(stats.nullCounts(), entry.file().rowCount()));
+                        file.rowCount(),
+                        result.minValues(),
+                        result.maxValues(),
+                        result.nullCounts())
+                && (!fileIndexReadEnabled
+                        || filterByFileIndex(entry.file().embeddedIndex(), entry));
     }
 
     private static boolean noOverlapping(List<ManifestEntry> entries) {

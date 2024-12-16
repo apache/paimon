@@ -40,6 +40,7 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
@@ -61,7 +62,13 @@ import org.apache.parquet.hadoop.ParquetFileWriter;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.example.ExampleParquetWriter;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
+import org.apache.parquet.schema.ConversionPatterns;
+import org.apache.parquet.schema.GroupType;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
+import org.apache.parquet.schema.PrimitiveType;
+import org.apache.parquet.schema.Type;
+import org.apache.parquet.schema.Types;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
@@ -89,6 +96,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
+import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT32;
+import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT64;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -468,6 +477,78 @@ public class ParquetReadWriteTest {
                         "Parquet does not support null keys in a map. "
                                 + "See https://github.com/apache/parquet-format/blob/master/LogicalTypes.md#maps for more details.")
                 .isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
+    public void testConvertToParquetTypeWithId() {
+        List<DataField> nestedFields =
+                Arrays.asList(
+                        new DataField(3, "v1", DataTypes.INT()),
+                        new DataField(4, "v2", DataTypes.STRING()));
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "a", DataTypes.INT()),
+                        new DataField(1, "b", DataTypes.ARRAY(DataTypes.STRING())),
+                        new DataField(
+                                2,
+                                "c",
+                                DataTypes.MAP(
+                                        DataTypes.INT(),
+                                        DataTypes.MAP(
+                                                DataTypes.BIGINT(), new RowType(nestedFields)))));
+        RowType rowType = new RowType(fields);
+
+        int baseId = 536870911;
+        int depthLimit = 1 << 10;
+        Type innerMapValueType =
+                new GroupType(
+                                Type.Repetition.OPTIONAL,
+                                "value",
+                                Types.primitive(INT32, Type.Repetition.OPTIONAL)
+                                        .named("v1")
+                                        .withId(3),
+                                Types.primitive(
+                                                PrimitiveType.PrimitiveTypeName.BINARY,
+                                                Type.Repetition.OPTIONAL)
+                                        .as(LogicalTypeAnnotation.stringType())
+                                        .named("v2")
+                                        .withId(4))
+                        .withId(baseId + depthLimit * 2 + 2);
+        Type outerMapValueType =
+                ConversionPatterns.mapType(
+                                Type.Repetition.OPTIONAL,
+                                "value",
+                                "key_value",
+                                Types.primitive(INT64, Type.Repetition.REQUIRED)
+                                        .named("key")
+                                        .withId(baseId - depthLimit * 2 - 2),
+                                innerMapValueType)
+                        .withId(baseId + depthLimit * 2 + 1);
+        Type expected =
+                new MessageType(
+                        "table",
+                        Types.primitive(INT32, Type.Repetition.OPTIONAL).named("a").withId(0),
+                        ConversionPatterns.listOfElements(
+                                        Type.Repetition.OPTIONAL,
+                                        "b",
+                                        Types.primitive(
+                                                        PrimitiveType.PrimitiveTypeName.BINARY,
+                                                        Type.Repetition.OPTIONAL)
+                                                .as(LogicalTypeAnnotation.stringType())
+                                                .named("element")
+                                                .withId(baseId + depthLimit + 1))
+                                .withId(1),
+                        ConversionPatterns.mapType(
+                                        Type.Repetition.OPTIONAL,
+                                        "c",
+                                        "key_value",
+                                        Types.primitive(INT32, Type.Repetition.REQUIRED)
+                                                .named("key")
+                                                .withId(baseId - depthLimit * 2 - 1),
+                                        outerMapValueType)
+                                .withId(2));
+        Type actual = ParquetSchemaConverter.convertToParquetMessageType("table", rowType);
+        assertThat(actual).isEqualTo(expected);
     }
 
     private void innerTestTypes(File folder, List<Integer> records, int rowGroupSize)

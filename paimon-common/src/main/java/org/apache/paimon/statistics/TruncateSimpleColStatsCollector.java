@@ -53,6 +53,11 @@ public class TruncateSimpleColStatsCollector extends AbstractSimpleColStatsColle
             return;
         }
 
+        // fast fail since the result is not correct
+        if (failed) {
+            return;
+        }
+
         // TODO use comparator for not comparable types and extract this logic to a util class
         if (!(field instanceof Comparable)) {
             return;
@@ -66,7 +71,12 @@ public class TruncateSimpleColStatsCollector extends AbstractSimpleColStatsColle
             Object max = truncateMax(field);
             // may fail
             if (max != null) {
-                maxValue = fieldSerializer.copy(truncateMax(field));
+                if (max != field) {
+                    // copied in `truncateMax`
+                    maxValue = max;
+                } else {
+                    maxValue = fieldSerializer.copy(max);
+                }
             }
         }
     }

@@ -25,22 +25,29 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.view.View;
+import org.apache.paimon.view.ViewImpl;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -107,23 +114,22 @@ public abstract class CatalogTestBase {
     }
 
     @Test
-    public void testDatabaseExistsWhenExists() throws Exception {
-        // Database exists returns true when the database exists
+    public void testDuplicatedDatabaseAfterCreatingTable() throws Exception {
         catalog.createDatabase("test_db", false);
-        boolean exists = catalog.databaseExists("test_db");
-        assertThat(exists).isTrue();
+        Identifier identifier = Identifier.create("test_db", "new_table");
+        Schema schema = Schema.newBuilder().column("pk1", DataTypes.INT()).build();
+        catalog.createTable(identifier, schema, false);
 
-        // Database exists returns false when the database does not exist
-        exists = catalog.databaseExists("non_existing_db");
-        assertThat(exists).isFalse();
+        List<String> databases = catalog.listDatabases();
+        List<String> distinctDatabases = databases.stream().distinct().collect(Collectors.toList());
+        Assertions.assertEquals(distinctDatabases.size(), databases.size());
     }
 
     @Test
     public void testCreateDatabase() throws Exception {
         // Create database creates a new database when it does not exist
         catalog.createDatabase("new_db", false);
-        boolean exists = catalog.databaseExists("new_db");
-        assertThat(exists).isTrue();
+        catalog.getDatabase("new_db");
 
         catalog.createDatabase("existing_db", false);
 
@@ -144,8 +150,8 @@ public abstract class CatalogTestBase {
         // Drop database deletes the database when it exists and there are no tables
         catalog.createDatabase("db_to_drop", false);
         catalog.dropDatabase("db_to_drop", false, false);
-        boolean exists = catalog.databaseExists("db_to_drop");
-        assertThat(exists).isFalse();
+        assertThatThrownBy(() -> catalog.getDatabase("db_to_drop"))
+                .isInstanceOf(Catalog.DatabaseNotExistException.class);
 
         // Drop database does not throw exception when database does not exist and ignoreIfNotExists
         // is true
@@ -158,8 +164,8 @@ public abstract class CatalogTestBase {
         catalog.createTable(Identifier.create("db_to_drop", "table2"), DEFAULT_TABLE_SCHEMA, false);
 
         catalog.dropDatabase("db_to_drop", false, true);
-        exists = catalog.databaseExists("db_to_drop");
-        assertThat(exists).isFalse();
+        assertThatThrownBy(() -> catalog.getDatabase("db_to_drop"))
+                .isInstanceOf(Catalog.DatabaseNotExistException.class);
 
         // Drop database throws DatabaseNotEmptyException when cascade is false and there are tables
         // in the database
@@ -186,21 +192,6 @@ public abstract class CatalogTestBase {
 
         tables = catalog.listTables("test_db");
         assertThat(tables).containsExactlyInAnyOrder("table1", "table2", "table3");
-    }
-
-    @Test
-    public void testTableExists() throws Exception {
-        // Table exists returns true when the table exists in the database
-        catalog.createDatabase("test_db", false);
-        Identifier identifier = Identifier.create("test_db", "test_table");
-        catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
-
-        boolean exists = catalog.tableExists(identifier);
-        assertThat(exists).isTrue();
-
-        // Table exists returns false when the table does not exist in the database
-        exists = catalog.tableExists(Identifier.create("non_existing_db", "non_existing_table"));
-        assertThat(exists).isFalse();
     }
 
     @Test
@@ -234,8 +225,7 @@ public abstract class CatalogTestBase {
         schema.options().remove(CoreOptions.AUTO_CREATE.key());
 
         catalog.createTable(identifier, schema, false);
-        boolean exists = catalog.tableExists(identifier);
-        assertThat(exists).isTrue();
+        catalog.getTable(identifier);
 
         // Create table throws Exception when table is system table
         assertThatExceptionOfType(IllegalArgumentException.class)
@@ -302,6 +292,19 @@ public abstract class CatalogTestBase {
                                                 ""),
                                         true))
                 .doesNotThrowAnyException();
+        // Create table throws IleaArgumentException when some table options are not set correctly
+        schema.options()
+                .put(
+                        CoreOptions.MERGE_ENGINE.key(),
+                        CoreOptions.MergeEngine.DEDUPLICATE.toString());
+        schema.options().put(CoreOptions.IGNORE_DELETE.key(), "max");
+        assertThatCode(
+                        () ->
+                                catalog.createTable(
+                                        Identifier.create("test_db", "wrong_table"), schema, false))
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage(
+                        "Unrecognized option for boolean: max. Expected either true or false(case insensitive)");
     }
 
     @Test
@@ -364,8 +367,8 @@ public abstract class CatalogTestBase {
         Identifier identifier = Identifier.create("test_db", "table_to_drop");
         catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
         catalog.dropTable(identifier, false);
-        boolean exists = catalog.tableExists(identifier);
-        assertThat(exists).isFalse();
+        assertThatThrownBy(() -> catalog.getTable(identifier))
+                .isInstanceOf(Catalog.TableNotExistException.class);
 
         // Drop table throws Exception when table is system table
         assertThatExceptionOfType(IllegalArgumentException.class)
@@ -397,8 +400,9 @@ public abstract class CatalogTestBase {
         catalog.createTable(fromTable, DEFAULT_TABLE_SCHEMA, false);
         Identifier toTable = Identifier.create("test_db", "new_table");
         catalog.renameTable(fromTable, toTable, false);
-        assertThat(catalog.tableExists(fromTable)).isFalse();
-        assertThat(catalog.tableExists(toTable)).isTrue();
+        assertThatThrownBy(() -> catalog.getTable(fromTable))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+        catalog.getTable(toTable);
 
         // Rename table throws Exception when original or target table is system table
         assertThatExceptionOfType(IllegalArgumentException.class)
@@ -509,7 +513,9 @@ public abstract class CatalogTestBase {
         catalog.createTable(
                 identifier,
                 new Schema(
-                        Lists.newArrayList(new DataField(0, "col1", DataTypes.STRING())),
+                        Lists.newArrayList(
+                                new DataField(0, "col1", DataTypes.STRING()),
+                                new DataField(1, "col2", DataTypes.STRING())),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         Maps.newHashMap(),
@@ -521,7 +527,7 @@ public abstract class CatalogTestBase {
                 false);
         Table table = catalog.getTable(identifier);
 
-        assertThat(table.rowType().getFields()).hasSize(1);
+        assertThat(table.rowType().getFields()).hasSize(2);
         assertThat(table.rowType().getFieldIndex("col1")).isLessThan(0);
         assertThat(table.rowType().getFieldIndex("new_col1")).isEqualTo(0);
 
@@ -532,12 +538,12 @@ public abstract class CatalogTestBase {
                                 catalog.alterTable(
                                         identifier,
                                         Lists.newArrayList(
-                                                SchemaChange.renameColumn("col1", "new_col1")),
+                                                SchemaChange.renameColumn("col2", "new_col1")),
                                         false))
                 .satisfies(
                         anyCauseMatches(
                                 Catalog.ColumnAlreadyExistException.class,
-                                "Column col1 already exists in the test_db.test_table table."));
+                                "Column new_col1 already exists in the test_db.test_table table."));
 
         // Alter table renames a column throws ColumnNotExistException when column does not exist
         assertThatThrownBy(
@@ -551,7 +557,7 @@ public abstract class CatalogTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 Catalog.ColumnNotExistException.class,
-                                "Column [non_existing_col] does not exist in the test_db.test_table table."));
+                                "Column non_existing_col does not exist in the test_db.test_table table."));
     }
 
     @Test
@@ -657,7 +663,7 @@ public abstract class CatalogTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 Catalog.ColumnNotExistException.class,
-                                "Column [non_existing_col] does not exist in the test_db.test_table table."));
+                                "Column non_existing_col does not exist in the test_db.test_table table."));
         // Alter table update a column type throws Exception when column is partition columns
         assertThatThrownBy(
                         () ->
@@ -669,8 +675,8 @@ public abstract class CatalogTestBase {
                                         false))
                 .satisfies(
                         anyCauseMatches(
-                                IllegalArgumentException.class,
-                                "Cannot update partition column [dt] type in the table"));
+                                UnsupportedOperationException.class,
+                                "Cannot update partition column: [dt]"));
     }
 
     @Test
@@ -728,7 +734,7 @@ public abstract class CatalogTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 Catalog.ColumnNotExistException.class,
-                                "Column [non_existing_col] does not exist in the test_db.test_table table."));
+                                "Column non_existing_col does not exist in the test_db.test_table table."));
     }
 
     @Test
@@ -784,7 +790,7 @@ public abstract class CatalogTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 Catalog.ColumnNotExistException.class,
-                                "Column [non_existing_col] does not exist in the test_db.test_table table."));
+                                "Column non_existing_col does not exist in the test_db.test_table table."));
 
         // Alter table update a column nullability throws Exception when column is pk columns
         assertThatThrownBy(
@@ -830,5 +836,128 @@ public abstract class CatalogTestBase {
 
         table = catalog.getTable(identifier);
         assertThat(table.comment().isPresent()).isFalse();
+    }
+
+    protected boolean supportsView() {
+        return false;
+    }
+
+    @Test
+    public void testView() throws Exception {
+        if (!supportsView()) {
+            return;
+        }
+
+        Identifier identifier = new Identifier("view_db", "my_view");
+        RowType rowType =
+                RowType.builder()
+                        .field("str", DataTypes.STRING())
+                        .field("int", DataTypes.INT())
+                        .build();
+        String query = "SELECT * FROM OTHER_TABLE";
+        String comment = "it is my view";
+        Map<String, String> options = new HashMap<>();
+        options.put("key1", "v1");
+        options.put("key2", "v2");
+        View view = new ViewImpl(identifier, rowType, query, comment, options);
+
+        assertThatThrownBy(() -> catalog.createView(identifier, view, false))
+                .isInstanceOf(Catalog.DatabaseNotExistException.class);
+
+        assertThatThrownBy(() -> catalog.listViews(identifier.getDatabaseName()))
+                .isInstanceOf(Catalog.DatabaseNotExistException.class);
+
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+
+        assertThatThrownBy(() -> catalog.getView(identifier))
+                .isInstanceOf(Catalog.ViewNotExistException.class);
+
+        catalog.createView(identifier, view, false);
+
+        View catalogView = catalog.getView(identifier);
+        assertThat(catalogView.fullName()).isEqualTo(view.fullName());
+        assertThat(catalogView.rowType()).isEqualTo(view.rowType());
+        assertThat(catalogView.query()).isEqualTo(view.query());
+        assertThat(catalogView.comment()).isEqualTo(view.comment());
+        assertThat(catalogView.options()).containsAllEntriesOf(view.options());
+
+        List<String> views = catalog.listViews(identifier.getDatabaseName());
+        assertThat(views).containsOnly(identifier.getObjectName());
+
+        catalog.createView(identifier, view, true);
+        assertThatThrownBy(() -> catalog.createView(identifier, view, false))
+                .isInstanceOf(Catalog.ViewAlreadyExistException.class);
+
+        Identifier newIdentifier = new Identifier("view_db", "new_view");
+        catalog.renameView(new Identifier("view_db", "unknown"), newIdentifier, true);
+        assertThatThrownBy(
+                        () ->
+                                catalog.renameView(
+                                        new Identifier("view_db", "unknown"), newIdentifier, false))
+                .isInstanceOf(Catalog.ViewNotExistException.class);
+        catalog.renameView(identifier, newIdentifier, false);
+
+        catalog.dropView(newIdentifier, false);
+        catalog.dropView(newIdentifier, true);
+        assertThatThrownBy(() -> catalog.dropView(newIdentifier, false))
+                .isInstanceOf(Catalog.ViewNotExistException.class);
+    }
+
+    protected boolean supportsFormatTable() {
+        return false;
+    }
+
+    @Test
+    public void testFormatTable() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+
+        Identifier identifier = new Identifier("format_db", "my_format");
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+
+        // create table
+        Schema schema =
+                Schema.newBuilder()
+                        .column("str", DataTypes.STRING())
+                        .column("int", DataTypes.INT())
+                        .option("type", "format-table")
+                        .option("file.format", "csv")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        assertThat(catalog.listTables(identifier.getDatabaseName()))
+                .contains(identifier.getTableName());
+        assertThat(catalog.getTable(identifier)).isInstanceOf(FormatTable.class);
+
+        // alter table
+        SchemaChange schemaChange = SchemaChange.addColumn("new_col", DataTypes.STRING());
+        assertThatThrownBy(() -> catalog.alterTable(identifier, schemaChange, false))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Only data table support alter table.");
+
+        // drop table
+        catalog.dropTable(identifier, false);
+        assertThatThrownBy(() -> catalog.getTable(identifier))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+
+        // rename table
+        catalog.createTable(identifier, schema, false);
+        Identifier newIdentifier = new Identifier("format_db", "new_format");
+        catalog.renameTable(identifier, newIdentifier, false);
+        assertThatThrownBy(() -> catalog.getTable(identifier))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+        assertThat(catalog.getTable(newIdentifier)).isInstanceOf(FormatTable.class);
+    }
+
+    @Test
+    public void testTableUUID() throws Exception {
+        catalog.createDatabase("test_db", false);
+        Identifier identifier = Identifier.create("test_db", "test_table");
+        catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
+        Table table = catalog.getTable(identifier);
+        String uuid = table.uuid();
+        assertThat(uuid).startsWith(identifier.getFullName() + ".");
+        assertThat(Long.parseLong(uuid.substring((identifier.getFullName() + ".").length())))
+                .isGreaterThan(0);
     }
 }

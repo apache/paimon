@@ -39,6 +39,7 @@ import org.apache.paimon.utils.VersionedObjectSerializer;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -82,6 +83,15 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     @VisibleForTesting
     public long suggestedFileSize() {
         return suggestedFileSize;
+    }
+
+    public List<ExpireFileEntry> readExpireFileEntries(String fileName, @Nullable Long fileSize) {
+        List<ManifestEntry> entries = read(fileName, fileSize);
+        List<ExpireFileEntry> result = new ArrayList<>(entries.size());
+        for (ManifestEntry entry : entries) {
+            result.add(ExpireFileEntry.from(entry));
+        }
+        return result;
     }
 
     /**
@@ -154,7 +164,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     fileIO.getFileSize(path),
                     numAddedFiles,
                     numDeletedFiles,
-                    partitionStatsSerializer.toBinary(partitionStatsCollector.extract()),
+                    partitionStatsSerializer.toBinaryAllMode(partitionStatsCollector.extract()),
                     numAddedFiles + numDeletedFiles > 0
                             ? schemaId
                             : schemaManager.latest().get().id());
@@ -209,19 +219,6 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     compression,
                     pathFactory.manifestFileFactory(),
                     suggestedFileSize,
-                    cache);
-        }
-
-        public ObjectsFile<SimpleFileEntry> createSimpleFileEntryReader() {
-            RowType entryType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
-            return new ObjectsFile<>(
-                    fileIO,
-                    new SimpleFileEntrySerializer(),
-                    entryType,
-                    fileFormat.createReaderFactory(entryType),
-                    fileFormat.createWriterFactory(entryType),
-                    compression,
-                    pathFactory.manifestFileFactory(),
                     cache);
         }
     }

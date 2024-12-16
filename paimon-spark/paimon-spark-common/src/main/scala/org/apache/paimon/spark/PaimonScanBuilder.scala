@@ -21,6 +21,7 @@ package org.apache.paimon.spark
 import org.apache.paimon.predicate.PredicateBuilder
 import org.apache.paimon.spark.aggregate.LocalAggregator
 import org.apache.paimon.table.Table
+import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
 import org.apache.spark.sql.connector.read.{Scan, SupportsPushDownAggregates, SupportsPushDownLimit}
@@ -34,15 +35,14 @@ class PaimonScanBuilder(table: Table)
   private var localScan: Option[Scan] = None
 
   override def pushLimit(limit: Int): Boolean = {
-    if (table.primaryKeys().isEmpty) {
-      pushDownLimit = Some(limit)
-    }
-    // just make a best effort to push down limit
+    // It is safe, since we will do nothing if it is the primary table and the split is not `rawConvertible`
+    pushDownLimit = Some(limit)
+    // just make the best effort to push down limit
     false
   }
 
   override def supportCompletePushDown(aggregation: Aggregation): Boolean = {
-    // for now we only support complete push down, so there is no difference with `pushAggregation`
+    // for now, we only support complete push down, so there is no difference with `pushAggregation`
     pushAggregation(aggregation)
   }
 
@@ -67,8 +67,11 @@ class PaimonScanBuilder(table: Table)
       val pushedPartitionPredicate = PredicateBuilder.and(pushedPredicates.map(_._2): _*)
       readBuilder.withFilter(pushedPartitionPredicate)
     }
-    val scan = readBuilder.newScan()
-    scan.listPartitionEntries.asScala.foreach(aggregator.update)
+    val dataSplits = readBuilder.newScan().plan().splits().asScala.map(_.asInstanceOf[DataSplit])
+    if (!dataSplits.forall(_.mergedRowCountAvailable())) {
+      return false
+    }
+    dataSplits.foreach(aggregator.update)
     localScan = Some(
       PaimonLocalScan(
         aggregator.result(),

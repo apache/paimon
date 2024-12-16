@@ -22,6 +22,7 @@ import org.apache.paimon.schema.TableSchema;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -50,8 +51,8 @@ public class IcebergSchema {
     @JsonProperty(FIELD_FIELDS)
     private final List<IcebergDataField> fields;
 
-    public IcebergSchema(TableSchema tableSchema) {
-        this(
+    public static IcebergSchema create(TableSchema tableSchema) {
+        return new IcebergSchema(
                 (int) tableSchema.id(),
                 tableSchema.fields().stream()
                         .map(IcebergDataField::new)
@@ -85,6 +86,11 @@ public class IcebergSchema {
     @JsonGetter(FIELD_FIELDS)
     public List<IcebergDataField> fields() {
         return fields;
+    }
+
+    @JsonIgnore
+    public int highestFieldId() {
+        return fields.stream().mapToInt(IcebergDataField::id).max().orElse(0);
     }
 
     @Override

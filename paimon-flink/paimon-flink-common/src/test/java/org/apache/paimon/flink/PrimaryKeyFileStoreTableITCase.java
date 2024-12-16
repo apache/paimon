@@ -37,8 +37,11 @@ import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -48,11 +51,15 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Tests for changelog table with primary keys. */
 public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
+
+    private static final int TIMEOUT = 180;
 
     // ------------------------------------------------------------------------
     //  Test Utilities
@@ -67,7 +74,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         tableDefaultProperties = new HashMap<>();
         if (random.nextBoolean()) {
-            tableDefaultProperties.put(CoreOptions.LOCAL_MERGE_BUFFER_SIZE.key(), "256 kb");
+            tableDefaultProperties.put(CoreOptions.LOCAL_MERGE_BUFFER_SIZE.key(), "5m");
         }
     }
 
@@ -90,12 +97,38 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                 catalogName, warehouse, defaultPropertyString);
     }
 
+    private CloseableIterator<Row> collect(TableResult result) {
+        return collect(result, TIMEOUT);
+    }
+
+    private CloseableIterator<Row> collect(TableResult result, int timeout) {
+        JobClient client = result.getJobClient().get();
+        Thread timeoutThread =
+                new Thread(
+                        () -> {
+                            for (int i = 0; i < timeout; i++) {
+                                try {
+                                    Thread.sleep(1000);
+                                    if (client.getJobStatus().get().isGloballyTerminalState()) {
+                                        return;
+                                    }
+                                } catch (Exception e) {
+                                    client.cancel();
+                                    throw new RuntimeException(e);
+                                }
+                            }
+                            client.cancel();
+                        });
+        timeoutThread.start();
+        return result.collect();
+    }
+
     // ------------------------------------------------------------------------
     //  Constructed Tests
     // ------------------------------------------------------------------------
 
     @Test
-    @Timeout(180)
+    @Timeout(TIMEOUT)
     public void testFullCompactionTriggerInterval() throws Exception {
         innerTestChangelogProducing(
                 Arrays.asList(
@@ -104,7 +137,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    @Timeout(180)
+    @Timeout(TIMEOUT)
     public void testFullCompactionWithLongCheckpointInterval() throws Exception {
         // create table
         TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().parallelism(1).build();
@@ -130,7 +163,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                         .build();
         sEnv.executeSql(createCatalogSql("testCatalog", path));
         sEnv.executeSql("USE CATALOG testCatalog");
-        CloseableIterator<Row> it = sEnv.executeSql("SELECT * FROM T").collect();
+        CloseableIterator<Row> it = collect(sEnv.executeSql("SELECT * FROM T"));
 
         // run compact job
         StreamExecutionEnvironment env =
@@ -163,7 +196,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    @Timeout(180)
+    @Timeout(TIMEOUT)
     public void testLookupChangelog() throws Exception {
         innerTestChangelogProducing(Collections.singletonList("'changelog-producer' = 'lookup'"));
     }
@@ -185,7 +218,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                         + "'bucket' = '2'"
                         + ")");
 
-        CloseableIterator<Row> it = sEnv.executeSql("SELECT * FROM T2").collect();
+        CloseableIterator<Row> it = collect(sEnv.executeSql("SELECT * FROM T2"));
 
         // insert data
         sEnv.executeSql("INSERT INTO T2 VALUES (1, 'A')").await();
@@ -208,7 +241,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         sEnv.executeSql("ALTER TABLE T2 SET ('changelog-producer'='full-compaction')");
 
         CloseableIterator<Row> branchIt =
-                sEnv.executeSql("select * from T2 /*+ OPTIONS('branch' = 'branch1') */").collect();
+                collect(sEnv.executeSql("select * from T2 /*+ OPTIONS('branch' = 'branch1') */"));
         // insert data to branch
         sEnv.executeSql(
                         "INSERT INTO T2/*+ OPTIONS('branch' = 'branch1') */ VALUES (10, 'v10'),(11, 'v11'),(12, 'v12')")
@@ -256,7 +289,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
         sEnv.executeSql(
                 "INSERT INTO T SELECT SUM(i) AS k, g AS v FROM `default_catalog`.`default_database`.`S` GROUP BY g");
-        CloseableIterator<Row> it = sEnv.executeSql("SELECT * FROM T").collect();
+        CloseableIterator<Row> it = collect(sEnv.executeSql("SELECT * FROM T"));
 
         // write initial data
         sEnv.executeSql(
@@ -303,9 +336,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     public void testBatchJobWithConflictAndRestart() throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().allowRestart(10).build();
         tEnv.executeSql(
-                "CREATE CATALOG mycat WITH ( 'type' = 'paimon', 'warehouse' = '"
-                        + getTempDirPath()
-                        + "' )");
+                "CREATE CATALOG mycat WITH ( 'type' = 'paimon', 'warehouse' = '" + path + "' )");
         tEnv.executeSql("USE CATALOG mycat");
         tEnv.executeSql(
                 "CREATE TABLE t ( k INT, v INT, PRIMARY KEY (k) NOT ENFORCED ) "
@@ -326,7 +357,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         result1.await();
         result2.await();
 
-        try (CloseableIterator<Row> it = tEnv.executeSql("SELECT * FROM t").collect()) {
+        try (CloseableIterator<Row> it = collect(tEnv.executeSql("SELECT * FROM t"))) {
             for (int i = 0; i < 3; i++) {
                 assertThat(it).hasNext();
                 Row row = it.next();
@@ -335,19 +366,287 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         }
     }
 
+    @Timeout(TIMEOUT)
+    @ParameterizedTest()
+    @ValueSource(booleans = {false, true})
+    public void testRecreateTableWithException(boolean isReloadData) throws Exception {
+        TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
+        bEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
+        bEnv.executeSql("USE CATALOG testCatalog");
+        bEnv.executeSql(
+                "CREATE TABLE t ( pt INT, k INT, v INT, PRIMARY KEY (pt, k) NOT ENFORCED ) "
+                        + "PARTITIONED BY (pt) "
+                        + "WITH ("
+                        + "    'bucket' = '2'\n"
+                        + "    ,'continuous.discovery-interval' = '1s'\n"
+                        + ")");
+
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .parallelism(4)
+                        .checkpointIntervalMs(1000)
+                        .build();
+        sEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
+        sEnv.executeSql("USE CATALOG testCatalog");
+        CloseableIterator<Row> it = collect(sEnv.executeSql("SELECT * FROM t"));
+
+        // first write
+        List<String> values = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            values.add(String.format("(0, %d, %d)", i, i));
+            values.add(String.format("(1, %d, %d)", i, i));
+        }
+        bEnv.executeSql("INSERT INTO t VALUES " + String.join(", ", values)).await();
+        List<Row> expected = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            expected.add(Row.ofKind(RowKind.INSERT, 0, i, i));
+            expected.add(Row.ofKind(RowKind.INSERT, 1, i, i));
+        }
+        assertStreamingResult(it, expected);
+
+        // second write
+        values.clear();
+        for (int i = 0; i < 10; i++) {
+            values.add(String.format("(0, %d, %d)", i, i + 1));
+            values.add(String.format("(1, %d, %d)", i, i + 1));
+        }
+        bEnv.executeSql("INSERT INTO t VALUES " + String.join(", ", values)).await();
+
+        // start a read job
+        for (int i = 0; i < 10; i++) {
+            expected.add(Row.ofKind(RowKind.UPDATE_BEFORE, 0, i, i));
+            expected.add(Row.ofKind(RowKind.UPDATE_BEFORE, 1, i, i));
+            expected.add(Row.ofKind(RowKind.UPDATE_AFTER, 0, i, i + 1));
+            expected.add(Row.ofKind(RowKind.UPDATE_AFTER, 1, i, i + 1));
+        }
+        assertStreamingResult(it, expected.subList(20, 60));
+
+        // delete table and recreate a same table
+        bEnv.executeSql("DROP TABLE t");
+        bEnv.executeSql(
+                "CREATE TABLE t ( pt INT, k INT, v INT, PRIMARY KEY (pt, k) NOT ENFORCED ) "
+                        + "PARTITIONED BY (pt) "
+                        + "WITH ("
+                        + "    'bucket' = '2'\n"
+                        + ")");
+
+        // if reload data, it will generate a new snapshot for recreated table
+        if (isReloadData) {
+            bEnv.executeSql("INSERT INTO t VALUES " + String.join(", ", values)).await();
+        }
+        assertThatCode(it::next)
+                .rootCause()
+                .hasMessageContaining(
+                        "The next expected snapshot is too big! Most possible cause might be the table had been recreated.");
+    }
+
+    @Test
+    @Timeout(TIMEOUT)
+    public void testChangelogCompactInBatchWrite() throws Exception {
+        TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
+        String catalogDdl =
+                "CREATE CATALOG mycat WITH ( 'type' = 'paimon', 'warehouse' = '" + path + "' )";
+        bEnv.executeSql(catalogDdl);
+        bEnv.executeSql("USE CATALOG mycat");
+        bEnv.executeSql(
+                "CREATE TABLE t ( pt INT, k INT, v INT, PRIMARY KEY (pt, k) NOT ENFORCED ) "
+                        + "PARTITIONED BY (pt) "
+                        + "WITH ("
+                        + "    'bucket' = '10',\n"
+                        + "    'changelog-producer' = 'lookup',\n"
+                        + "    'changelog.precommit-compact' = 'true',\n"
+                        + "    'snapshot.num-retained.min' = '3',\n"
+                        + "    'snapshot.num-retained.max' = '3'\n"
+                        + ")");
+
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder().streamingMode().checkpointIntervalMs(1000).build();
+        sEnv.executeSql(catalogDdl);
+        sEnv.executeSql("USE CATALOG mycat");
+
+        List<String> values = new ArrayList<>();
+        for (int i = 0; i < 1000; i++) {
+            values.add(String.format("(0, %d, %d)", i, i));
+            values.add(String.format("(1, %d, %d)", i, i));
+        }
+        bEnv.executeSql("INSERT INTO t VALUES " + String.join(", ", values)).await();
+
+        List<String> compactedChangelogs2 = listAllFilesWithPrefix("compacted-changelog-");
+        assertThat(compactedChangelogs2).hasSize(2);
+        assertThat(listAllFilesWithPrefix("changelog-")).isEmpty();
+
+        List<Row> expected = new ArrayList<>();
+        for (int i = 0; i < 1000; i++) {
+            expected.add(Row.ofKind(RowKind.INSERT, 0, i, i));
+            expected.add(Row.ofKind(RowKind.INSERT, 1, i, i));
+        }
+        assertStreamingResult(
+                sEnv.executeSql("SELECT * FROM t /*+ OPTIONS('scan.snapshot-id' = '1') */"),
+                expected);
+
+        values.clear();
+        for (int i = 0; i < 1000; i++) {
+            values.add(String.format("(0, %d, %d)", i, i + 1));
+            values.add(String.format("(1, %d, %d)", i, i + 1));
+        }
+        bEnv.executeSql("INSERT INTO t VALUES " + String.join(", ", values)).await();
+
+        assertThat(listAllFilesWithPrefix("compacted-changelog-")).hasSize(4);
+        assertThat(listAllFilesWithPrefix("changelog-")).isEmpty();
+
+        for (int i = 0; i < 1000; i++) {
+            expected.add(Row.ofKind(RowKind.UPDATE_BEFORE, 0, i, i));
+            expected.add(Row.ofKind(RowKind.UPDATE_BEFORE, 1, i, i));
+            expected.add(Row.ofKind(RowKind.UPDATE_AFTER, 0, i, i + 1));
+            expected.add(Row.ofKind(RowKind.UPDATE_AFTER, 1, i, i + 1));
+        }
+        assertStreamingResult(
+                sEnv.executeSql("SELECT * FROM t /*+ OPTIONS('scan.snapshot-id' = '1') */"),
+                expected);
+
+        values.clear();
+        for (int i = 0; i < 1000; i++) {
+            values.add(String.format("(0, %d, %d)", i, i + 2));
+            values.add(String.format("(1, %d, %d)", i, i + 2));
+        }
+        bEnv.executeSql("INSERT INTO t VALUES " + String.join(", ", values)).await();
+
+        assertThat(listAllFilesWithPrefix("compacted-changelog-")).hasSize(4);
+        assertThat(listAllFilesWithPrefix("changelog-")).isEmpty();
+        LocalFileIO fileIO = LocalFileIO.create();
+        for (String p : compactedChangelogs2) {
+            assertThat(fileIO.exists(new Path(p))).isFalse();
+        }
+
+        expected = expected.subList(2000, 6000);
+        for (int i = 0; i < 1000; i++) {
+            expected.add(Row.ofKind(RowKind.UPDATE_BEFORE, 0, i, i + 1));
+            expected.add(Row.ofKind(RowKind.UPDATE_BEFORE, 1, i, i + 1));
+            expected.add(Row.ofKind(RowKind.UPDATE_AFTER, 0, i, i + 2));
+            expected.add(Row.ofKind(RowKind.UPDATE_AFTER, 1, i, i + 2));
+        }
+        assertStreamingResult(
+                sEnv.executeSql("SELECT * FROM t /*+ OPTIONS('scan.snapshot-id' = '1') */"),
+                expected);
+    }
+
+    @Test
+    @Timeout(TIMEOUT)
+    public void testChangelogCompactInStreamWrite() throws Exception {
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(2000)
+                        .parallelism(4)
+                        .build();
+
+        sEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
+        sEnv.executeSql("USE CATALOG testCatalog");
+        sEnv.executeSql(
+                "CREATE TABLE t ( pt INT, k INT, v INT, PRIMARY KEY (pt, k) NOT ENFORCED ) "
+                        + "PARTITIONED BY (pt) "
+                        + "WITH ("
+                        + "    'bucket' = '10',\n"
+                        + "    'changelog-producer' = 'lookup',\n"
+                        + "    'changelog.precommit-compact' = 'true'\n"
+                        + ")");
+
+        Path inputPath = new Path(path, "input");
+        LocalFileIO.create().mkdirs(inputPath);
+        sEnv.executeSql(
+                "CREATE TABLE `default_catalog`.`default_database`.`s` ( pt INT, k INT, v INT, PRIMARY KEY (pt, k) NOT ENFORCED) "
+                        + "WITH ( 'connector' = 'filesystem', 'format' = 'testcsv', 'path' = '"
+                        + inputPath
+                        + "', 'source.monitor-interval' = '500ms' )");
+
+        sEnv.executeSql("INSERT INTO t SELECT * FROM `default_catalog`.`default_database`.`s`");
+        CloseableIterator<Row> it = collect(sEnv.executeSql("SELECT * FROM t"));
+
+        // write initial data
+        List<String> values = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            values.add(String.format("(0, %d, %d)", i, i));
+            values.add(String.format("(1, %d, %d)", i, i));
+        }
+        sEnv.executeSql(
+                        "INSERT INTO `default_catalog`.`default_database`.`s` VALUES "
+                                + String.join(", ", values))
+                .await();
+
+        List<Row> expected = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            expected.add(Row.ofKind(RowKind.INSERT, 0, i, i));
+            expected.add(Row.ofKind(RowKind.INSERT, 1, i, i));
+        }
+        assertStreamingResult(it, expected);
+
+        List<String> compactedChangelogs2 = listAllFilesWithPrefix("compacted-changelog-");
+        assertThat(compactedChangelogs2).hasSize(2);
+        assertThat(listAllFilesWithPrefix("changelog-")).isEmpty();
+
+        // write update data
+        values.clear();
+        for (int i = 0; i < 100; i++) {
+            values.add(String.format("(0, %d, %d)", i, i + 1));
+            values.add(String.format("(1, %d, %d)", i, i + 1));
+        }
+        sEnv.executeSql(
+                        "INSERT INTO `default_catalog`.`default_database`.`s` VALUES "
+                                + String.join(", ", values))
+                .await();
+        for (int i = 0; i < 100; i++) {
+            expected.add(Row.ofKind(RowKind.UPDATE_BEFORE, 0, i, i));
+            expected.add(Row.ofKind(RowKind.UPDATE_BEFORE, 1, i, i));
+            expected.add(Row.ofKind(RowKind.UPDATE_AFTER, 0, i, i + 1));
+            expected.add(Row.ofKind(RowKind.UPDATE_AFTER, 1, i, i + 1));
+        }
+        assertStreamingResult(it, expected.subList(200, 600));
+        assertThat(listAllFilesWithPrefix("compacted-changelog-")).hasSize(4);
+        assertThat(listAllFilesWithPrefix("changelog-")).isEmpty();
+    }
+
+    private List<String> listAllFilesWithPrefix(String prefix) throws Exception {
+        try (Stream<java.nio.file.Path> stream = Files.walk(java.nio.file.Paths.get(path))) {
+            return stream.filter(Files::isRegularFile)
+                    .filter(p -> p.getFileName().toString().startsWith(prefix))
+                    .map(java.nio.file.Path::toString)
+                    .collect(Collectors.toList());
+        }
+    }
+
+    private void assertStreamingResult(TableResult result, List<Row> expected) throws Exception {
+        List<Row> actual = new ArrayList<>();
+        try (CloseableIterator<Row> it = collect(result)) {
+            while (actual.size() < expected.size() && it.hasNext()) {
+                actual.add(it.next());
+            }
+        }
+        assertThat(actual).hasSameElementsAs(expected);
+    }
+
+    private void assertStreamingResult(CloseableIterator<Row> it, List<Row> expected) {
+        List<Row> actual = new ArrayList<>();
+        while (actual.size() < expected.size() && it.hasNext()) {
+            actual.add(it.next());
+        }
+
+        assertThat(actual).hasSameElementsAs(expected);
+    }
+
     // ------------------------------------------------------------------------
     //  Random Tests
     // ------------------------------------------------------------------------
 
     @Test
-    @Timeout(180)
+    @Timeout(TIMEOUT)
     public void testNoChangelogProducerBatchRandom() throws Exception {
         TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
         testNoChangelogProducerRandom(bEnv, 1, false);
     }
 
     @Test
-    @Timeout(180)
+    @Timeout(TIMEOUT)
     public void testNoChangelogProducerStreamingRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv =
@@ -360,14 +659,14 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    @Timeout(180)
+    @Timeout(TIMEOUT)
     public void testFullCompactionChangelogProducerBatchRandom() throws Exception {
         TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
         testFullCompactionChangelogProducerRandom(bEnv, 1, false);
     }
 
     @Test
-    @Timeout(180)
+    @Timeout(TIMEOUT)
     public void testFullCompactionChangelogProducerStreamingRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv =
@@ -380,7 +679,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    @Timeout(180)
+    @Timeout(TIMEOUT)
     public void testStandAloneFullCompactJobRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv =
@@ -393,14 +692,14 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    @Timeout(180)
+    @Timeout(TIMEOUT)
     public void testLookupChangelogProducerBatchRandom() throws Exception {
         TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
         testLookupChangelogProducerRandom(bEnv, 1, false);
     }
 
     @Test
-    @Timeout(180)
+    @Timeout(TIMEOUT)
     public void testLookupChangelogProducerStreamingRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv =
@@ -413,7 +712,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    @Timeout(180)
+    @Timeout(TIMEOUT)
     public void testStandAloneLookupJobRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv =
@@ -488,15 +787,17 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                 tEnv,
                 numProducers,
                 enableFailure,
-                "'bucket' = '4',"
-                        + String.format(
-                                "'write-buffer-size' = '%s',"
-                                        + "'changelog-producer' = 'lookup',"
-                                        + "'lookup-wait' = '%s',"
-                                        + "'deletion-vectors.enabled' = '%s'",
-                                random.nextBoolean() ? "4mb" : "8mb",
-                                random.nextBoolean(),
-                                enableDeletionVectors));
+                String.format(
+                        "'bucket' = '4', "
+                                + "'writer-buffer-size' = '%s', "
+                                + "'changelog-producer' = 'lookup', "
+                                + "'lookup-wait' = '%s', "
+                                + "'deletion-vectors.enabled' = '%s', "
+                                + "'changelog.precommit-compact' = '%s'",
+                        random.nextBoolean() ? "4mb" : "8mb",
+                        random.nextBoolean(),
+                        enableDeletionVectors,
+                        random.nextBoolean()));
 
         // sleep for a random amount of time to check
         // if we can first read complete records then read incremental records correctly
@@ -595,7 +896,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
         ResultChecker checker = new ResultChecker();
         int endCnt = 0;
-        try (CloseableIterator<Row> it = sEnv.executeSql("SELECT * FROM T").collect()) {
+        try (CloseableIterator<Row> it = collect(sEnv.executeSql("SELECT * FROM T"))) {
             while (it.hasNext()) {
                 Row row = it.next();
                 checker.addChangelog(row);
@@ -713,7 +1014,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         bEnv.executeSql("USE CATALOG testCatalog");
 
         ResultChecker checker = new ResultChecker();
-        try (CloseableIterator<Row> it = bEnv.executeSql("SELECT * FROM T").collect()) {
+        try (CloseableIterator<Row> it = collect(bEnv.executeSql("SELECT * FROM T"))) {
             while (it.hasNext()) {
                 checker.addChangelog(it.next());
             }

@@ -28,12 +28,15 @@ import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.flink.lookup.FileStoreLookupFunction;
 import org.apache.paimon.flink.lookup.LookupRuntimeProviderFactory;
-import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.DataTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Projection;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -41,10 +44,6 @@ import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.LookupTableSource;
-import org.apache.flink.table.connector.source.LookupTableSource.LookupContext;
-import org.apache.flink.table.connector.source.LookupTableSource.LookupRuntimeProvider;
-import org.apache.flink.table.connector.source.ScanTableSource.ScanContext;
-import org.apache.flink.table.connector.source.ScanTableSource.ScanRuntimeProvider;
 import org.apache.flink.table.connector.source.SourceProvider;
 import org.apache.flink.table.connector.source.abilities.SupportsAggregatePushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsWatermarkPushDown;
@@ -56,7 +55,10 @@ import org.apache.flink.table.types.DataType;
 import javax.annotation.Nullable;
 
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.IntStream;
 
@@ -72,6 +74,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGN
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_EMIT_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_TIMEOUT;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * Table source to create {@link StaticFileStoreSource} or {@link ContinuousFileStoreSource} under
@@ -80,13 +83,23 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_
 public abstract class BaseDataTableSource extends FlinkTableSource
         implements LookupTableSource, SupportsWatermarkPushDown, SupportsAggregatePushDown {
 
+    private static final List<ConfigOption<?>> TIME_TRAVEL_OPTIONS =
+            Arrays.asList(
+                    CoreOptions.SCAN_TIMESTAMP,
+                    CoreOptions.SCAN_TIMESTAMP_MILLIS,
+                    CoreOptions.SCAN_WATERMARK,
+                    CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS,
+                    CoreOptions.SCAN_SNAPSHOT_ID,
+                    CoreOptions.SCAN_TAG_NAME,
+                    CoreOptions.SCAN_VERSION);
+
     protected final ObjectIdentifier tableIdentifier;
     protected final boolean streaming;
     protected final DynamicTableFactory.Context context;
     @Nullable protected final LogStoreTableFactory logStoreTableFactory;
 
     @Nullable protected WatermarkStrategy<RowData> watermarkStrategy;
-    protected boolean isBatchCountStar;
+    @Nullable protected Long countPushed;
 
     public BaseDataTableSource(
             ObjectIdentifier tableIdentifier,
@@ -98,7 +111,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             @Nullable int[][] projectFields,
             @Nullable Long limit,
             @Nullable WatermarkStrategy<RowData> watermarkStrategy,
-            boolean isBatchCountStar) {
+            @Nullable Long countPushed) {
         super(table, predicate, projectFields, limit);
         this.tableIdentifier = tableIdentifier;
         this.streaming = streaming;
@@ -108,7 +121,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         this.projectFields = projectFields;
         this.limit = limit;
         this.watermarkStrategy = watermarkStrategy;
-        this.isBatchCountStar = isBatchCountStar;
+        this.countPushed = countPushed;
     }
 
     @Override
@@ -147,7 +160,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
 
     @Override
     public ScanRuntimeProvider getScanRuntimeProvider(ScanContext scanContext) {
-        if (isBatchCountStar) {
+        if (countPushed != null) {
             return createCountStarScan();
         }
 
@@ -200,10 +213,8 @@ public abstract class BaseDataTableSource extends FlinkTableSource
     }
 
     private ScanRuntimeProvider createCountStarScan() {
-        TableScan scan = table.newReadBuilder().withFilter(predicate).newScan();
-        List<PartitionEntry> partitionEntries = scan.listPartitionEntries();
-        long rowCount = partitionEntries.stream().mapToLong(PartitionEntry::recordCount).sum();
-        NumberSequenceRowSource source = new NumberSequenceRowSource(rowCount, rowCount);
+        checkNotNull(countPushed);
+        NumberSequenceRowSource source = new NumberSequenceRowSource(countPushed, countPushed);
         return new SourceProvider() {
             @Override
             public Source<RowData, ?, ?> createSource() {
@@ -231,6 +242,12 @@ public abstract class BaseDataTableSource extends FlinkTableSource
 
     @Override
     public LookupRuntimeProvider getLookupRuntimeProvider(LookupContext context) {
+        if (!(table instanceof FileStoreTable)) {
+            throw new UnsupportedOperationException(
+                    "Currently, lookup dim table only support FileStoreTable but is "
+                            + table.getClass().getName());
+        }
+
         if (limit != null) {
             throw new RuntimeException(
                     "Limit push down should not happen in Lookup source, but it is " + limit);
@@ -244,9 +261,32 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         boolean enableAsync = options.get(LOOKUP_ASYNC);
         int asyncThreadNumber = options.get(LOOKUP_ASYNC_THREAD_NUMBER);
         return LookupRuntimeProviderFactory.create(
-                new FileStoreLookupFunction(table, projection, joinKey, predicate),
+                getFileStoreLookupFunction(
+                        context,
+                        timeTravelDisabledTable((FileStoreTable) table),
+                        projection,
+                        joinKey),
                 enableAsync,
                 asyncThreadNumber);
+    }
+
+    protected FileStoreLookupFunction getFileStoreLookupFunction(
+            LookupContext context, Table table, int[] projection, int[] joinKey) {
+        return new FileStoreLookupFunction(table, projection, joinKey, predicate);
+    }
+
+    private FileStoreTable timeTravelDisabledTable(FileStoreTable table) {
+        Map<String, String> newOptions = new HashMap<>(table.options());
+        TIME_TRAVEL_OPTIONS.stream().map(ConfigOption::key).forEach(newOptions::remove);
+
+        CoreOptions.StartupMode startupMode = CoreOptions.fromMap(newOptions).startupMode();
+        if (startupMode != CoreOptions.StartupMode.COMPACTED_FULL) {
+            startupMode = CoreOptions.StartupMode.LATEST_FULL;
+        }
+        newOptions.put(CoreOptions.SCAN_MODE.key(), startupMode.toString());
+
+        TableSchema newSchema = table.schema().copy(newOptions);
+        return table.copy(newSchema);
     }
 
     @Override
@@ -259,15 +299,6 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         }
 
         if (!(table instanceof DataTable)) {
-            return false;
-        }
-
-        if (!table.primaryKeys().isEmpty()) {
-            return false;
-        }
-
-        CoreOptions options = ((DataTable) table).coreOptions();
-        if (options.deletionVectorsEnabled()) {
             return false;
         }
 
@@ -293,7 +324,22 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             return false;
         }
 
-        isBatchCountStar = true;
+        List<Split> splits =
+                table.newReadBuilder().dropStats().withFilter(predicate).newScan().plan().splits();
+        long countPushed = 0;
+        for (Split s : splits) {
+            if (!(s instanceof DataSplit)) {
+                return false;
+            }
+            DataSplit split = (DataSplit) s;
+            if (!split.mergedRowCountAvailable()) {
+                return false;
+            }
+
+            countPushed += split.mergedRowCount();
+        }
+
+        this.countPushed = countPushed;
         return true;
     }
 

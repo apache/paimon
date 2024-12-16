@@ -56,6 +56,9 @@ public class CdcActionCommonUtils {
     public static final String PULSAR_CONF = "pulsar_conf";
     public static final String TABLE_PREFIX = "table_prefix";
     public static final String TABLE_SUFFIX = "table_suffix";
+    public static final String TABLE_PREFIX_DB = "table_prefix_db";
+    public static final String TABLE_SUFFIX_DB = "table_suffix_db";
+    public static final String TABLE_MAPPING = "table_mapping";
     public static final String INCLUDING_TABLES = "including_tables";
     public static final String EXCLUDING_TABLES = "excluding_tables";
     public static final String TYPE_MAPPING = "type_mapping";

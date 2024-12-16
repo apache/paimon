@@ -88,10 +88,15 @@ public abstract class CommitterOperatorTestBase {
     }
 
     protected FileStoreTable createFileStoreTable() throws Exception {
-        return createFileStoreTable(options -> {});
+        return createFileStoreTable(options -> {}, Collections.emptyList());
     }
 
     protected FileStoreTable createFileStoreTable(Consumer<Options> setOptions) throws Exception {
+        return createFileStoreTable(setOptions, Collections.emptyList());
+    }
+
+    protected FileStoreTable createFileStoreTable(
+            Consumer<Options> setOptions, List<String> partitionKeys) throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
         conf.setString("bucket", "1");
@@ -101,7 +106,7 @@ public abstract class CommitterOperatorTestBase {
         schemaManager.createTable(
                 new Schema(
                         ROW_TYPE.getFields(),
-                        Collections.emptyList(),
+                        partitionKeys,
                         Collections.emptyList(),
                         conf.toMap(),
                         ""));
