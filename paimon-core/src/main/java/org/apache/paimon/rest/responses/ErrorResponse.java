@@ -18,10 +18,12 @@
 
 package org.apache.paimon.rest.responses;
 
+import org.apache.paimon.rest.RESTResponse;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.beans.ConstructorProperties;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.ArrayList;
@@ -29,7 +31,8 @@ import java.util.Arrays;
 import java.util.List;
 
 /** Response for error. */
-public class ErrorResponse {
+public class ErrorResponse implements RESTResponse {
+
     private static final String FIELD_MESSAGE = "message";
     private static final String FIELD_CODE = "code";
     private static final String FIELD_STACK = "stack";
@@ -49,8 +52,11 @@ public class ErrorResponse {
         this.stack = new ArrayList<String>();
     }
 
-    @ConstructorProperties({FIELD_MESSAGE, FIELD_CODE, FIELD_STACK})
-    public ErrorResponse(String message, int code, List<String> stack) {
+    @JsonCreator
+    public ErrorResponse(
+            @JsonProperty(FIELD_MESSAGE) String message,
+            @JsonProperty(FIELD_CODE) int code,
+            @JsonProperty(FIELD_STACK) List<String> stack) {
         this.message = message;
         this.code = code;
         this.stack = stack;
@@ -63,17 +69,17 @@ public class ErrorResponse {
     }
 
     @JsonGetter(FIELD_MESSAGE)
-    public String message() {
+    public String getMessage() {
         return message;
     }
 
     @JsonGetter(FIELD_CODE)
-    public Integer code() {
+    public Integer getCode() {
         return code;
     }
 
     @JsonGetter(FIELD_STACK)
-    public List<String> stack() {
+    public List<String> getStack() {
         return stack;
     }
 

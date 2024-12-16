@@ -186,7 +186,7 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
     @Override
     public void invalidateTable(Identifier ident) {
         // We do not need to check whether the table exists and whether
-        // it is an Paimon table to reduce remote service requests.
+        // it is a Paimon table to reduce remote service requests.
         sparkCatalog.invalidateTable(ident);
         asTableCatalog().invalidateTable(ident);
     }
@@ -288,12 +288,6 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
         Map<String, String> newOptions = new HashMap<>(options.asCaseSensitiveMap());
         fillAliyunConfigurations(newOptions, hadoopConf);
         fillCommonConfigurations(newOptions, sqlConf);
-
-        // if spark is case-insensitive, set allow upper case to catalog
-        if (!sqlConf.caseSensitiveAnalysis()) {
-            newOptions.put(ALLOW_UPPER_CASE.key(), "true");
-        }
-
         return new CaseInsensitiveStringMap(newOptions);
     }
 
@@ -313,13 +307,16 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
             String warehouse = sqlConf.warehousePath();
             options.put(WAREHOUSE.key(), warehouse);
         }
+
         if (!options.containsKey(METASTORE.key())) {
             String metastore = sqlConf.getConf(StaticSQLConf.CATALOG_IMPLEMENTATION());
             if (HiveCatalogOptions.IDENTIFIER.equals(metastore)) {
                 options.put(METASTORE.key(), metastore);
             }
         }
+
         options.put(CatalogOptions.FORMAT_TABLE_ENABLED.key(), "false");
+
         String sessionCatalogDefaultDatabase = SQLConfUtils.defaultDatabase(sqlConf);
         if (options.containsKey(DEFAULT_DATABASE.key())) {
             String userDefineDefaultDatabase = options.get(DEFAULT_DATABASE.key());
@@ -332,6 +329,11 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
             }
         } else {
             options.put(DEFAULT_DATABASE.key(), sessionCatalogDefaultDatabase);
+        }
+
+        // if spark is case-insensitive, set allow upper case to catalog
+        if (!sqlConf.caseSensitiveAnalysis()) {
+            options.put(ALLOW_UPPER_CASE.key(), "true");
         }
     }
 

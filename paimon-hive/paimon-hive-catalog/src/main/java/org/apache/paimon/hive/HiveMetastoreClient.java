@@ -119,17 +119,28 @@ public class HiveMetastoreClient implements MetastoreClient {
     public void alterPartition(
             LinkedHashMap<String, String> partitionSpec,
             Map<String, String> parameters,
-            long modifyTime)
+            long modifyTime,
+            boolean ignoreIfNotExist)
             throws Exception {
         List<String> partitionValues = new ArrayList<>(partitionSpec.values());
         int currentTime = (int) (modifyTime / 1000);
-        Partition hivePartition =
-                clients.run(
-                        client ->
-                                client.getPartition(
-                                        identifier.getDatabaseName(),
-                                        identifier.getObjectName(),
-                                        partitionValues));
+        Partition hivePartition;
+        try {
+            hivePartition =
+                    clients.run(
+                            client ->
+                                    client.getPartition(
+                                            identifier.getDatabaseName(),
+                                            identifier.getObjectName(),
+                                            partitionValues));
+        } catch (NoSuchObjectException e) {
+            if (ignoreIfNotExist) {
+                return;
+            } else {
+                throw e;
+            }
+        }
+
         hivePartition.setValues(partitionValues);
         hivePartition.setLastAccessTime(currentTime);
         hivePartition.getParameters().putAll(parameters);

@@ -1459,6 +1459,13 @@ public class CoreOptions implements Serializable {
                             "For DELETE manifest entry in manifest file, drop stats to reduce memory and storage."
                                     + " Default value is false only for compatibility of old reader.");
 
+    public static final ConfigOption<Boolean> DATA_FILE_THIN_MODE =
+            key("data-file.thin-mode")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Enable data file thin mode to avoid duplicate columns storage.");
+
     @ExcludeFromDocumentation("Only used internally to support materialized table")
     public static final ConfigOption<String> MATERIALIZED_TABLE_DEFINITION_QUERY =
             key("materialized-table.definition-query")
@@ -2383,6 +2390,10 @@ public class CoreOptions implements Serializable {
 
     public boolean statsDenseStore() {
         return options.get(METADATA_STATS_DENSE_STORE);
+    }
+
+    public boolean dataFileThinMode() {
+        return options.get(DATA_FILE_THIN_MODE);
     }
 
     /** Specifies the merge engine for table with primary key. */

@@ -65,17 +65,9 @@ public class HttpClient implements RESTClient {
     @Override
     public <T extends RESTResponse> T get(
             String path, Class<T> responseType, Map<String, String> headers) {
-        try {
-            Request request =
-                    new Request.Builder()
-                            .url(uri + path)
-                            .get()
-                            .headers(Headers.of(headers))
-                            .build();
-            return exec(request, responseType);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        Request request =
+                new Request.Builder().url(uri + path).get().headers(Headers.of(headers)).build();
+        return exec(request, responseType);
     }
 
     @Override
@@ -90,9 +82,16 @@ public class HttpClient implements RESTClient {
                             .headers(Headers.of(headers))
                             .build();
             return exec(request, responseType);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+        } catch (JsonProcessingException e) {
+            throw new RESTException(e, "build request failed.");
         }
+    }
+
+    @Override
+    public <T extends RESTResponse> T delete(String path, Map<String, String> headers) {
+        Request request =
+                new Request.Builder().url(uri + path).delete().headers(Headers.of(headers)).build();
+        return exec(request, null);
     }
 
     @Override
@@ -111,10 +110,15 @@ public class HttpClient implements RESTClient {
                                 response.code());
                 errorHandler.accept(error);
             }
-            if (responseBodyStr == null) {
+            if (responseType != null && responseBodyStr != null) {
+                return mapper.readValue(responseBodyStr, responseType);
+            } else if (responseType == null) {
+                return null;
+            } else {
                 throw new RESTException("response body is null.");
             }
-            return mapper.readValue(responseBodyStr, responseType);
+        } catch (RESTException e) {
+            throw e;
         } catch (Exception e) {
             throw new RESTException(e, "rest exception");
         }

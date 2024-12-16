@@ -40,9 +40,8 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.AsyncRecordReader;
-import org.apache.paimon.utils.BulkFormatMapping;
-import org.apache.paimon.utils.BulkFormatMapping.BulkFormatMappingBuilder;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.FormatReaderMapping;
 
 import javax.annotation.Nullable;
 
@@ -64,11 +63,11 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
     private final RowType keyType;
     private final RowType valueType;
 
-    private final BulkFormatMappingBuilder bulkFormatMappingBuilder;
+    private final FormatReaderMapping.Builder formatReaderMappingBuilder;
     private final DataFilePathFactory pathFactory;
     private final long asyncThreshold;
 
-    private final Map<FormatKey, BulkFormatMapping> bulkFormatMappings;
+    private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final BinaryRow partition;
     private final DeletionVector.Factory dvFactory;
 
@@ -78,7 +77,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             TableSchema schema,
             RowType keyType,
             RowType valueType,
-            BulkFormatMappingBuilder bulkFormatMappingBuilder,
+            FormatReaderMapping.Builder formatReaderMappingBuilder,
             DataFilePathFactory pathFactory,
             long asyncThreshold,
             BinaryRow partition,
@@ -88,11 +87,11 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         this.schema = schema;
         this.keyType = keyType;
         this.valueType = valueType;
-        this.bulkFormatMappingBuilder = bulkFormatMappingBuilder;
+        this.formatReaderMappingBuilder = formatReaderMappingBuilder;
         this.pathFactory = pathFactory;
         this.asyncThreshold = asyncThreshold;
         this.partition = partition;
-        this.bulkFormatMappings = new HashMap<>();
+        this.formatReaderMappings = new HashMap<>();
         this.dvFactory = dvFactory;
     }
 
@@ -136,16 +135,16 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             throws IOException {
         String formatIdentifier = DataFilePathFactory.formatIdentifier(fileName);
 
-        Supplier<BulkFormatMapping> formatSupplier =
+        Supplier<FormatReaderMapping> formatSupplier =
                 () ->
-                        bulkFormatMappingBuilder.build(
+                        formatReaderMappingBuilder.build(
                                 formatIdentifier,
                                 schema,
                                 schemaId == schema.id() ? schema : schemaManager.schema(schemaId));
 
-        BulkFormatMapping bulkFormatMapping =
+        FormatReaderMapping formatReaderMapping =
                 reuseFormat
-                        ? bulkFormatMappings.computeIfAbsent(
+                        ? formatReaderMappings.computeIfAbsent(
                                 new FormatKey(schemaId, formatIdentifier),
                                 key -> formatSupplier.get())
                         : formatSupplier.get();
@@ -153,14 +152,14 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
 
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
-                        bulkFormatMapping.getReaderFactory(),
+                        formatReaderMapping.getReaderFactory(),
                         orcPoolSize == null
                                 ? new FormatReaderContext(fileIO, filePath, fileSize)
                                 : new OrcFormatReaderContext(
                                         fileIO, filePath, fileSize, orcPoolSize),
-                        bulkFormatMapping.getIndexMapping(),
-                        bulkFormatMapping.getCastMapping(),
-                        PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
+                        formatReaderMapping.getIndexMapping(),
+                        formatReaderMapping.getCastMapping(),
+                        PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition));
 
         // TODO@HOULIANGQI
         Optional<DeletionVector> deletionVector = dvFactory.create(fileName);
@@ -293,7 +292,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     schema,
                     finalReadKeyType,
                     readValueType,
-                    new BulkFormatMappingBuilder(
+                    new FormatReaderMapping.Builder(
                             formatDiscover, readTableFields, fieldsExtractor, filters),
                     pathFactory.createDataFilePathFactory(partition, bucket),
                     options.fileReaderAsyncThreshold().getBytes(),

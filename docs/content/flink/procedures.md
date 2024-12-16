@@ -413,6 +413,49 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
+          <td>rollback_to_watermark</td>
+      <td>
+         -- for Flink 1.18<br/>
+         -- rollback to the snapshot which earlier or equal than watermark.<br/>
+         CALL sys.rollback_to_watermark('identifier', watermark)<br/><br/>
+         -- for Flink 1.19 and later<br/>
+         -- rollback to the snapshot which earlier or equal than watermark.<br/>
+         CALL sys.rollback_to_watermark(`table` => 'default.T', `watermark` => watermark)<br/><br/>
+      </td>
+      <td>
+         To rollback to the snapshot which earlier or equal than watermark. Argument:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>watermark (Long): Roll back to the snapshot which earlier or equal than watermark.</li>
+      </td>
+      <td>
+         -- for Flink 1.18<br/>
+         CALL sys.rollback_to_watermark('default.T', 1730292023000)
+         -- for Flink 1.19 and later<br/>
+         CALL sys.rollback_to_watermark(`table` => 'default.T', watermark => 1730292023000)
+      </td>
+   </tr>
+   <tr>
+          <td>purge_files</td>
+      <td>
+         -- for Flink 1.18<br/>
+         -- clear table with purge files directly.<br/>
+         CALL sys.purge_files('identifier')<br/><br/>
+         -- for Flink 1.19 and later<br/>
+         -- clear table with purge files directly.<br/>
+         CALL sys.purge_files(`table` => 'default.T')<br/><br/>
+      </td>
+      <td>
+         To clear table with purge files directly. Argument:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+      </td>
+      <td>
+         -- for Flink 1.18<br/>
+         CALL sys.purge_files('default.T')
+         -- for Flink 1.19 and later<br/>
+         CALL sys.purge_files(`table` => 'default.T')
+      </td>
+   </tr>
+   <tr>
       <td>expire_snapshots</td>
       <td>
          -- Use named argument<br/>

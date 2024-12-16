@@ -81,4 +81,20 @@ class PaimonSystemTableTest extends PaimonSparkTestBase {
       spark.sql("select partition,bucket from `T$buckets`"),
       Row("[2024-10-10, 01]", 0) :: Row("[2024-10-10, 01]", 1) :: Row("[2024-10-10, 01]", 2) :: Nil)
   }
+
+  test("system table: binlog table") {
+    sql("""
+          |CREATE TABLE T (a INT, b INT)
+          |TBLPROPERTIES ('primary-key'='a', 'changelog-producer' = 'lookup', 'bucket' = '2')
+          |""".stripMargin)
+
+    sql("INSERT INTO T VALUES (1, 2)")
+    sql("INSERT INTO T VALUES (1, 3)")
+    sql("INSERT INTO T VALUES (2, 2)")
+
+    checkAnswer(
+      sql("SELECT * FROM `T$binlog`"),
+      Seq(Row("+I", Array(1), Array(3)), Row("+I", Array(2), Array(2)))
+    )
+  }
 }

@@ -21,10 +21,10 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.LogicalTypeConversion;
-import org.apache.paimon.flink.source.operator.CombinedAwareBatchSourceFunction;
-import org.apache.paimon.flink.source.operator.CombinedAwareStreamingSourceFunction;
-import org.apache.paimon.flink.source.operator.CombinedUnawareBatchSourceFunction;
-import org.apache.paimon.flink.source.operator.CombinedUnawareStreamingSourceFunction;
+import org.apache.paimon.flink.source.operator.CombinedAwareBatchSource;
+import org.apache.paimon.flink.source.operator.CombinedAwareStreamingSource;
+import org.apache.paimon.flink.source.operator.CombinedUnawareBatchSource;
+import org.apache.paimon.flink.source.operator.CombinedUnawareStreamingSource;
 import org.apache.paimon.table.system.CompactBucketsTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
@@ -87,7 +87,7 @@ public class CombinedTableCompactorSourceBuilder {
         Preconditions.checkArgument(env != null, "StreamExecutionEnvironment should not be null.");
         RowType produceType = CompactBucketsTable.getRowType();
         if (isContinuous) {
-            return CombinedAwareStreamingSourceFunction.buildSource(
+            return CombinedAwareStreamingSource.buildSource(
                     env,
                     "Combine-MultiBucketTables--StreamingCompactorSource",
                     InternalTypeInfo.of(LogicalTypeConversion.toLogicalType(produceType)),
@@ -97,7 +97,7 @@ public class CombinedTableCompactorSourceBuilder {
                     databasePattern,
                     monitorInterval);
         } else {
-            return CombinedAwareBatchSourceFunction.buildSource(
+            return CombinedAwareBatchSource.buildSource(
                     env,
                     "Combine-MultiBucketTables-BatchCompactorSource",
                     InternalTypeInfo.of(LogicalTypeConversion.toLogicalType(produceType)),
@@ -112,7 +112,7 @@ public class CombinedTableCompactorSourceBuilder {
     public DataStream<MultiTableUnawareAppendCompactionTask> buildForUnawareBucketsTableSource() {
         Preconditions.checkArgument(env != null, "StreamExecutionEnvironment should not be null.");
         if (isContinuous) {
-            return CombinedUnawareStreamingSourceFunction.buildSource(
+            return CombinedUnawareStreamingSource.buildSource(
                     env,
                     "Combined-UnawareBucketTables-StreamingCompactorSource",
                     catalogLoader,
@@ -121,7 +121,7 @@ public class CombinedTableCompactorSourceBuilder {
                     databasePattern,
                     monitorInterval);
         } else {
-            return CombinedUnawareBatchSourceFunction.buildSource(
+            return CombinedUnawareBatchSource.buildSource(
                     env,
                     "Combined-UnawareBucketTables-BatchCompactorSource",
                     catalogLoader,

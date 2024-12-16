@@ -18,5 +18,8 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 /** Interface to mark both REST requests and responses. */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public interface RESTMessage {}

@@ -142,20 +142,19 @@ public class FileStorePathFactory {
     }
 
     public Path bucketPath(BinaryRow partition, int bucket) {
-        Path dataFileRoot = this.root;
-        if (dataFilePathDirectory != null) {
-            dataFileRoot = new Path(dataFileRoot, dataFilePathDirectory);
-        }
-        return new Path(dataFileRoot + "/" + relativePartitionAndBucketPath(partition, bucket));
+        return new Path(root, relativeBucketPath(partition, bucket));
     }
 
-    public Path relativePartitionAndBucketPath(BinaryRow partition, int bucket) {
+    public Path relativeBucketPath(BinaryRow partition, int bucket) {
+        Path relativeBucketPath = new Path(BUCKET_PATH_PREFIX + bucket);
         String partitionPath = getPartitionString(partition);
-        String fullPath =
-                partitionPath.isEmpty()
-                        ? BUCKET_PATH_PREFIX + bucket
-                        : partitionPath + "/" + BUCKET_PATH_PREFIX + bucket;
-        return new Path(fullPath);
+        if (!partitionPath.isEmpty()) {
+            relativeBucketPath = new Path(partitionPath, relativeBucketPath);
+        }
+        if (dataFilePathDirectory != null) {
+            relativeBucketPath = new Path(dataFilePathDirectory, relativeBucketPath);
+        }
+        return relativeBucketPath;
     }
 
     /** IMPORTANT: This method is NOT THREAD SAFE. */

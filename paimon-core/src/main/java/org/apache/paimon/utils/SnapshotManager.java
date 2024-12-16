@@ -45,6 +45,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
 import java.util.function.Consumer;
@@ -361,6 +362,65 @@ public class SnapshotManager implements Serializable {
             } else {
                 finalSnapshot = snapshot; // Found the exact match
                 break;
+            }
+        }
+        return finalSnapshot;
+    }
+
+    public @Nullable Snapshot earlierOrEqualWatermark(long watermark) {
+        Long earliest = earliestSnapshotId();
+        Long latest = latestSnapshotId();
+        // If latest == Long.MIN_VALUE don't need next binary search for watermark
+        // which can reduce IO cost with snapshot
+        if (earliest == null || latest == null || snapshot(latest).watermark() == Long.MIN_VALUE) {
+            return null;
+        }
+        Long earliestWatermark = null;
+        // find the first snapshot with watermark
+        if ((earliestWatermark = snapshot(earliest).watermark()) == null) {
+            while (earliest < latest) {
+                earliest++;
+                earliestWatermark = snapshot(earliest).watermark();
+                if (earliestWatermark != null) {
+                    break;
+                }
+            }
+        }
+        if (earliestWatermark == null) {
+            return null;
+        }
+
+        if (earliestWatermark >= watermark) {
+            return snapshot(earliest);
+        }
+        Snapshot finalSnapshot = null;
+
+        while (earliest <= latest) {
+            long mid = earliest + (latest - earliest) / 2; // Avoid overflow
+            Snapshot snapshot = snapshot(mid);
+            Long commitWatermark = snapshot.watermark();
+            if (commitWatermark == null) {
+                // find the first snapshot with watermark
+                while (mid >= earliest) {
+                    mid--;
+                    commitWatermark = snapshot(mid).watermark();
+                    if (commitWatermark != null) {
+                        break;
+                    }
+                }
+            }
+            if (commitWatermark == null) {
+                earliest = mid + 1;
+            } else {
+                if (commitWatermark > watermark) {
+                    latest = mid - 1; // Search in the left half
+                } else if (commitWatermark < watermark) {
+                    earliest = mid + 1; // Search in the right half
+                    finalSnapshot = snapshot;
+                } else {
+                    finalSnapshot = snapshot; // Found the exact match
+                    break;
+                }
             }
         }
         return finalSnapshot;
@@ -824,6 +884,23 @@ public class SnapshotManager implements Serializable {
 
     private void commitHint(long snapshotId, String fileName, Path dir) throws IOException {
         Path hintFile = new Path(dir, fileName);
-        fileIO.overwriteFileUtf8(hintFile, String.valueOf(snapshotId));
+        int loopTime = 3;
+        while (loopTime-- > 0) {
+            try {
+                fileIO.overwriteFileUtf8(hintFile, String.valueOf(snapshotId));
+                return;
+            } catch (IOException e) {
+                try {
+                    Thread.sleep(ThreadLocalRandom.current().nextInt(1000) + 500);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    // throw root cause
+                    throw new RuntimeException(e);
+                }
+                if (loopTime == 0) {
+                    throw e;
+                }
+            }
+        }
     }
 }

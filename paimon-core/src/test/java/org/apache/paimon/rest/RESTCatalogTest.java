@@ -18,8 +18,17 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Database;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.responses.CreateDatabaseResponse;
+import org.apache.paimon.rest.responses.ErrorResponse;
+import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.ListDatabasesResponse;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
@@ -28,17 +37,27 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Test for REST Catalog. */
 public class RESTCatalogTest {
 
+    private final ObjectMapper mapper = RESTObjectMapper.create();
     private MockWebServer mockWebServer;
     private RESTCatalog restCatalog;
+    private RESTCatalog mockRestCatalog;
 
     @Before
     public void setUp() throws IOException {
@@ -50,8 +69,13 @@ public class RESTCatalogTest {
         String initToken = "init_token";
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
-        mockOptions(RESTCatalogInternalOptions.PREFIX.key(), "prefix");
+        String mockResponse =
+                String.format(
+                        "{\"defaults\": {\"%s\": \"%s\"}}",
+                        RESTCatalogInternalOptions.PREFIX.key(), "prefix");
+        mockResponse(mockResponse, 200);
         restCatalog = new RESTCatalog(options);
+        mockRestCatalog = spy(restCatalog);
     }
 
     @After
@@ -70,16 +94,101 @@ public class RESTCatalogTest {
     public void testGetConfig() {
         String key = "a";
         String value = "b";
-        mockOptions(key, value);
+        String mockResponse = String.format("{\"defaults\": {\"%s\": \"%s\"}}", key, value);
+        mockResponse(mockResponse, 200);
         Map<String, String> header = new HashMap<>();
         Map<String, String> response = restCatalog.fetchOptionsFromServer(header, new HashMap<>());
         assertEquals(value, response.get(key));
     }
 
-    private void mockOptions(String key, String value) {
-        String mockResponse = String.format("{\"defaults\": {\"%s\": \"%s\"}}", key, value);
+    @Test
+    public void testListDatabases() throws JsonProcessingException {
+        String name = MockRESTMessage.databaseName();
+        ListDatabasesResponse response = MockRESTMessage.listDatabasesResponse(name);
+        mockResponse(mapper.writeValueAsString(response), 200);
+        List<String> result = restCatalog.listDatabases();
+        assertEquals(response.getDatabases().size(), result.size());
+        assertEquals(name, result.get(0));
+    }
+
+    @Test
+    public void testCreateDatabase() throws Exception {
+        String name = MockRESTMessage.databaseName();
+        CreateDatabaseResponse response = MockRESTMessage.createDatabaseResponse(name);
+        mockResponse(mapper.writeValueAsString(response), 200);
+        assertDoesNotThrow(() -> restCatalog.createDatabase(name, false, response.getOptions()));
+    }
+
+    @Test
+    public void testGetDatabase() throws Exception {
+        String name = MockRESTMessage.databaseName();
+        GetDatabaseResponse response = MockRESTMessage.getDatabaseResponse(name);
+        mockResponse(mapper.writeValueAsString(response), 200);
+        Database result = restCatalog.getDatabase(name);
+        assertEquals(name, result.name());
+        assertEquals(response.getOptions().size(), result.options().size());
+        assertEquals(response.comment().get(), result.comment().get());
+    }
+
+    @Test
+    public void testDropDatabase() throws Exception {
+        String name = MockRESTMessage.databaseName();
+        mockResponse("", 200);
+        assertDoesNotThrow(() -> mockRestCatalog.dropDatabase(name, false, true));
+        verify(mockRestCatalog, times(1)).dropDatabase(eq(name), eq(false), eq(true));
+        verify(mockRestCatalog, times(0)).listTables(eq(name));
+    }
+
+    @Test
+    public void testDropDatabaseWhenNoExistAndIgnoreIfNotExistsIsFalse() throws Exception {
+        String name = MockRESTMessage.databaseName();
+        ErrorResponse response = MockRESTMessage.noSuchResourceExceptionErrorResponse();
+        mockResponse(mapper.writeValueAsString(response), 404);
+        assertThrows(
+                Catalog.DatabaseNotExistException.class,
+                () -> mockRestCatalog.dropDatabase(name, false, true));
+    }
+
+    @Test
+    public void testDropDatabaseWhenNoExistAndIgnoreIfNotExistsIsTrue() throws Exception {
+        String name = MockRESTMessage.databaseName();
+        ErrorResponse response = MockRESTMessage.noSuchResourceExceptionErrorResponse();
+        mockResponse(mapper.writeValueAsString(response), 404);
+        assertDoesNotThrow(() -> mockRestCatalog.dropDatabase(name, true, true));
+        verify(mockRestCatalog, times(1)).dropDatabase(eq(name), eq(true), eq(true));
+        verify(mockRestCatalog, times(0)).listTables(eq(name));
+    }
+
+    @Test
+    public void testDropDatabaseWhenCascadeIsFalseAndNoTables() throws Exception {
+        String name = MockRESTMessage.databaseName();
+        boolean cascade = false;
+        mockResponse("", 200);
+        when(mockRestCatalog.listTables(name)).thenReturn(new ArrayList<>());
+        assertDoesNotThrow(() -> mockRestCatalog.dropDatabase(name, false, cascade));
+        verify(mockRestCatalog, times(1)).dropDatabase(eq(name), eq(false), eq(cascade));
+        verify(mockRestCatalog, times(1)).listTables(eq(name));
+    }
+
+    @Test
+    public void testDropDatabaseWhenCascadeIsFalseAndTablesExist() throws Exception {
+        String name = MockRESTMessage.databaseName();
+        boolean cascade = false;
+        mockResponse("", 200);
+        List<String> tables = new ArrayList<>();
+        tables.add("t1");
+        when(mockRestCatalog.listTables(name)).thenReturn(tables);
+        assertThrows(
+                Catalog.DatabaseNotEmptyException.class,
+                () -> mockRestCatalog.dropDatabase(name, false, cascade));
+        verify(mockRestCatalog, times(1)).dropDatabase(eq(name), eq(false), eq(cascade));
+        verify(mockRestCatalog, times(1)).listTables(eq(name));
+    }
+
+    private void mockResponse(String mockResponse, int httpCode) {
         MockResponse mockResponseObj =
                 new MockResponse()
+                        .setResponseCode(httpCode)
                         .setBody(mockResponse)
                         .addHeader("Content-Type", "application/json");
         mockWebServer.enqueue(mockResponseObj);

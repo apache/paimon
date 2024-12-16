@@ -43,6 +43,7 @@ import static org.mockito.Mockito.verify;
 
 /** Test for {@link HttpClient}. */
 public class HttpClientTest {
+
     private MockWebServer mockWebServer;
     private HttpClient httpClient;
     private ObjectMapper objectMapper = RESTObjectMapper.create();
@@ -107,6 +108,20 @@ public class HttpClientTest {
     public void testPostFail() {
         mockHttpCallWithCode(mockResponseDataStr, 400);
         httpClient.post(MOCK_PATH, mockResponseData, MockRESTData.class, headers);
+        verify(errorHandler, times(1)).accept(any());
+    }
+
+    @Test
+    public void testDeleteSuccess() {
+        mockHttpCallWithCode(mockResponseDataStr, 200);
+        MockRESTData response = httpClient.delete(MOCK_PATH, headers);
+        verify(errorHandler, times(0)).accept(any());
+    }
+
+    @Test
+    public void testDeleteFail() {
+        mockHttpCallWithCode(mockResponseDataStr, 400);
+        httpClient.delete(MOCK_PATH, headers);
         verify(errorHandler, times(1)).accept(any());
     }
 

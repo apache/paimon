@@ -31,8 +31,8 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Test for {@link BulkFormatMapping.BulkFormatMappingBuilder}. */
-public class BulkFormatMappingTest {
+/** Test for {@link FormatReaderMapping.Builder}. */
+public class FormatReaderMappingTest {
 
     @Test
     public void testTrimKeyFields() {
@@ -79,8 +79,7 @@ public class BulkFormatMappingTest {
         testFields.add(new DataField(1, String.valueOf(1), DataTypes.STRING()));
         testFields.add(new DataField(6, String.valueOf(6), DataTypes.STRING()));
 
-        Pair<int[], RowType> res =
-                BulkFormatMapping.BulkFormatMappingBuilder.trimKeyFields(testFields, allFields);
+        Pair<int[], RowType> res = FormatReaderMapping.Builder.trimKeyFields(testFields, allFields);
 
         Assertions.assertThat(res.getKey()).containsExactly(0, 1, 2, 3, 1, 4, 2, 0, 5);
 
@@ -124,11 +123,10 @@ public class BulkFormatMappingTest {
 
         // map from key fields reading to value fields reading
         Pair<int[], RowType> trimmedKeyPair =
-                BulkFormatMapping.BulkFormatMappingBuilder.trimKeyFields(
-                        readDataFields, readDataFields);
+                FormatReaderMapping.Builder.trimKeyFields(readDataFields, readDataFields);
 
-        BulkFormatMapping bulkFormatMapping =
-                new BulkFormatMapping(
+        FormatReaderMapping formatReaderMapping =
+                new FormatReaderMapping(
                         indexCastMapping.getIndexMapping(),
                         indexCastMapping.getCastMapping(),
                         trimmedKeyPair.getLeft(),
@@ -137,7 +135,8 @@ public class BulkFormatMappingTest {
                         null,
                         null);
 
-        Assertions.assertThat(bulkFormatMapping.getIndexMapping()).containsExactly(0, 1, 0, -1, 2);
+        Assertions.assertThat(formatReaderMapping.getIndexMapping())
+                .containsExactly(0, 1, 0, -1, 2);
         List<DataField> trimmed = trimmedKeyPair.getRight().getFields();
         Assertions.assertThat(trimmed.get(0).id()).isEqualTo(1);
         Assertions.assertThat(trimmed.get(1).id()).isEqualTo(0);
