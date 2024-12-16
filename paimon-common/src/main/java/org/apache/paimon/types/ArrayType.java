@@ -101,6 +101,21 @@ public final class ArrayType extends DataType {
     }
 
     @Override
+    public boolean equalsIgnoreFieldId(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        if (!super.equals(o)) {
+            return false;
+        }
+        ArrayType arrayType = (ArrayType) o;
+        return elementType.equalsIgnoreFieldId(arrayType.elementType);
+    }
+
+    @Override
     public boolean isPrunedFrom(Object o) {
         if (this == o) {
             return true;

@@ -434,6 +434,63 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
     }
   }
 
+  test("Paimon DDL with hive catalog: create external table with schema evolution") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        spark.sql(s"USE $catalogName")
+        withTempDir {
+          tbLocation =>
+            withDatabase("paimon_db") {
+              spark.sql(s"CREATE DATABASE IF NOT EXISTS paimon_db")
+              spark.sql(s"USE paimon_db")
+              withTable("t1", "t2") {
+                val expertTbLocation = tbLocation.getCanonicalPath
+                spark.sql(
+                  s"""
+                     |CREATE TABLE t1 (a INT, b INT, c STRUCT<f1: INT, f2: INT, f3: INT>) USING paimon
+                     |LOCATION '$expertTbLocation'
+                     |""".stripMargin)
+                spark.sql("INSERT INTO t1 VALUES (1, 1, STRUCT(1, 1, 1))")
+                spark.sql("ALTER TABLE t1 DROP COLUMN b")
+                spark.sql("ALTER TABLE t1 ADD COLUMN b INT")
+                spark.sql("ALTER TABLE t1 DROP COLUMN c.f2")
+                spark.sql("ALTER TABLE t1 ADD COLUMN c.f2 INT")
+                spark.sql("INSERT INTO t1 VALUES (2, STRUCT(1, 1, 1), 1)")
+                checkAnswer(
+                  spark.sql("SELECT * FROM t1 ORDER by a"),
+                  Seq(Row(1, Row(1, 1, null), null), Row(2, Row(1, 1, 1), 1)))
+
+                spark.sql(
+                  s"""
+                     |CREATE TABLE t2 (a INT, c STRUCT<f1: INT, f3: INT, f2: INT>, b INT) USING paimon
+                     |LOCATION '$expertTbLocation'
+                     |""".stripMargin)
+                checkAnswer(
+                  spark.sql("SELECT * FROM t2 ORDER by a"),
+                  Seq(Row(1, Row(1, 1, null), null), Row(2, Row(1, 1, 1), 1)))
+
+                // create table with wrong schema
+                intercept[Exception] {
+                  spark.sql(
+                    s"""
+                       |CREATE TABLE t3 (a INT, b INT, c STRUCT<f1: INT, f3: INT, f2: INT>) USING paimon
+                       |LOCATION '$expertTbLocation'
+                       |""".stripMargin)
+                }
+
+                intercept[Exception] {
+                  spark.sql(
+                    s"""
+                       |CREATE TABLE t4 (a INT, c STRUCT<f1: INT, f2: INT, f3: INT>, b INT) USING paimon
+                       |LOCATION '$expertTbLocation'
+                       |""".stripMargin)
+                }
+              }
+            }
+        }
+    }
+  }
+
   def getDatabaseProp(dbName: String, propertyName: String): String = {
     spark
       .sql(s"DESC DATABASE EXTENDED $dbName")
