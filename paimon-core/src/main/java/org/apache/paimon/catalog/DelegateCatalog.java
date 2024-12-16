@@ -19,7 +19,6 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -145,11 +144,6 @@ public class DelegateCatalog implements Catalog {
     public void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
             throws ViewNotExistException, ViewAlreadyExistException {
         wrapped.renameView(fromView, toView, ignoreIfNotExists);
-    }
-
-    @Override
-    public Path getTableLocation(Identifier identifier) {
-        return wrapped.getTableLocation(identifier);
     }
 
     @Override

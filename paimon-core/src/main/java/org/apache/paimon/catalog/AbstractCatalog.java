@@ -496,7 +496,6 @@ public abstract class AbstractCatalog implements Catalog {
         return Optional.empty();
     }
 
-    @Override
     public Path getTableLocation(Identifier identifier) {
         return new Path(newDatabasePath(identifier.getDatabaseName()), identifier.getTableName());
     }

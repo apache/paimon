@@ -83,7 +83,7 @@ class PartitionMarkDoneTest extends TableTestBase {
                         .build();
         catalog.createTable(identifier, schema, true);
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-        Path location = catalog.getTableLocation(identifier);
+        Path location = table.location();
         Path successFile = new Path(location, "a=0/_SUCCESS");
         PartitionMarkDone markDone =
                 PartitionMarkDone.create(false, false, new MockOperatorStateStore(), table).get();

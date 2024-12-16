@@ -25,7 +25,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
 import org.apache.paimon.flink.utils.FlinkDescriptorProperties;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.options.Options;
@@ -523,20 +522,6 @@ public class FlinkCatalog extends AbstractCatalog {
             Catalog.tableDefaultOptions(catalog.options()).forEach(options::putIfAbsent);
             options.put(REGISTER_TIMEOUT.key(), logStoreAutoRegisterTimeout.toString());
             registerLogSystem(catalog, identifier, options, classLoader);
-        }
-
-        // remove table path
-        String path = options.remove(PATH.key());
-        if (path != null) {
-            Path expectedPath = catalog.getTableLocation(identifier);
-            if (!new Path(path).equals(expectedPath)) {
-                throw new CatalogException(
-                        String.format(
-                                "You specified the Path when creating the table, "
-                                        + "but the Path '%s' is different from where it should be '%s'. "
-                                        + "Please remove the Path.",
-                                path, expectedPath));
-            }
         }
 
         if (catalogTable instanceof CatalogTable) {
