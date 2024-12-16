@@ -35,13 +35,13 @@ under the License.
 
 Manifest List includes meta of several manifest files. Its name contains UUID, it is a avro file, the schema is:
 
-1. fileName: manifest file name.
-2. fileSize: manifest file size.
-3. numAddedFiles: number added files in manifest.
-4. numDeletedFiles: number deleted files in manifest.
-5. partitionStats: partition stats, the minimum and maximum values of partition fields in this manifest are beneficial
+1. _FILE_NAME: STRING, manifest file name.
+2. _FILE_SIZE: BIGINT, manifest file size.
+3. _NUM_ADDED_FILES: BIGINT, number added files in manifest.
+4. _NUM_DELETED_FILES: BIGINT, number deleted files in manifest.
+5. _PARTITION_STATS: SimpleStats, partition stats, the minimum and maximum values of partition fields in this manifest are beneficial
    for skipping certain manifest files during queries, it is a SimpleStats.
-6. schemaId: schema id when writing this manifest file.
+6. _SCHEMA_ID: BIGINT, schema id when writing this manifest file.
 
 ## Manifest
 
@@ -63,31 +63,31 @@ Data Manifest includes meta of several data files or changelog files.
 
 The schema is:
 
-1. kind: ADD or DELETE,
-2. partition: partition spec, a BinaryRow.
-3. bucket: bucket of this file.
-4. totalBuckets: total buckets when write this file, it is used for verification after bucket changes.
-5. file: data file meta.
+1. _KIND: TINYINT, ADD or DELETE,
+2. _PARTITION: BYTES, partition spec, a BinaryRow.
+3. _BUCKET: INT, bucket of this file.
+4. _TOTAL_BUCKETS: INT, total buckets when write this file, it is used for verification after bucket changes.
+5. _FILE: data file meta.
 
 The data file meta is:
 
-1. fileName: file name.
-2. fileSize: file size.
-3. rowCount: total number of rows (including add & delete) in this file.
-4. minKey: the minimum key of this file.
-5. maxKey: the maximum key of this file.
-6. keyStats: the statistics of the key.
-7. valueStats: the statistics of the value.
-8. minSequenceNumber: the minimum sequence number.
-9. maxSequenceNumber: the maximum sequence number.
-10. schemaId: schema id when write this file.
-11. level: level of this file, in LSM.
-12. extraFiles: extra files for this file, for example, data file index file.
-13. creationTime: creation time of this file.
-14. deleteRowCount: rowCount = addRowCount + deleteRowCount.
-15. embeddedIndex: if data file index is too small, store the index in manifest.
-16. fileSource: indicate whether this file is generated as an APPEND or COMPACT file
-17. valueStatsCols: statistical column in metadata 
+1. _FILE_NAME: STRING, file name.
+2. _FILE_SIZE: BIGINT, file size.
+3. _ROW_COUNT: BIGINT, total number of rows (including add & delete) in this file.
+4. _MIN_KEY: STRING, the minimum key of this file.
+5. _MAX_KEY: STRING, the maximum key of this file.
+6. _KEY_STATS: SimpleStats, the statistics of the key.
+7. _VALUE_STATS: SimpleStats, the statistics of the value.
+8. _MIN_SEQUENCE_NUMBER: BIGINT, the minimum sequence number.
+9. _MAX_SEQUENCE_NUMBER: BIGINT, the maximum sequence number.
+10. _SCHEMA_ID: BIGINT, schema id when write this file.
+11. _LEVEL: INT, level of this file, in LSM.
+12. _EXTRA_FILES: ARRAY<STRING>, extra files for this file, for example, data file index file.
+13. _CREATION_TIME: TIMESTAMP_MILLIS, creation time of this file.
+14. _DELETE_ROW_COUNT: BIGINT, rowCount = addRowCount + deleteRowCount.
+15. _EMBEDDED_FILE_INDEX: BYTES, if data file index is too small, store the index in manifest.
+16. _FILE_SOURCE: TINYINT, indicate whether this file is generated as an APPEND or COMPACT file
+17. _VALUE_STATS_COLS: ARRAY<STRING>, statistical column in metadata 
 
 ### Index Manifest
 
@@ -100,20 +100,35 @@ Index Manifest includes meta of several [table-index]({{< ref "concepts/spec/tab
 
 The schema is:
 
-1. kind: ADD or DELETE,
-2. partition: partition spec, a BinaryRow.
-3. bucket: bucket of this file.
-4. indexFile: index file meta.
-
-The index file meta is:
-
-1. indexType: string, "HASH" or "DELETION_VECTORS".
-2. fileName: file name.
-3. fileSize: file size.
-4. rowCount: total number of rows.
-5. deletionVectorsRanges: Metadata only used by "DELETION_VECTORS", is an array of deletion vector meta, the schema of each deletion vector meta is:
+1. _KIND: TINYINT, ADD or DELETE,
+2. _PARTITION: BYTES, partition spec, a BinaryRow.
+3. _BUCKET: INT, bucket of this file.
+4. _INDEX_TYPE: STRING, "HASH" or "DELETION_VECTORS".
+5. _FILE_NAME: STRING, file name.
+6. _FILE_SIZE: BIGINT, file size.
+7. _ROW_COUNT: BIGINT, total number of rows.
+8. _DELETIONS_VECTORS_RANGES: Metadata only used by "DELETION_VECTORS", is an array of deletion vector meta, the schema of each deletion vector meta is:
    1. f0: the data file name corresponding to this deletion vector.
    2. f1: the starting offset of this deletion vector in the index file.
    3. f2: the length of this deletion vector in the index file.
-   4. cardinality: the number of deleted rows.
+   4. _CARDINALITY: the number of deleted rows.
 
+## Appendix
+
+### SimpleStats
+
+SimpleStats is nested row, the schema is:
+
+1. _MIN_VALUES: BYTES, BinaryRow, the minimum values of the columns.
+2. _MAX_VALUES: BYTES, BinaryRow, the maximum values of the columns.
+3. _NULL_COUNTS: ARRAY<BIGINT>, the number of nulls of the columns.
+
+### BinaryRow
+
+BinaryRow is backed by bytes instead of Object. It can significantly reduce the serialization/deserialization of Java
+objects.
+
+A Row has two part: Fixed-length part and variable-length part. Fixed-length part contains 1 byte header and null bit
+set and field values. Null bit set is used for null tracking and is aligned to 8-byte word boundaries. `Field values`
+holds fixed-length primitive types and variable-length values which can be stored in 8 bytes inside. If it do not fit
+the variable-length field, then store the length and offset of variable-length part.
