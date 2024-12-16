@@ -102,6 +102,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test for {@link FlinkCatalog}. */
 public class FlinkCatalogTest {
+
     private static final String TESTING_LOG_STORE = "testing";
 
     private final ObjectPath path1 = new ObjectPath("db1", "t1");
@@ -348,12 +349,7 @@ public class FlinkCatalogTest {
         CatalogTable table1 = createTable(options);
         assertThatThrownBy(() -> catalog.createTable(this.path1, table1, false))
                 .hasMessageContaining(
-                        "You specified the Path when creating the table, "
-                                + "but the Path '/unknown/path' is different from where it should be");
-
-        options.put(PATH.key(), warehouse + "/db1.db/t1");
-        CatalogTable table2 = createTable(options);
-        catalog.createTable(this.path1, table2, false);
+                        "The current catalog FileSystemCatalog does not support specifying the table path when creating a table.");
     }
 
     @ParameterizedTest
