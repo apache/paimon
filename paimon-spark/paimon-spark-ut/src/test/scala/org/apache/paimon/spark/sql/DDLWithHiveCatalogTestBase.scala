@@ -481,7 +481,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 intercept[Exception] {
                   spark.sql(
                     s"""
-                       |CREATE TABLE t2 (a INT, c STRUCT<f1: INT, f2: INT, f3: INT>, b INT) USING paimon
+                       |CREATE TABLE t4 (a INT, c STRUCT<f1: INT, f2: INT, f3: INT>, b INT) USING paimon
                        |LOCATION '$expertTbLocation'
                        |""".stripMargin)
                 }
