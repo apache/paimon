@@ -254,6 +254,7 @@ public class FormatReaderMapping {
             return readDataFields;
         }
 
+        @Nullable
         private DataType pruneDataType(DataType readType, DataType dataType) {
             switch (readType.getTypeRoot()) {
                 case ROW:

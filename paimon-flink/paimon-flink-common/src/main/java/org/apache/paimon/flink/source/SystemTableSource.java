@@ -86,7 +86,7 @@ public class SystemTableSource extends FlinkTableSource {
         org.apache.paimon.types.RowType readType = null;
         if (projectFields != null) {
             Projection projection = Projection.of(projectFields);
-            rowData = projection.getRowData(table.rowType());
+            rowData = projection.getOuterProjectRow(table.rowType());
             readType = projection.project(table.rowType());
         }
 

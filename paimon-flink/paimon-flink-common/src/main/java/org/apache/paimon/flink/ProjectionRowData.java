@@ -18,16 +18,17 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.types.RowType;
-
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.ArrayData;
 import org.apache.flink.table.data.DecimalData;
+import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.MapData;
 import org.apache.flink.table.data.RawValueData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 
 import javax.annotation.Nullable;
@@ -39,22 +40,48 @@ import java.io.Serializable;
  * projection information.
  */
 public class ProjectionRowData implements RowData, Serializable {
+    private static final long serialVersionUID = 1L;
+
     private final RowType producedDataType;
     private final int[][] projectedFields;
-    private final int[] lastProjectedFields;
-    private transient RowData row;
+    private final FieldGetter[][] fieldGetters;
+
+    private transient GenericRowData row;
 
     ProjectionRowData(RowType producedDataType, int[][] projectedFields) {
         this.producedDataType = producedDataType;
         this.projectedFields = projectedFields;
-        this.lastProjectedFields = new int[projectedFields.length];
+        this.fieldGetters = new FieldGetter[projectedFields.length][];
         for (int i = 0; i < projectedFields.length; i++) {
-            this.lastProjectedFields[i] = projectedFields[i][projectedFields[i].length - 1];
+            this.fieldGetters[i] = new FieldGetter[projectedFields[i].length];
+            LogicalType currentType = producedDataType;
+            for (int j = 0; j < projectedFields[i].length; j++) {
+                currentType = ((RowType) currentType).getTypeAt(projectedFields[i][j]);
+                this.fieldGetters[i][j] =
+                        RowData.createFieldGetter(currentType, projectedFields[i][j]);
+            }
         }
     }
 
-    public ProjectionRowData replaceRow(RowData row) {
-        this.row = row;
+    public ProjectionRowData replaceRow(RowData inputRow) {
+        if (this.row == null) {
+            this.row = new GenericRowData(inputRow.getRowKind(), fieldGetters.length);
+        }
+
+        for (int i = 0; i < fieldGetters.length; i++) {
+            Object currentRow = inputRow;
+            for (int j = 0; j < fieldGetters[i].length; j++) {
+                if (currentRow == null) {
+                    break;
+                }
+                currentRow = this.fieldGetters[i][j].getFieldOrNull((RowData) currentRow);
+            }
+            this.row.setField(i, currentRow);
+        }
+
+        if (inputRow != null) {
+            this.row.setRowKind(inputRow.getRowKind());
+        }
         return this;
     }
 
@@ -67,7 +94,7 @@ public class ProjectionRowData implements RowData, Serializable {
 
     @Override
     public int getArity() {
-        return projectedFields.length;
+        return this.row.getArity();
     }
 
     @Override
@@ -82,160 +109,82 @@ public class ProjectionRowData implements RowData, Serializable {
 
     @Override
     public boolean isNullAt(int i) {
-        RowData rowData = extractInternalRow(i);
-        if (rowData == null) {
-            return true;
-        }
-        return rowData.isNullAt(lastProjectedFields[i]);
-    }
-
-    private @Nullable RowData extractInternalRow(int i) {
-        int[] projectedField = projectedFields[i];
-        RowData rowData = this.row;
-        RowType dataType = producedDataType;
-        for (int j = 0; j < projectedField.length - 1; j++) {
-            dataType = (RowType) dataType.getTypeAt(projectedField[j]);
-            if (rowData.isNullAt(projectedField[j])) {
-                return null;
-            }
-            rowData = rowData.getRow(projectedField[j], dataType.getFieldCount());
-        }
-        return rowData;
+        return this.row.isNullAt(i);
     }
 
     @Override
     public boolean getBoolean(int i) {
-        RowData rowData = extractInternalRow(i);
-        if (rowData == null) {
-            throw new NullPointerException();
-        }
-        return rowData.getBoolean(lastProjectedFields[i]);
+        return this.row.getBoolean(i);
     }
 
     @Override
     public byte getByte(int i) {
-        RowData rowData = extractInternalRow(i);
-        if (rowData == null) {
-            throw new NullPointerException();
-        }
-        return rowData.getByte(lastProjectedFields[i]);
+        return this.row.getByte(i);
     }
 
     @Override
     public short getShort(int i) {
-        RowData rowData = extractInternalRow(i);
-        if (rowData == null) {
-            throw new NullPointerException();
-        }
-        return rowData.getShort(lastProjectedFields[i]);
+        return this.row.getShort(i);
     }
 
     @Override
     public int getInt(int i) {
-        RowData rowData = extractInternalRow(i);
-        if (rowData == null) {
-            throw new NullPointerException();
-        }
-        return rowData.getInt(lastProjectedFields[i]);
+        return this.row.getInt(i);
     }
 
     @Override
     public long getLong(int i) {
-        RowData rowData = extractInternalRow(i);
-        if (rowData == null) {
-            throw new NullPointerException();
-        }
-        return rowData.getLong(lastProjectedFields[i]);
+        return this.row.getLong(i);
     }
 
     @Override
     public float getFloat(int i) {
-        RowData rowData = extractInternalRow(i);
-        if (rowData == null) {
-            throw new NullPointerException();
-        }
-        return rowData.getFloat(lastProjectedFields[i]);
+        return this.row.getFloat(i);
     }
 
     @Override
     public double getDouble(int i) {
-        RowData rowData = extractInternalRow(i);
-        if (rowData == null) {
-            throw new NullPointerException();
-        }
-        return rowData.getDouble(lastProjectedFields[i]);
+        return this.row.getDouble(i);
     }
 
     @Override
     public StringData getString(int i) {
-        RowData rowData = extractInternalRow(i);
-        if (rowData == null) {
-            return null;
-        }
-        return rowData.getString(lastProjectedFields[i]);
+        return this.row.getString(i);
     }
 
     @Override
     public DecimalData getDecimal(int i, int i1, int i2) {
-        RowData rowData = extractInternalRow(i);
-        if (rowData == null) {
-            return null;
-        }
-        return rowData.getDecimal(lastProjectedFields[i], i1, i2);
+        return this.row.getDecimal(i, i1, i2);
     }
 
     @Override
     public TimestampData getTimestamp(int i, int i1) {
-        RowData rowData = extractInternalRow(i);
-        if (rowData == null) {
-            return null;
-        }
-        return rowData.getTimestamp(lastProjectedFields[i], i1);
+        return this.row.getTimestamp(i, i1);
     }
 
     @Override
     public <T> RawValueData<T> getRawValue(int i) {
-        RowData rowData = extractInternalRow(i);
-        if (rowData == null) {
-            return null;
-        }
-        return rowData.getRawValue(lastProjectedFields[i]);
+        return this.row.getRawValue(i);
     }
 
     @Override
     public byte[] getBinary(int i) {
-        RowData rowData = extractInternalRow(i);
-        if (rowData == null) {
-            return null;
-        }
-        return rowData.getBinary(lastProjectedFields[i]);
+        return this.row.getBinary(i);
     }
 
     @Override
     public ArrayData getArray(int i) {
-        RowData rowData = extractInternalRow(i);
-        if (rowData == null) {
-            return null;
-        }
-        return rowData.getArray(lastProjectedFields[i]);
+        return this.row.getArray(i);
     }
 
     @Override
     public MapData getMap(int i) {
-        RowData rowData = extractInternalRow(i);
-        if (rowData == null) {
-            return null;
-        }
-        return rowData.getMap(lastProjectedFields[i]);
+        return this.row.getMap(i);
     }
 
     @Override
     public RowData getRow(int i, int i1) {
-        RowData rowData = extractInternalRow(i);
-        if (rowData == null) {
-            return null;
-        }
-        return rowData.getRow(lastProjectedFields[i], i1);
+        return this.row.getRow(i, i1);
     }
 
     @VisibleForTesting

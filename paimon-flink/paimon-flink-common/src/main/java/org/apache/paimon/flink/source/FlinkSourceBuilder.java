@@ -193,7 +193,7 @@ public class FlinkSourceBuilder {
                         options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
                         options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE),
                         dynamicPartitionFilteringInfo,
-                        projectedRowData()));
+                        outerProject()));
     }
 
     private DataStream<RowData> buildContinuousFileSource() {
@@ -203,7 +203,7 @@ public class FlinkSourceBuilder {
                         table.options(),
                         limit,
                         bucketMode,
-                        projectedRowData()));
+                        outerProject()));
     }
 
     private DataStream<RowData> buildAlignedContinuousFileSource() {
@@ -214,7 +214,7 @@ public class FlinkSourceBuilder {
                         table.options(),
                         limit,
                         bucketMode,
-                        projectedRowData()));
+                        outerProject()));
     }
 
     private DataStream<RowData> toDataStream(Source<RowData, ?, ?> source) {
@@ -257,10 +257,10 @@ public class FlinkSourceBuilder {
                 .orElse(null);
     }
 
-    private @Nullable ProjectionRowData projectedRowData() {
+    private @Nullable ProjectionRowData outerProject() {
         return Optional.ofNullable(projectedFields)
                 .map(Projection::of)
-                .map(p -> p.getRowData(table.rowType()))
+                .map(p -> p.getOuterProjectRow(table.rowType()))
                 .orElse(null);
     }
 
@@ -310,7 +310,7 @@ public class FlinkSourceBuilder {
                                                 table,
                                                 projectedRowType(),
                                                 predicate,
-                                                projectedRowData()))
+                                                outerProject()))
                                 .addSource(
                                         new LogHybridSourceFactory(logSourceProvider),
                                         Boundedness.CONTINUOUS_UNBOUNDED)
@@ -346,7 +346,7 @@ public class FlinkSourceBuilder {
                         conf.get(
                                 FlinkConnectorOptions.STREAMING_READ_SHUFFLE_BUCKET_WITH_PARTITION),
                         bucketMode,
-                        projectedRowData());
+                        outerProject());
         if (parallelism != null) {
             dataStream.getTransformation().setParallelism(parallelism);
         }

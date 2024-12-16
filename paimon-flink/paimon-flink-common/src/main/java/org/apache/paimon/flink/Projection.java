@@ -33,6 +33,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
+
 /**
  * {@link Projection} represents a list of (possibly nested) indexes that can be used to project
  * data types. A row projection includes both reducing the accessible fields and reordering them.
@@ -47,7 +49,7 @@ public abstract class Projection {
     public abstract org.apache.paimon.types.RowType project(
             org.apache.paimon.types.RowType rowType);
 
-    public abstract ProjectionRowData getRowData(org.apache.paimon.types.RowType rowType);
+    public abstract ProjectionRowData getOuterProjectRow(org.apache.paimon.types.RowType rowType);
 
     /** @return {@code true} whether this projection is nested or not. */
     public abstract boolean isNested();
@@ -149,8 +151,8 @@ public abstract class Projection {
         }
 
         @Override
-        public ProjectionRowData getRowData(org.apache.paimon.types.RowType rowType) {
-            return new NestedProjection(toNestedIndexes()).getRowData(rowType);
+        public ProjectionRowData getOuterProjectRow(org.apache.paimon.types.RowType rowType) {
+            return new NestedProjection(toNestedIndexes()).getOuterProjectRow(rowType);
         }
 
         @Override
@@ -241,7 +243,7 @@ public abstract class Projection {
         }
 
         @Override
-        public ProjectionRowData getRowData(org.apache.paimon.types.RowType rowType) {
+        public ProjectionRowData getOuterProjectRow(org.apache.paimon.types.RowType rowType) {
             org.apache.paimon.types.RowType resultType = project(rowType);
 
             int[][] resultIndices = new int[this.projection.length][];
@@ -262,7 +264,7 @@ public abstract class Projection {
                 }
             }
 
-            return new ProjectionRowData(resultType, resultIndices);
+            return new ProjectionRowData(toLogicalType(resultType), resultIndices);
         }
 
         @Override
@@ -304,8 +306,8 @@ public abstract class Projection {
         }
 
         @Override
-        public ProjectionRowData getRowData(org.apache.paimon.types.RowType rowType) {
-            return new NestedProjection(toNestedIndexes()).getRowData(rowType);
+        public ProjectionRowData getOuterProjectRow(org.apache.paimon.types.RowType rowType) {
+            return new NestedProjection(toNestedIndexes()).getOuterProjectRow(rowType);
         }
 
         @Override

@@ -23,6 +23,7 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
+import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link Projection}. */
@@ -62,9 +63,9 @@ public class ProjectionTest {
                                         DataTypes.FIELD(0, "f0", DataTypes.INT()),
                                         DataTypes.FIELD(1, "f2", DataTypes.INT()))));
 
-        ProjectionRowData rowData = projection.getRowData(writeType);
+        ProjectionRowData rowData = projection.getOuterProjectRow(writeType);
 
-        assertThat(rowData.getRowType()).isEqualTo(readTypeForFlink);
+        assertThat(rowData.getRowType()).isEqualTo(toLogicalType(readTypeForFlink));
 
         assertThat(rowData.getProjectedFields()).isEqualTo(new int[][] {{0, 0}, {0, 1}});
     }
