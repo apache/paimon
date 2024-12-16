@@ -37,6 +37,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+/** ITCase for FileIndex. */
 public class FlinkFileIndexTest extends CatalogITCaseBase {
 
     @Test

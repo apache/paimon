@@ -40,6 +40,7 @@ import java.io.IOException;
 import static org.apache.paimon.fileindex.FileIndexResult.REMAIN;
 import static org.apache.paimon.fileindex.FileIndexResult.SKIP;
 
+/** implementation of dynamic bloom filter file index. */
 public class DynamicBloomFilterFileIndex implements FileIndexer {
 
     public static final int VERSION_1 = 1;

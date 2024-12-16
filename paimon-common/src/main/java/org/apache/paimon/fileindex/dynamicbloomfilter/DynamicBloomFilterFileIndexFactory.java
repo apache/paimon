@@ -23,6 +23,7 @@ import org.apache.paimon.fileindex.FileIndexerFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 
+/** Factory to create {@link DynamicBloomFilterFileIndexFactory}. */
 public class DynamicBloomFilterFileIndexFactory implements FileIndexerFactory {
 
     public static final String DYNAMIC_BLOOM_FILTER = "dynamic-bloom-filter";
