@@ -33,8 +33,6 @@ import org.apache.paimon.format.orc.writer.Vectorizer;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
@@ -45,14 +43,12 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 
-import org.apache.hadoop.conf.Configuration;
 import org.apache.orc.OrcConf;
 import org.apache.orc.TypeDescription;
 
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -75,23 +71,13 @@ public class OrcFileFormat extends FileFormat {
     private final int writeBatchSize;
     private final boolean deletionVectorsEnabled;
 
-    private static final Cache<Properties, Configuration> configCache =
-            Caffeine.newBuilder().maximumSize(100).expireAfterWrite(Duration.ofMinutes(30)).build();
-
     public OrcFileFormat(FormatContext formatContext) {
         super(IDENTIFIER);
         this.orcProperties = getOrcProperties(formatContext.options(), formatContext);
-        Configuration conf;
-        Configuration cachedConf = configCache.getIfPresent(orcProperties);
-        if (cachedConf != null) {
-            conf = cachedConf;
-        } else {
-            conf = new org.apache.hadoop.conf.Configuration(false);
-            this.orcProperties.forEach((k, v) -> conf.set(k.toString(), v.toString()));
-            configCache.put(orcProperties, conf);
-        }
-        this.readerConf = conf;
-        this.writerConf = conf;
+        this.readerConf = new org.apache.hadoop.conf.Configuration(false);
+        this.orcProperties.forEach((k, v) -> readerConf.set(k.toString(), v.toString()));
+        this.writerConf = new org.apache.hadoop.conf.Configuration(false);
+        this.orcProperties.forEach((k, v) -> writerConf.set(k.toString(), v.toString()));
         this.readBatchSize = formatContext.readBatchSize();
         this.writeBatchSize = formatContext.writeBatchSize();
         this.deletionVectorsEnabled = formatContext.options().get(DELETION_VECTORS_ENABLED);
