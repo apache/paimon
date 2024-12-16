@@ -35,6 +35,7 @@ import org.apache.paimon.spark.procedure.MigrateFileProcedure;
 import org.apache.paimon.spark.procedure.MigrateTableProcedure;
 import org.apache.paimon.spark.procedure.Procedure;
 import org.apache.paimon.spark.procedure.ProcedureBuilder;
+import org.apache.paimon.spark.procedure.PurgeFilesProcedure;
 import org.apache.paimon.spark.procedure.RefreshObjectTableProcedure;
 import org.apache.paimon.spark.procedure.RemoveOrphanFilesProcedure;
 import org.apache.paimon.spark.procedure.RenameTagProcedure;
@@ -74,6 +75,7 @@ public class SparkProcedures {
         procedureBuilders.put("rollback", RollbackProcedure::builder);
         procedureBuilders.put("rollback_to_timestamp", RollbackToTimestampProcedure::builder);
         procedureBuilders.put("rollback_to_watermark", RollbackToWatermarkProcedure::builder);
+        procedureBuilders.put("purge_files", PurgeFilesProcedure::builder);
         procedureBuilders.put("create_tag", CreateTagProcedure::builder);
         procedureBuilders.put("replace_tag", ReplaceTagProcedure::builder);
         procedureBuilders.put("rename_tag", RenameTagProcedure::builder);
