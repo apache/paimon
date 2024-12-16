@@ -542,7 +542,7 @@ public class StringUtils {
         return "`" + str + "`";
     }
 
-    public static String caseSensitiveConversion(String str, boolean caseSensitive) {
+    public static String toLowerCaseIfNeed(String str, boolean caseSensitive) {
         return caseSensitive ? str : str.toLowerCase();
     }
 

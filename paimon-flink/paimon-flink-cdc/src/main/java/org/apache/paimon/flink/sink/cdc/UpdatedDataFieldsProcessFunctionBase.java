@@ -216,8 +216,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
 
         List<SchemaChange> result = new ArrayList<>();
         for (DataField newField : updatedDataFields) {
-            String newFieldName =
-                    StringUtils.caseSensitiveConversion(newField.name(), caseSensitive);
+            String newFieldName = StringUtils.toLowerCaseIfNeed(newField.name(), caseSensitive);
             if (oldFields.containsKey(newFieldName)) {
                 DataField oldField = oldFields.get(newFieldName);
                 // we compare by ignoring nullable, because partition keys and primary keys might be

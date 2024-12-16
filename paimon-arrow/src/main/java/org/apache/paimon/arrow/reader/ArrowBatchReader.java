@@ -34,6 +34,8 @@ import org.apache.arrow.vector.types.pojo.Schema;
 import java.util.Iterator;
 import java.util.List;
 
+import static org.apache.paimon.utils.StringUtils.toLowerCaseIfNeed;
+
 /** Reader from a {@link VectorSchemaRoot} to paimon rows. */
 public class ArrowBatchReader {
 
@@ -63,8 +65,7 @@ public class ArrowBatchReader {
         for (int i = 0; i < dataFields.size(); ++i) {
             try {
                 String fieldName = dataFields.get(i).name();
-                Field field =
-                        arrowSchema.findField(caseSensitive ? fieldName : fieldName.toLowerCase());
+                Field field = arrowSchema.findField(toLowerCaseIfNeed(fieldName, caseSensitive));
                 int idx = arrowSchema.getFields().indexOf(field);
                 mapping[i] = idx;
             } catch (IllegalArgumentException e) {
