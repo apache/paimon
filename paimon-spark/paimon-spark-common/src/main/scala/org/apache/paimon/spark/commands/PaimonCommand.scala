@@ -245,12 +245,12 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
           val relativeFilePath = location.toUri.relativize(new URI(filePath)).toString
           val (partition, bucket) = dataFileToPartitionAndBucket.toMap.apply(relativeFilePath)
           val pathFactory = my_table.store().pathFactory()
-          val partitionAndBucket = pathFactory
-            .relativePartitionAndBucketPath(partition, bucket)
+          val relativeBucketPath = pathFactory
+            .relativeBucketPath(partition, bucket)
             .toString
 
           SparkDeletionVectors(
-            partitionAndBucket,
+            relativeBucketPath,
             SerializationUtils.serializeBinaryRow(partition),
             bucket,
             Seq((new Path(filePath).getName, dv.serializeToBytes()))
