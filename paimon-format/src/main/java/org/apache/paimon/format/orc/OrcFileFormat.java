@@ -30,10 +30,11 @@ import org.apache.paimon.format.orc.filter.OrcPredicateFunctionVisitor;
 import org.apache.paimon.format.orc.filter.OrcSimpleStatsExtractor;
 import org.apache.paimon.format.orc.writer.RowDataVectorizer;
 import org.apache.paimon.format.orc.writer.Vectorizer;
-import org.apache.paimon.fs.ObjectCacheManager;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
@@ -74,14 +75,8 @@ public class OrcFileFormat extends FileFormat {
     private final int writeBatchSize;
     private final boolean deletionVectorsEnabled;
 
-    private static final org.apache.hadoop.conf.Configuration emptyConf =
-            new org.apache.hadoop.conf.Configuration();
-    private static final ObjectCacheManager<Properties, Configuration> configCache =
-            ObjectCacheManager.newObjectCacheManager(Duration.ofDays(365), 1000);
-
-    static {
-        emptyConf.set("paimon.empty.configuration", "paimon.empty.configuration");
-    }
+    private static final Cache<Properties, Configuration> configCache =
+            Caffeine.newBuilder().maximumSize(100).expireAfterWrite(Duration.ofMinutes(30)).build();
 
     public OrcFileFormat(FormatContext formatContext) {
         super(IDENTIFIER);
@@ -91,7 +86,7 @@ public class OrcFileFormat extends FileFormat {
         if (cachedConf != null) {
             conf = cachedConf;
         } else {
-            conf = new org.apache.hadoop.conf.Configuration(emptyConf);
+            conf = new org.apache.hadoop.conf.Configuration(false);
             this.orcProperties.forEach((k, v) -> conf.set(k.toString(), v.toString()));
             configCache.put(orcProperties, conf);
         }
