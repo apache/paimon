@@ -54,7 +54,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class CdcMultiplexRecordChannelComputerTest {
 
     @TempDir java.nio.file.Path tempDir;
-    private Catalog.Loader catalogLoader;
+    private CatalogLoader catalogLoader;
     private Path warehouse;
     private String databaseName;
     private Identifier tableWithPartition;

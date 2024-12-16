@@ -82,7 +82,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
     private Identifier firstTable;
     private Catalog catalog;
     private Identifier secondTable;
-    private Catalog.Loader catalogLoader;
+    private CatalogLoader catalogLoader;
     private Schema firstTableSchema;
 
     @BeforeEach
@@ -340,7 +340,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         harness.close();
     }
 
-    private Catalog.Loader createCatalogLoader() {
+    private CatalogLoader createCatalogLoader() {
         Options catalogOptions = createCatalogOptions(warehouse);
         return () -> CatalogFactory.createCatalog(CatalogContext.create(catalogOptions));
     }
@@ -688,7 +688,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
     }
 
     private OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable>
-            createTestHarness(Catalog.Loader catalogLoader) throws Exception {
+            createTestHarness(CatalogLoader catalogLoader) throws Exception {
         CdcRecordStoreMultiWriteOperator.Factory operatorFactory =
                 new CdcRecordStoreMultiWriteOperator.Factory(
                         catalogLoader,

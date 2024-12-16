@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
@@ -72,7 +73,7 @@ public class MultiTablesStoreCompactOperator
     private transient StoreSinkWriteState state;
     private transient DataFileMetaSerializer dataFileMetaSerializer;
 
-    private final Catalog.Loader catalogLoader;
+    private final CatalogLoader catalogLoader;
 
     protected Catalog catalog;
     protected Map<Identifier, FileStoreTable> tables;
@@ -81,7 +82,7 @@ public class MultiTablesStoreCompactOperator
 
     private MultiTablesStoreCompactOperator(
             StreamOperatorParameters<MultiTableCommittable> parameters,
-            Catalog.Loader catalogLoader,
+            CatalogLoader catalogLoader,
             String initialCommitUser,
             CheckpointConfig checkpointConfig,
             boolean isStreaming,
@@ -324,7 +325,7 @@ public class MultiTablesStoreCompactOperator
     /** {@link StreamOperatorFactory} of {@link MultiTablesStoreCompactOperator}. */
     public static class Factory
             extends PrepareCommitOperator.Factory<RowData, MultiTableCommittable> {
-        private final Catalog.Loader catalogLoader;
+        private final CatalogLoader catalogLoader;
         private final CheckpointConfig checkpointConfig;
         private final boolean isStreaming;
         private final boolean ignorePreviousFiles;
@@ -332,7 +333,7 @@ public class MultiTablesStoreCompactOperator
         private final String initialCommitUser;
 
         public Factory(
-                Catalog.Loader catalogLoader,
+                CatalogLoader catalogLoader,
                 String initialCommitUser,
                 CheckpointConfig checkpointConfig,
                 boolean isStreaming,

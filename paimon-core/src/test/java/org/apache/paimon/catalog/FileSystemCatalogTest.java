@@ -36,7 +36,7 @@ public class FileSystemCatalogTest extends CatalogTestBase {
     public void setUp() throws Exception {
         super.setUp();
         Options catalogOptions = new Options();
-        catalogOptions.set(CatalogOptions.ALLOW_UPPER_CASE, false);
+        catalogOptions.set(CatalogOptions.CASE_SENSITIVE, false);
         catalog = new FileSystemCatalog(fileIO, new Path(warehouse), catalogOptions);
     }
 

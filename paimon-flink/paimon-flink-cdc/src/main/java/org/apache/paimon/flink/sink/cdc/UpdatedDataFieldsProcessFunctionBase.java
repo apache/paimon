@@ -48,7 +48,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     private static final Logger LOG =
             LoggerFactory.getLogger(UpdatedDataFieldsProcessFunctionBase.class);
 
-    protected final Catalog.Loader catalogLoader;
+    protected final CatalogLoader catalogLoader;
     protected Catalog catalog;
     private boolean allowUpperCase;
 
@@ -70,7 +70,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     private static final List<DataTypeRoot> TIMESTAMP_TYPES =
             Arrays.asList(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE);
 
-    protected UpdatedDataFieldsProcessFunctionBase(Catalog.Loader catalogLoader) {
+    protected UpdatedDataFieldsProcessFunctionBase(CatalogLoader catalogLoader) {
         this.catalogLoader = catalogLoader;
     }
 

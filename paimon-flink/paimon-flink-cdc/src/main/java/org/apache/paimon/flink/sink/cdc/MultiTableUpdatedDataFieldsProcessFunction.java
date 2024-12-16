@@ -51,7 +51,7 @@ public class MultiTableUpdatedDataFieldsProcessFunction
 
     private final Map<Identifier, SchemaManager> schemaManagers = new HashMap<>();
 
-    public MultiTableUpdatedDataFieldsProcessFunction(Catalog.Loader catalogLoader) {
+    public MultiTableUpdatedDataFieldsProcessFunction(CatalogLoader catalogLoader) {
         super(catalogLoader);
     }
 

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -53,7 +52,7 @@ public class UpdatedDataFieldsProcessFunction
     private Set<FieldIdentifier> latestFields;
 
     public UpdatedDataFieldsProcessFunction(
-            SchemaManager schemaManager, Identifier identifier, Catalog.Loader catalogLoader) {
+            SchemaManager schemaManager, Identifier identifier, CatalogLoader catalogLoader) {
         super(catalogLoader);
         this.schemaManager = schemaManager;
         this.identifier = identifier;

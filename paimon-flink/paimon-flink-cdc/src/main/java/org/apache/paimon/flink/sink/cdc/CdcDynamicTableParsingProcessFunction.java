@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.types.DataField;
 
@@ -62,13 +63,13 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
 
     private final EventParser.Factory<T> parserFactory;
     private final String database;
-    private final Catalog.Loader catalogLoader;
+    private final CatalogLoader catalogLoader;
 
     private transient EventParser<T> parser;
     private transient Catalog catalog;
 
     public CdcDynamicTableParsingProcessFunction(
-            String database, Catalog.Loader catalogLoader, EventParser.Factory<T> parserFactory) {
+            String database, CatalogLoader catalogLoader, EventParser.Factory<T> parserFactory) {
         // for now, only support single database
         this.database = database;
         this.catalogLoader = catalogLoader;
