@@ -66,13 +66,13 @@ public class ArrowUtils {
     }
 
     public static VectorSchemaRoot createVectorSchemaRoot(
-            RowType rowType, BufferAllocator allocator, boolean allowUpperCase) {
+            RowType rowType, BufferAllocator allocator, boolean caseSensitive) {
         List<Field> fields =
                 rowType.getFields().stream()
                         .map(
                                 f ->
                                         toArrowField(
-                                                allowUpperCase ? f.name() : f.name().toLowerCase(),
+                                                caseSensitive ? f.name() : f.name().toLowerCase(),
                                                 f.id(),
                                                 f.type(),
                                                 0))
@@ -81,9 +81,9 @@ public class ArrowUtils {
     }
 
     public static FieldVector createVector(
-            DataField dataField, BufferAllocator allocator, boolean allowUpperCase) {
+            DataField dataField, BufferAllocator allocator, boolean caseSensitive) {
         return toArrowField(
-                        allowUpperCase ? dataField.name() : dataField.name().toLowerCase(),
+                        caseSensitive ? dataField.name() : dataField.name().toLowerCase(),
                         dataField.id(),
                         dataField.type(),
                         0)

@@ -156,9 +156,9 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
 
     @Override
     protected void validateCaseSensitivity() {
-        CatalogUtils.validateCaseInsensitive(allowUpperCase, "Database", database);
-        CatalogUtils.validateCaseInsensitive(allowUpperCase, "Table prefix", tablePrefix);
-        CatalogUtils.validateCaseInsensitive(allowUpperCase, "Table suffix", tableSuffix);
+        CatalogUtils.validateCaseInsensitive(caseSensitive, "Database", database);
+        CatalogUtils.validateCaseInsensitive(caseSensitive, "Table prefix", tablePrefix);
+        CatalogUtils.validateCaseInsensitive(caseSensitive, "Table suffix", tableSuffix);
     }
 
     @Override
@@ -180,7 +180,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
         NewTableSchemaBuilder schemaBuilder =
                 new NewTableSchemaBuilder(
                         tableConfig,
-                        allowUpperCase,
+                        caseSensitive,
                         partitionKeys,
                         primaryKeys,
                         requirePrimaryKeys(),
@@ -191,7 +191,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
                 excludingTables == null ? null : Pattern.compile(excludingTables);
         TableNameConverter tableNameConverter =
                 new TableNameConverter(
-                        allowUpperCase,
+                        caseSensitive,
                         mergeShards,
                         dbPrefix,
                         dbSuffix,

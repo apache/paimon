@@ -542,8 +542,8 @@ public class StringUtils {
         return "`" + str + "`";
     }
 
-    public static String caseSensitiveConversion(String str, boolean allowUpperCase) {
-        return allowUpperCase ? str : str.toLowerCase();
+    public static String caseSensitiveConversion(String str, boolean caseSensitive) {
+        return caseSensitive ? str : str.toLowerCase();
     }
 
     public static boolean isNumeric(final CharSequence cs) {

@@ -41,7 +41,7 @@ public class FileSystemCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testCreateTableAllowUpperCase() throws Exception {
+    public void testCreateTableCaseSensitive() throws Exception {
         catalog.createDatabase("test_db", false);
         Identifier identifier = Identifier.create("test_db", "new_table");
         Schema schema =
