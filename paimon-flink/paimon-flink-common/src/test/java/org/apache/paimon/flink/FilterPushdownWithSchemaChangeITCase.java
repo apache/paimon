@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
 
@@ -31,7 +32,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** TODO all file format tests. */
+/** ITCase for {@link CastExecutors#safelyCastLiteralsWithNumericEvolution}. */
 @ExtendWith(ParameterizedTestExtension.class)
 public class FilterPushdownWithSchemaChangeITCase extends CatalogITCaseBase {
 

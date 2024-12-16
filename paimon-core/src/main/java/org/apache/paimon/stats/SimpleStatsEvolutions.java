@@ -82,13 +82,13 @@ public class SimpleStatsEvolutions {
         if (tableSchemaId == dataSchemaId) {
             return filter;
         }
-        List<Predicate> evolved =
+        List<Predicate> devolved =
                 Objects.requireNonNull(
                         SchemaEvolutionUtil.devolveDataFilters(
                                 schemaFields.apply(tableSchemaId),
                                 schemaFields.apply(dataSchemaId),
                                 Collections.singletonList(filter)));
-        return evolved.isEmpty() ? null : evolved.get(0);
+        return devolved.isEmpty() ? null : devolved.get(0);
     }
 
     public List<DataField> tableDataFields() {

@@ -265,7 +265,7 @@ public class SchemaEvolutionUtilTest {
     }
 
     @Test
-    public void testEvolveDataFilters() {
+    public void testDevolveDataFilters() {
         List<Predicate> predicates = new ArrayList<>();
         predicates.add(
                 new LeafPredicate(

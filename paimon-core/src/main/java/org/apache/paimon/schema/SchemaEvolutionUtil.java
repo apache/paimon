@@ -310,11 +310,11 @@ public class SchemaEvolutionUtil {
                         return Optional.empty();
                     }
 
-                    List<Object> evolvedLiterals =
+                    List<Object> devolvedLiterals =
                             CastExecutors.safelyCastLiteralsWithNumericEvolution(
                                     predicate, dataField.type());
 
-                    return evolvedLiterals == null
+                    return devolvedLiterals == null
                             ? Optional.empty()
                             : Optional.of(
                                     new LeafPredicate(
@@ -322,7 +322,7 @@ public class SchemaEvolutionUtil {
                                             dataField.type(),
                                             indexOf(dataField, idToDataFields),
                                             dataField.name(),
-                                            evolvedLiterals));
+                                            devolvedLiterals));
                 };
 
         for (Predicate predicate : filters) {
