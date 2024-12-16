@@ -18,13 +18,11 @@
 
 package org.apache.paimon.table.system;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.And;
 import org.apache.paimon.predicate.CompoundPredicate;
@@ -61,8 +59,6 @@ import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
-import javax.annotation.Nullable;
-
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -73,7 +69,6 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
@@ -98,21 +93,13 @@ public class SchemasTable implements ReadonlyTable {
                             new DataField(5, "comment", SerializationUtils.newStringType(true)),
                             new DataField(6, "update_time", new TimestampType(false, 3))));
 
-    private final FileIO fileIO;
     private final Path location;
-    private final String branch;
+
+    private final FileStoreTable dataTable;
 
     public SchemasTable(FileStoreTable dataTable) {
-        this(
-                dataTable.fileIO(),
-                dataTable.location(),
-                CoreOptions.branch(dataTable.schema().options()));
-    }
-
-    public SchemasTable(FileIO fileIO, Path location, String branchName) {
-        this.fileIO = fileIO;
-        this.location = location;
-        this.branch = branchName;
+        this.location = dataTable.location();
+        this.dataTable = dataTable;
     }
 
     @Override
@@ -137,32 +124,24 @@ public class SchemasTable implements ReadonlyTable {
 
     @Override
     public InnerTableRead newRead() {
-        return new SchemasRead(fileIO);
+        return new SchemasRead();
     }
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new SchemasTable(fileIO, location, branch);
+        return new SchemasTable(dataTable.copy(dynamicOptions));
     }
 
-    private class SchemasScan extends ReadOnceTableScan {
-        private @Nullable LeafPredicate schemaId;
-
-        @Override
-        public InnerTableScan withFilter(Predicate predicate) {
-            if (predicate == null) {
-                return this;
-            }
-
-            Map<String, LeafPredicate> leafPredicates =
-                    predicate.visit(LeafPredicateExtractor.INSTANCE);
-            schemaId = leafPredicates.get("schema_id");
-            return this;
-        }
+    private static class SchemasScan extends ReadOnceTableScan {
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new SchemasSplit(location, schemaId));
+            return () -> Collections.singletonList(new SchemasSplit());
+        }
+
+        @Override
+        public InnerTableScan withFilter(Predicate predicate) {
+            return this;
         }
     }
 
@@ -171,46 +150,28 @@ public class SchemasTable implements ReadonlyTable {
 
         private static final long serialVersionUID = 1L;
 
-        private final Path location;
-
-        private final @Nullable LeafPredicate schemaId;
-
-        private SchemasSplit(Path location, @Nullable LeafPredicate schemaId) {
-            this.location = location;
-            this.schemaId = schemaId;
-        }
-
+        @Override
         public boolean equals(Object o) {
             if (this == o) {
                 return true;
             }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            SchemasSplit that = (SchemasSplit) o;
-            return Objects.equals(location, that.location)
-                    && Objects.equals(schemaId, that.schemaId);
+            return o != null && getClass() == o.getClass();
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(location, schemaId);
+            return 0;
         }
     }
 
     /** {@link TableRead} implementation for {@link SchemasTable}. */
     private class SchemasRead implements InnerTableRead {
 
-        private final FileIO fileIO;
         private RowType readType;
 
         private Optional<Long> optionalFilterSchemaIdMax = Optional.empty();
         private Optional<Long> optionalFilterSchemaIdMin = Optional.empty();
         private final List<Long> schemaIds = new ArrayList<>();
-
-        public SchemasRead(FileIO fileIO) {
-            this.fileIO = fileIO;
-        }
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
@@ -291,9 +252,7 @@ public class SchemasTable implements ReadonlyTable {
             if (!(split instanceof SchemasSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
-            SchemasSplit schemasSplit = (SchemasSplit) split;
-            Path location = schemasSplit.location;
-            SchemaManager manager = new SchemaManager(fileIO, location, branch);
+            SchemaManager manager = dataTable.schemaManager();
 
             Collection<TableSchema> tableSchemas;
             if (!schemaIds.isEmpty()) {

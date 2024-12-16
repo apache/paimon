@@ -48,7 +48,7 @@ public class CommitMessageSerializerTest {
         CommitMessageImpl committable =
                 new CommitMessageImpl(row(0), 1, dataIncrement, compactIncrement, indexIncrement);
         CommitMessageImpl newCommittable =
-                (CommitMessageImpl) serializer.deserialize(3, serializer.serialize(committable));
+                (CommitMessageImpl) serializer.deserialize(5, serializer.serialize(committable));
         assertThat(newCommittable.compactIncrement()).isEqualTo(committable.compactIncrement());
         assertThat(newCommittable.newFilesIncrement()).isEqualTo(committable.newFilesIncrement());
         assertThat(newCommittable.indexIncrement()).isEqualTo(committable.indexIncrement());

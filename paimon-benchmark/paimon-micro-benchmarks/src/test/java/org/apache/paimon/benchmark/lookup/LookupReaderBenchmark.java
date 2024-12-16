@@ -128,7 +128,7 @@ public class LookupReaderBenchmark extends AbstractLookupBenchmark {
         LookupStoreFactory factory =
                 LookupStoreFactory.create(
                         options,
-                        new CacheManager(MemorySize.ofMebiBytes(10)),
+                        new CacheManager(MemorySize.ofMebiBytes(20), 0.5),
                         new RowCompactedSerializer(RowType.of(new IntType()))
                                 .createSliceComparator());
 

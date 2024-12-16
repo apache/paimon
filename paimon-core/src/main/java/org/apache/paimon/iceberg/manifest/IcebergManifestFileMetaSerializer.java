@@ -24,6 +24,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta.Content;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ObjectSerializer;
 
 import java.util.ArrayList;
@@ -36,8 +37,8 @@ public class IcebergManifestFileMetaSerializer extends ObjectSerializer<IcebergM
 
     private final IcebergPartitionSummarySerializer partitionSummarySerializer;
 
-    public IcebergManifestFileMetaSerializer() {
-        super(IcebergManifestFileMeta.schema());
+    public IcebergManifestFileMetaSerializer(RowType schema) {
+        super(schema);
         this.partitionSummarySerializer = new IcebergPartitionSummarySerializer();
     }
 

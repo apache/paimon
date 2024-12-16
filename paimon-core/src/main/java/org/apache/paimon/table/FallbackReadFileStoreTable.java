@@ -28,7 +28,6 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
@@ -105,7 +104,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
     private FileStoreTable switchWrappedToBranch(String branchName) {
         Optional<TableSchema> optionalSchema =
-                new SchemaManager(wrapped.fileIO(), wrapped.location(), branchName).latest();
+                wrapped.schemaManager().copyWithBranch(branchName).latest();
         Preconditions.checkArgument(
                 optionalSchema.isPresent(), "Branch " + branchName + " does not exist");
 

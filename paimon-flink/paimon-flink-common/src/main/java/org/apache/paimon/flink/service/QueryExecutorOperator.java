@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.service.network.NetworkUtils;
@@ -77,8 +78,8 @@ public class QueryExecutorOperator extends AbstractStreamOperator<InternalRow>
         this.query = ((FileStoreTable) table).newLocalTableQuery().withIOManager(ioManager);
         KvQueryServer server =
                 new KvQueryServer(
-                        getRuntimeContext().getIndexOfThisSubtask(),
-                        getRuntimeContext().getNumberOfParallelSubtasks(),
+                        RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext()),
+                        RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext()),
                         NetworkUtils.findHostAddress(),
                         Collections.singletonList(0).iterator(),
                         1,
@@ -96,8 +97,9 @@ public class QueryExecutorOperator extends AbstractStreamOperator<InternalRow>
         this.output.collect(
                 new StreamRecord<>(
                         GenericRow.of(
-                                getRuntimeContext().getNumberOfParallelSubtasks(),
-                                getRuntimeContext().getIndexOfThisSubtask(),
+                                RuntimeContextUtils.getNumberOfParallelSubtasks(
+                                        getRuntimeContext()),
+                                RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext()),
                                 BinaryString.fromString(address.getHostName()),
                                 address.getPort())));
     }

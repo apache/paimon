@@ -105,7 +105,8 @@ public abstract class OrphanFilesClean implements Serializable {
 
         List<String> abnormalBranches = new ArrayList<>();
         for (String branch : branches) {
-            if (!new SchemaManager(table.fileIO(), table.location(), branch).latest().isPresent()) {
+            SchemaManager schemaManager = table.schemaManager().copyWithBranch(branch);
+            if (!schemaManager.latest().isPresent()) {
                 abnormalBranches.add(branch);
             }
         }
@@ -119,21 +120,45 @@ public abstract class OrphanFilesClean implements Serializable {
         return branches;
     }
 
-    protected void cleanSnapshotDir(List<String> branches, Consumer<Path> deletedFileConsumer) {
+    protected void cleanSnapshotDir(
+            List<String> branches,
+            Consumer<Path> deletedFilesConsumer,
+            Consumer<Long> deletedFilesLenInBytesConsumer) {
         for (String branch : branches) {
             FileStoreTable branchTable = table.switchToBranch(branch);
             SnapshotManager snapshotManager = branchTable.snapshotManager();
 
             // specially handle the snapshot directory
-            List<Path> nonSnapshotFiles = snapshotManager.tryGetNonSnapshotFiles(this::oldEnough);
-            nonSnapshotFiles.forEach(fileCleaner);
-            nonSnapshotFiles.forEach(deletedFileConsumer);
+            List<Pair<Path, Long>> nonSnapshotFiles =
+                    snapshotManager.tryGetNonSnapshotFiles(this::oldEnough);
+            nonSnapshotFiles.forEach(
+                    nonSnapshotFile ->
+                            cleanFile(
+                                    nonSnapshotFile,
+                                    deletedFilesConsumer,
+                                    deletedFilesLenInBytesConsumer));
 
             // specially handle the changelog directory
-            List<Path> nonChangelogFiles = snapshotManager.tryGetNonChangelogFiles(this::oldEnough);
-            nonChangelogFiles.forEach(fileCleaner);
-            nonChangelogFiles.forEach(deletedFileConsumer);
+            List<Pair<Path, Long>> nonChangelogFiles =
+                    snapshotManager.tryGetNonChangelogFiles(this::oldEnough);
+            nonChangelogFiles.forEach(
+                    nonChangelogFile ->
+                            cleanFile(
+                                    nonChangelogFile,
+                                    deletedFilesConsumer,
+                                    deletedFilesLenInBytesConsumer));
         }
+    }
+
+    private void cleanFile(
+            Pair<Path, Long> deleteFileInfo,
+            Consumer<Path> deletedFilesConsumer,
+            Consumer<Long> deletedFilesLenInBytesConsumer) {
+        Path filePath = deleteFileInfo.getLeft();
+        Long fileSize = deleteFileInfo.getRight();
+        deletedFilesConsumer.accept(filePath);
+        deletedFilesLenInBytesConsumer.accept(fileSize);
+        fileCleaner.accept(filePath);
     }
 
     protected Set<Snapshot> safelyGetAllSnapshots(String branch) throws IOException {

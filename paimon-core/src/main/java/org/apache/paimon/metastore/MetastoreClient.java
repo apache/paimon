@@ -55,7 +55,8 @@ public interface MetastoreClient extends AutoCloseable {
     default void alterPartition(
             LinkedHashMap<String, String> partitionSpec,
             Map<String, String> parameters,
-            long modifyTime)
+            long modifyTime,
+            boolean ignoreIfNotExist)
             throws Exception {
         throw new UnsupportedOperationException();
     }

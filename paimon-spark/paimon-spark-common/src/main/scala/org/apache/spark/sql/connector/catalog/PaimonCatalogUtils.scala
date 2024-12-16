@@ -22,11 +22,9 @@ import org.apache.hadoop.conf.Configuration
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.catalog.ExternalCatalog
+import org.apache.spark.sql.connector.catalog.CatalogV2Util
 import org.apache.spark.sql.internal.StaticSQLConf.CATALOG_IMPLEMENTATION
-import org.apache.spark.util.Utils
-
-import scala.reflect.ClassTag
-import scala.util.control.NonFatal
+import org.apache.spark.sql.paimon.ReflectUtils
 
 object PaimonCatalogUtils {
 
@@ -37,22 +35,12 @@ object PaimonCatalogUtils {
       } else {
         "org.apache.spark.sql.catalyst.catalog.InMemoryCatalog"
       }
-    reflect[ExternalCatalog, SparkConf, Configuration](externalCatalogClassName, conf, hadoopConf)
+    ReflectUtils.reflect[ExternalCatalog, SparkConf, Configuration](
+      externalCatalogClassName,
+      conf,
+      hadoopConf)
   }
 
-  private def reflect[T, Arg1 <: AnyRef, Arg2 <: AnyRef](
-      className: String,
-      ctorArg1: Arg1,
-      ctorArg2: Arg2)(implicit ctorArgTag1: ClassTag[Arg1], ctorArgTag2: ClassTag[Arg2]): T = {
-    try {
-      val clazz = Utils.classForName(className)
-      val ctor = clazz.getDeclaredConstructor(ctorArgTag1.runtimeClass, ctorArgTag2.runtimeClass)
-      val args = Array[AnyRef](ctorArg1, ctorArg2)
-      ctor.newInstance(args: _*).asInstanceOf[T]
-    } catch {
-      case NonFatal(e) =>
-        throw new IllegalArgumentException(s"Error while instantiating '$className':", e)
-    }
-  }
+  val TABLE_RESERVED_PROPERTIES: Seq[String] = CatalogV2Util.TABLE_RESERVED_PROPERTIES
 
 }

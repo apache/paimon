@@ -23,6 +23,7 @@ import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.types.RowType;
@@ -79,7 +80,8 @@ public class SortOperator extends TableStreamOperator<InternalRow>
     public void open() throws Exception {
         super.open();
         initBuffer();
-        if (sinkParallelism != getRuntimeContext().getNumberOfParallelSubtasks()) {
+        if (sinkParallelism
+                != RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext())) {
             throw new IllegalArgumentException(
                     "Please ensure that the runtime parallelism of the sink matches the initial configuration "
                             + "to avoid potential issues with skewed range partitioning.");

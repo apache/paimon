@@ -165,22 +165,20 @@ public class LocalOrphanFilesCleanTest {
 
         // randomly delete tags
         List<String> deleteTags = Collections.emptyList();
-        if (!allTags.isEmpty()) {
-            deleteTags = randomlyPick(allTags);
-            for (String tagName : deleteTags) {
-                table.deleteTag(tagName);
-            }
+        deleteTags = randomlyPick(allTags);
+        for (String tagName : deleteTags) {
+            table.deleteTag(tagName);
         }
 
         // first check, nothing will be deleted because the default olderThan interval is 1 day
         LocalOrphanFilesClean orphanFilesClean = new LocalOrphanFilesClean(table);
-        assertThat(orphanFilesClean.clean().size()).isEqualTo(0);
+        assertThat(orphanFilesClean.clean().getDeletedFilesPath().size()).isEqualTo(0);
 
         // second check
         orphanFilesClean =
                 new LocalOrphanFilesClean(
                         table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2));
-        List<Path> deleted = orphanFilesClean.clean();
+        List<Path> deleted = orphanFilesClean.clean().getDeletedFilesPath();
         try {
             validate(deleted, snapshotData, new HashMap<>());
         } catch (Throwable t) {
@@ -363,13 +361,13 @@ public class LocalOrphanFilesCleanTest {
 
         // first check, nothing will be deleted because the default olderThan interval is 1 day
         LocalOrphanFilesClean orphanFilesClean = new LocalOrphanFilesClean(table);
-        assertThat(orphanFilesClean.clean().size()).isEqualTo(0);
+        assertThat(orphanFilesClean.clean().getDeletedFilesPath().size()).isEqualTo(0);
 
         // second check
         orphanFilesClean =
                 new LocalOrphanFilesClean(
                         table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2));
-        List<Path> deleted = orphanFilesClean.clean();
+        List<Path> deleted = orphanFilesClean.clean().getDeletedFilesPath();
         validate(deleted, snapshotData, changelogData);
     }
 
@@ -399,7 +397,7 @@ public class LocalOrphanFilesCleanTest {
         LocalOrphanFilesClean orphanFilesClean =
                 new LocalOrphanFilesClean(
                         table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2));
-        assertThat(orphanFilesClean.clean().size()).isGreaterThan(0);
+        assertThat(orphanFilesClean.clean().getDeletedFilesPath().size()).isGreaterThan(0);
     }
 
     private void writeData(

@@ -40,7 +40,7 @@ public class AppendOnlyTableColumnTypeFileMetaTest extends ColumnTypeFileMetaTes
         SchemaManager schemaManager = new TestingSchemaManager(tablePath, tableSchemas);
         return new AppendOnlyFileStoreTable(fileIO, tablePath, schemaManager.latest().get()) {
             @Override
-            protected SchemaManager schemaManager() {
+            public SchemaManager schemaManager() {
                 return schemaManager;
             }
         };

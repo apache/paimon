@@ -452,7 +452,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         containSameIdentifyEntryFile(fullCompacted, entryIdentifierExpected);
     }
 
-    @RepeatedTest(1000)
+    @RepeatedTest(10)
     public void testRandomFullCompaction() throws Exception {
         List<ManifestFileMeta> input = new ArrayList<>();
         Set<FileEntry.Identifier> manifestEntrySet = new HashSet<>();

@@ -105,7 +105,7 @@ public class AvroFileFormat extends FileFormat {
         if (compression.equalsIgnoreCase("zstd")) {
             return CodecFactory.zstandardCodec(zstdLevel);
         }
-        return CodecFactory.fromString(options.get(AVRO_OUTPUT_CODEC));
+        return CodecFactory.fromString(compression);
     }
 
     /** A {@link FormatWriterFactory} to write {@link InternalRow}. */

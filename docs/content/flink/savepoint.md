@@ -70,7 +70,7 @@ to learn how to configure and trigger savepoint.
 **Step 3: Choose the tag corresponding to the savepoint.**
 
 The tag corresponding to the savepoint will be named in the form of `savepoint-${savepointID}`. You can refer to
-[Tags Table]({{< ref "maintenance/system-tables#tags-table" >}}) to query.
+[Tags Table]({{< ref "concepts/system-tables#tags-table" >}}) to query.
 
 **Step 4: Rollback the paimon table.**
 

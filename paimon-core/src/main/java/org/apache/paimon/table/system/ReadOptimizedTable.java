@@ -26,6 +26,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.DefaultValueAssigner;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -120,7 +121,8 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     public SnapshotReader newSnapshotReader() {
         if (wrapped.schema().primaryKeys().size() > 0) {
             return wrapped.newSnapshotReader()
-                    .withLevelFilter(level -> level == coreOptions().numLevels() - 1);
+                    .withLevelFilter(level -> level == coreOptions().numLevels() - 1)
+                    .enableValueFilter();
         } else {
             return wrapped.newSnapshotReader();
         }
@@ -162,6 +164,11 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     @Override
     public SnapshotManager snapshotManager() {
         return wrapped.snapshotManager();
+    }
+
+    @Override
+    public SchemaManager schemaManager() {
+        return wrapped.schemaManager();
     }
 
     @Override

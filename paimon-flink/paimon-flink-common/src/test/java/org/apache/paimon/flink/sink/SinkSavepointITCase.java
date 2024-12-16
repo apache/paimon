@@ -137,7 +137,7 @@ public class SinkSavepointITCase extends AbstractTestBase {
                         .parallelism(1)
                         .allowRestart()
                         .setConf(conf)
-                        .setConf(StateBackendOptions.STATE_BACKEND, "filesystem")
+                        .setConf(StateBackendOptions.STATE_BACKEND, "hashmap")
                         .setConf(
                                 CheckpointingOptions.CHECKPOINTS_DIRECTORY,
                                 "file://" + path + "/checkpoint")

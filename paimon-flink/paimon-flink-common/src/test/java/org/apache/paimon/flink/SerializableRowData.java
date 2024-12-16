@@ -47,8 +47,10 @@ public class SerializableRowData implements RowData, Serializable {
         this.serializer = serializer;
     }
 
-    private void writeObject(ObjectOutputStream out) throws IOException {
+    private synchronized void writeObject(ObjectOutputStream out) throws IOException {
         out.defaultWriteObject();
+        // This following invocation needs to be synchronized to avoid racing problems when the
+        // serializer is reused across multiple subtasks.
         serializer.serialize(row, new DataOutputViewStreamWrapper(out));
     }
 

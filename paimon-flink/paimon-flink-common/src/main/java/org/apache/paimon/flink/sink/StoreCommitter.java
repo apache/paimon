@@ -23,6 +23,7 @@ import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.sink.partition.PartitionListeners;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -44,6 +45,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     private final TableCommitImpl commit;
     @Nullable private final CommitterMetrics committerMetrics;
     private final PartitionListeners partitionListeners;
+    private final boolean allowLogOffsetDuplicate;
 
     public StoreCommitter(FileStoreTable table, TableCommit commit, Context context) {
         this.commit = (TableCommitImpl) commit;
@@ -60,6 +62,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+        allowLogOffsetDuplicate = table.bucketMode() == BucketMode.BUCKET_UNAWARE;
     }
 
     @VisibleForTesting
@@ -94,7 +97,8 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
                 case LOG_OFFSET:
                     LogOffsetCommittable offset =
                             (LogOffsetCommittable) committable.wrappedCommittable();
-                    manifestCommittable.addLogOffset(offset.bucket(), offset.offset());
+                    manifestCommittable.addLogOffset(
+                            offset.bucket(), offset.offset(), allowLogOffsetDuplicate);
                     break;
             }
         }
@@ -136,6 +140,10 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     public void close() throws Exception {
         commit.close();
         partitionListeners.close();
+    }
+
+    public boolean allowLogOffsetDuplicate() {
+        return allowLogOffsetDuplicate;
     }
 
     private void calcNumBytesAndRecordsOut(List<ManifestCommittable> committables) {

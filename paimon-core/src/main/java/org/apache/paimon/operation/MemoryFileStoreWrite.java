@@ -73,6 +73,7 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
                 indexFactory,
                 dvMaintainerFactory,
                 tableName,
+                options,
                 options.bucket(),
                 partitionType,
                 options.writeMaxWritersToSpill(),

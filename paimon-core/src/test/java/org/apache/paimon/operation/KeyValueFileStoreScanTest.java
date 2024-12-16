@@ -26,8 +26,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
@@ -51,6 +49,7 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link KeyValueFileStoreScan}. */
@@ -277,26 +276,24 @@ public class KeyValueFileStoreScanTest {
     }
 
     @Test
-    public void testWithManifestList() throws Exception {
+    public void testDropStatsInPlan() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        int numCommits = random.nextInt(10) + 1;
-        for (int i = 0; i < numCommits; i++) {
-            List<KeyValue> data = generateData(random.nextInt(100) + 1);
-            writeData(data);
+        List<KeyValue> data = generateData(100, 0, (long) Math.abs(random.nextInt(1000)));
+        writeData(data, 0);
+        data = generateData(100, 1, (long) Math.abs(random.nextInt(1000)) + 1000);
+        writeData(data, 0);
+        data = generateData(100, 2, (long) Math.abs(random.nextInt(1000)) + 2000);
+        writeData(data, 0);
+        data = generateData(100, 3, (long) Math.abs(random.nextInt(1000)) + 3000);
+        Snapshot snapshot = writeData(data, 0);
+
+        KeyValueFileStoreScan scan = store.newScan();
+        scan.withSnapshot(snapshot.id()).dropStats();
+        List<ManifestEntry> files = scan.plan().files();
+
+        for (ManifestEntry manifestEntry : files) {
+            assertThat(manifestEntry.file().valueStats()).isEqualTo(EMPTY_STATS);
         }
-
-        ManifestList manifestList = store.manifestListFactory().create();
-        long wantedSnapshotId = random.nextLong(snapshotManager.latestSnapshotId()) + 1;
-        Snapshot wantedSnapshot = snapshotManager.snapshot(wantedSnapshotId);
-        List<ManifestFileMeta> wantedManifests = manifestList.readDataManifests(wantedSnapshot);
-
-        FileStoreScan scan = store.newScan();
-        scan.withManifestList(wantedManifests);
-
-        List<KeyValue> expectedKvs = store.readKvsFromSnapshot(wantedSnapshotId);
-        gen.sort(expectedKvs);
-        Map<BinaryRow, BinaryRow> expected = store.toKvMap(expectedKvs);
-        runTestExactMatch(scan, null, expected);
     }
 
     private void runTestExactMatch(

@@ -27,7 +27,6 @@ import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.BlockingIterator;
 
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
@@ -60,7 +59,7 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
                 tableEnvironmentBuilder()
                         .streamingMode()
                         .parallelism(1)
-                        .setConf(ExecutionCheckpointingOptions.ENABLE_UNALIGNED, false)
+                        .setString("execution.checkpointing.unaligned.enabled", "false")
                         .build();
         path = getTempDirPath();
         tEnv.executeSql(

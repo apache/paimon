@@ -61,18 +61,18 @@ SELECT * FROM default.T1 JOIN default.T2 ON xxxx;
 ```
 
 ## Describe table
-DESCRIBE TABLE statement returns the basic metadata information of a table. The metadata information includes column name, column type and column comment.
+DESCRIBE TABLE statement returns the basic metadata information of a table or view. The metadata information includes column name, column type and column comment.
 
 ```sql
--- describe table
+-- describe table or view
 DESCRIBE TABLE my_table;
 
--- describe table with additional metadata
+-- describe table or view with additional metadata
 DESCRIBE TABLE EXTENDED my_table;
 ```
 
 ## Show create table
-SHOW CREATE TABLE returns the CREATE TABLE statement that was used to create a given table.
+SHOW CREATE TABLE returns the CREATE TABLE statement or CREATE VIEW statement that was used to create a given table or view.
 
 ```sql
 SHOW CREATE TABLE my_table;
@@ -94,6 +94,28 @@ SHOW PARTITIONS my_table;
 
 -- Lists partitions matching the supplied partition spec for my_table
 SHOW PARTITIONS my_table PARTITION (dt=20230817);
+```
+
+## Show Table Extended
+The SHOW TABLE EXTENDED statement is used to list table or partition information.
+
+```sql
+-- Lists tables that satisfy regular expressions
+SHOW TABLE EXTENDED IN db_name LIKE 'test*';
+
+-- Lists the specified partition information for the table
+SHOW TABLE EXTENDED IN db_name LIKE 'table_name' PARTITION(pt = '2024');
+```
+
+## Show views
+The SHOW VIEWS statement returns all the views for an optionally specified database.
+
+```sql
+-- Lists all views
+SHOW VIEWS;
+
+-- Lists all views that satisfy regular expressions
+SHOW VIEWS LIKE 'test*';
 ```
 
 ## Analyze table

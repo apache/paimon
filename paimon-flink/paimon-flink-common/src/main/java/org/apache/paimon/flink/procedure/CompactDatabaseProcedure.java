@@ -29,6 +29,8 @@ import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.util.Map;
 
+import static org.apache.paimon.flink.action.ActionFactory.FULL;
+import static org.apache.paimon.flink.action.CompactActionFactory.checkCompactStrategy;
 import static org.apache.paimon.utils.ParameterUtils.parseCommaSeparatedKeyValues;
 
 /**
@@ -82,6 +84,10 @@ public class CompactDatabaseProcedure extends ProcedureBase {
                 @ArgumentHint(
                         name = "partition_idle_time",
                         type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "compact_strategy",
+                        type = @DataTypeHint("STRING"),
                         isOptional = true)
             })
     public String[] call(
@@ -91,7 +97,8 @@ public class CompactDatabaseProcedure extends ProcedureBase {
             String includingTables,
             String excludingTables,
             String tableOptions,
-            String partitionIdleTime)
+            String partitionIdleTime,
+            String compactStrategy)
             throws Exception {
         partitionIdleTime = notnull(partitionIdleTime);
         String warehouse = catalog.warehouse();
@@ -107,6 +114,10 @@ public class CompactDatabaseProcedure extends ProcedureBase {
         }
         if (!StringUtils.isNullOrWhitespaceOnly(partitionIdleTime)) {
             action.withPartitionIdleTime(TimeUtils.parseDuration(partitionIdleTime));
+        }
+
+        if (checkCompactStrategy(compactStrategy)) {
+            action.withFullCompaction(compactStrategy.trim().equalsIgnoreCase(FULL));
         }
 
         return execute(procedureContext, action, "Compact database job");

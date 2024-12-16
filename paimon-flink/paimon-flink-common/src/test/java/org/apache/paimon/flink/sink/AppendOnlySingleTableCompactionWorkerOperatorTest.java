@@ -32,7 +32,13 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.DataTypes;
 
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.runtime.operators.testutils.DummyEnvironment;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.streaming.runtime.tasks.SourceOperatorStreamTask;
+import org.apache.flink.streaming.util.MockOutput;
+import org.apache.flink.streaming.util.MockStreamConfig;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -49,7 +55,16 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
     public void testAsyncCompactionWorks() throws Exception {
         createTableDefault();
         AppendOnlySingleTableCompactionWorkerOperator workerOperator =
-                new AppendOnlySingleTableCompactionWorkerOperator(getTableDefault(), "user");
+                new AppendOnlySingleTableCompactionWorkerOperator.Factory(getTableDefault(), "user")
+                        .createStreamOperator(
+                                new StreamOperatorParameters<>(
+                                        new SourceOperatorStreamTask<Integer>(
+                                                new DummyEnvironment()),
+                                        new MockStreamConfig(new Configuration(), 1),
+                                        new MockOutput<>(new ArrayList<>()),
+                                        null,
+                                        null,
+                                        null));
 
         // write 200 files
         List<CommitMessage> commitMessages = writeDataDefault(200, 20);
@@ -102,7 +117,16 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
     public void testAsyncCompactionFileDeletedWhenShutdown() throws Exception {
         createTableDefault();
         AppendOnlySingleTableCompactionWorkerOperator workerOperator =
-                new AppendOnlySingleTableCompactionWorkerOperator(getTableDefault(), "user");
+                new AppendOnlySingleTableCompactionWorkerOperator.Factory(getTableDefault(), "user")
+                        .createStreamOperator(
+                                new StreamOperatorParameters<>(
+                                        new SourceOperatorStreamTask<Integer>(
+                                                new DummyEnvironment()),
+                                        new MockStreamConfig(new Configuration(), 1),
+                                        new MockOutput<>(new ArrayList<>()),
+                                        null,
+                                        null,
+                                        null));
 
         // write 200 files
         List<CommitMessage> commitMessages = writeDataDefault(200, 40);

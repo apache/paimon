@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
+import org.apache.paimon.flink.utils.FlinkDescriptorProperties;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.FileStoreCommit;
@@ -37,6 +38,8 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Preconditions;
@@ -44,7 +47,6 @@ import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
 
-import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.catalog.AbstractCatalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogDatabase;
@@ -94,11 +96,9 @@ import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotPartitionedException;
 import org.apache.flink.table.catalog.stats.CatalogColumnStatistics;
 import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
-import org.apache.flink.table.descriptors.DescriptorProperties;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.factories.Factory;
 import org.apache.flink.table.procedures.Procedure;
-import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -110,21 +110,16 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.descriptors.DescriptorProperties.COMMENT;
-import static org.apache.flink.table.descriptors.DescriptorProperties.NAME;
-import static org.apache.flink.table.descriptors.DescriptorProperties.WATERMARK;
-import static org.apache.flink.table.descriptors.DescriptorProperties.WATERMARK_ROWTIME;
-import static org.apache.flink.table.descriptors.DescriptorProperties.WATERMARK_STRATEGY_DATA_TYPE;
-import static org.apache.flink.table.descriptors.DescriptorProperties.WATERMARK_STRATEGY_EXPR;
-import static org.apache.flink.table.descriptors.Schema.SCHEMA;
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 import static org.apache.flink.table.utils.EncodingUtils.decodeBase64ToBytes;
@@ -149,11 +144,18 @@ import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.flink.log.LogStoreRegister.registerLogSystem;
 import static org.apache.paimon.flink.log.LogStoreRegister.unRegisterLogSystem;
+import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.SCHEMA;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.compoundKey;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deserializeNonPhysicalColumn;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deserializeWatermarkSpec;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.nonPhysicalColumnsCount;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.serializeNewWatermarkSpec;
+import static org.apache.paimon.flink.utils.FlinkDescriptorProperties.COMMENT;
+import static org.apache.paimon.flink.utils.FlinkDescriptorProperties.NAME;
+import static org.apache.paimon.flink.utils.FlinkDescriptorProperties.WATERMARK;
+import static org.apache.paimon.flink.utils.FlinkDescriptorProperties.WATERMARK_ROWTIME;
+import static org.apache.paimon.flink.utils.FlinkDescriptorProperties.WATERMARK_STRATEGY_DATA_TYPE;
+import static org.apache.paimon.flink.utils.FlinkDescriptorProperties.WATERMARK_STRATEGY_EXPR;
 import static org.apache.paimon.flink.utils.TableStatsUtil.createTableColumnStats;
 import static org.apache.paimon.flink.utils.TableStatsUtil.createTableStats;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -595,17 +597,12 @@ public class FlinkCatalog extends AbstractCatalog {
             if (!oldTableNonPhysicalColumnIndex.containsKey(
                     ((ModifyPhysicalColumnType) change).getOldColumn().getName())) {
                 ModifyPhysicalColumnType modify = (ModifyPhysicalColumnType) change;
-                LogicalType newColumnType = modify.getNewType().getLogicalType();
-                LogicalType oldColumnType = modify.getOldColumn().getDataType().getLogicalType();
-                if (newColumnType.isNullable() != oldColumnType.isNullable()) {
-                    schemaChanges.add(
-                            SchemaChange.updateColumnNullability(
-                                    modify.getNewColumn().getName(), newColumnType.isNullable()));
-                }
-                schemaChanges.add(
-                        SchemaChange.updateColumnType(
-                                modify.getOldColumn().getName(),
-                                LogicalTypeConversion.toDataType(newColumnType)));
+                generateNestedColumnUpdates(
+                        Collections.singletonList(modify.getOldColumn().getName()),
+                        LogicalTypeConversion.toDataType(
+                                modify.getOldColumn().getDataType().getLogicalType()),
+                        LogicalTypeConversion.toDataType(modify.getNewType().getLogicalType()),
+                        schemaChanges);
             }
             return schemaChanges;
         } else if (change instanceof ModifyColumnPosition) {
@@ -668,6 +665,139 @@ public class FlinkCatalog extends AbstractCatalog {
             return schemaChanges;
         }
         throw new UnsupportedOperationException("Change is not supported: " + change.getClass());
+    }
+
+    private void generateNestedColumnUpdates(
+            List<String> fieldNames,
+            org.apache.paimon.types.DataType oldType,
+            org.apache.paimon.types.DataType newType,
+            List<SchemaChange> schemaChanges) {
+        String joinedNames = String.join(".", fieldNames);
+        if (oldType.getTypeRoot() == DataTypeRoot.ROW) {
+            Preconditions.checkArgument(
+                    newType.getTypeRoot() == DataTypeRoot.ROW,
+                    "Column %s can only be updated to row type, and cannot be updated to %s type",
+                    joinedNames,
+                    newType.getTypeRoot());
+            org.apache.paimon.types.RowType oldRowType = (org.apache.paimon.types.RowType) oldType;
+            org.apache.paimon.types.RowType newRowType = (org.apache.paimon.types.RowType) newType;
+
+            // check that existing fields have same order
+            Map<String, Integer> oldFieldOrders = new HashMap<>();
+            for (int i = 0; i < oldRowType.getFieldCount(); i++) {
+                oldFieldOrders.put(oldRowType.getFields().get(i).name(), i);
+            }
+            int lastIdx = -1;
+            String lastFieldName = "";
+            for (DataField newField : newRowType.getFields()) {
+                String name = newField.name();
+                if (oldFieldOrders.containsKey(name)) {
+                    int idx = oldFieldOrders.get(name);
+                    Preconditions.checkState(
+                            lastIdx < idx,
+                            "Order of existing fields in column %s must be kept the same. "
+                                    + "However, field %s and %s have changed their orders.",
+                            joinedNames,
+                            lastFieldName,
+                            name);
+                    lastIdx = idx;
+                    lastFieldName = name;
+                }
+            }
+
+            // drop fields
+            Set<String> newFieldNames = new HashSet<>(newRowType.getFieldNames());
+            for (String name : oldRowType.getFieldNames()) {
+                if (!newFieldNames.contains(name)) {
+                    List<String> dropColumnNames = new ArrayList<>(fieldNames);
+                    dropColumnNames.add(name);
+                    schemaChanges.add(
+                            SchemaChange.dropColumn(dropColumnNames.toArray(new String[0])));
+                }
+            }
+
+            for (int i = 0; i < newRowType.getFieldCount(); i++) {
+                DataField field = newRowType.getFields().get(i);
+                String name = field.name();
+                List<String> fullFieldNames = new ArrayList<>(fieldNames);
+                fullFieldNames.add(name);
+                if (!oldFieldOrders.containsKey(name)) {
+                    // add fields
+                    SchemaChange.Move move;
+                    if (i == 0) {
+                        move = SchemaChange.Move.first(name);
+                    } else {
+                        String lastName = newRowType.getFields().get(i - 1).name();
+                        move = SchemaChange.Move.after(name, lastName);
+                    }
+                    schemaChanges.add(
+                            SchemaChange.addColumn(
+                                    fullFieldNames.toArray(new String[0]),
+                                    field.type(),
+                                    field.description(),
+                                    move));
+                } else {
+                    // update existing fields
+                    DataField oldField = oldRowType.getFields().get(oldFieldOrders.get(name));
+                    if (!Objects.equals(oldField.description(), field.description())) {
+                        schemaChanges.add(
+                                SchemaChange.updateColumnComment(
+                                        fullFieldNames.toArray(new String[0]),
+                                        field.description()));
+                    }
+                    generateNestedColumnUpdates(
+                            fullFieldNames, oldField.type(), field.type(), schemaChanges);
+                }
+            }
+        } else if (oldType.getTypeRoot() == DataTypeRoot.ARRAY) {
+            Preconditions.checkArgument(
+                    newType.getTypeRoot() == DataTypeRoot.ARRAY,
+                    "Column %s can only be updated to array type, and cannot be updated to %s type",
+                    joinedNames,
+                    newType);
+            List<String> fullFieldNames = new ArrayList<>(fieldNames);
+            // add a dummy column name indicating the element of array
+            fullFieldNames.add("element");
+            generateNestedColumnUpdates(
+                    fullFieldNames,
+                    ((org.apache.paimon.types.ArrayType) oldType).getElementType(),
+                    ((org.apache.paimon.types.ArrayType) newType).getElementType(),
+                    schemaChanges);
+        } else if (oldType.getTypeRoot() == DataTypeRoot.MAP) {
+            Preconditions.checkArgument(
+                    newType.getTypeRoot() == DataTypeRoot.MAP,
+                    "Column %s can only be updated to map type, and cannot be updated to %s type",
+                    joinedNames,
+                    newType);
+            org.apache.paimon.types.MapType oldMapType = (org.apache.paimon.types.MapType) oldType;
+            org.apache.paimon.types.MapType newMapType = (org.apache.paimon.types.MapType) newType;
+            Preconditions.checkArgument(
+                    oldMapType.getKeyType().equals(newMapType.getKeyType()),
+                    "Cannot update key type of column %s from %s type to %s type",
+                    joinedNames,
+                    oldMapType.getKeyType(),
+                    newMapType.getKeyType());
+            List<String> fullFieldNames = new ArrayList<>(fieldNames);
+            // add a dummy column name indicating the value of map
+            fullFieldNames.add("value");
+            generateNestedColumnUpdates(
+                    fullFieldNames,
+                    oldMapType.getValueType(),
+                    newMapType.getValueType(),
+                    schemaChanges);
+        } else {
+            if (!oldType.equalsIgnoreNullable(newType)) {
+                schemaChanges.add(
+                        SchemaChange.updateColumnType(
+                                fieldNames.toArray(new String[0]), newType, false));
+            }
+        }
+
+        if (oldType.isNullable() != newType.isNullable()) {
+            schemaChanges.add(
+                    SchemaChange.updateColumnNullability(
+                            fieldNames.toArray(new String[0]), newType.isNullable()));
+        }
     }
 
     /**
@@ -877,18 +1007,18 @@ public class FlinkCatalog extends AbstractCatalog {
         }
         // materialized table is not resolved at this time.
         if (!table1IsMaterialized) {
-            org.apache.flink.table.api.TableSchema ts1 = ct1.getSchema();
-            org.apache.flink.table.api.TableSchema ts2 = ct2.getSchema();
+            org.apache.flink.table.api.Schema ts1 = ct1.getUnresolvedSchema();
+            org.apache.flink.table.api.Schema ts2 = ct2.getUnresolvedSchema();
             boolean pkEquality = false;
 
             if (ts1.getPrimaryKey().isPresent() && ts2.getPrimaryKey().isPresent()) {
                 pkEquality =
                         Objects.equals(
-                                        ts1.getPrimaryKey().get().getType(),
-                                        ts2.getPrimaryKey().get().getType())
+                                        ts1.getPrimaryKey().get().getConstraintName(),
+                                        ts2.getPrimaryKey().get().getConstraintName())
                                 && Objects.equals(
-                                        ts1.getPrimaryKey().get().getColumns(),
-                                        ts2.getPrimaryKey().get().getColumns());
+                                        ts1.getPrimaryKey().get().getColumnNames(),
+                                        ts2.getPrimaryKey().get().getColumnNames());
             } else if (!ts1.getPrimaryKey().isPresent() && !ts2.getPrimaryKey().isPresent()) {
                 pkEquality = true;
             }
@@ -932,7 +1062,8 @@ public class FlinkCatalog extends AbstractCatalog {
     private CatalogBaseTable toCatalogTable(Table table) {
         Map<String, String> newOptions = new HashMap<>(table.options());
 
-        TableSchema.Builder builder = TableSchema.builder();
+        org.apache.flink.table.api.Schema.Builder builder =
+                org.apache.flink.table.api.Schema.newBuilder();
         Map<String, String> nonPhysicalColumnComments = new HashMap<>();
 
         // add columns
@@ -947,10 +1078,10 @@ public class FlinkCatalog extends AbstractCatalog {
             if (optionalName == null || physicalColumns.contains(optionalName)) {
                 // build physical column from table row field
                 RowType.RowField field = physicalRowFields.get(physicalColumnIndex++);
-                builder.field(field.getName(), fromLogicalToDataType(field.getType()));
+                builder.column(field.getName(), fromLogicalToDataType(field.getType()));
             } else {
                 // build non-physical column from options
-                builder.add(deserializeNonPhysicalColumn(newOptions, i));
+                deserializeNonPhysicalColumn(newOptions, i, builder);
                 if (newOptions.containsKey(compoundKey(SCHEMA, i, COMMENT))) {
                     nonPhysicalColumnComments.put(
                             optionalName, newOptions.get(compoundKey(SCHEMA, i, COMMENT)));
@@ -962,22 +1093,18 @@ public class FlinkCatalog extends AbstractCatalog {
         // extract watermark information
         if (newOptions.keySet().stream()
                 .anyMatch(key -> key.startsWith(compoundKey(SCHEMA, WATERMARK)))) {
-            builder.watermark(deserializeWatermarkSpec(newOptions));
+            deserializeWatermarkSpec(newOptions, builder);
         }
 
         // add primary keys
         if (table.primaryKeys().size() > 0) {
-            builder.primaryKey(
-                    table.primaryKeys().stream().collect(Collectors.joining("_", "PK_", "")),
-                    table.primaryKeys().toArray(new String[0]));
+            builder.primaryKey(table.primaryKeys());
         }
 
-        TableSchema schema = builder.build();
+        org.apache.flink.table.api.Schema schema = builder.build();
 
         // remove schema from options
-        DescriptorProperties removeProperties = new DescriptorProperties(false);
-        removeProperties.putTableSchema(SCHEMA, schema);
-        removeProperties.asMap().keySet().forEach(newOptions::remove);
+        FlinkDescriptorProperties.removeSchemaKeys(SCHEMA, schema, newOptions);
 
         Options options = Options.fromMap(newOptions);
         if (TableType.MATERIALIZED_TABLE == options.get(CoreOptions.TYPE)) {
@@ -993,7 +1120,10 @@ public class FlinkCatalog extends AbstractCatalog {
     }
 
     private CatalogMaterializedTable buildMaterializedTable(
-            Table table, Map<String, String> newOptions, TableSchema schema, Options options) {
+            Table table,
+            Map<String, String> newOptions,
+            org.apache.flink.table.api.Schema schema,
+            Options options) {
         String definitionQuery = options.get(MATERIALIZED_TABLE_DEFINITION_QUERY);
         IntervalFreshness freshness =
                 IntervalFreshness.of(
@@ -1017,7 +1147,7 @@ public class FlinkCatalog extends AbstractCatalog {
         // remove materialized table related options
         allMaterializedTableAttributes().forEach(newOptions::remove);
         return CatalogMaterializedTable.newBuilder()
-                .schema(schema.toSchema())
+                .schema(schema)
                 .comment(table.comment().orElse(""))
                 .partitionKeys(table.partitionKeys())
                 .options(newOptions)

@@ -44,6 +44,8 @@ import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+
 import javax.annotation.Nullable;
 
 import java.util.List;
@@ -107,4 +109,6 @@ public interface FileStore<T> {
     List<TagCallback> createTagCallbacks();
 
     void setManifestCache(SegmentsCache<Path> manifestCache);
+
+    void setSnapshotCache(Cache<Path, Snapshot> cache);
 }

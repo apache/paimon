@@ -19,11 +19,11 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.TableType;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.lineage.LineageMetaFactory;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.FileStoreCommit;
@@ -48,6 +48,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -60,11 +61,11 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.options.CatalogOptions.ALLOW_UPPER_CASE;
-import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
@@ -73,19 +74,14 @@ public abstract class AbstractCatalog implements Catalog {
     protected final Map<String, String> tableDefaultOptions;
     protected final Options catalogOptions;
 
-    @Nullable protected final LineageMetaFactory lineageMetaFactory;
-
     protected AbstractCatalog(FileIO fileIO) {
         this.fileIO = fileIO;
-        this.lineageMetaFactory = null;
         this.tableDefaultOptions = new HashMap<>();
         this.catalogOptions = new Options();
     }
 
     protected AbstractCatalog(FileIO fileIO, Options options) {
         this.fileIO = fileIO;
-        this.lineageMetaFactory =
-                findAndCreateLineageMeta(options, AbstractCatalog.class.getClassLoader());
         this.tableDefaultOptions = Catalog.tableDefaultOptions(options.toMap());
         this.catalogOptions = options;
     }
@@ -130,6 +126,10 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public boolean allowUpperCase() {
         return catalogOptions.getOptional(ALLOW_UPPER_CASE).orElse(true);
+    }
+
+    protected boolean allowCustomTablePath() {
+        return false;
     }
 
     @Override
@@ -271,6 +271,7 @@ public abstract class AbstractCatalog implements Catalog {
         validateIdentifierNameCaseInsensitive(identifier);
         validateFieldNameCaseInsensitive(schema.rowType().getFieldNames());
         validateAutoCreateClose(schema.options());
+        validateCustomTablePath(schema.options());
 
         // check db exists
         getDatabase(identifier.getDatabaseName());
@@ -369,32 +370,18 @@ public abstract class AbstractCatalog implements Catalog {
     protected abstract void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException;
 
-    @Nullable
-    private LineageMetaFactory findAndCreateLineageMeta(Options options, ClassLoader classLoader) {
-        return options.getOptional(LINEAGE_META)
-                .map(
-                        meta ->
-                                FactoryUtil.discoverFactory(
-                                        classLoader, LineageMetaFactory.class, meta))
-                .orElse(null);
-    }
-
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
         if (isSystemDatabase(identifier.getDatabaseName())) {
             String tableName = identifier.getTableName();
             Table table =
                     SystemTableLoader.loadGlobal(
-                            tableName,
-                            fileIO,
-                            this::allTablePaths,
-                            catalogOptions,
-                            lineageMetaFactory);
+                            tableName, fileIO, this::allTablePaths, catalogOptions);
             if (table == null) {
                 throw new TableNotExistException(identifier);
             }
             return table;
-        } else if (isSpecifiedSystemTable(identifier)) {
+        } else if (identifier.isSystemTable()) {
             Table originTable =
                     getDataOrFormatTable(
                             new Identifier(
@@ -423,17 +410,39 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
         Preconditions.checkArgument(identifier.getSystemTableName() == null);
-        TableSchema tableSchema = getDataTableSchema(identifier);
-        return FileStoreTableFactory.create(
-                fileIO,
-                getTableLocation(identifier),
-                tableSchema,
-                new CatalogEnvironment(
-                        identifier,
-                        Lock.factory(
-                                lockFactory().orElse(null), lockContext().orElse(null), identifier),
-                        metastoreClientFactory(identifier, tableSchema).orElse(null),
-                        lineageMetaFactory));
+        TableMeta tableMeta = getDataTableMeta(identifier);
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        fileIO,
+                        getTableLocation(identifier),
+                        tableMeta.schema,
+                        new CatalogEnvironment(
+                                identifier,
+                                tableMeta.uuid,
+                                Lock.factory(
+                                        lockFactory().orElse(null),
+                                        lockContext().orElse(null),
+                                        identifier),
+                                metastoreClientFactory(identifier, tableMeta.schema).orElse(null)));
+        CoreOptions options = table.coreOptions();
+        if (options.type() == TableType.OBJECT_TABLE) {
+            String objectLocation = options.objectLocation();
+            checkNotNull(objectLocation, "Object location should not be null for object table.");
+            table =
+                    ObjectTable.builder()
+                            .underlyingTable(table)
+                            .objectLocation(objectLocation)
+                            .objectFileIO(objectFileIO(objectLocation))
+                            .build();
+        }
+        return table;
+    }
+
+    /**
+     * Catalog implementation may override this method to provide {@link FileIO} to object table.
+     */
+    protected FileIO objectFileIO(String objectLocation) {
+        return fileIO;
     }
 
     /**
@@ -474,6 +483,10 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
+    protected TableMeta getDataTableMeta(Identifier identifier) throws TableNotExistException {
+        return new TableMeta(getDataTableSchema(identifier), null);
+    }
+
     protected abstract TableSchema getDataTableSchema(Identifier identifier)
             throws TableNotExistException;
 
@@ -506,12 +519,8 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
-    public static boolean isSpecifiedSystemTable(Identifier identifier) {
-        return identifier.getSystemTableName() != null;
-    }
-
     protected static boolean isTableInSystemDatabase(Identifier identifier) {
-        return isSystemDatabase(identifier.getDatabaseName()) || isSpecifiedSystemTable(identifier);
+        return isSystemDatabase(identifier.getDatabaseName()) || identifier.isSystemTable();
     }
 
     protected static void checkNotSystemTable(Identifier identifier, String method) {
@@ -560,7 +569,7 @@ public abstract class AbstractCatalog implements Catalog {
         for (SchemaChange change : changes) {
             if (change instanceof SchemaChange.AddColumn) {
                 SchemaChange.AddColumn addColumn = (SchemaChange.AddColumn) change;
-                fieldNames.addAll(addColumn.fieldNames());
+                fieldNames.addAll(Arrays.asList(addColumn.fieldNames()));
             } else if (change instanceof SchemaChange.RenameColumn) {
                 SchemaChange.RenameColumn rename = (SchemaChange.RenameColumn) change;
                 fieldNames.add(rename.newName());
@@ -582,6 +591,15 @@ public abstract class AbstractCatalog implements Catalog {
                 String.format(
                         "The value of %s property should be %s.",
                         CoreOptions.AUTO_CREATE.key(), Boolean.FALSE));
+    }
+
+    private void validateCustomTablePath(Map<String, String> options) {
+        if (!allowCustomTablePath() && options.containsKey(CoreOptions.PATH.key())) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "The current catalog %s does not support specifying the table path when creating a table.",
+                            this.getClass().getSimpleName()));
+        }
     }
 
     // =============================== Meta in File System =====================================
@@ -609,7 +627,16 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected boolean tableExistsInFileSystem(Path tablePath, String branchName) {
-        return !new SchemaManager(fileIO, tablePath, branchName).listAllIds().isEmpty();
+        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath, branchName);
+
+        // in order to improve the performance, check the schema-0 firstly.
+        boolean schemaZeroExists = schemaManager.schemaExists(0);
+        if (schemaZeroExists) {
+            return true;
+        } else {
+            // if schema-0 not exists, fallback to check other schemas
+            return !schemaManager.listAllIds().isEmpty();
+        }
     }
 
     public Optional<TableSchema> tableSchemaInFileSystem(Path tablePath, String branchName) {
@@ -625,5 +652,26 @@ public abstract class AbstractCatalog implements Catalog {
                                 return s;
                             }
                         });
+    }
+
+    /** Table metadata. */
+    protected static class TableMeta {
+
+        private final TableSchema schema;
+        @Nullable private final String uuid;
+
+        public TableMeta(TableSchema schema, @Nullable String uuid) {
+            this.schema = schema;
+            this.uuid = uuid;
+        }
+
+        public TableSchema schema() {
+            return schema;
+        }
+
+        @Nullable
+        public String uuid() {
+            return uuid;
+        }
     }
 }

@@ -62,6 +62,8 @@ import org.apache.orc.util.BloomFilterIO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
@@ -127,7 +129,7 @@ public class RecordReaderImpl implements RecordReader {
     private final boolean noSelectedVector;
     // identifies whether the file has bad bloom filters that we should not use.
     private final boolean skipBloomFilters;
-    private final FileIndexResult fileIndexResult;
+    @Nullable private final FileIndexResult fileIndexResult;
     static final String[] BAD_CPP_BLOOM_FILTER_VERSIONS = {
         "1.6.0", "1.6.1", "1.6.2", "1.6.3", "1.6.4", "1.6.5", "1.6.6", "1.6.7", "1.6.8", "1.6.9",
         "1.6.10", "1.6.11", "1.7.0"

@@ -62,7 +62,7 @@ public class QueryService {
                                 InternalTypeInfo.fromRowType(QueryExecutorOperator.outputType()),
                                 executorOperator)
                         .setParallelism(parallelism)
-                        .addSink(new QueryAddressRegister(table))
+                        .sinkTo(new QueryAddressRegister(table))
                         .setParallelism(1);
 
         sink.getTransformation().setMaxParallelism(1);

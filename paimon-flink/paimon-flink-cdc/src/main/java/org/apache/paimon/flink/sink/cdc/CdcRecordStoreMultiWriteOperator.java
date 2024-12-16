@@ -38,6 +38,9 @@ import org.apache.paimon.utils.ExecutorThreadFactory;
 
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
+import org.apache.flink.streaming.api.operators.StreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 import java.io.IOException;
@@ -74,12 +77,13 @@ public class CdcRecordStoreMultiWriteOperator
     private String commitUser;
     private ExecutorService compactExecutor;
 
-    public CdcRecordStoreMultiWriteOperator(
+    private CdcRecordStoreMultiWriteOperator(
+            StreamOperatorParameters<MultiTableCommittable> parameters,
             Catalog.Loader catalogLoader,
             StoreSinkWrite.WithWriteBufferProvider storeSinkWriteProvider,
             String initialCommitUser,
             Options options) {
-        super(options);
+        super(parameters, options);
         this.catalogLoader = catalogLoader;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
         this.initialCommitUser = initialCommitUser;
@@ -253,5 +257,43 @@ public class CdcRecordStoreMultiWriteOperator
     @VisibleForTesting
     public String commitUser() {
         return commitUser;
+    }
+
+    /** {@link StreamOperatorFactory} of {@link CdcRecordStoreMultiWriteOperator}. */
+    public static class Factory
+            extends PrepareCommitOperator.Factory<CdcMultiplexRecord, MultiTableCommittable> {
+        private final StoreSinkWrite.WithWriteBufferProvider storeSinkWriteProvider;
+        private final String initialCommitUser;
+        private final Catalog.Loader catalogLoader;
+
+        public Factory(
+                Catalog.Loader catalogLoader,
+                StoreSinkWrite.WithWriteBufferProvider storeSinkWriteProvider,
+                String initialCommitUser,
+                Options options) {
+            super(options);
+            this.catalogLoader = catalogLoader;
+            this.storeSinkWriteProvider = storeSinkWriteProvider;
+            this.initialCommitUser = initialCommitUser;
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T extends StreamOperator<MultiTableCommittable>> T createStreamOperator(
+                StreamOperatorParameters<MultiTableCommittable> parameters) {
+            return (T)
+                    new CdcRecordStoreMultiWriteOperator(
+                            parameters,
+                            catalogLoader,
+                            storeSinkWriteProvider,
+                            initialCommitUser,
+                            options);
+        }
+
+        @Override
+        @SuppressWarnings("rawtypes")
+        public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
+            return CdcRecordStoreMultiWriteOperator.class;
+        }
     }
 }

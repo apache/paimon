@@ -19,6 +19,8 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.data.serializer.VersionedSerializer;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexFileMeta09Serializer;
 import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -45,12 +47,14 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 /** {@link VersionedSerializer} for {@link CommitMessage}. */
 public class CommitMessageSerializer implements VersionedSerializer<CommitMessage> {
 
-    private static final int CURRENT_VERSION = 4;
+    private static final int CURRENT_VERSION = 5;
 
     private final DataFileMetaSerializer dataFileSerializer;
     private final IndexFileMetaSerializer indexEntrySerializer;
 
+    private DataFileMeta09Serializer dataFile09Serializer;
     private DataFileMeta08Serializer dataFile08Serializer;
+    private IndexFileMeta09Serializer indexEntry09Serializer;
 
     public CommitMessageSerializer() {
         this.dataFileSerializer = new DataFileMetaSerializer();
@@ -107,48 +111,48 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
     }
 
     private CommitMessage deserialize(int version, DataInputView view) throws IOException {
-        if (version >= 3) {
-            IOExceptionSupplier<List<DataFileMeta>> fileDeserializer =
-                    () -> dataFileSerializer.deserializeList(view);
-            if (version == 3) {
-                DataFileMeta09Serializer serializer = new DataFileMeta09Serializer();
-                fileDeserializer = () -> serializer.deserializeList(view);
-            }
-            return new CommitMessageImpl(
-                    deserializeBinaryRow(view),
-                    view.readInt(),
-                    new DataIncrement(
-                            fileDeserializer.get(), fileDeserializer.get(), fileDeserializer.get()),
-                    new CompactIncrement(
-                            fileDeserializer.get(), fileDeserializer.get(), fileDeserializer.get()),
-                    new IndexIncrement(
-                            indexEntrySerializer.deserializeList(view),
-                            indexEntrySerializer.deserializeList(view)));
-        } else {
-            return deserialize08(version, view);
-        }
-    }
-
-    private CommitMessage deserialize08(int version, DataInputView view) throws IOException {
-        if (dataFile08Serializer == null) {
-            dataFile08Serializer = new DataFileMeta08Serializer();
-        }
+        IOExceptionSupplier<List<DataFileMeta>> fileDeserializer = fileDeserializer(version, view);
+        IOExceptionSupplier<List<IndexFileMeta>> indexEntryDeserializer =
+                indexEntryDeserializer(version, view);
 
         return new CommitMessageImpl(
                 deserializeBinaryRow(view),
                 view.readInt(),
                 new DataIncrement(
-                        dataFile08Serializer.deserializeList(view),
-                        dataFile08Serializer.deserializeList(view),
-                        dataFile08Serializer.deserializeList(view)),
+                        fileDeserializer.get(), fileDeserializer.get(), fileDeserializer.get()),
                 new CompactIncrement(
-                        dataFile08Serializer.deserializeList(view),
-                        dataFile08Serializer.deserializeList(view),
-                        dataFile08Serializer.deserializeList(view)),
+                        fileDeserializer.get(), fileDeserializer.get(), fileDeserializer.get()),
                 new IndexIncrement(
-                        indexEntrySerializer.deserializeList(view),
-                        version <= 2
-                                ? Collections.emptyList()
-                                : indexEntrySerializer.deserializeList(view)));
+                        indexEntryDeserializer.get(),
+                        version <= 2 ? Collections.emptyList() : indexEntryDeserializer.get()));
+    }
+
+    private IOExceptionSupplier<List<DataFileMeta>> fileDeserializer(
+            int version, DataInputView view) {
+        if (version >= 4) {
+            return () -> dataFileSerializer.deserializeList(view);
+        } else if (version == 3) {
+            if (dataFile09Serializer == null) {
+                dataFile09Serializer = new DataFileMeta09Serializer();
+            }
+            return () -> dataFile09Serializer.deserializeList(view);
+        } else {
+            if (dataFile08Serializer == null) {
+                dataFile08Serializer = new DataFileMeta08Serializer();
+            }
+            return () -> dataFile08Serializer.deserializeList(view);
+        }
+    }
+
+    private IOExceptionSupplier<List<IndexFileMeta>> indexEntryDeserializer(
+            int version, DataInputView view) {
+        if (version >= 5) {
+            return () -> indexEntrySerializer.deserializeList(view);
+        } else {
+            if (indexEntry09Serializer == null) {
+                indexEntry09Serializer = new IndexFileMeta09Serializer();
+            }
+            return () -> indexEntry09Serializer.deserializeList(view);
+        }
     }
 }

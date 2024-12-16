@@ -42,7 +42,7 @@ import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.operators.SimpleOperatorFactory;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.streaming.api.transformations.OneInputTransformation;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.junit.jupiter.api.Test;
@@ -82,19 +82,21 @@ public class FlinkSinkTest {
                         Collections.singletonList(GenericRow.of(1, 1)));
         FlinkSink<InternalRow> flinkSink = new FixedBucketSink(fileStoreTable, null, null);
         DataStream<Committable> written = flinkSink.doWrite(source, "123", 1);
-        RowDataStoreWriteOperator operator =
-                ((RowDataStoreWriteOperator)
-                        ((SimpleOperatorFactory)
-                                        ((OneInputTransformation) written.getTransformation())
-                                                .getOperatorFactory())
-                                .getOperator());
+        OneInputStreamOperatorFactory<InternalRow, Committable> operatorFactory =
+                (OneInputStreamOperatorFactory<InternalRow, Committable>)
+                        ((OneInputTransformation<InternalRow, Committable>)
+                                        written.getTransformation())
+                                .getOperatorFactory();
 
         TypeSerializer<Committable> serializer =
                 new CommittableTypeInfo().createSerializer(new ExecutionConfig());
         OneInputStreamOperatorTestHarness<InternalRow, Committable> harness =
-                new OneInputStreamOperatorTestHarness<>(operator);
+                new OneInputStreamOperatorTestHarness<>(operatorFactory);
         harness.setup(serializer);
         harness.initializeEmptyState();
+
+        RowDataStoreWriteOperator operator =
+                (RowDataStoreWriteOperator) harness.getOneInputOperator();
 
         return ((KeyValueFileStoreWrite) ((StoreSinkWriteImpl) operator.write).write.getWrite())
                 .bufferSpillable();

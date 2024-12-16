@@ -23,6 +23,7 @@ import org.apache.paimon.types.DataType;
 
 import org.apache.hadoop.hive.ql.exec.vector.ColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
+import org.apache.orc.TypeDescription;
 
 import java.util.Arrays;
 import java.util.List;
@@ -35,7 +36,7 @@ public class RowDataVectorizer extends Vectorizer<InternalRow> {
 
     private final List<FieldWriter> fieldWriters;
 
-    public RowDataVectorizer(String schema, DataType[] fieldTypes) {
+    public RowDataVectorizer(TypeDescription schema, DataType[] fieldTypes) {
         super(schema);
         this.fieldWriters =
                 Arrays.stream(fieldTypes)

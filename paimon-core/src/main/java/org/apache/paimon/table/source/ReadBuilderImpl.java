@@ -51,6 +51,8 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     private @Nullable RowType readType;
 
+    private boolean dropStats = false;
+
     public ReadBuilderImpl(InnerTable table) {
         this.table = table;
     }
@@ -125,6 +127,12 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
+    public ReadBuilder dropStats() {
+        this.dropStats = true;
+        return this;
+    }
+
+    @Override
     public TableScan newScan() {
         InnerTableScan tableScan = configureScan(table.newScan());
         if (limit != null) {
@@ -155,6 +163,9 @@ public class ReadBuilderImpl implements ReadBuilder {
         }
         if (bucketFilter != null) {
             scan.withBucketFilter(bucketFilter);
+        }
+        if (dropStats) {
+            scan.dropStats();
         }
         return scan;
     }

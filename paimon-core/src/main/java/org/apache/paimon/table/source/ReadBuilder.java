@@ -150,6 +150,9 @@ public interface ReadBuilder extends Serializable {
      */
     ReadBuilder withShard(int indexOfThisSubtask, int numberOfParallelSubtasks);
 
+    /** Delete stats in scan plan result. */
+    ReadBuilder dropStats();
+
     /** Create a {@link TableScan} to perform batch planning. */
     TableScan newScan();
 

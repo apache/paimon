@@ -32,7 +32,7 @@ import org.apache.flink.runtime.checkpoint.CheckpointType;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.checkpoint.SavepointType;
 import org.apache.flink.runtime.state.StateInitializationContext;
-import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.junit.jupiter.api.Test;
 
@@ -198,13 +198,15 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
     }
 
     @Override
-    protected OneInputStreamOperator<Committable, Committable> createCommitterOperator(
-            FileStoreTable table,
-            String commitUser,
-            CommittableStateManager<ManifestCommittable> committableStateManager) {
-        return new AutoTagForSavepointCommitterOperator<>(
-                (CommitterOperator<Committable, ManifestCommittable>)
-                        super.createCommitterOperator(table, commitUser, committableStateManager),
+    protected OneInputStreamOperatorFactory<Committable, Committable>
+            createCommitterOperatorFactory(
+                    FileStoreTable table,
+                    String commitUser,
+                    CommittableStateManager<ManifestCommittable> committableStateManager) {
+        return new AutoTagForSavepointCommitterOperatorFactory<>(
+                (CommitterOperatorFactory<Committable, ManifestCommittable>)
+                        super.createCommitterOperatorFactory(
+                                table, commitUser, committableStateManager),
                 table::snapshotManager,
                 table::tagManager,
                 () -> table.store().newTagDeletion(),
@@ -213,14 +215,15 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
     }
 
     @Override
-    protected OneInputStreamOperator<Committable, Committable> createCommitterOperator(
-            FileStoreTable table,
-            String commitUser,
-            CommittableStateManager<ManifestCommittable> committableStateManager,
-            ThrowingConsumer<StateInitializationContext, Exception> initializeFunction) {
-        return new AutoTagForSavepointCommitterOperator<>(
-                (CommitterOperator<Committable, ManifestCommittable>)
-                        super.createCommitterOperator(
+    protected OneInputStreamOperatorFactory<Committable, Committable>
+            createCommitterOperatorFactory(
+                    FileStoreTable table,
+                    String commitUser,
+                    CommittableStateManager<ManifestCommittable> committableStateManager,
+                    ThrowingConsumer<StateInitializationContext, Exception> initializeFunction) {
+        return new AutoTagForSavepointCommitterOperatorFactory<>(
+                (CommitterOperatorFactory<Committable, ManifestCommittable>)
+                        super.createCommitterOperatorFactory(
                                 table, commitUser, committableStateManager, initializeFunction),
                 table::snapshotManager,
                 table::tagManager,

@@ -104,6 +104,12 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                         Row.of(2, 1, "cat"),
                         Row.of(2, 2, "elephant")),
                 collect(tEnv.executeSql("SELECT * FROM my_iceberg.test_db.t ORDER BY pt, id")));
+
+        Assert.assertTrue(
+                hiveShell
+                        .executeQuery("DESC DATABASE EXTENDED test_db")
+                        .toString()
+                        .contains("iceberg/test_db"));
     }
 
     @Test
@@ -149,6 +155,36 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                         tEnv.executeSql(
                                 "SELECT data, id, pt FROM my_iceberg.test_db.t WHERE id > 1 ORDER BY pt, id")));
     }
+
+    @Test
+    public void testCustomMetastoreClass() {
+        TableEnvironment tEnv =
+                TableEnvironmentImpl.create(
+                        EnvironmentSettings.newInstance().inBatchMode().build());
+        tEnv.executeSql(
+                "CREATE CATALOG my_paimon WITH ( 'type' = 'paimon', 'warehouse' = '"
+                        + path
+                        + "' )");
+        tEnv.executeSql("CREATE DATABASE my_paimon.test_db");
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE my_paimon.test_db.t ( pt INT, id INT, data STRING ) PARTITIONED BY (pt) WITH "
+                                + "( "
+                                + "'metadata.iceberg.storage' = 'hive-catalog', "
+                                + "'metadata.iceberg.uri' = '', "
+                                + "'file.format' = 'avro', "
+                                + "'metadata.iceberg.hive-client-class' = '%s')",
+                        createFailHiveMetaStoreClient()));
+        Assert.assertThrows(
+                Exception.class,
+                () ->
+                        tEnv.executeSql(
+                                        "INSERT INTO my_paimon.test_db.t VALUES "
+                                                + "(1, 1, 'apple'), (1, 2, 'pear'), (2, 1, 'cat'), (2, 2, 'dog')")
+                                .await());
+    }
+
+    protected abstract String createFailHiveMetaStoreClient();
 
     private List<Row> collect(TableResult result) throws Exception {
         List<Row> rows = new ArrayList<>();

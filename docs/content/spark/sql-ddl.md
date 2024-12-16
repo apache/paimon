@@ -26,7 +26,9 @@ under the License.
 
 # SQL DDL
 
-## Create Catalog
+## Catalog
+
+### Create Catalog
 
 Paimon catalogs currently support three types of metastores:
 
@@ -36,7 +38,7 @@ Paimon catalogs currently support three types of metastores:
 
 See [CatalogOptions]({{< ref "maintenance/configurations#catalogoptions" >}}) for detailed options when creating a catalog.
 
-### Create Filesystem Catalog
+#### Create Filesystem Catalog
 
 The following Spark SQL registers and uses a Paimon catalog named `my_catalog`. Metadata and table files are stored under `hdfs:///path/to/warehouse`.
 
@@ -56,7 +58,7 @@ After `spark-sql` is started, you can switch to the `default` database of the `p
 USE paimon.default;
 ```
 
-### Creating Hive Catalog
+#### Creating Hive Catalog
 
 By using Paimon Hive catalog, changes to the catalog will directly affect the corresponding Hive metastore. Tables created in such catalog can also be accessed directly from Hive.
 
@@ -84,13 +86,13 @@ USE paimon.default;
 
 Also, you can create [SparkGenericCatalog]({{< ref "spark/quick-start" >}}).
 
-#### Synchronizing Partitions into Hive Metastore
+**Synchronizing Partitions into Hive Metastore**
 
 By default, Paimon does not synchronize newly created partitions into Hive metastore. Users will see an unpartitioned table in Hive. Partition push-down will be carried out by filter push-down instead.
 
-If you want to see a partitioned table in Hive and also synchronize newly created partitions into Hive metastore, please set the table property `metastore.partitioned-table` to true. Also see [CoreOptions]({{< ref "maintenance/configurations#CoreOptions" >}}).
+If you want to see a partitioned table in Hive and also synchronize newly created partitions into Hive metastore, please set the table property `metastore.partitioned-table` to true. Also see [CoreOptions]({{< ref "maintenance/configurations#coreoptions" >}}).
 
-### Creating JDBC Catalog
+#### Creating JDBC Catalog
 
 By using the Paimon JDBC catalog, changes to the catalog will be directly stored in relational databases such as SQLite, MySQL, postgres, etc.
 
@@ -118,7 +120,9 @@ spark-sql ... \
 USE paimon.default;
 ```
 
-## Create Table
+## Table
+
+### Create Table
 
 After use Paimon catalog, you can create and drop tables. Tables created in Paimon Catalogs are managed by the catalog.
 When the table is dropped from catalog, its table files will also be deleted.
@@ -152,7 +156,34 @@ CREATE TABLE my_table (
 );
 ```
 
-## Create Table As Select
+### Create External Table
+
+When the catalog's `metastore` type is `hive`, if the `location` is specified when creating a table, that table will be considered an external table; otherwise, it will be a managed table. 
+
+When you drop an external table, only the metadata in Hive will be removed, and the actual data files will not be deleted; whereas dropping a managed table will also delete the data.
+
+```sql
+CREATE TABLE my_table (
+    user_id BIGINT,
+    item_id BIGINT,
+    behavior STRING,
+    dt STRING,
+    hh STRING
+) PARTITIONED BY (dt, hh) TBLPROPERTIES (
+    'primary-key' = 'dt,hh,user_id'
+) LOCATION '/path/to/table';
+```
+
+Furthermore, if there is already data stored in the specified location, you can create the table without explicitly specifying the fields, partitions and props or other information. 
+In this case, the new table will inherit them all from the existing table’s metadata. 
+
+However, if you manually specify them, you need to ensure that they are consistent with those of the existing table (props can be a subset). Therefore, it is strongly recommended not to specify them.
+
+```sql
+CREATE TABLE my_table LOCATION '/path/to/table';
+```
+
+### Create Table As Select
 
 Table can be created and populated by the results of a query, for example, we have a sql like this: `CREATE TABLE table_b AS SELECT id, name FORM table_a`,
 The resulting table `table_b` will be equivalent to create the table and insert the data with the following statement:
@@ -210,8 +241,34 @@ CREATE TABLE my_table_all (
 CREATE TABLE my_table_all_as PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 'dt,hh') AS SELECT * FROM my_table_all;
 ```
 
-## Tag DDL
-### Create or replace Tag
+## View
+
+Views are based on the result-set of an SQL query, when using `org.apache.paimon.spark.SparkCatalog`, views are managed by paimon itself. 
+And in this case, views are supported when the `metastore` type is `hive`, and temporary views are not supported yet.
+
+### Create Or Replace View
+
+CREATE VIEW constructs a virtual table that has no physical data.
+
+```sql
+-- create a view.
+CREATE VIEW v1 AS SELECT * FROM t1;
+
+-- create a view, if a view of same name already exists, it will be replaced.
+CREATE OR REPLACE VIEW v1 AS SELECT * FROM t1;
+```
+
+### Drop View
+
+DROP VIEW removes the metadata associated with a specified view from the catalog.
+
+```sql
+-- drop a view
+DROP VIEW v1;
+```
+
+## Tag
+### Create Or Replace Tag
 Create or replace a tag syntax with the following options.
 - Create a tag with or without the snapshot id and time retention.
 - Create an existed tag is not failed if using `IF NOT EXISTS` syntax.

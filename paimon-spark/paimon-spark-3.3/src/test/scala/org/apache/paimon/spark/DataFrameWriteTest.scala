@@ -18,9 +18,14 @@
 
 package org.apache.paimon.spark
 
+import org.apache.spark.SparkConf
 import org.junit.jupiter.api.Assertions
 
 class DataFrameWriteTest extends PaimonSparkTestBase {
+
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.sql.catalog.paimon.cache-enabled", "false")
+  }
 
   test("Paimon: DataFrameWrite.saveAsTable") {
 

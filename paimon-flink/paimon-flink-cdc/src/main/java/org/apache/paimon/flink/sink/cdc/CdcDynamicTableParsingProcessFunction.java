@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.types.DataField;
 
+import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.typeinfo.TypeHint;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -74,7 +75,16 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
         this.parserFactory = parserFactory;
     }
 
-    @Override
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
+     */
+    public void open(OpenContext openContext) throws Exception {
+        open(new Configuration());
+    }
+
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
+     */
     public void open(Configuration parameters) throws Exception {
         parser = parserFactory.create();
         catalog = catalogLoader.load();

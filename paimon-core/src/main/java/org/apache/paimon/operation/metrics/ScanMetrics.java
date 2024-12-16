@@ -49,12 +49,6 @@ public class ScanMetrics {
     public static final String SCAN_DURATION = "scanDuration";
     public static final String LAST_SCANNED_MANIFESTS = "lastScannedManifests";
 
-    public static final String LAST_SKIPPED_BY_PARTITION_AND_STATS =
-            "lastSkippedByPartitionAndStats";
-
-    public static final String LAST_SKIPPED_BY_WHOLE_BUCKET_FILES_FILTER =
-            "lastSkippedByWholeBucketFilesFilter";
-
     public static final String LAST_SCAN_SKIPPED_TABLE_FILES = "lastScanSkippedTableFiles";
 
     public static final String LAST_SCAN_RESULTED_TABLE_FILES = "lastScanResultedTableFiles";
@@ -66,12 +60,6 @@ public class ScanMetrics {
         metricGroup.gauge(
                 LAST_SCANNED_MANIFESTS,
                 () -> latestScan == null ? 0L : latestScan.getScannedManifests());
-        metricGroup.gauge(
-                LAST_SKIPPED_BY_PARTITION_AND_STATS,
-                () -> latestScan == null ? 0L : latestScan.getSkippedByPartitionAndStats());
-        metricGroup.gauge(
-                LAST_SKIPPED_BY_WHOLE_BUCKET_FILES_FILTER,
-                () -> latestScan == null ? 0L : latestScan.getSkippedByWholeBucketFiles());
         metricGroup.gauge(
                 LAST_SCAN_SKIPPED_TABLE_FILES,
                 () -> latestScan == null ? 0L : latestScan.getSkippedTableFiles());

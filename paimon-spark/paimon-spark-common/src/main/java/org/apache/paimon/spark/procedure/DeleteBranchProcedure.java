@@ -18,6 +18,8 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.spark.catalog.WithPaimonCatalog;
+
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -61,13 +63,20 @@ public class DeleteBranchProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String branchStr = args.getString(1);
-        return modifyPaimonTable(
-                tableIdent,
-                table -> {
-                    table.deleteBranches(branchStr);
-                    InternalRow outputRow = newInternalRow(true);
-                    return new InternalRow[] {outputRow};
-                });
+        InternalRow[] result =
+                modifyPaimonTable(
+                        tableIdent,
+                        table -> {
+                            table.deleteBranches(branchStr);
+                            InternalRow outputRow = newInternalRow(true);
+                            return new InternalRow[] {outputRow};
+                        });
+        ((WithPaimonCatalog) tableCatalog())
+                .paimonCatalog()
+                .invalidateTable(
+                        new org.apache.paimon.catalog.Identifier(
+                                tableIdent.namespace()[0], tableIdent.name(), branchStr));
+        return result;
     }
 
     public static ProcedureBuilder builder() {

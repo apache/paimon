@@ -52,10 +52,12 @@ public interface Catalog extends AutoCloseable {
     String SYSTEM_TABLE_SPLITTER = "$";
     String SYSTEM_DATABASE_NAME = "sys";
     String SYSTEM_BRANCH_PREFIX = "branch_";
-    String COMMENT_PROP = "comment";
     String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
-    String DB_LOCATION_PROP = "location";
     String DB_SUFFIX = ".db";
+
+    String COMMENT_PROP = "comment";
+    String OWNER_PROP = "owner";
+    String DB_LOCATION_PROP = "location";
     String NUM_ROWS_PROP = "numRows";
     String NUM_FILES_PROP = "numFiles";
     String TOTAL_SIZE_PROP = "totalSize";

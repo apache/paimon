@@ -22,6 +22,7 @@ import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaHookLoader;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
+import org.apache.hadoop.hive.metastore.api.EnvironmentContext;
 import org.apache.hadoop.hive.metastore.api.InvalidOperationException;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.Table;
@@ -48,6 +49,13 @@ public class AlterFailHiveMetaStoreClient extends HiveMetaStoreClient implements
     @Override
     public void alter_table(
             String defaultDatabaseName, String tblName, Table table, boolean cascade)
+            throws InvalidOperationException, MetaException, TException {
+        throw new TException();
+    }
+
+    @Override
+    public void alter_table_with_environmentContext(
+            String defaultDatabaseName, String tblName, Table table, EnvironmentContext env)
             throws InvalidOperationException, MetaException, TException {
         throw new TException();
     }

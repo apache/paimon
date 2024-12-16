@@ -79,7 +79,7 @@ The data is clustered using an automatically chosen strategy (such as ORDER, ZOR
 by setting the `sink.clustering.strategy`. Clustering relies on sampling and sorting. If the clustering process takes too much time, you can decrease
 the total sample number by setting the `sink.clustering.sample-factor` or disable the sorting step by setting the `sink.clustering.sort-in-cluster` to false.
 
-You can refer to [FlinkConnectorOptions]({{< ref "maintenance/configurations#FlinkConnectorOptions" >}}) for more info about the configurations above.
+You can refer to [FlinkConnectorOptions]({{< ref "maintenance/configurations#flinkconnectoroptions" >}}) for more info about the configurations above.
 
 ## Overwriting the Whole Table
 
@@ -175,9 +175,9 @@ PARTITION (k0 = 0, k1 = 0) SELECT v FROM my_table WHERE false;
 
 {{< hint info >}}
 Important table properties setting:
-1. Only [primary key table]({{< ref "primary-key-table" >}}) supports this feature.
-2. [MergeEngine]({{< ref "primary-key-table/merge-engine" >}}) needs to be [deduplicate]({{< ref "primary-key-table/merge-engine#deduplicate" >}})
-   or [partial-update]({{< ref "primary-key-table/merge-engine#partial-update" >}}) to support this feature.
+1. Only [primary key table]({{< ref "primary-key-table/overview" >}}) supports this feature.
+2. [MergeEngine]({{< ref "primary-key-table/merge-engine" >}}) needs to be [deduplicate]({{< ref "primary-key-table/merge-engine/overview#deduplicate" >}})
+   or [partial-update]({{< ref "primary-key-table/merge-engine/partial-update" >}}) to support this feature.
 3. Do not support updating primary keys.
 {{< /hint >}}
 
@@ -211,7 +211,9 @@ UPDATE my_table SET b = 1, c = 2 WHERE a = 'myTable';
 {{< hint info >}}
 Important table properties setting:
 1. Only primary key tables support this feature.
-2. If the table has primary keys, [MergeEngine]({{< ref "primary-key-table/merge-engine" >}}) needs to be [deduplicate]({{< ref "primary-key-table/merge-engine#deduplicate" >}}) to support this feature.
+2. If the table has primary keys, the following [MergeEngine]({{< ref "primary-key-table/merge-engine/overview" >}}) support this feature:
+   * [deduplicate]({{< ref "primary-key-table/merge-engine/overview#deduplicate" >}}).
+   * [partial-update]({{< ref "primary-key-table/merge-engine/partial-update" >}}) with option 'partial-update.remove-record-on-delete' enabled.
 3. Do not support deleting from table in streaming mode.
 {{< /hint >}}
 
@@ -257,7 +259,8 @@ CREATE TABLE my_partitioned_table (
     'partition.timestamp-formatter'='yyyyMMdd',
     'partition.timestamp-pattern'='$dt',
     'partition.time-interval'='1 d',
-    'partition.idle-time-to-done'='15 m'
+    'partition.idle-time-to-done'='15 m',
+    'partition.mark-done-action'='done-partition'
 );
 ```
 
@@ -267,4 +270,5 @@ CREATE TABLE my_partitioned_table (
    and then it will be marked as done.
 3. Thirdly, by default, partition mark done will create _SUCCESS file, the content of _SUCCESS file is a json, contains
    `creationTime` and `modificationTime`, they can help you understand if there is any delayed data. You can also
-   configure other actions.
+   configure other actions, like `'done-partition'`, for example, partition `'dt=20240501'` with produce
+   `'dt=20240501.done'` done partition.

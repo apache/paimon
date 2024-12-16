@@ -22,7 +22,9 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.runtime.state.StateInitializationContext;
-import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 
 import java.util.Map;
 
@@ -38,25 +40,35 @@ public class RowUnawareBucketSink extends UnawareBucketSink<InternalRow> {
     }
 
     @Override
-    protected OneInputStreamOperator<InternalRow, Committable> createWriteOperator(
+    protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new RowDataStoreWriteOperator(table, logSinkFunction, writeProvider, commitUser) {
-
+        return new RowDataStoreWriteOperator.Factory(
+                table, logSinkFunction, writeProvider, commitUser) {
             @Override
-            protected StoreSinkWriteState createState(
-                    StateInitializationContext context,
-                    StoreSinkWriteState.StateValueFilter stateFilter)
-                    throws Exception {
-                // No conflicts will occur in append only unaware bucket writer, so no state is
-                // needed.
-                return new NoopStoreSinkWriteState(stateFilter);
-            }
+            public StreamOperator createStreamOperator(StreamOperatorParameters parameters) {
+                return new RowDataStoreWriteOperator(
+                        parameters, table, logSinkFunction, writeProvider, commitUser) {
 
-            @Override
-            protected String getCommitUser(StateInitializationContext context) throws Exception {
-                // No conflicts will occur in append only unaware bucket writer, so commitUser does
-                // not matter.
-                return commitUser;
+                    @Override
+                    protected StoreSinkWriteState createState(
+                            StateInitializationContext context,
+                            StoreSinkWriteState.StateValueFilter stateFilter)
+                            throws Exception {
+                        // No conflicts will occur in append only unaware bucket writer, so no state
+                        // is
+                        // needed.
+                        return new NoopStoreSinkWriteState(stateFilter);
+                    }
+
+                    @Override
+                    protected String getCommitUser(StateInitializationContext context)
+                            throws Exception {
+                        // No conflicts will occur in append only unaware bucket writer, so
+                        // commitUser does
+                        // not matter.
+                        return commitUser;
+                    }
+                };
             }
         };
     }

@@ -20,6 +20,7 @@ package org.apache.paimon.format.parquet.reader;
 
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.heap.AbstractHeapVector;
+import org.apache.paimon.data.columnar.heap.ElementCountable;
 import org.apache.paimon.data.columnar.heap.HeapArrayVector;
 import org.apache.paimon.data.columnar.heap.HeapMapVector;
 import org.apache.paimon.data.columnar.heap.HeapRowVector;
@@ -134,7 +135,7 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
                     String.format("Row field does not have any children: %s.", field));
         }
 
-        int len = ((AbstractHeapVector) finalChildrenVectors[0]).getLen();
+        int len = ((ElementCountable) finalChildrenVectors[0]).getLen();
         boolean[] isNull = new boolean[len];
         Arrays.fill(isNull, true);
         boolean hasNull = false;
@@ -278,7 +279,7 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
             reader =
                     new NestedPrimitiveColumnReader(
                             descriptor,
-                            pages.getPageReader(descriptor),
+                            pages,
                             isUtcTimestamp,
                             descriptor.getPrimitiveType(),
                             field.getType(),

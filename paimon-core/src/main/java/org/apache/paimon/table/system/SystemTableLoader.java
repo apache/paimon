@@ -20,7 +20,6 @@ package org.apache.paimon.table.system;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.lineage.LineageMetaFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -37,10 +36,10 @@ import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.table.system.AggregationFieldsTable.AGGREGATION_FIELDS;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
 import static org.apache.paimon.table.system.AuditLogTable.AUDIT_LOG;
+import static org.apache.paimon.table.system.BinlogTable.BINLOG;
 import static org.apache.paimon.table.system.BranchesTable.BRANCHES;
 import static org.apache.paimon.table.system.BucketsTable.BUCKETS;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
@@ -51,12 +50,9 @@ import static org.apache.paimon.table.system.OptionsTable.OPTIONS;
 import static org.apache.paimon.table.system.PartitionsTable.PARTITIONS;
 import static org.apache.paimon.table.system.ReadOptimizedTable.READ_OPTIMIZED;
 import static org.apache.paimon.table.system.SchemasTable.SCHEMAS;
-import static org.apache.paimon.table.system.SinkTableLineageTable.SINK_TABLE_LINEAGE;
 import static org.apache.paimon.table.system.SnapshotsTable.SNAPSHOTS;
-import static org.apache.paimon.table.system.SourceTableLineageTable.SOURCE_TABLE_LINEAGE;
 import static org.apache.paimon.table.system.StatisticTable.STATISTICS;
 import static org.apache.paimon.table.system.TagsTable.TAGS;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Loader to load system {@link Table}s. */
 public class SystemTableLoader {
@@ -77,6 +73,7 @@ public class SystemTableLoader {
                     .put(READ_OPTIMIZED, ReadOptimizedTable::new)
                     .put(AGGREGATION_FIELDS, AggregationFieldsTable::new)
                     .put(STATISTICS, StatisticTable::new)
+                    .put(BINLOG, BinlogTable::new)
                     .build();
 
     public static final List<String> SYSTEM_TABLES = new ArrayList<>(SYSTEM_TABLE_LOADERS.keySet());
@@ -93,38 +90,18 @@ public class SystemTableLoader {
             String tableName,
             FileIO fileIO,
             Supplier<Map<String, Map<String, Path>>> allTablePaths,
-            Options catalogOptions,
-            @Nullable LineageMetaFactory lineageMetaFactory) {
+            Options catalogOptions) {
         switch (tableName.toLowerCase()) {
             case ALL_TABLE_OPTIONS:
                 return new AllTableOptionsTable(fileIO, allTablePaths.get());
             case CATALOG_OPTIONS:
                 return new CatalogOptionsTable(catalogOptions);
-            case SOURCE_TABLE_LINEAGE:
-                {
-                    checkNotNull(
-                            lineageMetaFactory,
-                            String.format(
-                                    "Lineage meta should be configured for catalog with %s",
-                                    LINEAGE_META.key()));
-                    return new SourceTableLineageTable(lineageMetaFactory, catalogOptions);
-                }
-            case SINK_TABLE_LINEAGE:
-                {
-                    checkNotNull(
-                            lineageMetaFactory,
-                            String.format(
-                                    "Lineage meta should be configured for catalog with %s",
-                                    LINEAGE_META.key()));
-                    return new SinkTableLineageTable(lineageMetaFactory, catalogOptions);
-                }
             default:
                 return null;
         }
     }
 
     public static List<String> loadGlobalTableNames() {
-        return Arrays.asList(
-                ALL_TABLE_OPTIONS, CATALOG_OPTIONS, SOURCE_TABLE_LINEAGE, SINK_TABLE_LINEAGE);
+        return Arrays.asList(ALL_TABLE_OPTIONS, CATALOG_OPTIONS);
     }
 }

@@ -27,6 +27,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.query.LocalTableQuery;
@@ -43,6 +44,8 @@ import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
+
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -73,6 +76,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public String uuid() {
+        return wrapped.uuid();
+    }
+
+    @Override
     public SnapshotReader newSnapshotReader() {
         return wrapped.newSnapshotReader();
     }
@@ -85,6 +93,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     @Override
     public SnapshotManager snapshotManager() {
         return wrapped.snapshotManager();
+    }
+
+    @Override
+    public SchemaManager schemaManager() {
+        return wrapped.schemaManager();
     }
 
     @Override
@@ -110,6 +123,16 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     @Override
     public void setManifestCache(SegmentsCache<Path> manifestCache) {
         wrapped.setManifestCache(manifestCache);
+    }
+
+    @Override
+    public void setSnapshotCache(Cache<Path, Snapshot> cache) {
+        wrapped.setSnapshotCache(cache);
+    }
+
+    @Override
+    public void setStatsCache(Cache<String, Statistics> cache) {
+        wrapped.setStatsCache(cache);
     }
 
     @Override

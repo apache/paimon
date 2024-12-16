@@ -24,6 +24,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.types.RowType;
 
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
 import java.util.List;
@@ -46,6 +47,8 @@ public class FileStorePathFactory {
     private final boolean fileSuffixIncludeCompression;
     private final String fileCompression;
 
+    @Nullable private final String dataFilePathDirectory;
+
     private final AtomicInteger manifestFileCount;
     private final AtomicInteger manifestListCount;
     private final AtomicInteger indexManifestCount;
@@ -61,8 +64,10 @@ public class FileStorePathFactory {
             String changelogFilePrefix,
             boolean legacyPartitionName,
             boolean fileSuffixIncludeCompression,
-            String fileCompression) {
+            String fileCompression,
+            @Nullable String dataFilePathDirectory) {
         this.root = root;
+        this.dataFilePathDirectory = dataFilePathDirectory;
         this.uuid = UUID.randomUUID().toString();
 
         this.partitionComputer =
@@ -125,7 +130,11 @@ public class FileStorePathFactory {
     }
 
     public Path bucketPath(BinaryRow partition, int bucket) {
-        return new Path(root + "/" + relativePartitionAndBucketPath(partition, bucket));
+        Path dataFileRoot = this.root;
+        if (dataFilePathDirectory != null) {
+            dataFileRoot = new Path(dataFileRoot, dataFilePathDirectory);
+        }
+        return new Path(dataFileRoot + "/" + relativePartitionAndBucketPath(partition, bucket));
     }
 
     public Path relativePartitionAndBucketPath(BinaryRow partition, int bucket) {

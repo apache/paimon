@@ -39,6 +39,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateReplaceVisitor;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -189,6 +190,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public SchemaManager schemaManager() {
+        return wrapped.schemaManager();
+    }
+
+    @Override
     public TagManager tagManager() {
         return wrapped.tagManager();
     }
@@ -321,6 +327,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader enableValueFilter() {
+            wrapped.enableValueFilter();
+            return this;
+        }
+
+        @Override
         public SnapshotReader withManifestEntryFilter(Filter<ManifestEntry> filter) {
             wrapped.withManifestEntryFilter(filter);
             return this;
@@ -346,6 +358,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public SnapshotReader withDataFileNameFilter(Filter<String> fileNameFilter) {
             wrapped.withDataFileNameFilter(fileNameFilter);
+            return this;
+        }
+
+        @Override
+        public SnapshotReader dropStats() {
+            wrapped.dropStats();
             return this;
         }
 
@@ -551,13 +569,13 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
     }
 
-    private class AuditLogRead implements InnerTableRead {
+    class AuditLogRead implements InnerTableRead {
 
-        private final InnerTableRead dataRead;
+        protected final InnerTableRead dataRead;
 
-        private int[] readProjection;
+        protected int[] readProjection;
 
-        private AuditLogRead(InnerTableRead dataRead) {
+        protected AuditLogRead(InnerTableRead dataRead) {
             this.dataRead = dataRead.forceKeepDelete();
             this.readProjection = defaultProjection();
         }
@@ -625,9 +643,9 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     }
 
     /** A {@link ProjectedRow} which returns row kind when mapping index is negative. */
-    private static class AuditLogRow extends ProjectedRow {
+    static class AuditLogRow extends ProjectedRow {
 
-        private AuditLogRow(int[] indexMapping, InternalRow row) {
+        AuditLogRow(int[] indexMapping, InternalRow row) {
             super(indexMapping);
             replaceRow(row);
         }

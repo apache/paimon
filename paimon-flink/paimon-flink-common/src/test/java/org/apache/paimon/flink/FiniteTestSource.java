@@ -18,16 +18,18 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.flink.source.AbstractNonCoordinatedSource;
+import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
+import org.apache.paimon.flink.source.SimpleSourceSplit;
+import org.apache.paimon.flink.source.SplitListState;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.flink.api.common.state.CheckpointListener;
-import org.apache.flink.api.common.state.ListState;
-import org.apache.flink.api.common.state.ListStateDescriptor;
-import org.apache.flink.api.common.typeutils.base.IntSerializer;
-import org.apache.flink.runtime.state.FunctionInitializationContext;
-import org.apache.flink.runtime.state.FunctionSnapshotContext;
+import org.apache.flink.api.connector.source.Boundedness;
+import org.apache.flink.api.connector.source.ReaderOutput;
+import org.apache.flink.api.connector.source.SourceReader;
+import org.apache.flink.api.connector.source.SourceReaderContext;
+import org.apache.flink.core.io.InputStatus;
 import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
-import org.apache.flink.streaming.api.functions.source.SourceFunction;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -39,8 +41,7 @@ import java.util.List;
  *
  * <p>The reason this class is rewritten is to support {@link CheckpointedFunction}.
  */
-public class FiniteTestSource<T>
-        implements SourceFunction<T>, CheckpointedFunction, CheckpointListener {
+public class FiniteTestSource<T> extends AbstractNonCoordinatedSource<T> {
 
     private static final long serialVersionUID = 1L;
 
@@ -48,27 +49,78 @@ public class FiniteTestSource<T>
 
     private final boolean emitOnce;
 
-    private volatile boolean running = true;
-
-    private transient int numCheckpointsComplete;
-
-    private transient ListState<Integer> checkpointedState;
-
-    private volatile int numTimesEmitted;
-
     public FiniteTestSource(List<T> elements, boolean emitOnce) {
         this.elements = elements;
         this.emitOnce = emitOnce;
     }
 
     @Override
-    public void initializeState(FunctionInitializationContext context) throws Exception {
-        this.checkpointedState =
-                context.getOperatorStateStore()
-                        .getListState(
-                                new ListStateDescriptor<>("emit-times", IntSerializer.INSTANCE));
+    public Boundedness getBoundedness() {
+        return Boundedness.BOUNDED;
+    }
 
-        if (context.isRestored()) {
+    @Override
+    public SourceReader<T, SimpleSourceSplit> createReader(SourceReaderContext sourceReaderContext)
+            throws Exception {
+        return new Reader<>(elements, emitOnce);
+    }
+
+    private static class Reader<T> extends AbstractNonCoordinatedSourceReader<T> {
+
+        private final List<T> elements;
+
+        private final boolean emitOnce;
+
+        private final SplitListState<Integer> checkpointedState =
+                new SplitListState<>("emit-times", x -> Integer.toString(x), Integer::parseInt);
+
+        private int numTimesEmitted = 0;
+
+        private int numCheckpointsComplete;
+
+        private Integer checkpointToAwait;
+
+        private Reader(List<T> elements, boolean emitOnce) {
+            this.elements = elements;
+            this.emitOnce = emitOnce;
+            this.numCheckpointsComplete = 0;
+        }
+
+        @Override
+        public synchronized InputStatus pollNext(ReaderOutput<T> readerOutput) {
+            if (checkpointToAwait == null) {
+                checkpointToAwait = numCheckpointsComplete + 2;
+            }
+            switch (numTimesEmitted) {
+                case 0:
+                    emitElements(readerOutput, false);
+                    if (numCheckpointsComplete < checkpointToAwait) {
+                        return InputStatus.MORE_AVAILABLE;
+                    }
+                    emitElements(readerOutput, true);
+                    if (numCheckpointsComplete < checkpointToAwait + 2) {
+                        return InputStatus.MORE_AVAILABLE;
+                    }
+                    break;
+                case 1:
+                    emitElements(readerOutput, true);
+                    if (numCheckpointsComplete < checkpointToAwait) {
+                        return InputStatus.MORE_AVAILABLE;
+                    }
+                    break;
+                case 2:
+                    // Maybe missed notifyCheckpointComplete, wait next notifyCheckpointComplete
+                    if (numCheckpointsComplete < checkpointToAwait) {
+                        return InputStatus.MORE_AVAILABLE;
+                    }
+                    break;
+            }
+            return InputStatus.END_OF_INPUT;
+        }
+
+        @Override
+        public void addSplits(List<SimpleSourceSplit> list) {
+            checkpointedState.restoreState(list);
             List<Integer> retrievedStates = new ArrayList<>();
             for (Integer entry : this.checkpointedState.get()) {
                 retrievedStates.add(entry);
@@ -85,76 +137,27 @@ public class FiniteTestSource<T>
                     getClass().getSimpleName()
                             + " retrieved invalid numTimesEmitted: "
                             + numTimesEmitted);
-        } else {
-            this.numTimesEmitted = 0;
         }
-    }
 
-    @Override
-    public void run(SourceContext<T> ctx) throws Exception {
-        switch (numTimesEmitted) {
-            case 0:
-                emitElementsAndWaitForCheckpoints(ctx, false);
-                emitElementsAndWaitForCheckpoints(ctx, true);
-                break;
-            case 1:
-                emitElementsAndWaitForCheckpoints(ctx, true);
-                break;
-            case 2:
-                // Maybe missed notifyCheckpointComplete, wait next notifyCheckpointComplete
-                final Object lock = ctx.getCheckpointLock();
-                synchronized (lock) {
-                    int checkpointToAwait = numCheckpointsComplete + 2;
-                    while (running && numCheckpointsComplete < checkpointToAwait) {
-                        lock.wait(1);
-                    }
-                }
-                break;
+        @Override
+        public List<SimpleSourceSplit> snapshotState(long l) {
+            this.checkpointedState.clear();
+            this.checkpointedState.add(this.numTimesEmitted);
+            return this.checkpointedState.snapshotState();
         }
-    }
 
-    private void emitElementsAndWaitForCheckpoints(SourceContext<T> ctx, boolean isSecond)
-            throws InterruptedException {
-        final Object lock = ctx.getCheckpointLock();
+        @Override
+        public void notifyCheckpointComplete(long checkpointId) {
+            numCheckpointsComplete++;
+        }
 
-        final int checkpointToAwait;
-        synchronized (lock) {
-            checkpointToAwait = numCheckpointsComplete + 2;
+        private void emitElements(ReaderOutput<T> readerOutput, boolean isSecond) {
             if (!isSecond || !emitOnce) {
                 for (T t : elements) {
-                    ctx.collect(t);
+                    readerOutput.collect(t);
                 }
             }
             numTimesEmitted++;
         }
-
-        synchronized (lock) {
-            while (running && numCheckpointsComplete < checkpointToAwait) {
-                lock.wait(1);
-            }
-        }
-    }
-
-    @Override
-    public void cancel() {
-        running = false;
-    }
-
-    @Override
-    public void notifyCheckpointComplete(long checkpointId) {
-        numCheckpointsComplete++;
-    }
-
-    @Override
-    public void notifyCheckpointAborted(long checkpointId) {}
-
-    @Override
-    public void snapshotState(FunctionSnapshotContext context) throws Exception {
-        Preconditions.checkState(
-                this.checkpointedState != null,
-                "The " + getClass().getSimpleName() + " has not been properly initialized.");
-
-        this.checkpointedState.clear();
-        this.checkpointedState.add(this.numTimesEmitted);
     }
 }

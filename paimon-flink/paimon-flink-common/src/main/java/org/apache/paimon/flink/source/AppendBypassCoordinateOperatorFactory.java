@@ -45,11 +45,7 @@ public class AppendBypassCoordinateOperatorFactory<CommitT>
                     StreamOperatorParameters<Either<CommitT, UnawareAppendCompactionTask>>
                             parameters) {
         AppendBypassCoordinateOperator<CommitT> operator =
-                new AppendBypassCoordinateOperator<>(table, processingTimeService);
-        operator.setup(
-                parameters.getContainingTask(),
-                parameters.getStreamConfig(),
-                parameters.getOutput());
+                new AppendBypassCoordinateOperator<>(parameters, table, processingTimeService);
         return (T) operator;
     }
 

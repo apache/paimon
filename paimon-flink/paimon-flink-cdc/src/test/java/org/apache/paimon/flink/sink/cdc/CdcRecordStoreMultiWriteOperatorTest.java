@@ -689,8 +689,8 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
     private OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable>
             createTestHarness(Catalog.Loader catalogLoader) throws Exception {
-        CdcRecordStoreMultiWriteOperator operator =
-                new CdcRecordStoreMultiWriteOperator(
+        CdcRecordStoreMultiWriteOperator.Factory operatorFactory =
+                new CdcRecordStoreMultiWriteOperator.Factory(
                         catalogLoader,
                         (t, commitUser, state, ioManager, memoryPoolFactory, metricGroup) ->
                                 new StoreSinkWriteImpl(
@@ -709,7 +709,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         TypeSerializer<MultiTableCommittable> outputSerializer =
                 new MultiTableCommittableTypeInfo().createSerializer(new ExecutionConfig());
         OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable> harness =
-                new OneInputStreamOperatorTestHarness<>(operator, inputSerializer);
+                new OneInputStreamOperatorTestHarness<>(operatorFactory, inputSerializer);
         harness.setup(outputSerializer);
         return harness;
     }

@@ -127,7 +127,7 @@ public class PrivilegedCatalog extends DelegateCatalog {
     public Table getTable(Identifier identifier) throws TableNotExistException {
         Table table = wrapped.getTable(identifier);
         if (table instanceof FileStoreTable) {
-            return new PrivilegedFileStoreTable(
+            return PrivilegedFileStoreTable.wrap(
                     (FileStoreTable) table, privilegeManager.getPrivilegeChecker(), identifier);
         } else {
             return table;

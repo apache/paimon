@@ -29,6 +29,7 @@ public class FileStoreSourceReaderMetrics {
     private long lastSplitUpdateTime = UNDEFINED;
 
     public static final long UNDEFINED = -1L;
+    public static final long ACTIVE = Long.MAX_VALUE;
 
     public FileStoreSourceReaderMetrics(MetricGroup sourceReaderMetricGroup) {
         sourceReaderMetricGroup.gauge(

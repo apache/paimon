@@ -25,15 +25,10 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.source.DataTableSource;
 import org.apache.paimon.flink.source.SystemTableSource;
-import org.apache.paimon.lineage.LineageMeta;
-import org.apache.paimon.lineage.LineageMetaFactory;
-import org.apache.paimon.lineage.TableLineageEntity;
-import org.apache.paimon.lineage.TableLineageEntityImpl;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.schema.Schema;
@@ -47,7 +42,6 @@ import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ExecutionOptions;
-import org.apache.flink.configuration.PipelineOptions;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.api.ValidationException;
@@ -71,7 +65,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.BiConsumer;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
@@ -109,23 +102,9 @@ public abstract class AbstractFlinkTableFactory
                     isStreamingMode,
                     context.getObjectIdentifier());
         } else {
-            Table table = buildPaimonTable(context);
-            if (table instanceof FileStoreTable) {
-                storeTableLineage(
-                        ((FileStoreTable) table).catalogEnvironment().lineageMetaFactory(),
-                        context,
-                        (entity, lineageFactory) -> {
-                            try (LineageMeta lineage =
-                                    lineageFactory.create(() -> Options.fromMap(table.options()))) {
-                                lineage.saveSourceTableLineage(entity);
-                            } catch (Exception e) {
-                                throw new RuntimeException(e);
-                            }
-                        });
-            }
             return new DataTableSource(
                     context.getObjectIdentifier(),
-                    table,
+                    buildPaimonTable(context),
                     isStreamingMode,
                     context,
                     createOptionalLogStoreFactory(context).orElse(null));
@@ -134,44 +113,11 @@ public abstract class AbstractFlinkTableFactory
 
     @Override
     public DynamicTableSink createDynamicTableSink(Context context) {
-        Table table = buildPaimonTable(context);
-        if (table instanceof FileStoreTable) {
-            storeTableLineage(
-                    ((FileStoreTable) table).catalogEnvironment().lineageMetaFactory(),
-                    context,
-                    (entity, lineageFactory) -> {
-                        try (LineageMeta lineage =
-                                lineageFactory.create(() -> Options.fromMap(table.options()))) {
-                            lineage.saveSinkTableLineage(entity);
-                        } catch (Exception e) {
-                            throw new RuntimeException(e);
-                        }
-                    });
-        }
         return new FlinkTableSink(
                 context.getObjectIdentifier(),
-                table,
+                buildPaimonTable(context),
                 context,
                 createOptionalLogStoreFactory(context).orElse(null));
-    }
-
-    private void storeTableLineage(
-            @Nullable LineageMetaFactory lineageMetaFactory,
-            Context context,
-            BiConsumer<TableLineageEntity, LineageMetaFactory> tableLineage) {
-        if (lineageMetaFactory != null) {
-            String pipelineName = context.getConfiguration().get(PipelineOptions.NAME);
-            if (pipelineName == null) {
-                throw new ValidationException("Cannot get pipeline name for lineage meta.");
-            }
-            tableLineage.accept(
-                    new TableLineageEntityImpl(
-                            context.getObjectIdentifier().getDatabaseName(),
-                            context.getObjectIdentifier().getObjectName(),
-                            pipelineName,
-                            Timestamp.fromEpochMillis(System.currentTimeMillis())),
-                    lineageMetaFactory);
-        }
     }
 
     @Override

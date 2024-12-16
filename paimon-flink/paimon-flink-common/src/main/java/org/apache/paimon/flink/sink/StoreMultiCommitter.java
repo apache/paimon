@@ -92,11 +92,11 @@ public class StoreMultiCommitter
             WrappedManifestCommittable wrappedManifestCommittable,
             List<MultiTableCommittable> committables) {
         for (MultiTableCommittable committable : committables) {
+            Identifier identifier =
+                    Identifier.create(committable.getDatabase(), committable.getTable());
             ManifestCommittable manifestCommittable =
                     wrappedManifestCommittable.computeCommittableIfAbsent(
-                            Identifier.create(committable.getDatabase(), committable.getTable()),
-                            checkpointId,
-                            watermark);
+                            identifier, checkpointId, watermark);
 
             switch (committable.kind()) {
                 case FILE:
@@ -106,7 +106,9 @@ public class StoreMultiCommitter
                 case LOG_OFFSET:
                     LogOffsetCommittable offset =
                             (LogOffsetCommittable) committable.wrappedCommittable();
-                    manifestCommittable.addLogOffset(offset.bucket(), offset.offset());
+                    StoreCommitter committer = tableCommitters.get(identifier);
+                    manifestCommittable.addLogOffset(
+                            offset.bucket(), offset.offset(), committer.allowLogOffsetDuplicate());
                     break;
             }
         }

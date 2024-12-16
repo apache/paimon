@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
@@ -47,10 +48,8 @@ import org.junit.jupiter.api.Test;
 import java.io.FileNotFoundException;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -100,14 +99,49 @@ class CachingCatalogTest extends CatalogTestBase {
 
     @Test
     public void testInvalidateSysTablesIfBaseTableIsDropped() throws Exception {
-        Catalog catalog = new CachingCatalog(this.catalog);
+        TestableCachingCatalog catalog =
+                new TestableCachingCatalog(this.catalog, EXPIRATION_TTL, ticker);
         Identifier tableIdent = new Identifier("db", "tbl");
         catalog.createTable(new Identifier("db", "tbl"), DEFAULT_TABLE_SCHEMA, false);
         Identifier sysIdent = new Identifier("db", "tbl$files");
+        // get system table will only cache the origin table
         catalog.getTable(sysIdent);
+        assertThat(catalog.tableCache.asMap()).containsKey(tableIdent);
+        assertThat(catalog.tableCache.asMap()).doesNotContainKey(sysIdent);
+        // test case sensitivity
+        Identifier sysIdent1 = new Identifier("db", "tbl$SNAPSHOTS");
+        catalog.getTable(sysIdent1);
+        assertThat(catalog.tableCache.asMap()).doesNotContainKey(sysIdent1);
+
         catalog.dropTable(tableIdent, false);
+        assertThat(catalog.tableCache.asMap()).doesNotContainKey(tableIdent);
         assertThatThrownBy(() -> catalog.getTable(sysIdent))
                 .hasMessage("Table db.tbl does not exist.");
+        assertThatThrownBy(() -> catalog.getTable(sysIdent1))
+                .hasMessage("Table db.tbl does not exist.");
+    }
+
+    @Test
+    public void testInvalidateBranchIfBaseTableIsDropped() throws Exception {
+        TestableCachingCatalog catalog =
+                new TestableCachingCatalog(this.catalog, EXPIRATION_TTL, ticker);
+        Identifier tableIdent = new Identifier("db", "tbl");
+        catalog.createTable(new Identifier("db", "tbl"), DEFAULT_TABLE_SCHEMA, false);
+        catalog.getTable(tableIdent).createBranch("b1");
+
+        Identifier branchIdent = new Identifier("db", "tbl$branch_b1");
+        Identifier branchSysIdent = new Identifier("db", "tbl$branch_b1$FILES");
+        // get system table will only cache the origin table
+        catalog.getTable(branchSysIdent);
+        assertThat(catalog.tableCache.asMap()).containsKey(branchIdent);
+        assertThat(catalog.tableCache.asMap()).doesNotContainKey(branchSysIdent);
+
+        catalog.dropTable(tableIdent, false);
+        assertThat(catalog.tableCache.asMap()).doesNotContainKey(branchIdent);
+        assertThatThrownBy(() -> catalog.getTable(branchIdent))
+                .hasMessage("Table db.tbl$branch_b1 does not exist.");
+        assertThatThrownBy(() -> catalog.getTable(branchSysIdent))
+                .hasMessage("Table db.tbl$branch_b1 does not exist.");
     }
 
     @Test
@@ -172,59 +206,6 @@ class CachingCatalogTest extends CatalogTestBase {
         ticker.advance(HALF_OF_EXPIRATION);
         assertThat(catalog.ageOf(tableIdent)).get().isEqualTo(HALF_OF_EXPIRATION);
         assertThat(catalog.remainingAgeFor(tableIdent)).get().isEqualTo(HALF_OF_EXPIRATION);
-    }
-
-    @Test
-    public void testCacheExpirationEagerlyRemovesSysTables() throws Exception {
-        TestableCachingCatalog catalog =
-                new TestableCachingCatalog(this.catalog, EXPIRATION_TTL, ticker);
-
-        Identifier tableIdent = new Identifier("db", "tbl");
-        catalog.createTable(tableIdent, DEFAULT_TABLE_SCHEMA, false);
-        Table table = catalog.getTable(tableIdent);
-        assertThat(catalog.tableCache().asMap()).containsKey(tableIdent);
-        assertThat(catalog.ageOf(tableIdent)).get().isEqualTo(Duration.ZERO);
-
-        ticker.advance(HALF_OF_EXPIRATION);
-        assertThat(catalog.tableCache().asMap()).containsKey(tableIdent);
-        assertThat(catalog.ageOf(tableIdent)).get().isEqualTo(HALF_OF_EXPIRATION);
-
-        for (Identifier sysTable : sysTables(tableIdent)) {
-            catalog.getTable(sysTable);
-        }
-        assertThat(catalog.tableCache().asMap()).containsKeys(sysTables(tableIdent));
-        assertThat(Arrays.stream(sysTables(tableIdent)).map(catalog::ageOf))
-                .isNotEmpty()
-                .allMatch(age -> age.isPresent() && age.get().equals(Duration.ZERO));
-
-        assertThat(catalog.remainingAgeFor(tableIdent))
-                .as("Loading a non-cached sys table should refresh the main table's age")
-                .isEqualTo(Optional.of(EXPIRATION_TTL));
-
-        // Move time forward and access already cached sys tables.
-        ticker.advance(HALF_OF_EXPIRATION);
-        for (Identifier sysTable : sysTables(tableIdent)) {
-            catalog.getTable(sysTable);
-        }
-        assertThat(Arrays.stream(sysTables(tableIdent)).map(catalog::ageOf))
-                .isNotEmpty()
-                .allMatch(age -> age.isPresent() && age.get().equals(Duration.ZERO));
-
-        assertThat(catalog.remainingAgeFor(tableIdent))
-                .as("Accessing a cached sys table should not affect the main table's age")
-                .isEqualTo(Optional.of(HALF_OF_EXPIRATION));
-
-        // Move time forward so the data table drops.
-        ticker.advance(HALF_OF_EXPIRATION);
-        assertThat(catalog.tableCache().asMap()).doesNotContainKey(tableIdent);
-
-        Arrays.stream(sysTables(tableIdent))
-                .forEach(
-                        sysTable ->
-                                assertThat(catalog.tableCache().asMap())
-                                        .as(
-                                                "When a data table expires, its sys tables should expire regardless of age")
-                                        .doesNotContainKeys(sysTable));
     }
 
     @Test
@@ -333,6 +314,31 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testSnapshotCache() throws Exception {
+        TestableCachingCatalog wrappedCatalog =
+                new TestableCachingCatalog(this.catalog, EXPIRATION_TTL, ticker);
+        Identifier tableIdent = new Identifier("db", "tbl");
+        wrappedCatalog.createTable(tableIdent, DEFAULT_TABLE_SCHEMA, false);
+        Table table = wrappedCatalog.getTable(tableIdent);
+
+        // write
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, fromString("1"), fromString("1")));
+            write.write(GenericRow.of(2, fromString("2"), fromString("2")));
+            commit.commit(write.prepareCommit());
+        }
+
+        Snapshot snapshot = table.snapshot(1);
+        assertThat(snapshot).isSameAs(table.snapshot(1));
+
+        // copy
+        Snapshot copied = table.copy(Collections.singletonMap("a", "b")).snapshot(1);
+        assertThat(copied).isSameAs(snapshot);
+    }
+
+    @Test
     public void testManifestCache() throws Exception {
         innerTestManifestCache(Long.MAX_VALUE);
         assertThatThrownBy(() -> innerTestManifestCache(10))
@@ -346,7 +352,8 @@ class CachingCatalogTest extends CatalogTestBase {
                         Duration.ofSeconds(10),
                         MemorySize.ofMebiBytes(1),
                         manifestCacheThreshold,
-                        0L);
+                        0L,
+                        10);
         Identifier tableIdent = new Identifier("db", "tbl");
         catalog.dropTable(tableIdent, true);
         catalog.createTable(tableIdent, DEFAULT_TABLE_SCHEMA, false);
@@ -363,7 +370,8 @@ class CachingCatalogTest extends CatalogTestBase {
 
         // repeat read
         for (int i = 0; i < 5; i++) {
-            table = catalog.getTable(tableIdent);
+            // test copy too
+            table = catalog.getTable(tableIdent).copy(Collections.singletonMap("a", "b"));
             ReadBuilder readBuilder = table.newReadBuilder();
             TableScan scan = readBuilder.newScan();
             TableRead read = readBuilder.newRead();

@@ -20,7 +20,7 @@ package org.apache.paimon.factories;
 
 /**
  * Base interface for all kind of factories that create object instances from a list of key-value
- * pairs in Paimon's catalog, lineage.
+ * pairs in Paimon's catalog.
  *
  * <p>A factory is uniquely identified by {@link Class} and {@link #identifier()}.
  *

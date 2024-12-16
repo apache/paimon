@@ -28,6 +28,7 @@ public final class FileSystemCatalogOptions {
             ConfigOptions.key("case-sensitive")
                     .booleanType()
                     .defaultValue(true)
+                    .withFallbackKeys("allow-upper-case")
                     .withDescription(
                             "Is case sensitive. If case insensitive, you need to set this option to false, and the table name and fields be converted to lowercase.");
 

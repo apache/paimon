@@ -112,22 +112,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                 break;
             case HADOOP_CATALOG:
             case HIVE_CATALOG:
-                Path dbPath = table.location().getParent();
-                final String dbSuffix = ".db";
-                if (dbPath.getName().endsWith(dbSuffix)) {
-                    String dbName =
-                            dbPath.getName()
-                                    .substring(0, dbPath.getName().length() - dbSuffix.length());
-                    String tableName = table.location().getName();
-                    Path separatePath =
-                            new Path(
-                                    dbPath.getParent(),
-                                    String.format("iceberg/%s/%s/metadata", dbName, tableName));
-                    this.pathFactory = new IcebergPathFactory(separatePath);
-                } else {
-                    throw new UnsupportedOperationException(
-                            "Storage type ICEBERG_WAREHOUSE can only be used on Paimon tables in a Paimon warehouse.");
-                }
+                this.pathFactory = new IcebergPathFactory(catalogTableMetadataPath(table));
                 break;
             default:
                 throw new UnsupportedOperationException(
@@ -150,6 +135,24 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
         this.fileStorePathFactory = table.store().pathFactory();
         this.manifestFile = IcebergManifestFile.create(table, pathFactory);
         this.manifestList = IcebergManifestList.create(table, pathFactory);
+    }
+
+    public static Path catalogTableMetadataPath(FileStoreTable table) {
+        Path icebergDBPath = catalogDatabasePath(table);
+        return new Path(icebergDBPath, String.format("%s/metadata", table.location().getName()));
+    }
+
+    public static Path catalogDatabasePath(FileStoreTable table) {
+        Path dbPath = table.location().getParent();
+        final String dbSuffix = ".db";
+        if (dbPath.getName().endsWith(dbSuffix)) {
+            String dbName =
+                    dbPath.getName().substring(0, dbPath.getName().length() - dbSuffix.length());
+            return new Path(dbPath.getParent(), String.format("iceberg/%s/", dbName));
+        } else {
+            throw new UnsupportedOperationException(
+                    "Storage type ICEBERG_WAREHOUSE can only be used on Paimon tables in a Paimon warehouse.");
+        }
     }
 
     @Override
@@ -292,7 +295,8 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                             rawFile.rowCount(),
                             rawFile.fileSize(),
                             schemaCache.get(paimonFileMeta.schemaId()),
-                            paimonFileMeta.valueStats());
+                            paimonFileMeta.valueStats(),
+                            paimonFileMeta.valueStatsCols());
             result.add(
                     new IcebergManifestEntry(
                             IcebergManifestEntry.Status.ADDED,
@@ -506,7 +510,8 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                                                     paimonFileMeta.rowCount(),
                                                     paimonFileMeta.fileSize(),
                                                     schemaCache.get(paimonFileMeta.schemaId()),
-                                                    paimonFileMeta.valueStats());
+                                                    paimonFileMeta.valueStats(),
+                                                    paimonFileMeta.valueStatsCols());
                                     return new IcebergManifestEntry(
                                             IcebergManifestEntry.Status.ADDED,
                                             currentSnapshotId,

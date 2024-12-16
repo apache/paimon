@@ -22,7 +22,6 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
@@ -38,9 +37,6 @@ import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.Type;
 import org.apache.parquet.schema.Types;
-
-import java.util.ArrayList;
-import java.util.List;
 
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT32;
@@ -59,86 +55,110 @@ public class ParquetSchemaConverter {
         return new MessageType(name, convertToParquetTypes(rowType));
     }
 
-    public static Type convertToParquetType(String name, DataType type) {
-        Type.Repetition repetition =
-                type.isNullable() ? Type.Repetition.OPTIONAL : Type.Repetition.REQUIRED;
-        return convertToParquetType(name, type, repetition);
+    public static Type convertToParquetType(String name, DataField field) {
+        return convertToParquetType(name, field.type(), field.id(), 0);
     }
 
-    private static Type convertToParquetType(
-            String name, DataType type, Type.Repetition repetition) {
+    private static Type[] convertToParquetTypes(RowType rowType) {
+        return rowType.getFields().stream()
+                .map(f -> convertToParquetType(f.name(), f.type(), f.id(), 0))
+                .toArray(Type[]::new);
+    }
+
+    private static Type convertToParquetType(String name, DataType type, int fieldId, int depth) {
+        Type.Repetition repetition =
+                type.isNullable() ? Type.Repetition.OPTIONAL : Type.Repetition.REQUIRED;
         switch (type.getTypeRoot()) {
             case CHAR:
             case VARCHAR:
                 return Types.primitive(PrimitiveType.PrimitiveTypeName.BINARY, repetition)
                         .as(LogicalTypeAnnotation.stringType())
-                        .named(name);
+                        .named(name)
+                        .withId(fieldId);
             case BOOLEAN:
                 return Types.primitive(PrimitiveType.PrimitiveTypeName.BOOLEAN, repetition)
-                        .named(name);
+                        .named(name)
+                        .withId(fieldId);
             case BINARY:
             case VARBINARY:
                 return Types.primitive(PrimitiveType.PrimitiveTypeName.BINARY, repetition)
-                        .named(name);
+                        .named(name)
+                        .withId(fieldId);
             case DECIMAL:
                 int precision = ((DecimalType) type).getPrecision();
                 int scale = ((DecimalType) type).getScale();
                 if (is32BitDecimal(precision)) {
                     return Types.primitive(INT32, repetition)
                             .as(LogicalTypeAnnotation.decimalType(scale, precision))
-                            .named(name);
+                            .named(name)
+                            .withId(fieldId);
                 } else if (is64BitDecimal(precision)) {
                     return Types.primitive(INT64, repetition)
                             .as(LogicalTypeAnnotation.decimalType(scale, precision))
-                            .named(name);
+                            .named(name)
+                            .withId(fieldId);
                 } else {
                     return Types.primitive(FIXED_LEN_BYTE_ARRAY, repetition)
                             .as(LogicalTypeAnnotation.decimalType(scale, precision))
                             .length(computeMinBytesForDecimalPrecision(precision))
-                            .named(name);
+                            .named(name)
+                            .withId(fieldId);
                 }
             case TINYINT:
                 return Types.primitive(INT32, repetition)
                         .as(LogicalTypeAnnotation.intType(8, true))
-                        .named(name);
+                        .named(name)
+                        .withId(fieldId);
             case SMALLINT:
                 return Types.primitive(INT32, repetition)
                         .as(LogicalTypeAnnotation.intType(16, true))
-                        .named(name);
+                        .named(name)
+                        .withId(fieldId);
             case INTEGER:
-                return Types.primitive(INT32, repetition).named(name);
+                return Types.primitive(INT32, repetition).named(name).withId(fieldId);
             case BIGINT:
-                return Types.primitive(INT64, repetition).named(name);
+                return Types.primitive(INT64, repetition).named(name).withId(fieldId);
             case FLOAT:
                 return Types.primitive(PrimitiveType.PrimitiveTypeName.FLOAT, repetition)
-                        .named(name);
+                        .named(name)
+                        .withId(fieldId);
             case DOUBLE:
                 return Types.primitive(PrimitiveType.PrimitiveTypeName.DOUBLE, repetition)
-                        .named(name);
+                        .named(name)
+                        .withId(fieldId);
             case DATE:
                 return Types.primitive(INT32, repetition)
                         .as(LogicalTypeAnnotation.dateType())
-                        .named(name);
+                        .named(name)
+                        .withId(fieldId);
             case TIME_WITHOUT_TIME_ZONE:
                 return Types.primitive(INT32, repetition)
                         .as(
                                 LogicalTypeAnnotation.timeType(
                                         true, LogicalTypeAnnotation.TimeUnit.MILLIS))
-                        .named(name);
+                        .named(name)
+                        .withId(fieldId);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 TimestampType timestampType = (TimestampType) type;
                 return createTimestampWithLogicalType(
-                        name, timestampType.getPrecision(), repetition, false);
+                                name, timestampType.getPrecision(), repetition, false)
+                        .withId(fieldId);
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 LocalZonedTimestampType localZonedTimestampType = (LocalZonedTimestampType) type;
                 return createTimestampWithLogicalType(
-                        name, localZonedTimestampType.getPrecision(), repetition, true);
+                                name, localZonedTimestampType.getPrecision(), repetition, true)
+                        .withId(fieldId);
             case ARRAY:
                 ArrayType arrayType = (ArrayType) type;
-                return ConversionPatterns.listOfElements(
-                        repetition,
-                        name,
-                        convertToParquetType(LIST_ELEMENT_NAME, arrayType.getElementType()));
+                Type elementParquetType =
+                        convertToParquetType(
+                                        LIST_ELEMENT_NAME,
+                                        arrayType.getElementType(),
+                                        fieldId,
+                                        depth + 1)
+                                .withId(SpecialFields.getArrayElementFieldId(fieldId, depth + 1));
+                return ConversionPatterns.listOfElements(repetition, name, elementParquetType)
+                        .withId(fieldId);
             case MAP:
                 MapType mapType = (MapType) type;
                 DataType keyType = mapType.getKeyType();
@@ -147,12 +167,20 @@ public class ParquetSchemaConverter {
                     // it as not nullable
                     keyType = keyType.copy(false);
                 }
+                Type mapKeyParquetType =
+                        convertToParquetType(MAP_KEY_NAME, keyType, fieldId, depth + 1)
+                                .withId(SpecialFields.getMapKeyFieldId(fieldId, depth + 1));
+                Type mapValueParquetType =
+                        convertToParquetType(
+                                        MAP_VALUE_NAME, mapType.getValueType(), fieldId, depth + 1)
+                                .withId(SpecialFields.getMapValueFieldId(fieldId, depth + 1));
                 return ConversionPatterns.mapType(
-                        repetition,
-                        name,
-                        MAP_REPEATED_NAME,
-                        convertToParquetType(MAP_KEY_NAME, keyType),
-                        convertToParquetType(MAP_VALUE_NAME, mapType.getValueType()));
+                                repetition,
+                                name,
+                                MAP_REPEATED_NAME,
+                                mapKeyParquetType,
+                                mapValueParquetType)
+                        .withId(fieldId);
             case MULTISET:
                 MultisetType multisetType = (MultisetType) type;
                 DataType elementType = multisetType.getElementType();
@@ -161,15 +189,23 @@ public class ParquetSchemaConverter {
                     // so we configure it as not nullable
                     elementType = elementType.copy(false);
                 }
+                Type multisetKeyParquetType =
+                        convertToParquetType(MAP_KEY_NAME, elementType, fieldId, depth + 1)
+                                .withId(SpecialFields.getMapKeyFieldId(fieldId, depth + 1));
+                Type multisetValueParquetType =
+                        convertToParquetType(MAP_VALUE_NAME, new IntType(false), fieldId, depth + 1)
+                                .withId(SpecialFields.getMapValueFieldId(fieldId, depth + 1));
                 return ConversionPatterns.mapType(
-                        repetition,
-                        name,
-                        MAP_REPEATED_NAME,
-                        convertToParquetType(MAP_KEY_NAME, elementType),
-                        convertToParquetType(MAP_VALUE_NAME, new IntType(false)));
+                                repetition,
+                                name,
+                                MAP_REPEATED_NAME,
+                                multisetKeyParquetType,
+                                multisetValueParquetType)
+                        .withId(fieldId);
             case ROW:
                 RowType rowType = (RowType) type;
-                return new GroupType(repetition, name, convertToParquetTypes(rowType));
+                return new GroupType(repetition, name, convertToParquetTypes(rowType))
+                        .withId(fieldId);
             default:
                 throw new UnsupportedOperationException("Unsupported type: " + type);
         }
@@ -192,53 +228,6 @@ public class ParquetSchemaConverter {
                                     isAdjustToUTC, LogicalTypeAnnotation.TimeUnit.MICROS))
                     .named(name);
         }
-    }
-
-    private static List<Type> convertToParquetTypes(RowType rowType) {
-        List<Type> types = new ArrayList<>(rowType.getFieldCount());
-        for (DataField field : rowType.getFields()) {
-            Type parquetType = convertToParquetType(field.name(), field.type());
-            Type typeWithId = parquetType.withId(field.id());
-            if (field.type().getTypeRoot() == DataTypeRoot.ARRAY) {
-                GroupType groupType = (GroupType) parquetType;
-                GroupType wrapperType = (GroupType) groupType.getFields().get(0);
-                Type elementTypeWithId =
-                        wrapperType
-                                .getFields()
-                                .get(0)
-                                .withId(SpecialFields.getArrayElementFieldId(field.id()));
-                typeWithId =
-                        ConversionPatterns.listOfElements(
-                                        groupType.getRepetition(),
-                                        groupType.getName(),
-                                        elementTypeWithId)
-                                .withId(field.id());
-            } else if (field.type().getTypeRoot() == DataTypeRoot.MAP
-                    || field.type().getTypeRoot() == DataTypeRoot.MULTISET) {
-                GroupType groupType = (GroupType) parquetType;
-                GroupType wrapperType = (GroupType) groupType.getFields().get(0);
-                Type keyTypeWithId =
-                        wrapperType
-                                .getFields()
-                                .get(0)
-                                .withId(SpecialFields.getMapKeyFieldId(field.id()));
-                Type valueTypeWithId =
-                        wrapperType
-                                .getFields()
-                                .get(1)
-                                .withId(SpecialFields.getMapValueFieldId(field.id()));
-                typeWithId =
-                        ConversionPatterns.mapType(
-                                        groupType.getRepetition(),
-                                        groupType.getName(),
-                                        MAP_REPEATED_NAME,
-                                        keyTypeWithId,
-                                        valueTypeWithId)
-                                .withId(field.id());
-            }
-            types.add(typeWithId);
-        }
-        return types;
     }
 
     public static int computeMinBytesForDecimalPrecision(int precision) {

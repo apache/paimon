@@ -48,9 +48,18 @@ import java.util.stream.Stream;
  * directly by id. These ids are not stored in {@link org.apache.paimon.types.DataField}.
  *
  * <ul>
- *   <li>Array element field: ID = 536870911 + <code>(array-field-id)</code>.
- *   <li>Map key field: ID = 536870911 + <code>(array-field-id)</code>.
- *   <li>Map value field: ID = 536870911 - <code>(array-field-id)</code>.
+ *   <li>Array element field: ID = 536870911 + 1024 * <code>(array-field-id)</code> + depth.
+ *   <li>Map key field: ID = 536870911 - 1024 * <code>(array-field-id)</code> - depth.
+ *   <li>Map value field: ID = 536870911 + 1024 * <code>(array-field-id)</code> + depth.
+ * </ul>
+ *
+ * <p>Examples:
+ *
+ * <ul>
+ *   <li>ARRAY(MAP(INT, ARRAY(INT))) type, outer array has field id 10, then map (element of outer
+ *       array) has field id 536870911 + 1024 * 10 + 1, map key (int) has field id 536870911 - 1024
+ *       * 10 - 2, map value (inner array) has field id 536870911 + 1024 * 10 + 2, inner array
+ *       element (int) has field id 536870911 + 1024 * 10 + 3
  * </ul>
  */
 public class SpecialFields {
@@ -90,21 +99,32 @@ public class SpecialFields {
         return field.startsWith(KEY_FIELD_PREFIX) || SYSTEM_FIELD_NAMES.contains(field);
     }
 
+    public static boolean isKeyField(String field) {
+        return field.startsWith(KEY_FIELD_PREFIX);
+    }
+
     // ----------------------------------------------------------------------------------------
     // Structured type fields
     // ----------------------------------------------------------------------------------------
 
     public static final int STRUCTURED_TYPE_FIELD_ID_BASE = Integer.MAX_VALUE / 4;
+    public static final int STRUCTURED_TYPE_FIELD_DEPTH_LIMIT = 1 << 10;
 
-    public static int getArrayElementFieldId(int arrayFieldId) {
-        return STRUCTURED_TYPE_FIELD_ID_BASE + arrayFieldId;
+    public static int getArrayElementFieldId(int arrayFieldId, int depth) {
+        return STRUCTURED_TYPE_FIELD_ID_BASE
+                + arrayFieldId * STRUCTURED_TYPE_FIELD_DEPTH_LIMIT
+                + depth;
     }
 
-    public static int getMapKeyFieldId(int mapFieldId) {
-        return STRUCTURED_TYPE_FIELD_ID_BASE + mapFieldId;
+    public static int getMapKeyFieldId(int mapFieldId, int depth) {
+        return STRUCTURED_TYPE_FIELD_ID_BASE
+                - mapFieldId * STRUCTURED_TYPE_FIELD_DEPTH_LIMIT
+                - depth;
     }
 
-    public static int getMapValueFieldId(int mapFieldId) {
-        return STRUCTURED_TYPE_FIELD_ID_BASE - mapFieldId;
+    public static int getMapValueFieldId(int mapFieldId, int depth) {
+        return STRUCTURED_TYPE_FIELD_ID_BASE
+                + mapFieldId * STRUCTURED_TYPE_FIELD_DEPTH_LIMIT
+                + depth;
     }
 }

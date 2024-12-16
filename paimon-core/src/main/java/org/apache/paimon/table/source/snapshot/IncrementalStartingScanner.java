@@ -31,7 +31,6 @@ import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
-import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -50,6 +49,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
+import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link StartingScanner} for incremental changes by snapshot. */
@@ -84,7 +84,7 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                         .collect(Collectors.toList());
 
         Iterator<ManifestFileMeta> manifests =
-                ManifestReadThreadPool.randomlyExecute(
+                randomlyExecuteSequentialReturn(
                         id -> {
                             Snapshot snapshot = snapshotManager.snapshot(id);
                             switch (scanMode) {
@@ -111,7 +111,7 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                         reader.parallelism());
 
         Iterator<ManifestEntry> entries =
-                ManifestReadThreadPool.randomlyExecute(
+                randomlyExecuteSequentialReturn(
                         reader::readManifest, Lists.newArrayList(manifests), reader.parallelism());
 
         while (entries.hasNext()) {

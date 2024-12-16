@@ -18,11 +18,15 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.function.Supplier;
 
 /* This file is based on source code from the RoaringBitmap Project (http://roaringbitmap.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -34,36 +38,39 @@ public class BitSliceIndexRoaringBitmap {
     public static final byte VERSION_1 = 1;
 
     public static final BitSliceIndexRoaringBitmap EMPTY =
-            new BitSliceIndexRoaringBitmap(0, new RoaringBitmap32(), new RoaringBitmap32[] {});
+            new BitSliceIndexRoaringBitmap(0, 0, new RoaringBitmap32(), new RoaringBitmap32[] {});
 
     private final long min;
+    private final long max;
     private final RoaringBitmap32 ebm;
     private final RoaringBitmap32[] slices;
 
-    private BitSliceIndexRoaringBitmap(long min, RoaringBitmap32 ebm, RoaringBitmap32[] slices) {
+    private BitSliceIndexRoaringBitmap(
+            long min, long max, RoaringBitmap32 ebm, RoaringBitmap32[] slices) {
         this.min = min;
+        this.max = max;
         this.ebm = ebm;
         this.slices = slices;
     }
 
     public RoaringBitmap32 eq(long predicate) {
-        return oNeilCompare(Operation.EQ, predicate - min, null);
+        return compare(Operation.EQ, predicate, null);
     }
 
     public RoaringBitmap32 lt(long predicate) {
-        return oNeilCompare(Operation.LT, predicate - min, null);
+        return compare(Operation.LT, predicate, null);
     }
 
     public RoaringBitmap32 lte(long predicate) {
-        return oNeilCompare(Operation.LTE, predicate - min, null);
+        return compare(Operation.LTE, predicate, null);
     }
 
     public RoaringBitmap32 gt(long predicate) {
-        return oNeilCompare(Operation.GT, predicate - min, null);
+        return compare(Operation.GT, predicate, null);
     }
 
     public RoaringBitmap32 gte(long predicate) {
-        return oNeilCompare(Operation.GTE, predicate - min, null);
+        return compare(Operation.GTE, predicate, null);
     }
 
     public RoaringBitmap32 isNotNull() {
@@ -82,6 +89,86 @@ public class BitSliceIndexRoaringBitmap {
         return min == that.min
                 && Objects.equals(ebm, that.ebm)
                 && Arrays.equals(slices, that.slices);
+    }
+
+    private RoaringBitmap32 compare(Operation operation, long predicate, RoaringBitmap32 foundSet) {
+        // using min/max to fast skip
+        return compareUsingMinMax(operation, predicate, foundSet)
+                .orElseGet(() -> oNeilCompare(operation, predicate - min, foundSet));
+    }
+
+    @VisibleForTesting
+    protected Optional<RoaringBitmap32> compareUsingMinMax(
+            Operation operation, long predicate, RoaringBitmap32 foundSet) {
+        Supplier<Optional<RoaringBitmap32>> empty = () -> Optional.of(new RoaringBitmap32());
+        Supplier<Optional<RoaringBitmap32>> all =
+                () -> {
+                    if (foundSet == null) {
+                        return Optional.of(isNotNull());
+                    } else {
+                        return Optional.of(RoaringBitmap32.and(foundSet, ebm));
+                    }
+                };
+
+        switch (operation) {
+            case EQ:
+                {
+                    if (min == max && min == predicate) {
+                        return all.get();
+                    } else if (predicate < min || predicate > max) {
+                        return empty.get();
+                    }
+                    break;
+                }
+            case NEQ:
+                {
+                    if (min == max && min == predicate) {
+                        return empty.get();
+                    } else if (predicate < min || predicate > max) {
+                        return all.get();
+                    }
+                    break;
+                }
+            case GTE:
+                {
+                    if (predicate <= min) {
+                        return all.get();
+                    } else if (predicate > max) {
+                        return empty.get();
+                    }
+                    break;
+                }
+            case GT:
+                {
+                    if (predicate < min) {
+                        return all.get();
+                    } else if (predicate >= max) {
+                        return empty.get();
+                    }
+                    break;
+                }
+            case LTE:
+                {
+                    if (predicate >= max) {
+                        return all.get();
+                    } else if (predicate < min) {
+                        return empty.get();
+                    }
+                    break;
+                }
+            case LT:
+                {
+                    if (predicate > max) {
+                        return all.get();
+                    } else if (predicate <= min) {
+                        return empty.get();
+                    }
+                    break;
+                }
+            default:
+                throw new IllegalArgumentException("not support operation: " + operation);
+        }
+        return Optional.empty();
     }
 
     /**
@@ -133,7 +220,8 @@ public class BitSliceIndexRoaringBitmap {
     }
 
     /** Specifies O'Neil compare algorithm operation. */
-    private enum Operation {
+    @VisibleForTesting
+    protected enum Operation {
         EQ,
         NEQ,
         LTE,
@@ -151,8 +239,9 @@ public class BitSliceIndexRoaringBitmap {
                             version));
         }
 
-        // deserialize min
+        // deserialize min & max
         long min = in.readLong();
+        long max = in.readLong();
 
         // deserialize ebm
         RoaringBitmap32 ebm = new RoaringBitmap32();
@@ -166,7 +255,7 @@ public class BitSliceIndexRoaringBitmap {
             slices[i] = rb;
         }
 
-        return new BitSliceIndexRoaringBitmap(min, ebm, slices);
+        return new BitSliceIndexRoaringBitmap(min, max, ebm, slices);
     }
 
     /** A Builder for {@link BitSliceIndexRoaringBitmap}. */
@@ -220,6 +309,7 @@ public class BitSliceIndexRoaringBitmap {
         public void serialize(DataOutput out) throws IOException {
             out.writeByte(VERSION_1);
             out.writeLong(min);
+            out.writeLong(max);
             ebm.serialize(out);
             out.writeInt(slices.length);
             for (RoaringBitmap32 slice : slices) {
@@ -228,7 +318,7 @@ public class BitSliceIndexRoaringBitmap {
         }
 
         public BitSliceIndexRoaringBitmap build() throws IOException {
-            return new BitSliceIndexRoaringBitmap(min, ebm, slices);
+            return new BitSliceIndexRoaringBitmap(min, max, ebm, slices);
         }
     }
 }

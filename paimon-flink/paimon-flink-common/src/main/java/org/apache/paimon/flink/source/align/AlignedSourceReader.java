@@ -58,7 +58,7 @@ public class AlignedSourceReader extends FileStoreSourceReader
             @Nullable Long limit,
             FutureCompletingBlockingQueue<RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>>>
                     elementsQueue) {
-        super(readerContext, tableRead, metrics, ioManager, limit, elementsQueue);
+        super(readerContext, tableRead, metrics, ioManager, limit);
         this.elementsQueue = elementsQueue;
         this.nextCheckpointId = null;
     }

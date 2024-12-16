@@ -29,10 +29,10 @@ import org.apache.flink.core.fs.FSDataInputStream;
 import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.FileSystem.WriteMode;
-import org.apache.flink.core.fs.FileSystemKind;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.Locale;
 
 /** Flink {@link FileIO} to use {@link FileSystem}. */
 public class FlinkFileIO implements FileIO {
@@ -48,7 +48,27 @@ public class FlinkFileIO implements FileIO {
     @Override
     public boolean isObjectStore() {
         try {
-            return path.getFileSystem().getKind() != FileSystemKind.FILE_SYSTEM;
+            FileSystem fs = path.getFileSystem();
+            String scheme = fs.getUri().getScheme().toLowerCase(Locale.US);
+
+            if (scheme.startsWith("s3")
+                    || scheme.startsWith("emr")
+                    || scheme.startsWith("oss")
+                    || scheme.startsWith("wasb")
+                    || scheme.startsWith("gs")) {
+                // the Amazon S3 storage or Aliyun OSS storage or Azure Blob Storage
+                // or Google Cloud Storage
+                return true;
+            } else if (scheme.startsWith("http") || scheme.startsWith("ftp")) {
+                // file servers instead of file systems
+                // they might actually be consistent, but we have no hard guarantees
+                // currently to rely on that
+                return true;
+            } else {
+                // the remainder should include hdfs, kosmos, ceph, ...
+                // this also includes federated HDFS (viewfs).
+                return false;
+            }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

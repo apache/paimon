@@ -31,6 +31,7 @@ import org.apache.paimon.utils.PartitionPathUtils;
 
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
+import org.apache.hadoop.hive.metastore.api.AlreadyExistsException;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.PartitionEventType;
@@ -92,21 +93,15 @@ public class HiveMetastoreClient implements MetastoreClient {
 
     @Override
     public void addPartition(LinkedHashMap<String, String> partitionSpec) throws Exception {
-        List<String> partitionValues = new ArrayList<>(partitionSpec.values());
-        try {
-            clients.execute(
-                    client ->
-                            client.getPartition(
-                                    identifier.getDatabaseName(),
-                                    identifier.getTableName(),
-                                    partitionValues));
-            // do nothing if the partition already exists
-        } catch (NoSuchObjectException e) {
-            // partition not found, create new partition
-            Partition hivePartition =
-                    toHivePartition(partitionSpec, (int) (System.currentTimeMillis() / 1000));
-            clients.execute(client -> client.add_partition(hivePartition));
-        }
+        Partition hivePartition =
+                toHivePartition(partitionSpec, (int) (System.currentTimeMillis() / 1000));
+        clients.execute(
+                client -> {
+                    try {
+                        client.add_partition(hivePartition);
+                    } catch (AlreadyExistsException ignore) {
+                    }
+                });
     }
 
     @Override
@@ -124,17 +119,28 @@ public class HiveMetastoreClient implements MetastoreClient {
     public void alterPartition(
             LinkedHashMap<String, String> partitionSpec,
             Map<String, String> parameters,
-            long modifyTime)
+            long modifyTime,
+            boolean ignoreIfNotExist)
             throws Exception {
         List<String> partitionValues = new ArrayList<>(partitionSpec.values());
         int currentTime = (int) (modifyTime / 1000);
-        Partition hivePartition =
-                clients.run(
-                        client ->
-                                client.getPartition(
-                                        identifier.getDatabaseName(),
-                                        identifier.getObjectName(),
-                                        partitionValues));
+        Partition hivePartition;
+        try {
+            hivePartition =
+                    clients.run(
+                            client ->
+                                    client.getPartition(
+                                            identifier.getDatabaseName(),
+                                            identifier.getObjectName(),
+                                            partitionValues));
+        } catch (NoSuchObjectException e) {
+            if (ignoreIfNotExist) {
+                return;
+            } else {
+                throw e;
+            }
+        }
+
         hivePartition.setValues(partitionValues);
         hivePartition.setLastAccessTime(currentTime);
         hivePartition.getParameters().putAll(parameters);

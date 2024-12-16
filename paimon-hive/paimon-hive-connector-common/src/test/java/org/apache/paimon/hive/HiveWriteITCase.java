@@ -157,7 +157,7 @@ public class HiveWriteITCase extends HiveTestBase {
         write.close();
         commit.close();
 
-        String tableName = "test_table_" + (UUID.randomUUID().toString().substring(0, 4));
+        String tableName = "test_table_" + UUID.randomUUID().toString().replace('-', '_');
         hiveShell.execute(
                 String.join(
                         "\n",

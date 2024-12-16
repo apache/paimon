@@ -18,5 +18,12 @@
 
 package org.apache.paimon.iceberg;
 
+import org.apache.paimon.hive.CreateFailHiveMetaStoreClient;
+
 /** IT cases for {@link IcebergHiveMetadataCommitter} in Hive 2.3. */
-public class IcebergHive23MetadataCommitterITCase extends IcebergHiveMetadataCommitterITCaseBase {}
+public class IcebergHive23MetadataCommitterITCase extends IcebergHiveMetadataCommitterITCaseBase {
+    @Override
+    protected String createFailHiveMetaStoreClient() {
+        return CreateFailHiveMetaStoreClient.class.getName();
+    }
+}

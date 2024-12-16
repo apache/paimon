@@ -95,7 +95,7 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
                 vectors = VectorMappingUtils.createPartitionMappedVectors(partitionInfo, vectors);
             }
             if (indexMapping != null) {
-                vectors = VectorMappingUtils.createIndexMappedVectors(indexMapping, vectors);
+                vectors = VectorMappingUtils.createMappedVectors(indexMapping, vectors);
             }
             return copy(vectors);
         }

@@ -72,20 +72,6 @@ public class AddPartitionCommitCallback implements CommitCallback {
         addPartitions(partitions);
     }
 
-    private void addPartition(BinaryRow partition) {
-        try {
-            boolean added = cache.get(partition, () -> false);
-            if (added) {
-                return;
-            }
-
-            client.addPartition(partition);
-            cache.put(partition, true);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
     private void addPartitions(Set<BinaryRow> partitions) {
         try {
             List<BinaryRow> newPartitions = new ArrayList<>();

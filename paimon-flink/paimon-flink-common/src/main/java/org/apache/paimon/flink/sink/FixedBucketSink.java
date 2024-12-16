@@ -21,7 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.table.FileStoreTable;
 
-import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 
 import javax.annotation.Nullable;
 
@@ -43,8 +43,9 @@ public class FixedBucketSink extends FlinkWriteSink<InternalRow> {
     }
 
     @Override
-    protected OneInputStreamOperator<InternalRow, Committable> createWriteOperator(
+    protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new RowDataStoreWriteOperator(table, logSinkFunction, writeProvider, commitUser);
+        return new RowDataStoreWriteOperator.Factory(
+                table, logSinkFunction, writeProvider, commitUser);
     }
 }

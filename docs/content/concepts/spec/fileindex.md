@@ -154,11 +154,35 @@ BSI file index format (V1)
 +-------------------------------------------------+
 ｜ has positive value (1 byte)                    ｜
 +-------------------------------------------------+
-｜ positive bsi serialized (if has positive value)｜       
+｜ positive BSI serialized (if has positive value)｜       
 +-------------------------------------------------+
 ｜ has negative value (1 byte)                    ｜
 +-------------------------------------------------+
-｜ negative bsi serialized (if has negative value)｜       
+｜ negative BSI serialized (if has negative value)｜       
++-------------------------------------------------+
+</pre>
+
+BSI serialized format (V1):
+<pre>
+BSI serialized format (V1)
++-------------------------------------------------+
+｜ version (1 byte)                               ｜
++-------------------------------------------------+
+｜ min value (8 bytes long)                       ｜
++-------------------------------------------------+
+｜ max value (8 bytes long)                       ｜
++-------------------------------------------------+
+｜ serialized existence bitmap                    ｜       
++-------------------------------------------------+
+｜ bit slice bitmap count (4 bytes int)           ｜
++-------------------------------------------------+
+｜ serialized bit 0 bitmap                        ｜
++-------------------------------------------------+
+｜ serialized bit 1 bitmap                        ｜
++-------------------------------------------------+
+｜ serialized bit 2 bitmap                        ｜
++-------------------------------------------------+
+｜ ...                                            ｜
 +-------------------------------------------------+
 </pre>
 

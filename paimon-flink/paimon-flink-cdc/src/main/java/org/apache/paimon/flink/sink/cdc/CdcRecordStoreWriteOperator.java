@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.PrepareCommitOperator;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.TableWriteOperator;
@@ -27,6 +28,9 @@ import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.runtime.state.StateInitializationContext;
+import org.apache.flink.streaming.api.operators.StreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 import java.io.IOException;
@@ -50,11 +54,12 @@ public class CdcRecordStoreWriteOperator extends TableWriteOperator<CdcRecord> {
 
     private final long retrySleepMillis;
 
-    public CdcRecordStoreWriteOperator(
+    protected CdcRecordStoreWriteOperator(
+            StreamOperatorParameters<Committable> parameters,
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
-        super(table, storeSinkWriteProvider, initialCommitUser);
+        super(parameters, table, storeSinkWriteProvider, initialCommitUser);
         this.retrySleepMillis =
                 table.coreOptions().toConfiguration().get(RETRY_SLEEP_TIME).toMillis();
     }
@@ -90,6 +95,32 @@ public class CdcRecordStoreWriteOperator extends TableWriteOperator<CdcRecord> {
             write.write(optionalConverted.get());
         } catch (Exception e) {
             throw new IOException(e);
+        }
+    }
+
+    /** {@link StreamOperatorFactory} of {@link CdcRecordStoreWriteOperator}. */
+    public static class Factory extends TableWriteOperator.Factory<CdcRecord> {
+
+        public Factory(
+                FileStoreTable table,
+                StoreSinkWrite.Provider storeSinkWriteProvider,
+                String initialCommitUser) {
+            super(table, storeSinkWriteProvider, initialCommitUser);
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T extends StreamOperator<Committable>> T createStreamOperator(
+                StreamOperatorParameters<Committable> parameters) {
+            return (T)
+                    new CdcRecordStoreWriteOperator(
+                            parameters, table, storeSinkWriteProvider, initialCommitUser);
+        }
+
+        @Override
+        @SuppressWarnings("rawtypes")
+        public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
+            return CdcRecordStoreWriteOperator.class;
         }
     }
 }

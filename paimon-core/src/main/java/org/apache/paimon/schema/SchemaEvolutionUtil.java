@@ -19,10 +19,15 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.casting.CastElementGetter;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.casting.CastFieldGetter;
+import org.apache.paimon.casting.CastedArray;
+import org.apache.paimon.casting.CastedMap;
 import org.apache.paimon.casting.CastedRow;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
@@ -31,7 +36,6 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
-import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.ProjectedRow;
@@ -372,6 +376,7 @@ public class SchemaEvolutionUtil {
             List<DataField> tableFields, List<DataField> dataFields, int[] indexMapping) {
         CastFieldGetter[] converterMapping = new CastFieldGetter[tableFields.size()];
         boolean castExist = false;
+
         for (int i = 0; i < tableFields.size(); i++) {
             int dataIndex = indexMapping == null ? i : indexMapping[i];
             if (dataIndex < 0) {
@@ -380,51 +385,37 @@ public class SchemaEvolutionUtil {
             } else {
                 DataField tableField = tableFields.get(i);
                 DataField dataField = dataFields.get(dataIndex);
-                if (dataField.type().equalsIgnoreNullable(tableField.type())) {
-                    // Create getter with index i and projected row data will convert to underlying
-                    // data
-                    converterMapping[i] =
-                            new CastFieldGetter(
-                                    InternalRowUtils.createNullCheckingFieldGetter(
-                                            dataField.type(), i),
-                                    CastExecutors.identityCastExecutor());
-                } else {
-                    // TODO support column type evolution in nested type
-                    checkState(
-                            !(tableField.type() instanceof MapType
-                                    || dataField.type() instanceof ArrayType
-                                    || dataField.type() instanceof MultisetType),
-                            "Only support column type evolution in atomic and row data type.");
-
-                    CastExecutor<?, ?> castExecutor;
-                    if (tableField.type() instanceof RowType
-                            && dataField.type() instanceof RowType) {
-                        castExecutor =
-                                createRowCastExecutor(
-                                        (RowType) dataField.type(), (RowType) tableField.type());
-                    } else {
-                        castExecutor = CastExecutors.resolve(dataField.type(), tableField.type());
-                    }
-                    checkNotNull(
-                            castExecutor,
-                            "Cannot cast from type "
-                                    + dataField.type()
-                                    + " to type "
-                                    + tableField.type());
-
-                    // Create getter with index i and projected row data will convert to underlying
-                    // data
-                    converterMapping[i] =
-                            new CastFieldGetter(
-                                    InternalRowUtils.createNullCheckingFieldGetter(
-                                            dataField.type(), i),
-                                    castExecutor);
+                if (!dataField.type().equalsIgnoreNullable(tableField.type())) {
                     castExist = true;
                 }
+
+                // Create getter with index i and projected row data will convert to underlying data
+                converterMapping[i] =
+                        new CastFieldGetter(
+                                InternalRowUtils.createNullCheckingFieldGetter(dataField.type(), i),
+                                createCastExecutor(dataField.type(), tableField.type()));
             }
         }
 
         return castExist ? converterMapping : null;
+    }
+
+    private static CastExecutor<?, ?> createCastExecutor(DataType inputType, DataType targetType) {
+        if (targetType.equalsIgnoreNullable(inputType)) {
+            return CastExecutors.identityCastExecutor();
+        } else if (inputType instanceof RowType && targetType instanceof RowType) {
+            return createRowCastExecutor((RowType) inputType, (RowType) targetType);
+        } else if (inputType instanceof ArrayType && targetType instanceof ArrayType) {
+            return createArrayCastExecutor((ArrayType) inputType, (ArrayType) targetType);
+        } else if (inputType instanceof MapType && targetType instanceof MapType) {
+            return createMapCastExecutor((MapType) inputType, (MapType) targetType);
+        } else {
+            return checkNotNull(
+                    CastExecutors.resolve(inputType, targetType),
+                    "Cannot cast from type %s to type %s",
+                    inputType,
+                    targetType);
+        }
     }
 
     private static CastExecutor<InternalRow, InternalRow> createRowCastExecutor(
@@ -445,5 +436,33 @@ public class SchemaEvolutionUtil {
             }
             return value;
         };
+    }
+
+    private static CastExecutor<InternalArray, InternalArray> createArrayCastExecutor(
+            ArrayType inputType, ArrayType targetType) {
+        CastElementGetter castElementGetter =
+                new CastElementGetter(
+                        InternalArray.createElementGetter(inputType.getElementType()),
+                        createCastExecutor(
+                                inputType.getElementType(), targetType.getElementType()));
+
+        CastedArray castedArray = CastedArray.from(castElementGetter);
+        return castedArray::replaceArray;
+    }
+
+    private static CastExecutor<InternalMap, InternalMap> createMapCastExecutor(
+            MapType inputType, MapType targetType) {
+        checkState(
+                inputType.getKeyType().equals(targetType.getKeyType()),
+                "Cannot cast map type %s to map type %s, because they have different key types.",
+                inputType.getKeyType(),
+                targetType.getKeyType());
+        CastElementGetter castElementGetter =
+                new CastElementGetter(
+                        InternalArray.createElementGetter(inputType.getValueType()),
+                        createCastExecutor(inputType.getValueType(), targetType.getValueType()));
+
+        CastedMap castedMap = CastedMap.from(castElementGetter);
+        return castedMap::replaceMap;
     }
 }

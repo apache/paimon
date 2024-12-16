@@ -23,12 +23,12 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DeletionFile;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
 
 import org.junit.jupiter.api.Test;
@@ -94,7 +94,7 @@ class AppendDeletionFileMaintainerTest {
         assertThat(res.size()).isEqualTo(3);
         IndexManifestEntry entry =
                 res.stream().filter(file -> file.kind() == FileKind.ADD).findAny().get();
-        assertThat(entry.indexFile().deletionVectorsRanges().containsKey("f2")).isTrue();
+        assertThat(entry.indexFile().deletionVectorMetas().containsKey("f2")).isTrue();
         entry =
                 res.stream()
                         .filter(file -> file.kind() == FileKind.DELETE)
@@ -117,14 +117,15 @@ class AppendDeletionFileMaintainerTest {
             PathFactory indexPathFactory, List<IndexFileMeta> fileMetas) {
         Map<String, DeletionFile> dataFileToDeletionFiles = new HashMap<>();
         for (IndexFileMeta indexFileMeta : fileMetas) {
-            for (Map.Entry<String, Pair<Integer, Integer>> range :
-                    indexFileMeta.deletionVectorsRanges().entrySet()) {
+            for (Map.Entry<String, DeletionVectorMeta> dvMeta :
+                    indexFileMeta.deletionVectorMetas().entrySet()) {
                 dataFileToDeletionFiles.put(
-                        range.getKey(),
+                        dvMeta.getKey(),
                         new DeletionFile(
                                 indexPathFactory.toPath(indexFileMeta.fileName()).toString(),
-                                range.getValue().getLeft(),
-                                range.getValue().getRight()));
+                                dvMeta.getValue().offset(),
+                                dvMeta.getValue().length(),
+                                dvMeta.getValue().cardinality()));
             }
         }
         return dataFileToDeletionFiles;

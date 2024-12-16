@@ -95,6 +95,10 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
       output: Seq[Attribute]): Seq[DataSplit] = {
     // low level snapshot reader, it can not be affected by 'scan.mode'
     val snapshotReader = table.newSnapshotReader()
+    // dropStats after filter push down
+    if (table.coreOptions().manifestDeleteFileDropStats()) {
+      snapshotReader.dropStats()
+    }
     if (condition != TrueLiteral) {
       val filter =
         convertConditionToPaimonPredicate(condition, output, rowType, ignoreFailure = true)

@@ -18,21 +18,26 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.PrepareCommitOperator;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowKind;
 
+import org.apache.flink.streaming.api.operators.StreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 /** A {@link PrepareCommitOperator} to write {@link CdcRecord} to unaware-bucket mode table. */
 public class CdcUnawareBucketWriteOperator extends CdcRecordStoreWriteOperator {
 
-    public CdcUnawareBucketWriteOperator(
+    private CdcUnawareBucketWriteOperator(
+            StreamOperatorParameters<Committable> parameters,
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
-        super(table, storeSinkWriteProvider, initialCommitUser);
+        super(parameters, table, storeSinkWriteProvider, initialCommitUser);
     }
 
     @Override
@@ -40,6 +45,32 @@ public class CdcUnawareBucketWriteOperator extends CdcRecordStoreWriteOperator {
         // only accepts INSERT record
         if (element.getValue().kind() == RowKind.INSERT) {
             super.processElement(element);
+        }
+    }
+
+    /** {@link StreamOperatorFactory} of {@link CdcUnawareBucketWriteOperator}. */
+    public static class Factory extends CdcRecordStoreWriteOperator.Factory {
+
+        public Factory(
+                FileStoreTable table,
+                StoreSinkWrite.Provider storeSinkWriteProvider,
+                String initialCommitUser) {
+            super(table, storeSinkWriteProvider, initialCommitUser);
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T extends StreamOperator<Committable>> T createStreamOperator(
+                StreamOperatorParameters<Committable> parameters) {
+            return (T)
+                    new CdcUnawareBucketWriteOperator(
+                            parameters, table, storeSinkWriteProvider, initialCommitUser);
+        }
+
+        @Override
+        @SuppressWarnings("rawtypes")
+        public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
+            return CdcUnawareBucketWriteOperator.class;
         }
     }
 }

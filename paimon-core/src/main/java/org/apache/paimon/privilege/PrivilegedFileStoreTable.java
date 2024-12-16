@@ -27,6 +27,7 @@ import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.DelegatedFileStoreTable;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
@@ -48,10 +49,10 @@ import java.util.OptionalLong;
 /** {@link FileStoreTable} with privilege checks. */
 public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
 
-    private final PrivilegeChecker privilegeChecker;
-    private final Identifier identifier;
+    protected final PrivilegeChecker privilegeChecker;
+    protected final Identifier identifier;
 
-    public PrivilegedFileStoreTable(
+    protected PrivilegedFileStoreTable(
             FileStoreTable wrapped, PrivilegeChecker privilegeChecker, Identifier identifier) {
         super(wrapped);
         this.privilegeChecker = privilegeChecker;
@@ -104,18 +105,6 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     public Optional<Statistics> statistics() {
         privilegeChecker.assertCanSelect(identifier);
         return wrapped.statistics();
-    }
-
-    @Override
-    public FileStoreTable copy(Map<String, String> dynamicOptions) {
-        return new PrivilegedFileStoreTable(
-                wrapped.copy(dynamicOptions), privilegeChecker, identifier);
-    }
-
-    @Override
-    public FileStoreTable copy(TableSchema newTableSchema) {
-        return new PrivilegedFileStoreTable(
-                wrapped.copy(newTableSchema), privilegeChecker, identifier);
     }
 
     @Override
@@ -203,18 +192,6 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
-    public FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions) {
-        return new PrivilegedFileStoreTable(
-                wrapped.copyWithoutTimeTravel(dynamicOptions), privilegeChecker, identifier);
-    }
-
-    @Override
-    public FileStoreTable copyWithLatestSchema() {
-        return new PrivilegedFileStoreTable(
-                wrapped.copyWithLatestSchema(), privilegeChecker, identifier);
-    }
-
-    @Override
     public DataTableScan newScan() {
         privilegeChecker.assertCanSelect(identifier);
         return wrapped.newScan();
@@ -262,11 +239,7 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
         return wrapped.newLocalTableQuery();
     }
 
-    @Override
-    public FileStoreTable switchToBranch(String branchName) {
-        return new PrivilegedFileStoreTable(
-                wrapped.switchToBranch(branchName), privilegeChecker, identifier);
-    }
+    // ======================= equals ============================
 
     @Override
     public boolean equals(Object o) {
@@ -280,5 +253,46 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
         return Objects.equals(wrapped, that.wrapped)
                 && Objects.equals(privilegeChecker, that.privilegeChecker)
                 && Objects.equals(identifier, that.identifier);
+    }
+
+    // ======================= copy ============================
+
+    @Override
+    public PrivilegedFileStoreTable copy(Map<String, String> dynamicOptions) {
+        return new PrivilegedFileStoreTable(
+                wrapped.copy(dynamicOptions), privilegeChecker, identifier);
+    }
+
+    @Override
+    public PrivilegedFileStoreTable copy(TableSchema newTableSchema) {
+        return new PrivilegedFileStoreTable(
+                wrapped.copy(newTableSchema), privilegeChecker, identifier);
+    }
+
+    @Override
+    public PrivilegedFileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions) {
+        return new PrivilegedFileStoreTable(
+                wrapped.copyWithoutTimeTravel(dynamicOptions), privilegeChecker, identifier);
+    }
+
+    @Override
+    public PrivilegedFileStoreTable copyWithLatestSchema() {
+        return new PrivilegedFileStoreTable(
+                wrapped.copyWithLatestSchema(), privilegeChecker, identifier);
+    }
+
+    @Override
+    public PrivilegedFileStoreTable switchToBranch(String branchName) {
+        return new PrivilegedFileStoreTable(
+                wrapped.switchToBranch(branchName), privilegeChecker, identifier);
+    }
+
+    public static PrivilegedFileStoreTable wrap(
+            FileStoreTable table, PrivilegeChecker privilegeChecker, Identifier identifier) {
+        if (table instanceof ObjectTable) {
+            return new PrivilegedObjectTable((ObjectTable) table, privilegeChecker, identifier);
+        } else {
+            return new PrivilegedFileStoreTable(table, privilegeChecker, identifier);
+        }
     }
 }

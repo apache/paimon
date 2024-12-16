@@ -44,10 +44,15 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
+import org.apache.flink.streaming.api.operators.AbstractStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
 import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.Output;
+import org.apache.flink.streaming.api.operators.StreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
@@ -76,13 +81,14 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
 
     private transient boolean endOfInput;
 
-    public LocalMergeOperator(TableSchema schema) {
+    private LocalMergeOperator(
+            StreamOperatorParameters<InternalRow> parameters, TableSchema schema) {
         Preconditions.checkArgument(
                 schema.primaryKeys().size() > 0,
                 "LocalMergeOperator currently only support tables with primary keys");
         this.schema = schema;
         this.ignoreDelete = CoreOptions.fromMap(schema.options()).ignoreDelete();
-        setChainingStrategy(ChainingStrategy.ALWAYS);
+        setup(parameters.getContainingTask(), parameters.getStreamConfig(), parameters.getOutput());
     }
 
     @Override
@@ -234,5 +240,29 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
     @VisibleForTesting
     void setOutput(Output<StreamRecord<InternalRow>> output) {
         this.output = output;
+    }
+
+    /** {@link StreamOperatorFactory} of {@link LocalMergeOperator}. */
+    public static class Factory extends AbstractStreamOperatorFactory<InternalRow>
+            implements OneInputStreamOperatorFactory<InternalRow, InternalRow> {
+        private final TableSchema schema;
+
+        public Factory(TableSchema schema) {
+            this.chainingStrategy = ChainingStrategy.ALWAYS;
+            this.schema = schema;
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T extends StreamOperator<InternalRow>> T createStreamOperator(
+                StreamOperatorParameters<InternalRow> parameters) {
+            return (T) new LocalMergeOperator(parameters, schema);
+        }
+
+        @Override
+        @SuppressWarnings("rawtypes")
+        public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
+            return LocalMergeOperator.class;
+        }
     }
 }

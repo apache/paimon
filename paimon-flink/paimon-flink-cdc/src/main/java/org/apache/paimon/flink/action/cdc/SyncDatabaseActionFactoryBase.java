@@ -29,8 +29,11 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.INCLUDING_
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MULTIPLE_TABLE_PARTITION_KEYS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PARTITION_KEYS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PRIMARY_KEYS;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_MAPPING;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_PREFIX;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_PREFIX_DB;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_SUFFIX;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_SUFFIX_DB;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TYPE_MAPPING;
 
 /** Base {@link ActionFactory} for synchronizing into database. */
@@ -51,6 +54,9 @@ public abstract class SyncDatabaseActionFactoryBase<T extends SyncDatabaseAction
     protected void withParams(MultipleParameterToolAdapter params, T action) {
         action.withTablePrefix(params.get(TABLE_PREFIX))
                 .withTableSuffix(params.get(TABLE_SUFFIX))
+                .withDbPrefix(optionalConfigMap(params, TABLE_PREFIX_DB))
+                .withDbSuffix(optionalConfigMap(params, TABLE_SUFFIX_DB))
+                .withTableMapping(optionalConfigMap(params, TABLE_MAPPING))
                 .includingTables(params.get(INCLUDING_TABLES))
                 .excludingTables(params.get(EXCLUDING_TABLES))
                 .withPartitionKeyMultiple(

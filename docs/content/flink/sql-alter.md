@@ -78,6 +78,10 @@ If you use object storage, such as S3 or OSS, please use this syntax carefully, 
 
 The following SQL adds two columns `c1` and `c2` to table `my_table`.
 
+{{< hint info >}}
+To add a column in a row type, see [Changing Column Type](#changing-column-type).
+{{< /hint >}}
+
 ```sql
 ALTER TABLE my_table ADD (c1 INT, c2 STRING);
 ```
@@ -98,6 +102,10 @@ otherwise this operation may fail, throws an exception like `The following colum
 ```sql
 ALTER TABLE my_table DROP (c1, c2);
 ```
+
+{{< hint info >}}
+To drop a column in a row type, see [Changing Column Type](#changing-column-type).
+{{< /hint >}}
 
 ## Dropping Partitions
 
@@ -183,6 +191,14 @@ The following SQL changes type of column `col_a` to `DOUBLE`.
 
 ```sql
 ALTER TABLE my_table MODIFY col_a DOUBLE;
+```
+
+Paimon also supports changing columns of row type, array type, and map type.
+
+```sql
+-- col_a previously has type ARRAY<MAP<INT, ROW(f1 INT, f2 STRING)>>
+-- the following SQL changes f1 to BIGINT, drops f2, and adds f3
+ALTER TABLE my_table MODIFY col_a ARRAY<MAP<INT, ROW(f1 BIGINT, f3 DOUBLE)>>;
 ```
 
 ## Adding watermark

@@ -20,11 +20,15 @@ package org.apache.spark.sql
 
 import org.apache.spark.executor.OutputMetrics
 import org.apache.spark.rdd.InputFileBlockHolder
+import org.apache.spark.sql.catalyst.analysis.Resolver
+import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.connector.expressions.{FieldReference, NamedReference}
 import org.apache.spark.sql.execution.datasources.DataSourceStrategy
 import org.apache.spark.sql.sources.Filter
+import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.util.PartitioningUtils
 import org.apache.spark.util.{Utils => SparkUtils}
 
 /**
@@ -86,5 +90,20 @@ object PaimonUtils {
       recordsWritten: Long): Unit = {
     outputMetrics.setBytesWritten(bytesWritten)
     outputMetrics.setRecordsWritten(recordsWritten)
+  }
+
+  def normalizePartitionSpec[T](
+      partitionSpec: Map[String, T],
+      partCols: StructType,
+      tblName: String,
+      resolver: Resolver): Map[String, T] = {
+    PartitioningUtils.normalizePartitionSpec(partitionSpec, partCols, tblName, resolver)
+  }
+
+  def requireExactMatchedPartitionSpec(
+      tableName: String,
+      spec: TablePartitionSpec,
+      partitionColumnNames: Seq[String]): Unit = {
+    PartitioningUtils.requireExactMatchedPartitionSpec(tableName, spec, partitionColumnNames)
   }
 }

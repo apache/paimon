@@ -30,11 +30,14 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Queue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -54,16 +57,30 @@ public class ThreadPoolUtils {
      * is max thread number.
      */
     public static ThreadPoolExecutor createCachedThreadPool(int threadNum, String namePrefix) {
+        return createCachedThreadPool(threadNum, namePrefix, new LinkedBlockingQueue<>());
+    }
+
+    /**
+     * Create a thread pool with max thread number and define queue. Inactive threads will
+     * automatically exit.
+     */
+    public static ThreadPoolExecutor createCachedThreadPool(
+            int threadNum, String namePrefix, BlockingQueue<Runnable> workQueue) {
         ThreadPoolExecutor executor =
                 new ThreadPoolExecutor(
                         threadNum,
                         threadNum,
                         1,
                         TimeUnit.MINUTES,
-                        new LinkedBlockingQueue<>(),
+                        workQueue,
                         newDaemonThreadFactory(namePrefix));
         executor.allowCoreThreadTimeOut(true);
         return executor;
+    }
+
+    public static ScheduledExecutorService createScheduledThreadPool(
+            int threadNum, String namePrefix) {
+        return new ScheduledThreadPoolExecutor(threadNum, newDaemonThreadFactory(namePrefix));
     }
 
     /** This method aims to parallel process tasks with memory control and sequentially. */
@@ -110,7 +127,9 @@ public class ThreadPoolUtils {
                                 if (stack.isEmpty()) {
                                     return;
                                 }
-                                activeList = randomlyExecute(executor, processor, stack.poll());
+                                activeList =
+                                        randomlyExecuteSequentialReturn(
+                                                executor, processor, stack.poll());
                             }
                         }
                     }
@@ -132,7 +151,7 @@ public class ThreadPoolUtils {
         awaitAllFutures(futures);
     }
 
-    public static <U, T> Iterator<T> randomlyExecute(
+    public static <U, T> Iterator<T> randomlyExecuteSequentialReturn(
             ExecutorService executor, Function<U, List<T>> processor, Collection<U> input) {
         List<Future<List<T>>> futures = new ArrayList<>(input.size());
         ClassLoader cl = Thread.currentThread().getContextClassLoader();

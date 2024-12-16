@@ -211,6 +211,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
 
     @Override
     public boolean isCompacting() {
+        compactManager.triggerCompaction(false);
         return compactManager.isCompacting();
     }
 

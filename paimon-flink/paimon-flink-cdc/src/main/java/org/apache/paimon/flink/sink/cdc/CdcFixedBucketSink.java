@@ -24,7 +24,7 @@ import org.apache.paimon.flink.sink.FlinkWriteSink;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.table.FileStoreTable;
 
-import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 
 /**
  * A {@link FlinkSink} for fixed-bucket table which accepts {@link CdcRecord} and waits for a schema
@@ -39,8 +39,8 @@ public class CdcFixedBucketSink extends FlinkWriteSink<CdcRecord> {
     }
 
     @Override
-    protected OneInputStreamOperator<CdcRecord, Committable> createWriteOperator(
+    protected OneInputStreamOperatorFactory<CdcRecord, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new CdcRecordStoreWriteOperator(table, writeProvider, commitUser);
+        return new CdcRecordStoreWriteOperator.Factory(table, writeProvider, commitUser);
     }
 }

@@ -316,8 +316,8 @@ made and contains the following information:
   "commitKind" : "COMPACT",
   "timeMillis" : 1684163217960,
   "logOffsets" : { },
-  "totalRecordCount" : 38,
-  "deltaRecordCount" : 20,
+  "totalRecordCount" : 2,
+  "deltaRecordCount" : -16,
   "changelogRecordCount" : 0,
   "watermark" : -9223372036854775808
 }

@@ -26,8 +26,11 @@ import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.table.api.TableException;
+import org.apache.flink.types.Row;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -46,6 +49,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 public class ConsumerActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
+    @Timeout(60)
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
     public void testResetConsumer(String invoker) throws Exception {
         init(warehouse);
@@ -72,18 +76,22 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         writeData(rowData(3L, BinaryString.fromString("Paimon")));
 
         // use consumer streaming read table
-        testStreamingRead(
+        BlockingIterator<Row, Row> iterator =
+                testStreamingRead(
                         "SELECT * FROM `"
                                 + tableName
                                 + "` /*+ OPTIONS('consumer-id'='myid','consumer.expiration-time'='3h') */",
                         Arrays.asList(
                                 changelogRow("+I", 1L, "Hi"),
                                 changelogRow("+I", 2L, "Hello"),
-                                changelogRow("+I", 3L, "Paimon")))
-                .close();
+                                changelogRow("+I", 3L, "Paimon")));
 
-        Thread.sleep(1000);
         ConsumerManager consumerManager = new ConsumerManager(table.fileIO(), table.location());
+        while (!consumerManager.consumer("myid").isPresent()) {
+            Thread.sleep(1000);
+        }
+        iterator.close();
+
         Optional<Consumer> consumer1 = consumerManager.consumer("myid");
         assertThat(consumer1).isPresent();
         assertThat(consumer1.get().nextSnapshot()).isEqualTo(4);
@@ -191,6 +199,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
     }
 
     @ParameterizedTest
+    @Timeout(60)
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
     public void testResetBranchConsumer(String invoker) throws Exception {
         init(warehouse);
@@ -222,18 +231,23 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         String branchTableName = tableName + "$branch_b1";
 
         // use consumer streaming read table
-        testStreamingRead(
+        BlockingIterator<Row, Row> iterator =
+                testStreamingRead(
                         "SELECT * FROM `"
                                 + branchTableName
                                 + "` /*+ OPTIONS('consumer-id'='myid','consumer.expiration-time'='3h') */",
                         Arrays.asList(
                                 changelogRow("+I", 1L, "Hi"),
                                 changelogRow("+I", 2L, "Hello"),
-                                changelogRow("+I", 3L, "Paimon")))
-                .close();
+                                changelogRow("+I", 3L, "Paimon")));
 
         ConsumerManager consumerManager =
                 new ConsumerManager(table.fileIO(), table.location(), branchName);
+        while (!consumerManager.consumer("myid").isPresent()) {
+            Thread.sleep(1000);
+        }
+        iterator.close();
+
         Optional<Consumer> consumer1 = consumerManager.consumer("myid");
         assertThat(consumer1).isPresent();
         assertThat(consumer1.get().nextSnapshot()).isEqualTo(4);

@@ -102,6 +102,11 @@ public class ManifestEntry implements FileEntry {
         return file.maxKey();
     }
 
+    @Override
+    public List<String> extraFiles() {
+        return file.extraFiles();
+    }
+
     public int totalBuckets() {
         return totalBuckets;
     }
@@ -119,6 +124,10 @@ public class ManifestEntry implements FileEntry {
                 file.fileName(),
                 file.extraFiles(),
                 file.embeddedIndex());
+    }
+
+    public ManifestEntry copyWithoutStats() {
+        return new ManifestEntry(kind, partition, bucket, totalBuckets, file.copyWithoutStats());
     }
 
     @Override

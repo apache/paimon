@@ -48,9 +48,7 @@ public class ScanMetricsTest {
                         ScanMetrics.SCAN_DURATION,
                         ScanMetrics.LAST_SCANNED_MANIFESTS,
                         ScanMetrics.LAST_SCAN_SKIPPED_TABLE_FILES,
-                        ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES,
-                        ScanMetrics.LAST_SKIPPED_BY_PARTITION_AND_STATS,
-                        ScanMetrics.LAST_SKIPPED_BY_WHOLE_BUCKET_FILES_FILTER);
+                        ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES);
     }
 
     /** Tests that the metrics are updated properly. */
@@ -66,14 +64,6 @@ public class ScanMetricsTest {
                 (Histogram) registeredGenericMetrics.get(ScanMetrics.SCAN_DURATION);
         Gauge<Long> lastScannedManifests =
                 (Gauge<Long>) registeredGenericMetrics.get(ScanMetrics.LAST_SCANNED_MANIFESTS);
-        Gauge<Long> lastSkippedByPartitionAndStats =
-                (Gauge<Long>)
-                        registeredGenericMetrics.get(
-                                ScanMetrics.LAST_SKIPPED_BY_PARTITION_AND_STATS);
-        Gauge<Long> lastSkippedByWholeBucketFilesFilter =
-                (Gauge<Long>)
-                        registeredGenericMetrics.get(
-                                ScanMetrics.LAST_SKIPPED_BY_WHOLE_BUCKET_FILES_FILTER);
         Gauge<Long> lastScanSkippedTableFiles =
                 (Gauge<Long>)
                         registeredGenericMetrics.get(ScanMetrics.LAST_SCAN_SKIPPED_TABLE_FILES);
@@ -85,8 +75,6 @@ public class ScanMetricsTest {
         assertThat(scanDuration.getCount()).isEqualTo(0);
         assertThat(scanDuration.getStatistics().size()).isEqualTo(0);
         assertThat(lastScannedManifests.getValue()).isEqualTo(0);
-        assertThat(lastSkippedByPartitionAndStats.getValue()).isEqualTo(0);
-        assertThat(lastSkippedByWholeBucketFilesFilter.getValue()).isEqualTo(0);
         assertThat(lastScanSkippedTableFiles.getValue()).isEqualTo(0);
         assertThat(lastScanResultedTableFiles.getValue()).isEqualTo(0);
 
@@ -104,9 +92,7 @@ public class ScanMetricsTest {
         assertThat(scanDuration.getStatistics().getMax()).isEqualTo(200);
         assertThat(scanDuration.getStatistics().getStdDev()).isEqualTo(0);
         assertThat(lastScannedManifests.getValue()).isEqualTo(20);
-        assertThat(lastSkippedByPartitionAndStats.getValue()).isEqualTo(25);
-        assertThat(lastSkippedByWholeBucketFilesFilter.getValue()).isEqualTo(32);
-        assertThat(lastScanSkippedTableFiles.getValue()).isEqualTo(57);
+        assertThat(lastScanSkippedTableFiles.getValue()).isEqualTo(25);
         assertThat(lastScanResultedTableFiles.getValue()).isEqualTo(10);
 
         // report again
@@ -123,19 +109,17 @@ public class ScanMetricsTest {
         assertThat(scanDuration.getStatistics().getMax()).isEqualTo(500);
         assertThat(scanDuration.getStatistics().getStdDev()).isCloseTo(212.132, offset(0.001));
         assertThat(lastScannedManifests.getValue()).isEqualTo(22);
-        assertThat(lastSkippedByPartitionAndStats.getValue()).isEqualTo(30);
-        assertThat(lastSkippedByWholeBucketFilesFilter.getValue()).isEqualTo(33);
-        assertThat(lastScanSkippedTableFiles.getValue()).isEqualTo(63);
+        assertThat(lastScanSkippedTableFiles.getValue()).isEqualTo(30);
         assertThat(lastScanResultedTableFiles.getValue()).isEqualTo(8);
     }
 
     private void reportOnce(ScanMetrics scanMetrics) {
-        ScanStats scanStats = new ScanStats(200, 20, 25, 32, 10);
+        ScanStats scanStats = new ScanStats(200, 20, 25, 10);
         scanMetrics.reportScan(scanStats);
     }
 
     private void reportAgain(ScanMetrics scanMetrics) {
-        ScanStats scanStats = new ScanStats(500, 22, 30, 33, 8);
+        ScanStats scanStats = new ScanStats(500, 22, 30, 8);
         scanMetrics.reportScan(scanStats);
     }
 

@@ -198,4 +198,16 @@ public class AvroFileFormatTest {
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("Artificial exception");
     }
+
+    @Test
+    void testCompression() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull());
+        AvroFileFormat format = new AvroFileFormat(new FormatContext(new Options(), 1024, 1024));
+        LocalFileIO localFileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+        try (PositionOutputStream out = localFileIO.newOutputStream(file, false)) {
+            assertThatThrownBy(() -> format.createWriterFactory(rowType).create(out, "unsupported"))
+                    .hasMessageContaining("Unrecognized codec: unsupported");
+        }
+    }
 }

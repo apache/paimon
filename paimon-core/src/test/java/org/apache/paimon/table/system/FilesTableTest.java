@@ -191,7 +191,16 @@ public class FilesTableTest extends TableTestBase {
                             BinaryString.fromString(
                                     Arrays.toString(new String[] {partition1, partition2})),
                             fileEntry.bucket(),
-                            BinaryString.fromString(file.fileName()),
+                            BinaryString.fromString(
+                                    table.location()
+                                            + "/pt1="
+                                            + partition1
+                                            + "/pt2="
+                                            + partition2
+                                            + "/bucket-"
+                                            + fileEntry.bucket()
+                                            + "/"
+                                            + file.fileName()),
                             BinaryString.fromString(file.fileFormat()),
                             file.schemaId(),
                             file.level(),

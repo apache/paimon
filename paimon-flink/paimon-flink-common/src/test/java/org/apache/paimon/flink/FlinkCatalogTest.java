@@ -850,7 +850,7 @@ public class FlinkCatalogTest {
         assertThat(t2.getComment()).isEqualTo(t1.getComment());
         assertThat(t2.getOptions()).isEqualTo(t1.getOptions());
         if (t1.getTableKind() == CatalogBaseTable.TableKind.TABLE) {
-            assertThat(t2.getSchema()).isEqualTo(t1.getSchema());
+            assertThat(t2.getUnresolvedSchema()).isEqualTo(t1.getUnresolvedSchema());
             assertThat(((CatalogTable) (t2)).getPartitionKeys())
                     .isEqualTo(((CatalogTable) (t1)).getPartitionKeys());
             assertThat(((CatalogTable) (t2)).isPartitioned())
@@ -864,7 +864,12 @@ public class FlinkCatalogTest {
                                             t2.getUnresolvedSchema()
                                                     .resolve(new TestSchemaResolver()))
                                     .build())
-                    .isEqualTo(t1.getSchema().toSchema());
+                    .isEqualTo(
+                            Schema.newBuilder()
+                                    .fromResolvedSchema(
+                                            t1.getUnresolvedSchema()
+                                                    .resolve(new TestSchemaResolver()))
+                                    .build());
             assertThat(mt2.getPartitionKeys()).isEqualTo(mt1.getPartitionKeys());
             assertThat(mt2.isPartitioned()).isEqualTo(mt1.isPartitioned());
             // validate definition query

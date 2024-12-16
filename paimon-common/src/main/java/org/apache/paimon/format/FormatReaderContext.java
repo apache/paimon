@@ -60,6 +60,7 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
         return fileSize;
     }
 
+    @Nullable
     @Override
     public FileIndexResult fileIndex() {
         return fileIndexResult;

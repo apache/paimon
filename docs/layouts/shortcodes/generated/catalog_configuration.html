@@ -69,6 +69,12 @@ under the License.
             <td>Controls the max number for which partitions in the catalog are cached.</td>
         </tr>
         <tr>
+            <td><h5>cache.snapshot.max-num-per-table</h5></td>
+            <td style="word-wrap: break-word;">20</td>
+            <td>Integer</td>
+            <td>Controls the max number for snapshots per table in the catalog are cached.</td>
+        </tr>
+        <tr>
             <td><h5>client-pool-size</h5></td>
             <td style="word-wrap: break-word;">2</td>
             <td>Integer</td>
@@ -79,12 +85,6 @@ under the License.
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
             <td>Whether to support format tables, format table corresponds to a regular csv, parquet or orc table, allowing read and write operations. However, during these processes, it does not connect to the metastore; hence, newly added partitions will not be reflected in the metastore and need to be manually added as separate partition operations.</td>
-        </tr>
-        <tr>
-            <td><h5>lineage-meta</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>The lineage meta to store table and data lineage information.<br /><br />Possible values:<br /><ul><li>"jdbc": Use standard jdbc to store table and data lineage information.</li></ul><ul><li>"custom": You can implement LineageMetaFactory and LineageMeta to store lineage information in customized storage.</li></ul></td>
         </tr>
         <tr>
             <td><h5>lock-acquire-timeout</h5></td>

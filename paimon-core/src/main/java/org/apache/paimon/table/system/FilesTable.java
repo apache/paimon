@@ -143,8 +143,7 @@ public class FilesTable implements ReadonlyTable {
 
     @Override
     public InnerTableRead newRead() {
-        return new FilesRead(
-                new SchemaManager(storeTable.fileIO(), storeTable.location()), storeTable);
+        return new FilesRead(storeTable.schemaManager(), storeTable);
     }
 
     @Override
@@ -385,7 +384,9 @@ public class FilesTable implements ReadonlyTable {
                                                         partitionConverter.convert(
                                                                 dataSplit.partition()))),
                         dataSplit::bucket,
-                        () -> BinaryString.fromString(dataFileMeta.fileName()),
+                        () ->
+                                BinaryString.fromString(
+                                        dataSplit.bucketPath() + "/" + dataFileMeta.fileName()),
                         () ->
                                 BinaryString.fromString(
                                         DataFilePathFactory.formatIdentifier(

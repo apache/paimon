@@ -53,7 +53,7 @@ jobs:
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
           test_modules="!paimon-e2e-tests,!org.apache.paimon:paimon-hive-connector-3.1,"
-          for suffix in 3.5 3.4 3.3 3.2 common; do
+          for suffix in 3.5 3.4 3.3 3.2 ut; do
           test_modules+="!org.apache.paimon:paimon-spark-${suffix},"
           done
           test_modules="${test_modules%,}"

@@ -48,6 +48,15 @@ public final class HiveCatalogOptions {
                                     + "If not configured, try to load from 'HADOOP_CONF_DIR' or 'HADOOP_HOME' system environment.\n"
                                     + "Configure Priority: 1.from 'hadoop-conf-dir' 2.from HADOOP_CONF_DIR  3.from HADOOP_HOME/conf 4.HADOOP_HOME/etc/hadoop.\n");
 
+    public static final ConfigOption<String> METASTORE_CLIENT_CLASS =
+            ConfigOptions.key("metastore.client.class")
+                    .stringType()
+                    .defaultValue("org.apache.hadoop.hive.metastore.HiveMetaStoreClient")
+                    .withDescription(
+                            "Class name of Hive metastore client.\n"
+                                    + "NOTE: This class must directly implements "
+                                    + "org.apache.hadoop.hive.metastore.IMetaStoreClient.");
+
     public static final ConfigOption<Boolean> LOCATION_IN_PROPERTIES =
             ConfigOptions.key("location-in-properties")
                     .booleanType()

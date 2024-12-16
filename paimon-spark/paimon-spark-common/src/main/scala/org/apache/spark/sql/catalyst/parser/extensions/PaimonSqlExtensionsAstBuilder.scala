@@ -19,7 +19,7 @@
 package org.apache.spark.sql.catalyst.parser.extensions
 
 import org.apache.paimon.spark.catalyst.plans.logical
-import org.apache.paimon.spark.catalyst.plans.logical.{CreateOrReplaceTagCommand, DeleteTagCommand, PaimonCallArgument, PaimonCallStatement, PaimonNamedArgument, PaimonPositionalArgument, RenameTagCommand, ShowTagsCommand, TagOptions}
+import org.apache.paimon.spark.catalyst.plans.logical._
 import org.apache.paimon.utils.TimeUtils
 
 import org.antlr.v4.runtime._
@@ -212,5 +212,16 @@ object CurrentOrigin {
   def get: Origin = value.get()
   def set(o: Origin): Unit = value.set(o)
   def reset(): Unit = value.set(Origin())
+
+  def withOrigin[A](o: Origin)(f: => A): A = {
+    // remember the previous one so it can be reset to this
+    // way withOrigin can be recursive
+    val previous = get
+    set(o)
+    val ret =
+      try f
+      finally { set(previous) }
+    ret
+  }
 }
 /* Apache Spark copy end */

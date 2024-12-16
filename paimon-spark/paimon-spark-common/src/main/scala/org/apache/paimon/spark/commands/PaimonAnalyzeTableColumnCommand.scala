@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.manifest.PartitionEntry
 import org.apache.paimon.schema.TableSchema
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
@@ -64,11 +65,9 @@ case class PaimonAnalyzeTableColumnCommand(
     // compute stats
     val totalSize = table
       .newScan()
-      .plan()
-      .splits()
+      .listPartitionEntries()
       .asScala
-      .flatMap { case split: DataSplit => split.dataFiles().asScala }
-      .map(_.fileSize())
+      .map(_.fileSizeInBytes())
       .sum
     val (mergedRecordCount, colStats) =
       PaimonStatsUtils.computeColumnStats(sparkSession, relation, attributes)

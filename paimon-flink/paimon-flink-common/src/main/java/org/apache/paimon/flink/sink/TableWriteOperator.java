@@ -21,12 +21,15 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.ProcessRecordAttributesUtil;
 import org.apache.paimon.flink.sink.StoreSinkWriteState.StateValueFilter;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.ChannelComputer;
 
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
+import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.RecordAttributes;
 
 import java.io.IOException;
@@ -44,10 +47,11 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     protected transient StoreSinkWrite write;
 
     public TableWriteOperator(
+            StreamOperatorParameters<Committable> parameters,
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
-        super(Options.fromMap(table.options()));
+        super(parameters, Options.fromMap(table.options()));
         this.table = table;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
         this.initialCommitUser = initialCommitUser;
@@ -58,14 +62,14 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
         super.initializeState(context);
 
         boolean containLogSystem = containLogSystem();
-        int numTasks = getRuntimeContext().getNumberOfParallelSubtasks();
+        int numTasks = RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext());
         StateValueFilter stateFilter =
                 (tableName, partition, bucket) -> {
                     int task =
                             containLogSystem
                                     ? ChannelComputer.select(bucket, numTasks)
                                     : ChannelComputer.select(partition, bucket, numTasks);
-                    return task == getRuntimeContext().getIndexOfThisSubtask();
+                    return task == RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext());
                 };
 
         state = createState(context, stateFilter);
@@ -126,5 +130,23 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     @VisibleForTesting
     public StoreSinkWrite getWrite() {
         return write;
+    }
+
+    /** {@link StreamOperatorFactory} of {@link TableWriteOperator}. */
+    protected abstract static class Factory<IN>
+            extends PrepareCommitOperator.Factory<IN, Committable> {
+        protected final FileStoreTable table;
+        protected final StoreSinkWrite.Provider storeSinkWriteProvider;
+        protected final String initialCommitUser;
+
+        protected Factory(
+                FileStoreTable table,
+                StoreSinkWrite.Provider storeSinkWriteProvider,
+                String initialCommitUser) {
+            super(Options.fromMap(table.options()));
+            this.table = table;
+            this.storeSinkWriteProvider = storeSinkWriteProvider;
+            this.initialCommitUser = initialCommitUser;
+        }
     }
 }

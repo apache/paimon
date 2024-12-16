@@ -26,12 +26,18 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.runtime.operators.testutils.DummyEnvironment;
 import org.apache.flink.streaming.api.operators.Output;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.LatencyMarker;
 import org.apache.flink.streaming.runtime.streamrecord.RecordAttributes;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.streaming.runtime.tasks.SourceOperatorStreamTask;
 import org.apache.flink.streaming.runtime.watermarkstatus.WatermarkStatus;
+import org.apache.flink.streaming.util.MockOutput;
+import org.apache.flink.streaming.util.MockStreamConfig;
 import org.apache.flink.util.OutputTag;
 import org.junit.jupiter.api.Test;
 
@@ -151,7 +157,17 @@ class LocalMergeOperatorTest {
                         Collections.singletonList("f0"),
                         options,
                         null);
-        operator = new LocalMergeOperator(schema);
+        operator =
+                new LocalMergeOperator.Factory(schema)
+                        .createStreamOperator(
+                                new StreamOperatorParameters<>(
+                                        new SourceOperatorStreamTask<Integer>(
+                                                new DummyEnvironment()),
+                                        new MockStreamConfig(new Configuration(), 1),
+                                        new MockOutput<>(new ArrayList<>()),
+                                        null,
+                                        null,
+                                        null));
         operator.open();
         assertThat(operator.merger()).isInstanceOf(HashMapLocalMerger.class);
     }

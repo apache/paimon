@@ -22,6 +22,8 @@ import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.casting.CastedRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
@@ -33,9 +35,9 @@ import org.apache.paimon.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Converter for array of {@link SimpleColStats}. */
 public class SimpleStatsEvolution {
@@ -46,6 +48,9 @@ public class SimpleStatsEvolution {
 
     private final Map<List<String>, int[]> indexMappings;
 
+    private final GenericRow emptyValues;
+    private final GenericArray emptyNullCounts;
+
     public SimpleStatsEvolution(
             RowType rowType,
             @Nullable int[] indexMapping,
@@ -53,7 +58,9 @@ public class SimpleStatsEvolution {
         this.fieldNames = rowType.getFieldNames();
         this.indexMapping = indexMapping;
         this.castFieldGetters = castFieldGetters;
-        this.indexMappings = new HashMap<>();
+        this.indexMappings = new ConcurrentHashMap<>();
+        this.emptyValues = new GenericRow(fieldNames.size());
+        this.emptyNullCounts = new GenericArray(new Object[fieldNames.size()]);
     }
 
     public Result evolution(
@@ -62,7 +69,12 @@ public class SimpleStatsEvolution {
         InternalRow maxValues = stats.maxValues();
         InternalArray nullCounts = stats.nullCounts();
 
-        if (denseFields != null) {
+        if (denseFields != null && denseFields.isEmpty()) {
+            // optimize for empty dense fields
+            minValues = emptyValues;
+            maxValues = emptyValues;
+            nullCounts = emptyNullCounts;
+        } else if (denseFields != null) {
             int[] denseIndexMapping =
                     indexMappings.computeIfAbsent(
                             denseFields,

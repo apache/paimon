@@ -102,7 +102,10 @@ abstract class AbstractLookupBenchmark {
                         new CacheManager(MemorySize.ofMebiBytes(10)),
                         keySerializer.createSliceComparator());
 
-        File file = new File(tempDir.toFile(), UUID.randomUUID().toString());
+        String name =
+                String.format(
+                        "%s-%s-%s", options.lookupLocalFileType(), valueLength, bloomFilterEnabled);
+        File file = new File(tempDir.toFile(), UUID.randomUUID() + "-" + name);
         LookupStoreWriter writer = factory.createWriter(file, createBloomFiler(bloomFilterEnabled));
         int i = 0;
         for (byte[] input : inputs) {

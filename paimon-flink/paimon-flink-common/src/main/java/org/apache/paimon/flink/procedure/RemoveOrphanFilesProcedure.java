@@ -20,6 +20,7 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.orphan.FlinkOrphanFilesClean;
+import org.apache.paimon.operation.CleanOrphanFilesResult;
 import org.apache.paimon.operation.LocalOrphanFilesClean;
 
 import org.apache.flink.table.annotation.ArgumentHint;
@@ -75,11 +76,11 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
         if (mode == null) {
             mode = "DISTRIBUTED";
         }
-        long deletedFiles;
+        CleanOrphanFilesResult cleanOrphanFilesResult;
         try {
             switch (mode.toUpperCase(Locale.ROOT)) {
                 case "DISTRIBUTED":
-                    deletedFiles =
+                    cleanOrphanFilesResult =
                             FlinkOrphanFilesClean.executeDatabaseOrphanFiles(
                                     procedureContext.getExecutionEnvironment(),
                                     catalog,
@@ -90,7 +91,7 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
                                     tableName);
                     break;
                 case "LOCAL":
-                    deletedFiles =
+                    cleanOrphanFilesResult =
                             LocalOrphanFilesClean.executeDatabaseOrphanFiles(
                                     catalog,
                                     databaseName,
@@ -105,7 +106,10 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
                                     + mode
                                     + ". Only 'DISTRIBUTED' and 'LOCAL' are supported.");
             }
-            return new String[] {String.valueOf(deletedFiles)};
+            return new String[] {
+                String.valueOf(cleanOrphanFilesResult.getDeletedFileCount()),
+                String.valueOf(cleanOrphanFilesResult.getDeletedFileTotalLenInBytes())
+            };
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

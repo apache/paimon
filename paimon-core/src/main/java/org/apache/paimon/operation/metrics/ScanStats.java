@@ -25,23 +25,15 @@ public class ScanStats {
     // the unit is milliseconds
     private final long duration;
     private final long scannedManifests;
-    private final long skippedByPartitionAndStats;
 
-    private final long skippedByWholeBucketFiles;
     private final long skippedTableFiles;
     private final long resultedTableFiles;
 
     public ScanStats(
-            long duration,
-            long scannedManifests,
-            long skippedByPartitionAndStats,
-            long skippedByWholeBucketFiles,
-            long resultedTableFiles) {
+            long duration, long scannedManifests, long skippedTableFiles, long resultedTableFiles) {
         this.duration = duration;
         this.scannedManifests = scannedManifests;
-        this.skippedByPartitionAndStats = skippedByPartitionAndStats;
-        this.skippedByWholeBucketFiles = skippedByWholeBucketFiles;
-        this.skippedTableFiles = skippedByPartitionAndStats + skippedByWholeBucketFiles;
+        this.skippedTableFiles = skippedTableFiles;
         this.resultedTableFiles = resultedTableFiles;
     }
 
@@ -58,16 +50,6 @@ public class ScanStats {
     @VisibleForTesting
     protected long getResultedTableFiles() {
         return resultedTableFiles;
-    }
-
-    @VisibleForTesting
-    protected long getSkippedByPartitionAndStats() {
-        return skippedByPartitionAndStats;
-    }
-
-    @VisibleForTesting
-    protected long getSkippedByWholeBucketFiles() {
-        return skippedByWholeBucketFiles;
     }
 
     @VisibleForTesting

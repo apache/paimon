@@ -18,10 +18,10 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.commons.collections.IteratorUtils;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.datastream.DataStreamUtils;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.test.util.MiniClusterWithClientResource;
@@ -67,7 +67,7 @@ public class IteratorSourcesITCase extends TestLogger {
                         "iterator source");
 
         final List<RowData> result =
-                DataStreamUtils.collectBoundedStream(stream, "Iterator Source Test");
+                IteratorUtils.toList(stream.executeAndCollect("Iterator Source Test"));
 
         verifySequence(result, 1L, 1_000L);
     }

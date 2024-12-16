@@ -93,7 +93,7 @@ public class HmsReporter implements Closeable {
             statistic.put(HIVE_LAST_UPDATE_TIME_PROP, String.valueOf(modifyTime / 1000));
 
             LOG.info("alter partition {} with statistic {}.", partitionSpec, statistic);
-            metastoreClient.alterPartition(partitionSpec, statistic, modifyTime);
+            metastoreClient.alterPartition(partitionSpec, statistic, modifyTime, true);
         }
     }
 

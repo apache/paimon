@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.object;
 
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.DelegatedFileStoreTable;
@@ -46,6 +47,7 @@ public interface ObjectTable extends FileStoreTable {
     RowType SCHEMA =
             RowType.builder()
                     .field("path", DataTypes.STRING().notNull())
+                    .field("parent_path", DataTypes.STRING().notNull())
                     .field("name", DataTypes.STRING().notNull())
                     .field("length", DataTypes.BIGINT().notNull())
                     .field("mtime", DataTypes.TIMESTAMP_LTZ_MILLIS())
@@ -66,10 +68,25 @@ public interface ObjectTable extends FileStoreTable {
     /** Underlying table to store metadata. */
     FileStoreTable underlyingTable();
 
+    /** File io for object file system. */
+    FileIO objectFileIO();
+
     long refresh();
 
     @Override
     ObjectTable copy(Map<String, String> dynamicOptions);
+
+    @Override
+    ObjectTable copy(TableSchema newTableSchema);
+
+    @Override
+    ObjectTable copyWithoutTimeTravel(Map<String, String> dynamicOptions);
+
+    @Override
+    ObjectTable copyWithLatestSchema();
+
+    @Override
+    ObjectTable switchToBranch(String branchName);
 
     /** Create a new builder for {@link ObjectTable}. */
     static ObjectTable.Builder builder() {
@@ -80,6 +97,7 @@ public interface ObjectTable extends FileStoreTable {
     class Builder {
 
         private FileStoreTable underlyingTable;
+        private FileIO objectFileIO;
         private String objectLocation;
 
         public ObjectTable.Builder underlyingTable(FileStoreTable underlyingTable) {
@@ -93,23 +111,31 @@ public interface ObjectTable extends FileStoreTable {
             return this;
         }
 
+        public ObjectTable.Builder objectFileIO(FileIO objectFileIO) {
+            this.objectFileIO = objectFileIO;
+            return this;
+        }
+
         public ObjectTable.Builder objectLocation(String objectLocation) {
             this.objectLocation = objectLocation;
             return this;
         }
 
         public ObjectTable build() {
-            return new ObjectTableImpl(underlyingTable, objectLocation);
+            return new ObjectTableImpl(underlyingTable, objectFileIO, objectLocation);
         }
     }
 
     /** An implementation for {@link ObjectTable}. */
     class ObjectTableImpl extends DelegatedFileStoreTable implements ObjectTable {
 
+        private final FileIO objectFileIO;
         private final String objectLocation;
 
-        public ObjectTableImpl(FileStoreTable underlyingTable, String objectLocation) {
+        public ObjectTableImpl(
+                FileStoreTable underlyingTable, FileIO objectFileIO, String objectLocation) {
             super(underlyingTable);
+            this.objectFileIO = objectFileIO;
             this.objectLocation = objectLocation;
         }
 
@@ -149,6 +175,11 @@ public interface ObjectTable extends FileStoreTable {
         }
 
         @Override
+        public FileIO objectFileIO() {
+            return objectFileIO;
+        }
+
+        @Override
         public long refresh() {
             try {
                 return ObjectRefresh.refresh(this);
@@ -159,28 +190,30 @@ public interface ObjectTable extends FileStoreTable {
 
         @Override
         public ObjectTable copy(Map<String, String> dynamicOptions) {
-            return new ObjectTableImpl(wrapped.copy(dynamicOptions), objectLocation);
+            return new ObjectTableImpl(wrapped.copy(dynamicOptions), objectFileIO, objectLocation);
         }
 
         @Override
-        public FileStoreTable copy(TableSchema newTableSchema) {
-            return new ObjectTableImpl(wrapped.copy(newTableSchema), objectLocation);
+        public ObjectTable copy(TableSchema newTableSchema) {
+            return new ObjectTableImpl(wrapped.copy(newTableSchema), objectFileIO, objectLocation);
         }
 
         @Override
-        public FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions) {
+        public ObjectTable copyWithoutTimeTravel(Map<String, String> dynamicOptions) {
             return new ObjectTableImpl(
-                    wrapped.copyWithoutTimeTravel(dynamicOptions), objectLocation);
+                    wrapped.copyWithoutTimeTravel(dynamicOptions), objectFileIO, objectLocation);
         }
 
         @Override
-        public FileStoreTable copyWithLatestSchema() {
-            return new ObjectTableImpl(wrapped.copyWithLatestSchema(), objectLocation);
+        public ObjectTable copyWithLatestSchema() {
+            return new ObjectTableImpl(
+                    wrapped.copyWithLatestSchema(), objectFileIO, objectLocation);
         }
 
         @Override
-        public FileStoreTable switchToBranch(String branchName) {
-            return new ObjectTableImpl(wrapped.switchToBranch(branchName), objectLocation);
+        public ObjectTable switchToBranch(String branchName) {
+            return new ObjectTableImpl(
+                    wrapped.switchToBranch(branchName), objectFileIO, objectLocation);
         }
     }
 }

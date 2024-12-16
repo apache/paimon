@@ -20,6 +20,7 @@ package org.apache.paimon.flink.utils;
 
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.ExecutionConfig;
+import org.apache.flink.api.common.serialization.SerializerConfig;
 import org.apache.flink.api.common.typeinfo.AtomicType;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeComparator;
@@ -78,7 +79,16 @@ public class JavaTypeInfo<T extends Serializable> extends TypeInformation<T>
         return Comparable.class.isAssignableFrom(typeClass);
     }
 
-    @Override
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
+     */
+    public TypeSerializer<T> createSerializer(SerializerConfig config) {
+        return this.createSerializer((ExecutionConfig) null);
+    }
+
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
+     */
     public TypeSerializer<T> createSerializer(ExecutionConfig config) {
         return new JavaSerializer<>(this.typeClass);
     }
@@ -91,7 +101,9 @@ public class JavaTypeInfo<T extends Serializable> extends TypeInformation<T>
             @SuppressWarnings("rawtypes")
             GenericTypeComparator comparator =
                     new GenericTypeComparator(
-                            sortOrderAscending, createSerializer(executionConfig), this.typeClass);
+                            sortOrderAscending,
+                            new JavaSerializer<>(this.typeClass),
+                            this.typeClass);
             return (TypeComparator<T>) comparator;
         }
 

@@ -20,6 +20,7 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.data.{InternalRow => PaimonInternalRow}
 import org.apache.paimon.reader.RecordReader
+import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.source.{DataSplit, Split}
 

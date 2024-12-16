@@ -71,13 +71,14 @@ public class StatsFileHandler {
     }
 
     public Optional<Statistics> readStats(Snapshot snapshot) {
-        if (snapshot.statistics() == null) {
-            return Optional.empty();
-        } else {
-            Statistics stats = statsFile.read(snapshot.statistics());
-            stats.deserializeFieldsFromString(schemaManager.schema(stats.schemaId()));
-            return Optional.of(stats);
-        }
+        String file = snapshot.statistics();
+        return file == null ? Optional.empty() : Optional.of(readStats(file));
+    }
+
+    public Statistics readStats(String file) {
+        Statistics stats = statsFile.read(file);
+        stats.deserializeFieldsFromString(schemaManager.schema(stats.schemaId()));
+        return stats;
     }
 
     /** Delete stats of the specified snapshot. */

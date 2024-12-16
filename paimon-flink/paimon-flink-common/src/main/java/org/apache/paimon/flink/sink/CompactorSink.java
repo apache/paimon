@@ -21,7 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
 
-import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.table.data.RowData;
 
 /** {@link FlinkSink} for dedicated compact jobs. */
@@ -29,14 +29,17 @@ public class CompactorSink extends FlinkSink<RowData> {
 
     private static final long serialVersionUID = 1L;
 
-    public CompactorSink(FileStoreTable table) {
+    private final boolean fullCompaction;
+
+    public CompactorSink(FileStoreTable table, boolean fullCompaction) {
         super(table, false);
+        this.fullCompaction = fullCompaction;
     }
 
     @Override
-    protected OneInputStreamOperator<RowData, Committable> createWriteOperator(
+    protected OneInputStreamOperatorFactory<RowData, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new StoreCompactOperator(table, writeProvider, commitUser);
+        return new StoreCompactOperator.Factory(table, writeProvider, commitUser, fullCompaction);
     }
 
     @Override

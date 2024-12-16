@@ -96,7 +96,8 @@ public class HiveSplitGenerator {
                     scan.withFilter(PredicateBuilder.and(predicatePerPartition));
                 }
             }
-            scan.plan()
+            scan.dropStats()
+                    .plan()
                     .splits()
                     .forEach(
                             split ->
