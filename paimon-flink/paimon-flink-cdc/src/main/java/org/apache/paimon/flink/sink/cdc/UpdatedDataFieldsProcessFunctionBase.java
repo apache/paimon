@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -48,9 +49,9 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     private static final Logger LOG =
             LoggerFactory.getLogger(UpdatedDataFieldsProcessFunctionBase.class);
 
-    protected final Catalog.Loader catalogLoader;
+    protected final CatalogLoader catalogLoader;
     protected Catalog catalog;
-    private boolean allowUpperCase;
+    private boolean caseSensitive;
 
     private static final List<DataTypeRoot> STRING_TYPES =
             Arrays.asList(DataTypeRoot.CHAR, DataTypeRoot.VARCHAR);
@@ -70,7 +71,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     private static final List<DataTypeRoot> TIMESTAMP_TYPES =
             Arrays.asList(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE);
 
-    protected UpdatedDataFieldsProcessFunctionBase(Catalog.Loader catalogLoader) {
+    protected UpdatedDataFieldsProcessFunctionBase(CatalogLoader catalogLoader) {
         this.catalogLoader = catalogLoader;
     }
 
@@ -86,7 +87,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
      */
     public void open(Configuration parameters) {
         this.catalog = catalogLoader.load();
-        this.allowUpperCase = this.catalog.allowUpperCase();
+        this.caseSensitive = this.catalog.caseSensitive();
     }
 
     protected void applySchemaChange(
@@ -215,8 +216,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
 
         List<SchemaChange> result = new ArrayList<>();
         for (DataField newField : updatedDataFields) {
-            String newFieldName =
-                    StringUtils.caseSensitiveConversion(newField.name(), allowUpperCase);
+            String newFieldName = StringUtils.toLowerCaseIfNeed(newField.name(), caseSensitive);
             if (oldFields.containsKey(newFieldName)) {
                 DataField oldField = oldFields.get(newFieldName);
                 // we compare by ignoring nullable, because partition keys and primary keys might be

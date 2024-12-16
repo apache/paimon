@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.flink.sink.cdc.EventParser;
@@ -155,9 +156,9 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
 
     @Override
     protected void validateCaseSensitivity() {
-        Catalog.validateCaseInsensitive(allowUpperCase, "Database", database);
-        Catalog.validateCaseInsensitive(allowUpperCase, "Table prefix", tablePrefix);
-        Catalog.validateCaseInsensitive(allowUpperCase, "Table suffix", tableSuffix);
+        CatalogUtils.validateCaseInsensitive(caseSensitive, "Database", database);
+        CatalogUtils.validateCaseInsensitive(caseSensitive, "Table prefix", tablePrefix);
+        CatalogUtils.validateCaseInsensitive(caseSensitive, "Table suffix", tableSuffix);
     }
 
     @Override
@@ -179,7 +180,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
         NewTableSchemaBuilder schemaBuilder =
                 new NewTableSchemaBuilder(
                         tableConfig,
-                        allowUpperCase,
+                        caseSensitive,
                         partitionKeys,
                         primaryKeys,
                         requirePrimaryKeys(),
@@ -190,7 +191,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
                 excludingTables == null ? null : Pattern.compile(excludingTables);
         TableNameConverter tableNameConverter =
                 new TableNameConverter(
-                        allowUpperCase,
+                        caseSensitive,
                         mergeShards,
                         dbPrefix,
                         dbSuffix,

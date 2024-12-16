@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.FileSystemCatalogOptions;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -1327,7 +1326,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 syncTableActionBuilder(mySqlConfig)
                         .withCatalogConfig(
                                 Collections.singletonMap(
-                                        FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false"))
+                                        CatalogOptions.CASE_SENSITIVE.key(), "false"))
                         .withComputedColumnArgs("SUBSTRING=substring(UPPERCASE_STRING,2)")
                         .build();
         runActionWithDefaultEnv(action);
@@ -1363,7 +1362,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 syncTableActionBuilder(mySqlConfig)
                         .withCatalogConfig(
                                 Collections.singletonMap(
-                                        FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false"))
+                                        CatalogOptions.CASE_SENSITIVE.key(), "false"))
                         .withPrimaryKeys("ID1", "PART")
                         .withPartitionKeys("PART")
                         .build();

@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.source.operator;
 
 import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
-import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.flink.compact.MultiTableScanBase;
 import org.apache.paimon.flink.compact.MultiUnawareBucketTableScan;
 import org.apache.paimon.flink.sink.MultiTableCompactionTaskTypeInfo;
@@ -48,7 +48,7 @@ public class CombinedUnawareStreamingSource
     private final long monitorInterval;
 
     public CombinedUnawareStreamingSource(
-            Catalog.Loader catalogLoader,
+            CatalogLoader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,
@@ -104,7 +104,7 @@ public class CombinedUnawareStreamingSource
     public static DataStream<MultiTableUnawareAppendCompactionTask> buildSource(
             StreamExecutionEnvironment env,
             String name,
-            Catalog.Loader catalogLoader,
+            CatalogLoader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,

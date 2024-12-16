@@ -320,7 +320,7 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
-    public boolean allowUpperCase() {
+    public boolean caseSensitive() {
         return false;
     }
 
