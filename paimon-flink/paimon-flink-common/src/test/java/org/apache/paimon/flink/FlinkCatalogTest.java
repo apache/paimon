@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.flink.log.LogSinkProvider;
 import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.log.LogStoreRegister;
@@ -99,6 +100,11 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatCollection;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Test for {@link FlinkCatalog}. */
 public class FlinkCatalogTest {
@@ -598,6 +604,43 @@ public class FlinkCatalogTest {
         assertThatThrownBy(() -> catalog.dropDatabase(path1.getDatabaseName(), false, false))
                 .isInstanceOf(DatabaseNotExistException.class)
                 .hasMessage("Database db1 does not exist in Catalog test-catalog.");
+    }
+
+    @Test
+    public void testAlterDb() throws DatabaseAlreadyExistException, DatabaseNotExistException {
+        CatalogDatabaseImpl database = new CatalogDatabaseImpl(Collections.emptyMap(), null);
+        catalog.createDatabase(path1.getDatabaseName(), database, false);
+        Map<String, String> properties = Collections.singletonMap("haa", "ccc");
+        CatalogDatabaseImpl newDatabase = new CatalogDatabaseImpl(properties, "haha");
+        Catalog mockCatalog = spy(catalog);
+        doNothing().when(mockCatalog).alterDatabase(path1.getDatabaseName(), newDatabase, false);
+        when(mockCatalog.getDatabase(path1.getDatabaseName())).thenReturn(database);
+        mockCatalog.alterDatabase(path1.getDatabaseName(), newDatabase, false);
+        verify(mockCatalog, times(1)).alterDatabase(path1.getDatabaseName(), newDatabase, false);
+        verify(mockCatalog, times(1)).getDatabase(path1.getDatabaseName());
+    }
+
+    @Test
+    public void testAlterDb_DatabaseNotExistException() {
+        CatalogDatabaseImpl database = new CatalogDatabaseImpl(Collections.emptyMap(), null);
+        assertThatThrownBy(() -> catalog.alterDatabase(path1.getDatabaseName(), database, false))
+                .isInstanceOf(DatabaseNotExistException.class)
+                .hasMessage("Database db1 does not exist in Catalog test-catalog.");
+    }
+
+    @Test
+    public void testGetProperties() throws Exception {
+        Map<String, String> oldProperties = Collections.emptyMap();
+        Map<String, String> newProperties = Collections.singletonMap("haa", "ccc");
+        List<PropertyChange> propertyChanges =
+                FlinkCatalog.getPropertyChanges(oldProperties, newProperties);
+        assertThat(propertyChanges.size()).isEqualTo(1);
+        oldProperties = newProperties;
+        propertyChanges = FlinkCatalog.getPropertyChanges(oldProperties, newProperties);
+        assertThat(propertyChanges.size()).isEqualTo(0);
+        oldProperties = Collections.singletonMap("aa", "ccc");
+        propertyChanges = FlinkCatalog.getPropertyChanges(oldProperties, newProperties);
+        assertThat(propertyChanges.size()).isEqualTo(2);
     }
 
     @Test

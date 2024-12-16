@@ -20,8 +20,11 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
 import org.apache.paimon.flink.utils.FlinkDescriptorProperties;
@@ -1223,13 +1226,20 @@ public class FlinkCatalog extends AbstractCatalog {
         return new Identifier(path.getDatabaseName(), path.getObjectName());
     }
 
-    // --------------------- unsupported methods ----------------------------
-
     @Override
     public final void alterDatabase(
             String name, CatalogDatabase newDatabase, boolean ignoreIfNotExists)
-            throws CatalogException {
-        throw new UnsupportedOperationException();
+            throws CatalogException, DatabaseNotExistException {
+        try {
+            Database oldDatabase = catalog.getDatabase(name);
+            List<PropertyChange> changes =
+                    getPropertyChanges(oldDatabase.options(), newDatabase.getProperties());
+            catalog.alterDatabase(name, changes, ignoreIfNotExists);
+        } catch (Catalog.DatabaseNotExistException e) {
+            if (!ignoreIfNotExists) {
+                throw new DatabaseNotExistException(getName(), e.database());
+            }
+        }
     }
 
     @Override
@@ -1276,6 +1286,27 @@ public class FlinkCatalog extends AbstractCatalog {
             return Collections.emptyList();
         }
         return getPartitionSpecs(tablePath, null);
+    }
+
+    @VisibleForTesting
+    static List<PropertyChange> getPropertyChanges(
+            Map<String, String> oldOptions, Map<String, String> newOptions) {
+        List<PropertyChange> changes = new ArrayList<>();
+        newOptions.forEach(
+                (k, v) -> {
+                    if (!oldOptions.containsKey(k) || !oldOptions.get(k).equals(v)) {
+                        changes.add(PropertyChange.setProperty(k, v));
+                    }
+                });
+        oldOptions
+                .keySet()
+                .forEach(
+                        (k) -> {
+                            if (!newOptions.containsKey(k)) {
+                                changes.add(PropertyChange.removeProperty(k));
+                            }
+                        });
+        return changes;
     }
 
     private Table getPaimonTable(ObjectPath tablePath) throws TableNotExistException {

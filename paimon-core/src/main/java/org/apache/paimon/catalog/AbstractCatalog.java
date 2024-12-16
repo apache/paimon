@@ -234,6 +234,9 @@ public abstract class AbstractCatalog implements Catalog {
             throws DatabaseNotExistException {
         checkNotSystemDatabase(name);
         try {
+            if (changes == null || changes.isEmpty()) {
+                return;
+            }
             alterDatabaseImpl(name, changes);
         } catch (DatabaseNotExistException e) {
             if (ignoreIfNotExists) {
