@@ -171,7 +171,6 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
         return true;
     }
 
-
     private boolean shouldSynchronizeCurrentTable() {
         if (!shouldSynchronizeCurrentDb()) {
             return false;

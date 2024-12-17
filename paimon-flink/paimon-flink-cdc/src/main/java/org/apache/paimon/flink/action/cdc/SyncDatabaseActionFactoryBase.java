@@ -23,9 +23,10 @@ import org.apache.paimon.flink.action.ActionFactory;
 import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 
 import java.util.Optional;
+
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.EXCLUDING_DBS;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.INCLUDING_DBS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.EXCLUDING_TABLES;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.INCLUDING_DBS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.INCLUDING_TABLES;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MULTIPLE_TABLE_PARTITION_KEYS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PARTITION_KEYS;

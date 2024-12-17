@@ -159,7 +159,6 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
         return this;
     }
 
-
     public SyncDatabaseActionBase withPartitionKeys(String... partitionKeys) {
         this.partitionKeys.addAll(Arrays.asList(partitionKeys));
         return this;
@@ -206,8 +205,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
         Pattern tblExcludingPattern =
                 excludingTables == null ? null : Pattern.compile(excludingTables);
         Pattern dbIncludingPattern = Pattern.compile(includingDbs);
-        Pattern dbExcludingPattern =
-                excludingDbs == null ? null : Pattern.compile(excludingDbs);
+        Pattern dbExcludingPattern = excludingDbs == null ? null : Pattern.compile(excludingDbs);
         TableNameConverter tableNameConverter =
                 new TableNameConverter(
                         allowUpperCase,
