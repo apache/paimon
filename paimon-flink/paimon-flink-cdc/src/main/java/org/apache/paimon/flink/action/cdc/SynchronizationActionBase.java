@@ -64,7 +64,7 @@ public abstract class SynchronizationActionBase extends ActionBase {
     protected final String database;
     protected final Configuration cdcSourceConfig;
     protected final SyncJobHandler syncJobHandler;
-    protected final boolean allowUpperCase;
+    protected final boolean caseSensitive;
 
     protected Map<String, String> tableConfig = new HashMap<>();
     protected TypeMapping typeMapping = TypeMapping.defaultMapping();
@@ -80,7 +80,7 @@ public abstract class SynchronizationActionBase extends ActionBase {
         this.database = database;
         this.cdcSourceConfig = Configuration.fromMap(cdcSourceConfig);
         this.syncJobHandler = syncJobHandler;
-        this.allowUpperCase = catalog.allowUpperCase();
+        this.caseSensitive = catalog.caseSensitive();
 
         this.syncJobHandler.registerJdbcDriver();
     }

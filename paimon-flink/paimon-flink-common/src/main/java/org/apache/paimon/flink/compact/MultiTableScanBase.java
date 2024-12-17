@@ -20,6 +20,7 @@ package org.apache.paimon.flink.compact;
 
 import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -59,7 +60,7 @@ public abstract class MultiTableScanBase<T> implements AutoCloseable {
     protected boolean isStreaming;
 
     public MultiTableScanBase(
-            Catalog.Loader catalogLoader,
+            CatalogLoader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,

@@ -60,7 +60,6 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.CoreOptions.createCommitUser;
-import static org.apache.paimon.options.CatalogOptions.ALLOW_UPPER_CASE;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
@@ -82,7 +81,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected AbstractCatalog(FileIO fileIO, Options options) {
         this.fileIO = fileIO;
-        this.tableDefaultOptions = Catalog.tableDefaultOptions(options.toMap());
+        this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(options.toMap());
         this.catalogOptions = options;
     }
 
@@ -121,11 +120,6 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected boolean lockEnabled() {
         return catalogOptions.getOptional(LOCK_ENABLED).orElse(fileIO.isObjectStore());
-    }
-
-    @Override
-    public boolean allowUpperCase() {
-        return catalogOptions.getOptional(ALLOW_UPPER_CASE).orElse(true);
     }
 
     protected boolean allowCustomTablePath() {
@@ -559,8 +553,9 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected void validateIdentifierNameCaseInsensitive(Identifier identifier) {
-        Catalog.validateCaseInsensitive(allowUpperCase(), "Database", identifier.getDatabaseName());
-        Catalog.validateCaseInsensitive(allowUpperCase(), "Table", identifier.getObjectName());
+        CatalogUtils.validateCaseInsensitive(
+                caseSensitive(), "Database", identifier.getDatabaseName());
+        CatalogUtils.validateCaseInsensitive(caseSensitive(), "Table", identifier.getObjectName());
     }
 
     private void validateFieldNameCaseInsensitiveInSchemaChange(List<SchemaChange> changes) {
@@ -578,7 +573,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected void validateFieldNameCaseInsensitive(List<String> fieldNames) {
-        Catalog.validateCaseInsensitive(allowUpperCase(), "Field", fieldNames);
+        CatalogUtils.validateCaseInsensitive(caseSensitive(), "Field", fieldNames);
     }
 
     private void validateAutoCreateClose(Map<String, String> options) {

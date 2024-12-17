@@ -26,15 +26,9 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.view.View;
 
-import java.io.Serializable;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
-
-import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * This interface is responsible for reading and writing metadata such as database/table from a
@@ -46,30 +40,38 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 @Public
 public interface Catalog extends AutoCloseable {
 
-    String DEFAULT_DATABASE = "default";
-
+    // constants for system table and database
     String SYSTEM_TABLE_SPLITTER = "$";
     String SYSTEM_DATABASE_NAME = "sys";
     String SYSTEM_BRANCH_PREFIX = "branch_";
-    String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
-    String DB_SUFFIX = ".db";
 
+    // constants for table and database
     String COMMENT_PROP = "comment";
     String OWNER_PROP = "owner";
+
+    // constants for database
+    String DEFAULT_DATABASE = "default";
+    String DB_SUFFIX = ".db";
     String DB_LOCATION_PROP = "location";
+
+    // constants for table
+    String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
     String NUM_ROWS_PROP = "numRows";
     String NUM_FILES_PROP = "numFiles";
     String TOTAL_SIZE_PROP = "totalSize";
     String LAST_UPDATE_TIME_PROP = "lastUpdateTime";
-    String HIVE_LAST_UPDATE_TIME_PROP = "transient_lastDdlTime";
 
-    /** Warehouse root path containing all database directories in this catalog. */
+    /** Warehouse root path for creating new databases. */
     String warehouse();
 
-    /** Catalog options. */
+    /** {@link FileIO} of this catalog. It can access {@link #warehouse()} path. */
+    FileIO fileIO();
+
+    /** Catalog options for re-creating this catalog. */
     Map<String, String> options();
 
-    FileIO fileIO();
+    /** Return a boolean that indicates whether this catalog is case-sensitive. */
+    boolean caseSensitive();
 
     /**
      * Get the names of all databases in this catalog.
@@ -325,42 +327,28 @@ public interface Catalog extends AutoCloseable {
         throw new UnsupportedOperationException();
     }
 
-    /** Return a boolean that indicates whether this catalog allow upper case. */
-    boolean allowUpperCase();
-
+    /**
+     * Repair the entire Catalog, repair the metadata in the metastore consistent with the metadata
+     * in the filesystem, register missing tables in the metastore.
+     */
     default void repairCatalog() {
         throw new UnsupportedOperationException();
     }
 
+    /**
+     * Repair the entire database, repair the metadata in the metastore consistent with the metadata
+     * in the filesystem, register missing tables in the metastore.
+     */
     default void repairDatabase(String databaseName) {
         throw new UnsupportedOperationException();
     }
 
+    /**
+     * Repair the table, repair the metadata in the metastore consistent with the metadata in the
+     * filesystem.
+     */
     default void repairTable(Identifier identifier) throws TableNotExistException {
         throw new UnsupportedOperationException();
-    }
-
-    static Map<String, String> tableDefaultOptions(Map<String, String> options) {
-        return convertToPropertiesPrefixKey(options, TABLE_DEFAULT_OPTION_PREFIX);
-    }
-
-    /** Validate database, table and field names must be lowercase when not case-sensitive. */
-    static void validateCaseInsensitive(boolean caseSensitive, String type, String... names) {
-        validateCaseInsensitive(caseSensitive, type, Arrays.asList(names));
-    }
-
-    /** Validate database, table and field names must be lowercase when not case-sensitive. */
-    static void validateCaseInsensitive(boolean caseSensitive, String type, List<String> names) {
-        if (caseSensitive) {
-            return;
-        }
-        List<String> illegalNames =
-                names.stream().filter(f -> !f.equals(f.toLowerCase())).collect(Collectors.toList());
-        checkArgument(
-                illegalNames.isEmpty(),
-                String.format(
-                        "%s name %s cannot contain upper case in the catalog.",
-                        type, illegalNames));
     }
 
     /** Exception for trying to drop on a database that is not empty. */
@@ -598,11 +586,5 @@ public interface Catalog extends AutoCloseable {
         public Identifier identifier() {
             return identifier;
         }
-    }
-
-    /** Loader of {@link Catalog}. */
-    @FunctionalInterface
-    interface Loader extends Serializable {
-        Catalog load();
     }
 }

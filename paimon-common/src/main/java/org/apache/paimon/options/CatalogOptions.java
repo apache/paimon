@@ -128,13 +128,12 @@ public class CatalogOptions {
                     .withDescription(
                             "Controls the max number for snapshots per table in the catalog are cached.");
 
-    public static final ConfigOption<Boolean> ALLOW_UPPER_CASE =
-            ConfigOptions.key("allow-upper-case")
+    public static final ConfigOption<Boolean> CASE_SENSITIVE =
+            ConfigOptions.key("case-sensitive")
                     .booleanType()
                     .noDefaultValue()
-                    .withDescription(
-                            "Indicates whether this catalog allow upper case, "
-                                    + "its default value depends on the implementation of the specific catalog.");
+                    .withFallbackKeys("allow-upper-case")
+                    .withDescription("Indicates whether this catalog is case-sensitive.");
 
     public static final ConfigOption<Boolean> SYNC_ALL_PROPERTIES =
             ConfigOptions.key("sync-all-properties")

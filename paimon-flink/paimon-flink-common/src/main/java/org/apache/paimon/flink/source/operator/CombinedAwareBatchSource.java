@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.source.operator;
 
-import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.flink.compact.MultiAwareBucketTableScan;
 import org.apache.paimon.flink.compact.MultiTableScanBase;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
@@ -54,7 +54,7 @@ public class CombinedAwareBatchSource extends CombinedCompactorSource<Tuple2<Spl
     private static final Logger LOGGER = LoggerFactory.getLogger(CombinedAwareBatchSource.class);
 
     public CombinedAwareBatchSource(
-            Catalog.Loader catalogLoader,
+            CatalogLoader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern) {
@@ -112,7 +112,7 @@ public class CombinedAwareBatchSource extends CombinedCompactorSource<Tuple2<Spl
             StreamExecutionEnvironment env,
             String name,
             TypeInformation<RowData> typeInfo,
-            Catalog.Loader catalogLoader,
+            CatalogLoader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,

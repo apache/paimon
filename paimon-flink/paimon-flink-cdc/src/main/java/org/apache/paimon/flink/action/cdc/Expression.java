@@ -189,7 +189,7 @@ public interface Expression extends Serializable {
             String[] literals =
                     Arrays.stream(args).skip(1).map(String::trim).toArray(String[]::new);
             String referencedFieldCheckForm =
-                    StringUtils.caseSensitiveConversion(referencedField, caseSensitive);
+                    StringUtils.toLowerCaseIfNeed(referencedField, caseSensitive);
 
             DataType fieldType =
                     checkNotNull(

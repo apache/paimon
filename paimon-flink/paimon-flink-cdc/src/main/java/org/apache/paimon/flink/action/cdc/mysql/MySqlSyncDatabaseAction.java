@@ -139,7 +139,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
 
         TableNameConverter tableNameConverter =
                 new TableNameConverter(
-                        allowUpperCase, mergeShards, tablePrefix, tableSuffix, tableMapping);
+                        caseSensitive, mergeShards, tablePrefix, tableSuffix, tableMapping);
         for (JdbcTableInfo tableInfo : jdbcTableInfos) {
             Identifier identifier =
                     Identifier.create(
@@ -155,7 +155,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                             tableConfig,
                             tableInfo.schema(),
                             metadataConverters,
-                            allowUpperCase,
+                            caseSensitive,
                             false,
                             true);
             try {

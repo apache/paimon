@@ -24,6 +24,8 @@ import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.apache.paimon.utils.StringUtils.toLowerCaseIfNeed;
+
 /** Used to convert a MySQL source table name to corresponding Paimon table name. */
 public class TableNameConverter implements Serializable {
 
@@ -78,7 +80,7 @@ public class TableNameConverter implements Serializable {
         // top priority: table mapping
         if (tableMapping.containsKey(originTblName.toLowerCase())) {
             String mappedName = tableMapping.get(originTblName.toLowerCase());
-            return caseSensitive ? mappedName : mappedName.toLowerCase();
+            return toLowerCaseIfNeed(mappedName, caseSensitive);
         }
 
         String tblPrefix = prefix;
@@ -93,7 +95,7 @@ public class TableNameConverter implements Serializable {
         }
 
         // third priority: normal prefix and suffix
-        String tableName = caseSensitive ? originTblName : originTblName.toLowerCase();
+        String tableName = toLowerCaseIfNeed(originTblName, caseSensitive);
         return tblPrefix + tableName + tblSuffix;
     }
 

@@ -69,7 +69,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
-import static org.apache.paimon.options.CatalogOptions.ALLOW_UPPER_CASE;
+import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 import static org.apache.paimon.spark.util.OptionUtils.copyWithSQLConf;
@@ -96,9 +96,9 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
         CatalogContext catalogContext =
                 CatalogContext.create(Options.fromMap(options), sessionState.newHadoopConf());
 
-        // if spark is case-insensitive, set allow upper case to catalog
+        // if spark is case-insensitive, set case-sensitive to catalog
         if (!sessionState.conf().caseSensitiveAnalysis()) {
-            newOptions.put(ALLOW_UPPER_CASE.key(), "true");
+            newOptions.put(CASE_SENSITIVE.key(), "true");
         }
         options = new CaseInsensitiveStringMap(newOptions);
 

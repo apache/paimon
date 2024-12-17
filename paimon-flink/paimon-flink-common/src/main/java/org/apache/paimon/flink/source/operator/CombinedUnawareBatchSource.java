@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source.operator;
 
 import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.compact.MultiTableScanBase;
@@ -63,7 +64,7 @@ public class CombinedUnawareBatchSource
     private static final Logger LOGGER = LoggerFactory.getLogger(CombinedUnawareBatchSource.class);
 
     public CombinedUnawareBatchSource(
-            Catalog.Loader catalogLoader,
+            CatalogLoader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern) {
@@ -121,7 +122,7 @@ public class CombinedUnawareBatchSource
     public static DataStream<MultiTableUnawareAppendCompactionTask> buildSource(
             StreamExecutionEnvironment env,
             String name,
-            Catalog.Loader catalogLoader,
+            CatalogLoader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,

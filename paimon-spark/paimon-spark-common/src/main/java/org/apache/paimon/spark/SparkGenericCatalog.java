@@ -62,7 +62,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Callable;
 
-import static org.apache.paimon.options.CatalogOptions.ALLOW_UPPER_CASE;
+import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.apache.paimon.spark.SparkCatalogOptions.CREATE_UNDERLYING_SESSION_CATALOG;
@@ -331,9 +331,9 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
             options.put(DEFAULT_DATABASE.key(), sessionCatalogDefaultDatabase);
         }
 
-        // if spark is case-insensitive, set allow upper case to catalog
+        // if spark is case-insensitive, set case-sensitive to catalog
         if (!sqlConf.caseSensitiveAnalysis()) {
-            options.put(ALLOW_UPPER_CASE.key(), "true");
+            options.put(CASE_SENSITIVE.key(), "true");
         }
     }
 

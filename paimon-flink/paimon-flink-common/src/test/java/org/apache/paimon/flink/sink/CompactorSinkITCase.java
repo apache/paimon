@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
@@ -273,7 +274,7 @@ public class CompactorSinkITCase extends AbstractTestBase {
     }
 
     protected MultiTablesStoreCompactOperator.Factory createMultiTablesCompactOperator(
-            Catalog.Loader catalogLoader) throws Exception {
+            CatalogLoader catalogLoader) throws Exception {
         return new MultiTablesStoreCompactOperator.Factory(
                 catalogLoader,
                 commitUser,
