@@ -50,7 +50,6 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /** Test for REST Catalog. */
 public class RESTCatalogTest {
@@ -113,11 +112,11 @@ public class RESTCatalogTest {
     }
 
     @Test
-    public void testCreateDatabase() throws Exception {
+    public void testCreateDatabaseImpl() throws Exception {
         String name = MockRESTMessage.databaseName();
         CreateDatabaseResponse response = MockRESTMessage.createDatabaseResponse(name);
         mockResponse(mapper.writeValueAsString(response), 200);
-        assertDoesNotThrow(() -> restCatalog.createDatabase(name, false, response.getOptions()));
+        assertDoesNotThrow(() -> restCatalog.createDatabaseImpl(name, response.getOptions()));
     }
 
     @Test
@@ -132,85 +131,29 @@ public class RESTCatalogTest {
     }
 
     @Test
-    public void testDropDatabase() throws Exception {
+    public void testDropDatabaseImpl() throws Exception {
         String name = MockRESTMessage.databaseName();
         mockResponse("", 200);
-        assertDoesNotThrow(() -> mockRestCatalog.dropDatabase(name, false, true));
-        verify(mockRestCatalog, times(1)).dropDatabase(eq(name), eq(false), eq(true));
-        verify(mockRestCatalog, times(0)).listTables(eq(name));
+        assertDoesNotThrow(() -> mockRestCatalog.dropDatabaseImpl(name));
+        verify(mockRestCatalog, times(1)).dropDatabaseImpl(eq(name));
     }
 
     @Test
-    public void testDropDatabaseWhenNoExistAndIgnoreIfNotExistsIsFalse() throws Exception {
-        String name = MockRESTMessage.databaseName();
-        ErrorResponse response = MockRESTMessage.noSuchResourceExceptionErrorResponse();
-        mockResponse(mapper.writeValueAsString(response), 404);
-        assertThrows(
-                Catalog.DatabaseNotExistException.class,
-                () -> mockRestCatalog.dropDatabase(name, false, true));
-    }
-
-    @Test
-    public void testDropDatabaseWhenNoExistAndIgnoreIfNotExistsIsTrue() throws Exception {
-        String name = MockRESTMessage.databaseName();
-        ErrorResponse response = MockRESTMessage.noSuchResourceExceptionErrorResponse();
-        mockResponse(mapper.writeValueAsString(response), 404);
-        assertDoesNotThrow(() -> mockRestCatalog.dropDatabase(name, true, true));
-        verify(mockRestCatalog, times(1)).dropDatabase(eq(name), eq(true), eq(true));
-        verify(mockRestCatalog, times(0)).listTables(eq(name));
-    }
-
-    @Test
-    public void testDropDatabaseWhenCascadeIsFalseAndNoTables() throws Exception {
-        String name = MockRESTMessage.databaseName();
-        boolean cascade = false;
-        mockResponse("", 200);
-        when(mockRestCatalog.listTables(name)).thenReturn(new ArrayList<>());
-        assertDoesNotThrow(() -> mockRestCatalog.dropDatabase(name, false, cascade));
-        verify(mockRestCatalog, times(1)).dropDatabase(eq(name), eq(false), eq(cascade));
-        verify(mockRestCatalog, times(1)).listTables(eq(name));
-    }
-
-    @Test
-    public void testDropDatabaseWhenCascadeIsFalseAndTablesExist() throws Exception {
-        String name = MockRESTMessage.databaseName();
-        boolean cascade = false;
-        mockResponse("", 200);
-        List<String> tables = new ArrayList<>();
-        tables.add("t1");
-        when(mockRestCatalog.listTables(name)).thenReturn(tables);
-        assertThrows(
-                Catalog.DatabaseNotEmptyException.class,
-                () -> mockRestCatalog.dropDatabase(name, false, cascade));
-        verify(mockRestCatalog, times(1)).dropDatabase(eq(name), eq(false), eq(cascade));
-        verify(mockRestCatalog, times(1)).listTables(eq(name));
-    }
-
-    @Test
-    public void testAlterDatabase() throws Exception {
+    public void testAlterDatabaseImpl() throws Exception {
         String name = MockRESTMessage.databaseName();
         AlterDatabaseResponse response = MockRESTMessage.alterDatabaseResponse();
         mockResponse(mapper.writeValueAsString(response), 200);
-        assertDoesNotThrow(() -> mockRestCatalog.alterDatabase(name, new ArrayList<>(), true));
+        assertDoesNotThrow(() -> mockRestCatalog.alterDatabaseImpl(name, new ArrayList<>()));
     }
 
     @Test
-    public void testAlterDatabaseWhenDatabaseNotExistAndIgnoreIfNotExistsIsFalse()
-            throws Exception {
+    public void testAlterDatabaseImplWhenDatabaseNotExist() throws Exception {
         String name = MockRESTMessage.databaseName();
         ErrorResponse response = MockRESTMessage.noSuchResourceExceptionErrorResponse();
         mockResponse(mapper.writeValueAsString(response), 404);
         assertThrows(
                 Catalog.DatabaseNotExistException.class,
-                () -> mockRestCatalog.alterDatabase(name, new ArrayList<>(), false));
-    }
-
-    @Test
-    public void testAlterDatabaseWhenDatabaseNotExistAndIgnoreIfNotExistsIsTrue() throws Exception {
-        String name = MockRESTMessage.databaseName();
-        ErrorResponse response = MockRESTMessage.noSuchResourceExceptionErrorResponse();
-        mockResponse(mapper.writeValueAsString(response), 404);
-        assertDoesNotThrow(() -> mockRestCatalog.alterDatabase(name, new ArrayList<>(), true));
+                () -> mockRestCatalog.alterDatabaseImpl(name, new ArrayList<>()));
     }
 
     private void mockResponse(String mockResponse, int httpCode) {

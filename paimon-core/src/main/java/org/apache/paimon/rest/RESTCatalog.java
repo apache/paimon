@@ -18,18 +18,16 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.CredentialsProvider;
 import org.apache.paimon.rest.auth.CredentialsProviderFactory;
-import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
@@ -41,7 +39,7 @@ import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.table.Table;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.shade.guava30.com.google.common.annotations.VisibleForTesting;
@@ -50,6 +48,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -61,7 +60,7 @@ import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
 /** A catalog implementation for REST. */
-public class RESTCatalog implements Catalog {
+public class RESTCatalog extends AbstractCatalog {
 
     private static final ObjectMapper OBJECT_MAPPER = RESTObjectMapper.create();
 
@@ -74,6 +73,11 @@ public class RESTCatalog implements Catalog {
     private volatile ScheduledExecutorService refreshExecutor = null;
 
     public RESTCatalog(Options options) {
+        this(null, options);
+    }
+
+    public RESTCatalog(FileIO fileIO, Options options) {
+        super(fileIO, options);
         if (options.getOptional(CatalogOptions.WAREHOUSE).isPresent()) {
             throw new IllegalArgumentException("Can not config warehouse in RESTCatalog.");
         }
@@ -139,21 +143,13 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void createDatabase(String name, boolean ignoreIfExists, Map<String, String> properties)
-            throws DatabaseAlreadyExistException {
+    protected void createDatabaseImpl(String name, Map<String, String> properties) {
         CreateDatabaseRequest request = new CreateDatabaseRequest(name, properties);
-        try {
-            client.post(
-                    resourcePaths.databases(), request, CreateDatabaseResponse.class, headers());
-        } catch (AlreadyExistsException e) {
-            if (!ignoreIfExists) {
-                throw new DatabaseAlreadyExistException(name);
-            }
-        }
+        client.post(resourcePaths.databases(), request, CreateDatabaseResponse.class, headers());
     }
 
     @Override
-    public Database getDatabase(String name) throws DatabaseNotExistException {
+    protected Database getDatabaseImpl(String name) throws DatabaseNotExistException {
         try {
             GetDatabaseResponse response =
                     client.get(resourcePaths.database(name), GetDatabaseResponse.class, headers());
@@ -165,22 +161,12 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
-            throws DatabaseNotExistException, DatabaseNotEmptyException {
-        try {
-            if (!cascade && !this.listTables(name).isEmpty()) {
-                throw new DatabaseNotEmptyException(name);
-            }
-            client.delete(resourcePaths.database(name), headers());
-        } catch (NoSuchResourceException e) {
-            if (!ignoreIfNotExists) {
-                throw new DatabaseNotExistException(name);
-            }
-        }
+    protected void dropDatabaseImpl(String name) {
+        client.delete(resourcePaths.database(name), headers());
     }
 
     @Override
-    public void alterDatabase(String name, List<PropertyChange> changes, boolean ignoreIfNotExists)
+    protected void alterDatabaseImpl(String name, List<PropertyChange> changes)
             throws DatabaseNotExistException {
         try {
             Pair<Map<String, String>, Set<String>> setPropertiesToRemoveKeys =
@@ -199,33 +185,25 @@ public class RESTCatalog implements Catalog {
                 throw new IllegalStateException("Failed to update properties");
             }
         } catch (NoSuchResourceException e) {
-            if (!ignoreIfNotExists) {
-                throw new DatabaseNotExistException(name);
-            }
+            throw new DatabaseNotExistException(name);
         }
     }
 
     @Override
-    public Table getTable(Identifier identifier) throws TableNotExistException {
-        throw new UnsupportedOperationException();
+    protected TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
+        return null;
     }
 
     @Override
-    public List<String> listTables(String databaseName) throws DatabaseNotExistException {
-        return new ArrayList<String>();
+    protected List<String> listTablesImpl(String databaseName) {
+        return Collections.emptyList();
     }
 
     @Override
-    public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
-            throws TableNotExistException {
-        throw new UnsupportedOperationException();
-    }
+    protected void dropTableImpl(Identifier identifier) {}
 
     @Override
-    public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
-            throws TableAlreadyExistException, DatabaseNotExistException {
-        throw new UnsupportedOperationException();
-    }
+    protected void createTableImpl(Identifier identifier, Schema schema) {}
 
     @Override
     public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
@@ -234,27 +212,11 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void alterTable(
-            Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
-            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
-        throw new UnsupportedOperationException();
-    }
+    protected void renameTableImpl(Identifier fromTable, Identifier toTable) {}
 
     @Override
-    public void createPartition(Identifier identifier, Map<String, String> partitionSpec)
-            throws TableNotExistException {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void dropPartition(Identifier identifier, Map<String, String> partitions)
-            throws TableNotExistException, PartitionNotExistException {}
-
-    @Override
-    public List<PartitionEntry> listPartitions(Identifier identifier)
-            throws TableNotExistException {
-        throw new UnsupportedOperationException();
-    }
+    protected void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
+            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {}
 
     @Override
     public boolean caseSensitive() {
