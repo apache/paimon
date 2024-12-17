@@ -66,6 +66,14 @@ under the License.
         <td>It is used to specify which source tables are not to be synchronized. The usage is same as "--including_tables". "--excluding_tables" has higher priority than "--including_tables" if you specified both.</td>
     </tr>
     <tr>
+        <td><h5>--including_databases</h5></td>
+        <td>It is used to specify the databases within which the tables are to be synchronized. The usage is same as "--including_tables".</td>
+    </tr>
+    <tr>
+        <td><h5>--excluding_databases</h5></td>
+        <td>It is used to specify the databases within which the tables are not to be synchronized. The usage is same as "--excluding_tables". "--excluding_databases" has higher priority than "--including_databases" if you specified both.</td>
+    </tr>
+    <tr>
         <td><h5>--type_mapping</h5></td>
         <td>It is used to specify how to map MySQL data type to Paimon type.<br />
             Supported options:

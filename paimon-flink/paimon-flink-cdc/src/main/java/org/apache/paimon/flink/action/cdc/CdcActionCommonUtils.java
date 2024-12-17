@@ -61,6 +61,8 @@ public class CdcActionCommonUtils {
     public static final String TABLE_MAPPING = "table_mapping";
     public static final String INCLUDING_TABLES = "including_tables";
     public static final String EXCLUDING_TABLES = "excluding_tables";
+    public static final String INCLUDING_DBS = "including_dbs";
+    public static final String EXCLUDING_DBS = "excluding_dbs";
     public static final String TYPE_MAPPING = "type_mapping";
     public static final String PARTITION_KEYS = "partition_keys";
     public static final String PRIMARY_KEYS = "primary_keys";
