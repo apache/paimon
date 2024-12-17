@@ -26,7 +26,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /** Client pool for using multiple clients to execute actions. */
-public interface ClientPool<C, E extends Exception> {
+public interface ClientPool<C, E extends Exception> extends Closeable {
     /** Action interface with return object for client. */
     interface Action<R, C, E extends Exception> {
         R run(C client) throws E;
@@ -42,7 +42,7 @@ public interface ClientPool<C, E extends Exception> {
     void execute(ExecuteAction<C, E> action) throws E, InterruptedException;
 
     /** Default implementation for {@link ClientPool}. */
-    abstract class ClientPoolImpl<C, E extends Exception> implements Closeable, ClientPool<C, E> {
+    abstract class ClientPoolImpl<C, E extends Exception> implements ClientPool<C, E> {
 
         private volatile LinkedBlockingDeque<C> clients;
 

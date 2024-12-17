@@ -204,6 +204,14 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
         return Key.of(elements);
     }
 
+    @Override
+    public void close() throws IOException {
+        if (clientPoolCache != null) {
+            clientPoolCache.asMap().forEach((key, client) -> client.close());
+            clientPoolCache.cleanUp();
+        }
+    }
+
     static class Key {
         private final List<Object> elements;
 
