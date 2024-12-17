@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
@@ -183,6 +184,33 @@ public class RESTCatalogTest {
                 () -> mockRestCatalog.dropDatabase(name, false, cascade));
         verify(mockRestCatalog, times(1)).dropDatabase(eq(name), eq(false), eq(cascade));
         verify(mockRestCatalog, times(1)).listTables(eq(name));
+    }
+
+    @Test
+    public void testAlterDatabase() throws Exception {
+        String name = MockRESTMessage.databaseName();
+        AlterDatabaseResponse response = MockRESTMessage.alterDatabaseResponse();
+        mockResponse(mapper.writeValueAsString(response), 200);
+        assertDoesNotThrow(() -> mockRestCatalog.alterDatabase(name, new ArrayList<>(), true));
+    }
+
+    @Test
+    public void testAlterDatabaseWhenDatabaseNotExistAndIgnoreIfNotExistsIsFalse()
+            throws Exception {
+        String name = MockRESTMessage.databaseName();
+        ErrorResponse response = MockRESTMessage.noSuchResourceExceptionErrorResponse();
+        mockResponse(mapper.writeValueAsString(response), 404);
+        assertThrows(
+                Catalog.DatabaseNotExistException.class,
+                () -> mockRestCatalog.alterDatabase(name, new ArrayList<>(), false));
+    }
+
+    @Test
+    public void testAlterDatabaseWhenDatabaseNotExistAndIgnoreIfNotExistsIsTrue() throws Exception {
+        String name = MockRESTMessage.databaseName();
+        ErrorResponse response = MockRESTMessage.noSuchResourceExceptionErrorResponse();
+        mockResponse(mapper.writeValueAsString(response), 404);
+        assertDoesNotThrow(() -> mockRestCatalog.alterDatabase(name, new ArrayList<>(), true));
     }
 
     private void mockResponse(String mockResponse, int httpCode) {

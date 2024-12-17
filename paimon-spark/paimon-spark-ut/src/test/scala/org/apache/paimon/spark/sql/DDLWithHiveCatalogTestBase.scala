@@ -22,7 +22,7 @@ import org.apache.paimon.hive.HiveMetastoreClient
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.table.FileStoreTable
 
-import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.{AnalysisException, Row, SparkSession}
 import org.junit.jupiter.api.Assertions
 
 abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
@@ -190,6 +190,46 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
           Assertions.assertEquals(props("k1"), "v1")
           Assertions.assertEquals(props("k2"), "v2")
           Assertions.assertTrue(getDatabaseOwner("paimon_db").nonEmpty)
+        }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: alter database's properties") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        spark.sql(s"USE $catalogName")
+        val databaseName = "paimon_db"
+        withDatabase(databaseName) {
+          spark.sql(s"CREATE DATABASE $databaseName WITH DBPROPERTIES ('k1' = 'v1', 'k2' = 'v2')")
+          var props = getDatabaseProps(databaseName)
+          Assertions.assertEquals(props("k1"), "v1")
+          Assertions.assertEquals(props("k2"), "v2")
+          spark.sql(s"ALTER DATABASE $databaseName SET DBPROPERTIES ('k1' = 'v11', 'k2' = 'v22')")
+          props = getDatabaseProps(databaseName)
+          Assertions.assertEquals(props("k1"), "v11")
+          Assertions.assertEquals(props("k2"), "v22")
+        }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: alter database location") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        spark.sql(s"USE $catalogName")
+        val databaseName = "paimon_db"
+        withDatabase(databaseName) {
+          spark.sql(s"CREATE DATABASE $databaseName WITH DBPROPERTIES ('k1' = 'v1', 'k2' = 'v2')")
+          withTempDir {
+            dBLocation =>
+              try {
+                spark.sql(
+                  s"ALTER DATABASE $databaseName SET LOCATION '${dBLocation.getCanonicalPath}'")
+              } catch {
+                case e: AnalysisException =>
+                  Assertions.assertTrue(
+                    e.getMessage.contains("does not support altering database location"))
+              }
+          }
         }
     }
   }

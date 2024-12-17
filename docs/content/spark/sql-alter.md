@@ -240,3 +240,21 @@ The following SQL changes the type of a nested column `f2` to `BIGINT` in a stru
 -- column v previously has type MAP<INT, STRUCT<f1: STRING, f2: INT>>
 ALTER TABLE my_table ALTER COLUMN v.value.f2 TYPE BIGINT;
 ```
+
+
+# ALTER DATABASE
+
+The following SQL sets one or more properties in the specified database. If a particular property is already set in the database, override the old value with the new one.
+
+```sql
+ALTER { DATABASE | SCHEMA | NAMESPACE } my_database
+    SET { DBPROPERTIES | PROPERTIES } ( property_name = property_value [ , ... ] )
+```
+
+## Altering Database Location
+
+The following SQL sets the location of the specified database to `file:/temp/my_database.db`.
+
+```sql
+ALTER DATABASE my_database SET LOCATION 'file:/temp/my_database.db'
+```

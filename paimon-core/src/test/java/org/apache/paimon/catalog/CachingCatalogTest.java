@@ -44,6 +44,7 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cach
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import java.io.FileNotFoundException;
 import java.time.Duration;
@@ -63,6 +64,8 @@ import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_THRESHOLD;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.when;
 
 class CachingCatalogTest extends CatalogTestBase {
 
@@ -84,6 +87,26 @@ class CachingCatalogTest extends CatalogTestBase {
     public void testListDatabasesWhenNoDatabases() {
         List<String> databases = catalog.listDatabases();
         assertThat(databases).contains("db");
+    }
+
+    @Test
+    public void testInvalidateWhenDatabaseIsAltered() throws Exception {
+        Catalog mockcatalog = Mockito.mock(Catalog.class);
+        Catalog catalog = new CachingCatalog(mockcatalog);
+        String databaseName = "db";
+        boolean ignoreIfExists = false;
+        Database database = Database.of(databaseName);
+        Database secondDatabase = Database.of(databaseName);
+        when(mockcatalog.getDatabase(databaseName)).thenReturn(database, secondDatabase);
+        doNothing().when(mockcatalog).alterDatabase(databaseName, emptyList(), ignoreIfExists);
+        Database cachingDatabase = catalog.getDatabase(databaseName);
+        assertThat(cachingDatabase.name()).isEqualTo(databaseName);
+        catalog.alterDatabase(databaseName, emptyList(), ignoreIfExists);
+        Database newCachingDatabase = catalog.getDatabase(databaseName);
+        // same as secondDatabase means cache is invalidated, so call getDatabase again then return
+        // secondDatabase
+        assertThat(newCachingDatabase).isNotSameAs(database);
+        assertThat(newCachingDatabase).isSameAs(secondDatabase);
     }
 
     @Test

@@ -26,6 +26,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -52,6 +53,8 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.apache.flink.table.hive.LegacyHiveClasses;
 import org.apache.hadoop.conf.Configuration;
@@ -400,6 +403,33 @@ public class HiveCatalog extends AbstractCatalog {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted in call to dropDatabase " + name, e);
+        }
+    }
+
+    @Override
+    protected void alterDatabaseImpl(String name, List<PropertyChange> changes) {
+        try {
+            Database database = clients.run(client -> client.getDatabase(name));
+            Map<String, String> parameter = Maps.newHashMap();
+            parameter.putAll(database.getParameters());
+            Pair<Map<String, String>, Set<String>> setPropertiesToRemoveKeys =
+                    PropertyChange.getSetPropertiesToRemoveKeys(changes);
+            Map<String, String> setProperties = setPropertiesToRemoveKeys.getLeft();
+            Set<String> removeKeys = setPropertiesToRemoveKeys.getRight();
+            if (setProperties.size() > 0) {
+                parameter.putAll(setProperties);
+            }
+            if (removeKeys.size() > 0) {
+                parameter.keySet().removeAll(removeKeys);
+            }
+            Map<String, String> newProperties = Collections.unmodifiableMap(parameter);
+            Database alterDatabase = convertToHiveDatabase(name, newProperties);
+            clients.execute(client -> client.alterDatabase(name, alterDatabase));
+        } catch (TException e) {
+            throw new RuntimeException("Failed to alter database " + name, e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted in call to alterDatabase " + name, e);
         }
     }
 

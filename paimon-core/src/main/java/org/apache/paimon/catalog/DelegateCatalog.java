@@ -84,6 +84,12 @@ public class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public void alterDatabase(String name, List<PropertyChange> changes, boolean ignoreIfNotExists)
+            throws DatabaseNotExistException {
+        wrapped.alterDatabase(name, changes, ignoreIfNotExists);
+    }
+
+    @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         return wrapped.listTables(databaseName);
     }

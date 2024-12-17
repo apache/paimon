@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -130,7 +131,8 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
             throws NamespaceAlreadyExistsException {
         checkNamespace(namespace);
         try {
-            catalog.createDatabase(namespace[0], false, metadata);
+            String databaseName = getDatabaseNameFromNamespace(namespace);
+            catalog.createDatabase(databaseName, false, metadata);
         } catch (Catalog.DatabaseAlreadyExistException e) {
             throw new NamespaceAlreadyExistsException(namespace);
         }
@@ -153,7 +155,8 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
         }
         checkNamespace(namespace);
         try {
-            catalog.getDatabase(namespace[0]);
+            String databaseName = getDatabaseNameFromNamespace(namespace);
+            catalog.getDatabase(databaseName);
             return new String[0][];
         } catch (Catalog.DatabaseNotExistException e) {
             throw new NoSuchNamespaceException(namespace);
@@ -164,9 +167,9 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
     public Map<String, String> loadNamespaceMetadata(String[] namespace)
             throws NoSuchNamespaceException {
         checkNamespace(namespace);
-        String dataBaseName = namespace[0];
         try {
-            return catalog.getDatabase(dataBaseName).options();
+            String databaseName = getDatabaseNameFromNamespace(namespace);
+            return catalog.getDatabase(databaseName).options();
         } catch (Catalog.DatabaseNotExistException e) {
             throw new NoSuchNamespaceException(namespace);
         }
@@ -203,7 +206,8 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
             throws NoSuchNamespaceException {
         checkNamespace(namespace);
         try {
-            catalog.dropDatabase(namespace[0], false, cascade);
+            String databaseName = getDatabaseNameFromNamespace(namespace);
+            catalog.dropDatabase(databaseName, false, cascade);
             return true;
         } catch (Catalog.DatabaseNotExistException e) {
             throw new NoSuchNamespaceException(namespace);
@@ -217,7 +221,8 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
     public Identifier[] listTables(String[] namespace) throws NoSuchNamespaceException {
         checkNamespace(namespace);
         try {
-            return catalog.listTables(namespace[0]).stream()
+            String databaseName = getDatabaseNameFromNamespace(namespace);
+            return catalog.listTables(databaseName).stream()
                     .map(table -> Identifier.of(namespace, table))
                     .toArray(Identifier[]::new);
         } catch (Catalog.DatabaseNotExistException e) {
@@ -516,10 +521,35 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
         return partitionColNames;
     }
 
-    // --------------------- unsupported methods ----------------------------
-
     @Override
-    public void alterNamespace(String[] namespace, NamespaceChange... changes) {
-        throw new UnsupportedOperationException("Alter namespace in Spark is not supported yet.");
+    public void alterNamespace(String[] namespace, NamespaceChange... changes)
+            throws NoSuchNamespaceException {
+        checkNamespace(namespace);
+        try {
+            String databaseName = getDatabaseNameFromNamespace(namespace);
+            List<PropertyChange> propertyChanges =
+                    Arrays.stream(changes).map(this::toPropertyChange).collect(Collectors.toList());
+            catalog.alterDatabase(databaseName, propertyChanges, false);
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new NoSuchNamespaceException(namespace);
+        }
+    }
+
+    private PropertyChange toPropertyChange(NamespaceChange change) {
+        if (change instanceof NamespaceChange.SetProperty) {
+            NamespaceChange.SetProperty set = (NamespaceChange.SetProperty) change;
+            return PropertyChange.setProperty(set.property(), set.value());
+        } else if (change instanceof NamespaceChange.RemoveProperty) {
+            NamespaceChange.RemoveProperty remove = (NamespaceChange.RemoveProperty) change;
+            return PropertyChange.removeProperty(remove.property());
+
+        } else {
+            throw new UnsupportedOperationException(
+                    "Change is not supported: " + change.getClass());
+        }
+    }
+
+    private String getDatabaseNameFromNamespace(String[] namespace) {
+        return namespace[0];
     }
 }
