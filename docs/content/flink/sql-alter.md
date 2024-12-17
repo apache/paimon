@@ -235,3 +235,11 @@ The following SQL sets one or more properties in the specified database. If a pa
 ```sql
 ALTER DATABASE [catalog_name.]db_name SET (key1=val1, key2=val2, ...)
 ```
+
+## Altering Database Location
+
+The following SQL changes location of database `my_database` to `file:/temp/my_database`.
+
+```sql
+ALTER DATABASE my_database SET ('location' =  'file:/temp/my_database')
+```

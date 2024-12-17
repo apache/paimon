@@ -136,6 +136,7 @@ import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_REFRESH_HANDLER_D
 import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_REFRESH_MODE;
 import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_REFRESH_STATUS;
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
 import static org.apache.paimon.catalog.Catalog.LAST_UPDATE_TIME_PROP;
 import static org.apache.paimon.catalog.Catalog.NUM_FILES_PROP;
 import static org.apache.paimon.catalog.Catalog.NUM_ROWS_PROP;
@@ -244,7 +245,7 @@ public class FlinkCatalog extends AbstractCatalog {
             properties = new HashMap<>(database.getProperties());
             if (database.getDescription().isPresent()
                     && !database.getDescription().get().equals("")) {
-                properties.put(Catalog.COMMENT_PROP, database.getDescription().get());
+                properties.put(COMMENT_PROP, database.getDescription().get());
             }
         } else {
             properties = Collections.emptyMap();
@@ -623,7 +624,7 @@ public class FlinkCatalog extends AbstractCatalog {
 
             SchemaManager.checkAlterTablePath(key);
 
-            if (Catalog.COMMENT_PROP.equals(key)) {
+            if (COMMENT_PROP.equals(key)) {
                 schemaChanges.add(SchemaChange.updateComment(value));
             } else {
                 schemaChanges.add(SchemaChange.setOption(key, value));
@@ -632,7 +633,7 @@ public class FlinkCatalog extends AbstractCatalog {
         } else if (change instanceof ResetOption) {
             ResetOption resetOption = (ResetOption) change;
             String key = resetOption.getKey();
-            if (Catalog.COMMENT_PROP.equals(key)) {
+            if (COMMENT_PROP.equals(key)) {
                 schemaChanges.add(SchemaChange.updateComment(null));
             } else {
                 schemaChanges.add(SchemaChange.removeOption(resetOption.getKey()));
@@ -1220,6 +1221,8 @@ public class FlinkCatalog extends AbstractCatalog {
             Database oldDatabase = catalog.getDatabase(name);
             List<PropertyChange> changes =
                     getPropertyChanges(oldDatabase.options(), newDatabase.getProperties());
+            getPropertyChangeFromComment(oldDatabase.comment(), newDatabase.getDescription())
+                    .ifPresent(changes::add);
             catalog.alterDatabase(name, changes, ignoreIfNotExists);
         } catch (Catalog.DatabaseNotExistException e) {
             if (!ignoreIfNotExists) {
@@ -1293,6 +1296,15 @@ public class FlinkCatalog extends AbstractCatalog {
                             }
                         });
         return changes;
+    }
+
+    @VisibleForTesting
+    static Optional<PropertyChange> getPropertyChangeFromComment(
+            Optional<String> oldComment, Optional<String> newComment) {
+        if (newComment.isPresent() && !oldComment.equals(newComment)) {
+            return Optional.of(PropertyChange.setProperty(COMMENT_PROP, newComment.get()));
+        }
+        return Optional.empty();
     }
 
     private Table getPaimonTable(ObjectPath tablePath) throws TableNotExistException {

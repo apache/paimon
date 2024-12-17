@@ -250,3 +250,11 @@ The following SQL sets one or more properties in the specified database. If a pa
 ALTER { DATABASE | SCHEMA | NAMESPACE } my_database
     SET { DBPROPERTIES | PROPERTIES } ( property_name = property_value [ , ... ] )
 ```
+
+## Altering Database Location
+
+The following SQL sets the location of the specified database to `file:/temp/my_database.db`.
+
+```sql
+ALTER DATABASE my_database SET LOCATION 'file:/temp/my_database.db'
+```

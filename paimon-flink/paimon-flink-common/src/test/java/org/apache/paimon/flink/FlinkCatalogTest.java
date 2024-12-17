@@ -84,6 +84,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -618,6 +619,20 @@ public class FlinkCatalogTest {
     }
 
     @Test
+    public void testAlterDbComment()
+            throws DatabaseAlreadyExistException, DatabaseNotExistException {
+        CatalogDatabaseImpl database = new CatalogDatabaseImpl(Collections.emptyMap(), null);
+        catalog.createDatabase(path1.getDatabaseName(), database, false);
+        Catalog mockCatalog = spy(catalog);
+        when(mockCatalog.getDatabase(path1.getDatabaseName())).thenReturn(database);
+        CatalogDatabaseImpl newDatabase = new CatalogDatabaseImpl(Collections.emptyMap(), "aa");
+        doNothing().when(mockCatalog).alterDatabase(path1.getDatabaseName(), newDatabase, false);
+        mockCatalog.alterDatabase(path1.getDatabaseName(), newDatabase, false);
+        verify(mockCatalog, times(1)).alterDatabase(path1.getDatabaseName(), newDatabase, false);
+        verify(mockCatalog, times(1)).getDatabase(path1.getDatabaseName());
+    }
+
+    @Test
     public void testAlterDb_DatabaseNotExistException() {
         CatalogDatabaseImpl database = new CatalogDatabaseImpl(Collections.emptyMap(), null);
         assertThatThrownBy(() -> catalog.alterDatabase(path1.getDatabaseName(), database, false))
@@ -638,6 +653,22 @@ public class FlinkCatalogTest {
         oldProperties = Collections.singletonMap("aa", "ccc");
         propertyChanges = FlinkCatalog.getPropertyChanges(oldProperties, newProperties);
         assertThat(propertyChanges.size()).isEqualTo(2);
+    }
+
+    @Test
+    public void testGetPropertyChangeFromComment() {
+        Optional<PropertyChange> commentChange =
+                FlinkCatalog.getPropertyChangeFromComment(Optional.empty(), Optional.empty());
+        assertThat(commentChange.isPresent()).isFalse();
+        commentChange =
+                FlinkCatalog.getPropertyChangeFromComment(Optional.of("aa"), Optional.of("bb"));
+        assertThat(commentChange.isPresent()).isTrue();
+        commentChange =
+                FlinkCatalog.getPropertyChangeFromComment(Optional.of("aa"), Optional.empty());
+        assertThat(commentChange.isPresent()).isFalse();
+        commentChange =
+                FlinkCatalog.getPropertyChangeFromComment(Optional.empty(), Optional.of("bb"));
+        assertThat(commentChange.isPresent()).isTrue();
     }
 
     @Test
