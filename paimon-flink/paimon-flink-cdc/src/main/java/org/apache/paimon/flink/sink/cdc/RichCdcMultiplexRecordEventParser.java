@@ -139,7 +139,7 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     private boolean shouldSynchronizeCurrentDb() {
         // In case the record is incomplete, we let the null value pass validation
         // and handle the null value when we really need it
-        if (currentDb == null || currentTable == null) {
+        if (currentDb == null) {
             return true;
         }
 
