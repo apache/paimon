@@ -18,10 +18,8 @@
 
 package org.apache.paimon.schema;
 
-import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.IsNotNull;
 import org.apache.paimon.predicate.IsNull;
 import org.apache.paimon.predicate.LeafPredicate;
@@ -38,7 +36,6 @@ import org.apache.paimon.utils.Projection;
 
 import org.junit.jupiter.api.Test;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -288,30 +285,5 @@ public class SchemaEvolutionUtilTest {
         assertThat(child1.function()).isEqualTo(IsNull.INSTANCE);
         assertThat(child1.fieldName()).isEqualTo("b");
         assertThat(child1.index()).isEqualTo(1);
-    }
-
-    @Test
-    public void testColumnTypeFilter() {
-        // alter d from INT to DECIMAL(10, 2)
-        // filter d = 11.01 will be devolved to d = 11
-        List<Predicate> predicates = new ArrayList<>();
-        predicates.add(
-                new LeafPredicate(
-                        Equal.INSTANCE,
-                        DataTypes.DECIMAL(10, 2),
-                        0,
-                        "d",
-                        Collections.singletonList(
-                                Decimal.fromBigDecimal(new BigDecimal("11.01"), 10, 2))));
-        List<Predicate> filters =
-                SchemaEvolutionUtil.devolveDataFilters(tableFields2, dataFields, predicates);
-        assert filters != null;
-        assertThat(filters.size()).isEqualTo(1);
-
-        LeafPredicate child = (LeafPredicate) filters.get(0);
-        // Validate value 11 with index 3
-        assertThat(child.test(GenericRow.of(0, 0, 0, 11))).isTrue();
-        // Validate value 12 with index 3
-        assertThat(child.test(GenericRow.of(1, 0, 0, 12))).isFalse();
     }
 }

@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
+import org.apache.paimon.types.DataType;
 
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.TestTemplate;
@@ -32,7 +33,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** ITCase for {@link CastExecutors#safelyCastLiteralsWithNumericEvolution}. */
+/** ITCase for {@link CastExecutors#castLiteralsWithEvolution(List, DataType, DataType)}. */
 @ExtendWith(ParameterizedTestExtension.class)
 public class FilterPushdownWithSchemaChangeITCase extends CatalogITCaseBase {
 

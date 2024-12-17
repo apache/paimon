@@ -310,19 +310,16 @@ public class SchemaEvolutionUtil {
                         return Optional.empty();
                     }
 
-                    List<Object> devolvedLiterals =
-                            CastExecutors.safelyCastLiteralsWithNumericEvolution(
-                                    predicate, dataField.type());
-
-                    return devolvedLiterals == null
-                            ? Optional.empty()
-                            : Optional.of(
-                                    new LeafPredicate(
-                                            predicate.function(),
-                                            dataField.type(),
-                                            indexOf(dataField, idToDataFields),
-                                            dataField.name(),
-                                            devolvedLiterals));
+                    return CastExecutors.castLiteralsWithEvolution(
+                                    predicate.literals(), predicate.type(), dataField.type())
+                            .map(
+                                    literals ->
+                                            new LeafPredicate(
+                                                    predicate.function(),
+                                                    dataField.type(),
+                                                    indexOf(dataField, idToDataFields),
+                                                    dataField.name(),
+                                                    literals));
                 };
 
         for (Predicate predicate : filters) {
