@@ -91,7 +91,6 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
         this.read = readBuilder.newRead().withIOManager(ioManager);
         this.reuseRow = new FlinkRowData(null);
         if (projectionRowData != null) {
-            projectionRowData.replaceRow(this.reuseRow);
             this.reuseRecord = new StreamRecord<>(projectionRowData);
         } else {
             this.reuseRecord = new StreamRecord<>(reuseRow);
@@ -126,6 +125,9 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
                 }
 
                 reuseRow.replace(iterator.next());
+                if (projectionRowData != null) {
+                    projectionRowData.replaceRow(this.reuseRow);
+                }
                 output.collect(reuseRecord);
             }
         }
