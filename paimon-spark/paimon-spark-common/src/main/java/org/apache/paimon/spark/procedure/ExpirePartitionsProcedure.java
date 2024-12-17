@@ -99,7 +99,7 @@ public class ExpirePartitionsProcedure extends BaseProcedure {
             FileStore fileStore = fileStoreTable.store();
 
             PartitionExpire partitionExpire =
-                    fileStore.newPartitionExpire(fileStore.options().createCommitUser());
+                    fileStore.newPartitionExpire("", fileStoreTable);
             Preconditions.checkNotNull(
                     partitionExpire,
                     "Both the partition expiration time and partition field can not be null.");

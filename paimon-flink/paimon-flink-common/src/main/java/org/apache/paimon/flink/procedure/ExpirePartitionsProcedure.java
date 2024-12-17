@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.operation.PartitionExpire;
@@ -31,7 +32,9 @@ import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 import org.apache.flink.types.Row;
+import org.apache.paimon.utils.TimeUtils;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -93,7 +96,7 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
         FileStore fileStore = fileStoreTable.store();
 
         PartitionExpire partitionExpire =
-                fileStore.newPartitionExpire(fileStore.options().createCommitUser());
+                fileStore.newPartitionExpire("", fileStoreTable);
         Preconditions.checkNotNull(
                 partitionExpire,
                 "Both the partition expiration time and partition field can not be null.");
