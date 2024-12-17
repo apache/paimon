@@ -70,6 +70,18 @@ public class ProjectionPushDownITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testProjectionPushDownWithUnorderedColumns() {
+        String sql = "SELECT c, a FROM T";
+        assertPlanAndResult(
+                sql,
+                "TableSourceScan(table=[[PAIMON, default, T, project=[c, a]]], fields=[c, a])",
+                Row.ofKind(RowKind.INSERT, "1", 1),
+                Row.ofKind(RowKind.INSERT, "2", 1),
+                Row.ofKind(RowKind.INSERT, "3", 2),
+                Row.ofKind(RowKind.INSERT, "3", 3));
+    }
+
+    @Test
     public void testNestedProjectionPushDown() {
         String sql = "SELECT a, b.b1 FROM T";
         assertPlanAndResult(

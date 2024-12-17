@@ -209,6 +209,11 @@ public abstract class Projection {
 
         @Override
         public org.apache.paimon.types.RowType project(org.apache.paimon.types.RowType rowType) {
+            if (!nested) {
+                return rowType.project(
+                        Arrays.stream(this.projection).mapToInt(x -> x[0]).toArray());
+            }
+
             MutableRowType result =
                     new MutableRowType(rowType.isNullable(), Collections.emptyList());
             for (int[] indexPath : this.projection) {
@@ -244,6 +249,10 @@ public abstract class Projection {
 
         @Override
         public ProjectionRowData getOuterProjectRow(org.apache.paimon.types.RowType rowType) {
+            if (!nested) {
+                return null;
+            }
+
             org.apache.paimon.types.RowType resultType = project(rowType);
 
             int[][] resultIndices = new int[this.projection.length][];
