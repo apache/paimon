@@ -270,6 +270,11 @@ paimon-format/src/main/java/org/apache/parquet/hadoop/ParquetFileReader.java
 paimon-format/src/main/java/org/apache/parquet/hadoop/ParquetWriter.java
 from https://parquet.apache.org/ version 1.14.0
 
+paimon-common/src/main/java/org/apache/paimon/data/variant/GenericVariant.java
+paimon-common/src/main/java/org/apache/paimon/data/variant/GenericVariantBuilder.java
+paimon-common/src/main/java/org/apache/paimon/data/variant/GenericVariantUtil.java
+from https://spark.apache.org/ version 4.0.0-preview2
+
 MIT License
 -----------
 
