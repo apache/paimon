@@ -27,12 +27,14 @@ import java.util.Map;
 /** Expire tags action for Flink. */
 public class ExpireTagsAction extends ActionBase {
 
+    private final String database;
     private final String table;
     private final String olderThan;
 
     public ExpireTagsAction(
-            String warehouse, String table, String olderThan, Map<String, String> catalogConfig) {
-        super(warehouse, catalogConfig);
+            String database, String table, String olderThan, Map<String, String> catalogConfig) {
+        super(catalogConfig);
+        this.database = database;
         this.table = table;
         this.olderThan = olderThan;
     }
@@ -41,6 +43,7 @@ public class ExpireTagsAction extends ActionBase {
     public void run() throws Exception {
         ExpireTagsProcedure expireTagsProcedure = new ExpireTagsProcedure();
         expireTagsProcedure.withCatalog(catalog);
-        expireTagsProcedure.call(new DefaultProcedureContext(env), table, olderThan);
+        expireTagsProcedure.call(
+                new DefaultProcedureContext(env), database + "." + table, olderThan);
     }
 }

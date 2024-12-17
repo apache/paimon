@@ -102,11 +102,8 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
     private final List<Identifier> excludedTables = new ArrayList<>();
 
     public MySqlSyncDatabaseAction(
-            String warehouse,
-            String database,
-            Map<String, String> catalogConfig,
-            Map<String, String> mySqlConfig) {
-        super(warehouse, database, catalogConfig, mySqlConfig, SyncJobHandler.SourceType.MYSQL);
+            String database, Map<String, String> catalogConfig, Map<String, String> mySqlConfig) {
+        super(database, catalogConfig, mySqlConfig, SyncJobHandler.SourceType.MYSQL);
         this.mode = DIVIDED;
     }
 

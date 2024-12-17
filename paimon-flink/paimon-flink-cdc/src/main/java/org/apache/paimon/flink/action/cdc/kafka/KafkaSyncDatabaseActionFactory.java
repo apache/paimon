@@ -40,7 +40,7 @@ public class KafkaSyncDatabaseActionFactory
 
     @Override
     public KafkaSyncDatabaseAction createAction() {
-        return new KafkaSyncDatabaseAction(warehouse, database, catalogConfig, cdcSourceConfig);
+        return new KafkaSyncDatabaseAction(database, catalogConfig, cdcSourceConfig);
     }
 
     @Override

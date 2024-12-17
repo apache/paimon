@@ -76,8 +76,8 @@ public class CompactDatabaseAction extends ActionBase {
 
     private boolean isStreaming;
 
-    public CompactDatabaseAction(String warehouse, Map<String, String> catalogConfig) {
-        super(warehouse, catalogConfig);
+    public CompactDatabaseAction(Map<String, String> catalogConfig) {
+        super(catalogConfig);
     }
 
     public CompactDatabaseAction includingDatabases(@Nullable String includingDatabases) {

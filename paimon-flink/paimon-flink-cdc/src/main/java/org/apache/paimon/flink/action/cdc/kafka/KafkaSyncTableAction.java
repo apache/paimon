@@ -27,17 +27,10 @@ import java.util.Map;
 public class KafkaSyncTableAction extends MessageQueueSyncTableActionBase {
 
     public KafkaSyncTableAction(
-            String warehouse,
             String database,
             String table,
             Map<String, String> catalogConfig,
             Map<String, String> kafkaConfig) {
-        super(
-                warehouse,
-                database,
-                table,
-                catalogConfig,
-                kafkaConfig,
-                SyncJobHandler.SourceType.KAFKA);
+        super(database, table, catalogConfig, kafkaConfig, SyncJobHandler.SourceType.KAFKA);
     }
 }

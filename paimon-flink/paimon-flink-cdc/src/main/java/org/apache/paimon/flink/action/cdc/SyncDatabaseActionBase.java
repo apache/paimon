@@ -66,13 +66,11 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     protected Map<String, List<String>> partitionKeyMultiple = new HashMap<>();
 
     public SyncDatabaseActionBase(
-            String warehouse,
             String database,
             Map<String, String> catalogConfig,
             Map<String, String> cdcSourceConfig,
             SyncJobHandler.SourceType sourceType) {
         super(
-                warehouse,
                 database,
                 catalogConfig,
                 cdcSourceConfig,

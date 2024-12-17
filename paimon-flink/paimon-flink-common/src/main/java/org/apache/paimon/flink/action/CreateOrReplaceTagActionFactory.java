@@ -20,8 +20,6 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.utils.TimeUtils;
 
-import org.apache.flink.api.java.tuple.Tuple3;
-
 import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
@@ -35,11 +33,8 @@ public abstract class CreateOrReplaceTagActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        checkRequiredArgument(params, TAG_NAME);
-
-        Tuple3<String, String, String> tablePath = getTablePath(params);
-        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
-        String tagName = params.get(TAG_NAME);
+        Map<String, String> catalogConfig = catalogConfigMap(params);
+        String tagName = params.getRequired(TAG_NAME);
 
         Long snapshot = null;
         if (params.has(SNAPSHOT)) {
@@ -53,11 +48,17 @@ public abstract class CreateOrReplaceTagActionFactory implements ActionFactory {
 
         return Optional.of(
                 createOrReplaceTagAction(
-                        tablePath, catalogConfig, tagName, snapshot, timeRetained));
+                        params.getRequired(DATABASE),
+                        params.getRequired(TABLE),
+                        catalogConfig,
+                        tagName,
+                        snapshot,
+                        timeRetained));
     }
 
     abstract Action createOrReplaceTagAction(
-            Tuple3<String, String, String> tablePath,
+            String database,
+            String table,
             Map<String, String> catalogConfig,
             String tagName,
             Long snapshot,

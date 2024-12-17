@@ -172,7 +172,13 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                         .checkpointIntervalMs(2000)
                         .build();
         env.setParallelism(1);
-        new CompactAction(path, "default", "T").withStreamExecutionEnvironment(env).build();
+        new CompactAction(
+                        "default",
+                        "T",
+                        Collections.singletonMap("warehouse", path),
+                        Collections.emptyMap())
+                .withStreamExecutionEnvironment(env)
+                .build();
         JobClient client = env.executeAsync();
 
         // write records for a while
@@ -834,7 +840,13 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                             .parallelism(2)
                             .allowRestart()
                             .build();
-            new CompactAction(path, "default", "T").withStreamExecutionEnvironment(env).build();
+            new CompactAction(
+                            "default",
+                            "T",
+                            Collections.singletonMap("warehouse", path),
+                            Collections.emptyMap())
+                    .withStreamExecutionEnvironment(env)
+                    .build();
             env.executeAsync();
         }
 
@@ -873,7 +885,13 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                             .allowRestart()
                             .build();
             env.setParallelism(2);
-            new CompactAction(path, "default", "T").withStreamExecutionEnvironment(env).build();
+            new CompactAction(
+                            "default",
+                            "T",
+                            Collections.singletonMap("warehouse", path),
+                            Collections.emptyMap())
+                    .withStreamExecutionEnvironment(env)
+                    .build();
             env.executeAsync();
         }
 

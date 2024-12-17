@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action;
 
+import java.util.Map;
 import java.util.Optional;
 
 /** Factory to create {@link CloneAction}. */
@@ -37,16 +38,22 @@ public class CloneActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
+        Map<String, String> catalogConfig = catalogConfigMap(params);
+
+        Map<String, String> targetCatalogConfig = optionalConfigMap(params, TARGET_CATALOG_CONF);
+        String targetWarehouse = params.get(TARGET_WAREHOUSE);
+        if (targetWarehouse != null && !targetCatalogConfig.containsKey(TARGET_WAREHOUSE)) {
+            catalogConfig.put(TARGET_WAREHOUSE, targetWarehouse);
+        }
+
         CloneAction cloneAction =
                 new CloneAction(
-                        params.get(WAREHOUSE),
                         params.get(DATABASE),
                         params.get(TABLE),
-                        optionalConfigMap(params, CATALOG_CONF),
-                        params.get(TARGET_WAREHOUSE),
+                        catalogConfig,
                         params.get(TARGET_DATABASE),
                         params.get(TARGET_TABLE),
-                        optionalConfigMap(params, TARGET_CATALOG_CONF),
+                        targetCatalogConfig,
                         params.get(PARALLELISM));
 
         return Optional.of(cloneAction);

@@ -33,12 +33,11 @@ public class RollbackToAction extends TableActionBase {
     private final String version;
 
     public RollbackToAction(
-            String warehouse,
             String databaseName,
             String tableName,
             String version,
             Map<String, String> catalogConfig) {
-        super(warehouse, databaseName, tableName, catalogConfig);
+        super(databaseName, tableName, catalogConfig);
         this.version = version;
     }
 

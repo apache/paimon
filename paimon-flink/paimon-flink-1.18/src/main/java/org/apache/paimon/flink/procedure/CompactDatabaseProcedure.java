@@ -123,10 +123,9 @@ public class CompactDatabaseProcedure extends ProcedureBase {
             String partitionIdleTime,
             String compactStrategy)
             throws Exception {
-        String warehouse = catalog.warehouse();
         Map<String, String> catalogOptions = catalog.options();
         CompactDatabaseAction action =
-                new CompactDatabaseAction(warehouse, catalogOptions)
+                new CompactDatabaseAction(catalogOptions)
                         .includingDatabases(nullable(includingDatabases))
                         .includingTables(nullable(includingTables))
                         .excludingTables(nullable(excludingTables))

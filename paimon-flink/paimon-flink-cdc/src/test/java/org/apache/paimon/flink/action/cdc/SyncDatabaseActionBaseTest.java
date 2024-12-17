@@ -33,6 +33,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -63,7 +64,9 @@ public class SyncDatabaseActionBaseTest {
 
         kafkaSyncDbAction =
                 new KafkaSyncDatabaseAction(
-                        tmp.toString(), "default", new HashMap<>(), new HashMap<>());
+                        "default",
+                        Collections.singletonMap("warehouse", tmp.toString()),
+                        new HashMap<>());
 
         Map<String, String> rawData = new HashMap<>();
         rawData.put("field", "value");
