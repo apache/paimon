@@ -420,19 +420,6 @@ public class GenericVariantUtil {
         }
     }
 
-    /**
-     * Class used to pass around start and end fields of year-month and day-time interval values.
-     */
-    public static class IntervalFields {
-        public IntervalFields(byte startField, byte endField) {
-            this.startField = startField;
-            this.endField = endField;
-        }
-
-        public final byte startField;
-        public final byte endField;
-    }
-
     // Get a double value from variant value `value[pos...]`.
     // Throw `MALFORMED_VARIANT` if the variant is malformed.
     public static double getDouble(byte[] value, int pos) {

@@ -280,7 +280,7 @@ public final class GenericVariant implements Variant {
                 });
     }
 
-    /** 1. */
+    /** Variant object field. */
     public static final class ObjectField {
         public final String key;
         public final Variant value;
