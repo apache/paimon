@@ -61,6 +61,7 @@ import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanne
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SimpleFileReader;
@@ -469,7 +470,15 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         if (options.partitionedTableInMetastore()
                 && metastoreClientFactory != null
                 && !tableSchema.partitionKeys().isEmpty()) {
-            callbacks.add(new AddPartitionCommitCallback(metastoreClientFactory.create()));
+            InternalRowPartitionComputer partitionComputer =
+                    new InternalRowPartitionComputer(
+                            options.partitionDefaultName(),
+                            tableSchema.logicalPartitionType(),
+                            tableSchema.partitionKeys().toArray(new String[0]),
+                            options.legacyPartitionName());
+            callbacks.add(
+                    new AddPartitionCommitCallback(
+                            metastoreClientFactory.create(), partitionComputer));
         }
 
         TagPreview tagPreview = TagPreview.create(options);

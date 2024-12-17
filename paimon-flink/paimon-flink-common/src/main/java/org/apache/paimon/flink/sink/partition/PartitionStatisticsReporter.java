@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.metastore.MetastoreClient;
+import org.apache.paimon.metastore.PartitionStats;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ScanMode;
@@ -35,15 +36,9 @@ import org.slf4j.LoggerFactory;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
-import static org.apache.paimon.catalog.Catalog.LAST_UPDATE_TIME_PROP;
-import static org.apache.paimon.catalog.Catalog.NUM_FILES_PROP;
-import static org.apache.paimon.catalog.Catalog.NUM_ROWS_PROP;
-import static org.apache.paimon.catalog.Catalog.TOTAL_SIZE_PROP;
 import static org.apache.paimon.utils.PartitionPathUtils.extractPartitionSpecFromPath;
 
 /** Action to report the table statistic from the latest snapshot to HMS. */
@@ -64,7 +59,7 @@ public class PartitionStatisticsReporter implements Closeable {
         this.snapshotManager = table.snapshotManager();
     }
 
-    public void report(String partition, long modifyTime) throws Exception {
+    public void report(String partition, long modifyTimeMillis) throws Exception {
         Snapshot snapshot = snapshotManager.latestSnapshot();
         if (snapshot != null) {
             LinkedHashMap<String, String> partitionSpec =
@@ -88,19 +83,11 @@ public class PartitionStatisticsReporter implements Closeable {
                     totalSize += fileMeta.fileSize();
                 }
             }
-            Map<String, String> statistic = new HashMap<>();
-            statistic.put(NUM_FILES_PROP, String.valueOf(fileCount));
-            statistic.put(TOTAL_SIZE_PROP, String.valueOf(totalSize));
-            statistic.put(NUM_ROWS_PROP, String.valueOf(rowCount));
 
-            String modifyTimeSeconds = String.valueOf(modifyTime / 1000);
-            statistic.put(LAST_UPDATE_TIME_PROP, modifyTimeSeconds);
-
-            // just for being compatible with hive metastore
-            statistic.put(HIVE_LAST_UPDATE_TIME_PROP, modifyTimeSeconds);
-
-            LOG.info("alter partition {} with statistic {}.", partitionSpec, statistic);
-            metastoreClient.alterPartition(partitionSpec, statistic, modifyTime, true);
+            PartitionStats partitionStats =
+                    PartitionStats.create(fileCount, totalSize, rowCount, modifyTimeMillis);
+            LOG.info("alter partition {} with statistic {}.", partitionSpec, partitionStats);
+            metastoreClient.alterPartition(partitionSpec, partitionStats);
         }
     }
 

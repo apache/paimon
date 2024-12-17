@@ -27,7 +27,6 @@ import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.pool.CachedClientPool;
@@ -48,6 +47,7 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.view.View;
@@ -191,13 +191,12 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public Optional<MetastoreClient.Factory> metastoreClientFactory(
-            Identifier identifier, TableSchema schema) {
+    public Optional<MetastoreClient.Factory> metastoreClientFactory(Identifier identifier) {
         Identifier tableIdentifier =
                 new Identifier(identifier.getDatabaseName(), identifier.getTableName());
         return Optional.of(
                 new HiveMetastoreClient.Factory(
-                        tableIdentifier, schema, hiveConf, clientClassName, options));
+                        tableIdentifier, hiveConf, clientClassName, options));
     }
 
     @Override
@@ -350,9 +349,8 @@ public class HiveCatalog extends AbstractCatalog {
                         new HiveMetastoreClient(
                                 new Identifier(
                                         identifier.getDatabaseName(), identifier.getTableName()),
-                                tableSchema,
                                 clients);
-                metastoreClient.deletePartition(new LinkedHashMap<>(partitionSpec));
+                metastoreClient.dropPartition(new LinkedHashMap<>(partitionSpec));
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -610,7 +608,7 @@ public class HiveCatalog extends AbstractCatalog {
                                     lockFactory().orElse(null),
                                     lockContext().orElse(null),
                                     identifier),
-                            metastoreClientFactory(identifier, tableMeta.schema()).orElse(null)));
+                            metastoreClientFactory(identifier).orElse(null)));
         } catch (TableNotExistException ignore) {
         }
 
@@ -968,14 +966,19 @@ public class HiveCatalog extends AbstractCatalog {
             // repair partitions
             if (!tableSchema.partitionKeys().isEmpty() && !newTable.getPartitionKeys().isEmpty()) {
                 // Do not close client, it is for HiveCatalog
+                CoreOptions options = new CoreOptions(tableSchema.options());
+                InternalRowPartitionComputer partitionComputer =
+                        new InternalRowPartitionComputer(
+                                options.partitionDefaultName(),
+                                tableSchema.logicalPartitionType(),
+                                tableSchema.partitionKeys().toArray(new String[0]),
+                                options.legacyPartitionName());
                 @SuppressWarnings("resource")
-                HiveMetastoreClient metastoreClient =
-                        new HiveMetastoreClient(identifier, tableSchema, clients);
-                List<BinaryRow> partitions =
-                        getTable(identifier).newReadBuilder().newScan().listPartitions();
-                for (BinaryRow partition : partitions) {
-                    metastoreClient.addPartition(partition);
-                }
+                HiveMetastoreClient metastoreClient = new HiveMetastoreClient(identifier, clients);
+                metastoreClient.addPartitions(
+                        getTable(identifier).newReadBuilder().newScan().listPartitions().stream()
+                                .map(partitionComputer::generatePartValues)
+                                .collect(Collectors.toList()));
             }
         } catch (Exception e) {
             throw new RuntimeException(e);

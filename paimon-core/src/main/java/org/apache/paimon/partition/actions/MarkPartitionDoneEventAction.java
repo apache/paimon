@@ -39,7 +39,7 @@ public class MarkPartitionDoneEventAction implements PartitionMarkDoneAction {
     public void markDone(String partition) throws Exception {
         LinkedHashMap<String, String> partitionSpec =
                 extractPartitionSpecFromPath(new Path(partition));
-        metastoreClient.markDone(partitionSpec);
+        metastoreClient.markPartitionDone(partitionSpec);
     }
 
     @Override

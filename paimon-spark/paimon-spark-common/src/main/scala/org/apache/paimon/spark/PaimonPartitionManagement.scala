@@ -78,7 +78,7 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
           // sync to metastore with delete partitions
           if (clientFactory != null && fileStoreTable.coreOptions().partitionedTableInMetastore()) {
             metastoreClient = clientFactory.create()
-            toPaimonPartitions(rows).foreach(metastoreClient.deletePartition)
+            metastoreClient.dropPartitions(toPaimonPartitions(rows))
           }
         } finally {
           commit.close()

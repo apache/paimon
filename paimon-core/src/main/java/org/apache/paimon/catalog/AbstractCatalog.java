@@ -417,7 +417,7 @@ public abstract class AbstractCatalog implements Catalog {
                                         lockFactory().orElse(null),
                                         lockContext().orElse(null),
                                         identifier),
-                                metastoreClientFactory(identifier, tableMeta.schema).orElse(null)));
+                                metastoreClientFactory(identifier).orElse(null)));
         CoreOptions options = table.coreOptions();
         if (options.type() == TableType.OBJECT_TABLE) {
             String objectLocation = options.objectLocation();
@@ -485,8 +485,7 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableNotExistException;
 
     /** Get metastore client factory for the table specified by {@code identifier}. */
-    public Optional<MetastoreClient.Factory> metastoreClientFactory(
-            Identifier identifier, TableSchema schema) {
+    public Optional<MetastoreClient.Factory> metastoreClientFactory(Identifier identifier) {
         return Optional.empty();
     }
 

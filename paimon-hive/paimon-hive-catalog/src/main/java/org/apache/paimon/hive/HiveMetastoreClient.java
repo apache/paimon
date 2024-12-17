@@ -18,15 +18,12 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.hive.pool.CachedClientPool;
 import org.apache.paimon.metastore.MetastoreClient;
+import org.apache.paimon.metastore.PartitionStats;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.PartitionPathUtils;
 
 import org.apache.hadoop.hive.conf.HiveConf;
@@ -39,34 +36,30 @@ import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.thrift.TException;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.catalog.Catalog.LAST_UPDATE_TIME_PROP;
+import static org.apache.paimon.catalog.Catalog.NUM_FILES_PROP;
+import static org.apache.paimon.catalog.Catalog.NUM_ROWS_PROP;
+import static org.apache.paimon.catalog.Catalog.TOTAL_SIZE_PROP;
+
 /** {@link MetastoreClient} for Hive tables. */
 public class HiveMetastoreClient implements MetastoreClient {
 
+    private static final String HIVE_LAST_UPDATE_TIME_PROP = "transient_lastDdlTime";
+
     private final Identifier identifier;
-    private final InternalRowPartitionComputer partitionComputer;
 
     private final ClientPool<IMetaStoreClient, TException> clients;
     private final StorageDescriptor sd;
 
-    HiveMetastoreClient(
-            Identifier identifier,
-            TableSchema schema,
-            ClientPool<IMetaStoreClient, TException> clients)
+    HiveMetastoreClient(Identifier identifier, ClientPool<IMetaStoreClient, TException> clients)
             throws TException, InterruptedException {
         this.identifier = identifier;
-        CoreOptions options = new CoreOptions(schema.options());
-        this.partitionComputer =
-                new InternalRowPartitionComputer(
-                        options.partitionDefaultName(),
-                        schema.logicalPartitionType(),
-                        schema.partitionKeys().toArray(new String[0]),
-                        options.legacyPartitionName());
-
         this.clients = clients;
         this.sd =
                 this.clients
@@ -79,22 +72,9 @@ public class HiveMetastoreClient implements MetastoreClient {
     }
 
     @Override
-    public void addPartition(BinaryRow partition) throws Exception {
-        addPartition(partitionComputer.generatePartValues(partition));
-    }
-
-    @Override
-    public void addPartitions(List<BinaryRow> partitions) throws Exception {
-        addPartitionsSpec(
-                partitions.stream()
-                        .map(partitionComputer::generatePartValues)
-                        .collect(Collectors.toList()));
-    }
-
-    @Override
-    public void addPartition(LinkedHashMap<String, String> partitionSpec) throws Exception {
+    public void addPartition(LinkedHashMap<String, String> partition) throws Exception {
         Partition hivePartition =
-                toHivePartition(partitionSpec, (int) (System.currentTimeMillis() / 1000));
+                toHivePartition(partition, (int) (System.currentTimeMillis() / 1000));
         clients.execute(
                 client -> {
                     try {
@@ -105,11 +85,10 @@ public class HiveMetastoreClient implements MetastoreClient {
     }
 
     @Override
-    public void addPartitionsSpec(List<LinkedHashMap<String, String>> partitionSpecsList)
-            throws Exception {
+    public void addPartitions(List<LinkedHashMap<String, String>> partitions) throws Exception {
         int currentTime = (int) (System.currentTimeMillis() / 1000);
         List<Partition> hivePartitions =
-                partitionSpecsList.stream()
+                partitions.stream()
                         .map(partitionSpec -> toHivePartition(partitionSpec, currentTime))
                         .collect(Collectors.toList());
         clients.execute(client -> client.add_partitions(hivePartitions, true, false));
@@ -117,43 +96,45 @@ public class HiveMetastoreClient implements MetastoreClient {
 
     @Override
     public void alterPartition(
-            LinkedHashMap<String, String> partitionSpec,
-            Map<String, String> parameters,
-            long modifyTime,
-            boolean ignoreIfNotExist)
+            LinkedHashMap<String, String> partition, PartitionStats partitionStats)
             throws Exception {
-        List<String> partitionValues = new ArrayList<>(partitionSpec.values());
-        int currentTime = (int) (modifyTime / 1000);
-        Partition hivePartition;
+        List<String> partitionValues = new ArrayList<>(partition.values());
+
+        Map<String, String> statistic = new HashMap<>();
+        statistic.put(NUM_FILES_PROP, String.valueOf(partitionStats.numFiles()));
+        statistic.put(TOTAL_SIZE_PROP, String.valueOf(partitionStats.totalSize()));
+        statistic.put(NUM_ROWS_PROP, String.valueOf(partitionStats.numRows()));
+
+        String modifyTimeSeconds = String.valueOf(partitionStats.lastUpdateTimeMillis() / 1000);
+        statistic.put(LAST_UPDATE_TIME_PROP, modifyTimeSeconds);
+
+        // just for being compatible with hive metastore
+        statistic.put(HIVE_LAST_UPDATE_TIME_PROP, modifyTimeSeconds);
+
         try {
-            hivePartition =
+            Partition hivePartition =
                     clients.run(
                             client ->
                                     client.getPartition(
                                             identifier.getDatabaseName(),
                                             identifier.getObjectName(),
                                             partitionValues));
+            hivePartition.setValues(partitionValues);
+            hivePartition.setLastAccessTime((int) (partitionStats.lastUpdateTimeMillis() / 1000));
+            hivePartition.getParameters().putAll(statistic);
+            clients.execute(
+                    client ->
+                            client.alter_partition(
+                                    identifier.getDatabaseName(),
+                                    identifier.getObjectName(),
+                                    hivePartition));
         } catch (NoSuchObjectException e) {
-            if (ignoreIfNotExist) {
-                return;
-            } else {
-                throw e;
-            }
+            // do nothing if the partition not exists
         }
-
-        hivePartition.setValues(partitionValues);
-        hivePartition.setLastAccessTime(currentTime);
-        hivePartition.getParameters().putAll(parameters);
-        clients.execute(
-                client ->
-                        client.alter_partition(
-                                identifier.getDatabaseName(),
-                                identifier.getObjectName(),
-                                hivePartition));
     }
 
     @Override
-    public void deletePartition(LinkedHashMap<String, String> partitionSpec) throws Exception {
+    public void dropPartition(LinkedHashMap<String, String> partitionSpec) throws Exception {
         List<String> partitionValues = new ArrayList<>(partitionSpec.values());
         try {
             clients.execute(
@@ -169,7 +150,14 @@ public class HiveMetastoreClient implements MetastoreClient {
     }
 
     @Override
-    public void markDone(LinkedHashMap<String, String> partitionSpec) throws Exception {
+    public void dropPartitions(List<LinkedHashMap<String, String>> partitions) throws Exception {
+        for (LinkedHashMap<String, String> partition : partitions) {
+            dropPartition(partition);
+        }
+    }
+
+    @Override
+    public void markPartitionDone(LinkedHashMap<String, String> partitionSpec) throws Exception {
         try {
             clients.execute(
                     client ->
@@ -213,19 +201,13 @@ public class HiveMetastoreClient implements MetastoreClient {
         private static final long serialVersionUID = 1L;
 
         private final Identifier identifier;
-        private final TableSchema schema;
         private final SerializableHiveConf hiveConf;
         private final String clientClassName;
         private final Options options;
 
         public Factory(
-                Identifier identifier,
-                TableSchema schema,
-                HiveConf hiveConf,
-                String clientClassName,
-                Options options) {
+                Identifier identifier, HiveConf hiveConf, String clientClassName, Options options) {
             this.identifier = identifier;
-            this.schema = schema;
             this.hiveConf = new SerializableHiveConf(hiveConf);
             this.clientClassName = clientClassName;
             this.options = options;
@@ -236,7 +218,7 @@ public class HiveMetastoreClient implements MetastoreClient {
             HiveConf conf = hiveConf.conf();
             try {
                 return new HiveMetastoreClient(
-                        identifier, schema, new CachedClientPool(conf, options, clientClassName));
+                        identifier, new CachedClientPool(conf, options, clientClassName));
             } catch (TException e) {
                 throw new RuntimeException(
                         "Can not get table " + identifier + " info from metastore.", e);
