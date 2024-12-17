@@ -46,8 +46,6 @@ public class PartitionStatisticsReporter implements Closeable {
 
     private static final Logger LOG = LoggerFactory.getLogger(PartitionStatisticsReporter.class);
 
-    private static final String HIVE_LAST_UPDATE_TIME_PROP = "transient_lastDdlTime";
-
     private final MetastoreClient metastoreClient;
     private final SnapshotReader snapshotReader;
     private final SnapshotManager snapshotManager;
