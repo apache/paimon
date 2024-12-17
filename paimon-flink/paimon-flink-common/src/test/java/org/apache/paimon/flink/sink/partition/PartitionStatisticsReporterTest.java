@@ -49,8 +49,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Test for {@link HmsReporter}. */
-public class HmsReporterTest {
+/** Test for {@link PartitionStatisticsReporter}. */
+public class PartitionStatisticsReporterTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -117,7 +117,8 @@ public class HmsReporterTest {
                     public void alterPartition(
                             LinkedHashMap<String, String> partitionSpec,
                             Map<String, String> parameters,
-                            long modifyTime)
+                            long modifyTime,
+                            boolean ignoreIfNotExist)
                             throws Exception {
                         partitionParams.put(
                                 PartitionPathUtils.generatePartitionPath(partitionSpec),
@@ -130,7 +131,7 @@ public class HmsReporterTest {
                     }
                 };
 
-        HmsReporter action = new HmsReporter(table, client);
+        PartitionStatisticsReporter action = new PartitionStatisticsReporter(table, client);
         long time = 1729598544974L;
         action.report("c1=a/", time);
         Assertions.assertThat(partitionParams).containsKey("c1=a/");
@@ -143,6 +144,8 @@ public class HmsReporterTest {
                                 "591",
                                 "numRows",
                                 "1",
+                                "lastUpdateTime",
+                                String.valueOf(time / 1000),
                                 "transient_lastDdlTime",
                                 String.valueOf(time / 1000)));
         action.close();

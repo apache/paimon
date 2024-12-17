@@ -16,21 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.catalog;
+package org.apache.paimon.spark.procedure
 
-import org.apache.paimon.options.ConfigOption;
-import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.spark.PaimonSparkTestBase
 
-/** Options for filesystem catalog. */
-public final class FileSystemCatalogOptions {
+import org.apache.spark.sql.Row
 
-    public static final ConfigOption<Boolean> CASE_SENSITIVE =
-            ConfigOptions.key("case-sensitive")
-                    .booleanType()
-                    .defaultValue(true)
-                    .withFallbackKeys("allow-upper-case")
-                    .withDescription(
-                            "Is case sensitive. If case insensitive, you need to set this option to false, and the table name and fields be converted to lowercase.");
+class PurgeFilesProcedureTest extends PaimonSparkTestBase {
 
-    private FileSystemCatalogOptions() {}
+  test("Paimon procedure: purge files test") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id STRING, name STRING)
+                 |USING PAIMON
+                 |""".stripMargin)
+
+    spark.sql("insert into T select '1', 'aa'");
+    checkAnswer(spark.sql("select * from test.T"), Row("1", "aa") :: Nil)
+
+    spark.sql("CALL paimon.sys.purge_files(table => 'test.T')")
+    checkAnswer(spark.sql("select * from test.T"), Nil)
+
+    spark.sql("refresh table test.T");
+    spark.sql("insert into T select '2', 'aa'");
+    checkAnswer(spark.sql("select * from test.T"), Row("2", "aa") :: Nil)
+  }
+
 }

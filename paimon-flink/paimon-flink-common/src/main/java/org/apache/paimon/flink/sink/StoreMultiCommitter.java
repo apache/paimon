@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
@@ -56,12 +57,12 @@ public class StoreMultiCommitter
     private final boolean ignoreEmptyCommit;
     private final Map<String, String> dynamicOptions;
 
-    public StoreMultiCommitter(Catalog.Loader catalogLoader, Context context) {
+    public StoreMultiCommitter(CatalogLoader catalogLoader, Context context) {
         this(catalogLoader, context, false, Collections.emptyMap());
     }
 
     public StoreMultiCommitter(
-            Catalog.Loader catalogLoader,
+            CatalogLoader catalogLoader,
             Context context,
             boolean ignoreEmptyCommit,
             Map<String, String> dynamicOptions) {

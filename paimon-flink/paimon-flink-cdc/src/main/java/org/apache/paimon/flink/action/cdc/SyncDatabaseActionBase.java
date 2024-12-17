@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.flink.sink.cdc.EventParser;
@@ -53,6 +54,8 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     protected String tablePrefix = "";
     protected String tableSuffix = "";
     protected Map<String, String> tableMapping = new HashMap<>();
+    protected Map<String, String> dbPrefix = new HashMap<>();
+    protected Map<String, String> dbSuffix = new HashMap<>();
     protected String includingTables = ".*";
     protected List<String> partitionKeys = new ArrayList<>();
     protected List<String> primaryKeys = new ArrayList<>();
@@ -98,6 +101,30 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
         return this;
     }
 
+    public SyncDatabaseActionBase withDbPrefix(Map<String, String> dbPrefix) {
+        if (dbPrefix != null) {
+            this.dbPrefix =
+                    dbPrefix.entrySet().stream()
+                            .collect(
+                                    HashMap::new,
+                                    (m, e) -> m.put(e.getKey().toLowerCase(), e.getValue()),
+                                    HashMap::putAll);
+        }
+        return this;
+    }
+
+    public SyncDatabaseActionBase withDbSuffix(Map<String, String> dbSuffix) {
+        if (dbSuffix != null) {
+            this.dbSuffix =
+                    dbSuffix.entrySet().stream()
+                            .collect(
+                                    HashMap::new,
+                                    (m, e) -> m.put(e.getKey().toLowerCase(), e.getValue()),
+                                    HashMap::putAll);
+        }
+        return this;
+    }
+
     public SyncDatabaseActionBase withTableMapping(Map<String, String> tableMapping) {
         if (tableMapping != null) {
             this.tableMapping = tableMapping;
@@ -129,9 +156,9 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
 
     @Override
     protected void validateCaseSensitivity() {
-        Catalog.validateCaseInsensitive(allowUpperCase, "Database", database);
-        Catalog.validateCaseInsensitive(allowUpperCase, "Table prefix", tablePrefix);
-        Catalog.validateCaseInsensitive(allowUpperCase, "Table suffix", tableSuffix);
+        CatalogUtils.validateCaseInsensitive(caseSensitive, "Database", database);
+        CatalogUtils.validateCaseInsensitive(caseSensitive, "Table prefix", tablePrefix);
+        CatalogUtils.validateCaseInsensitive(caseSensitive, "Table suffix", tableSuffix);
     }
 
     @Override
@@ -153,7 +180,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
         NewTableSchemaBuilder schemaBuilder =
                 new NewTableSchemaBuilder(
                         tableConfig,
-                        allowUpperCase,
+                        caseSensitive,
                         partitionKeys,
                         primaryKeys,
                         requirePrimaryKeys(),
@@ -164,7 +191,13 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
                 excludingTables == null ? null : Pattern.compile(excludingTables);
         TableNameConverter tableNameConverter =
                 new TableNameConverter(
-                        allowUpperCase, mergeShards, tablePrefix, tableSuffix, tableMapping);
+                        caseSensitive,
+                        mergeShards,
+                        dbPrefix,
+                        dbSuffix,
+                        tablePrefix,
+                        tableSuffix,
+                        tableMapping);
         Set<String> createdTables;
         try {
             createdTables = new HashSet<>(catalog.listTables(database));

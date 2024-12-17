@@ -331,6 +331,10 @@ public class TableSchema implements Serializable {
         return rowType.getFields();
     }
 
+    public Schema toSchema() {
+        return new Schema(fields, partitionKeys, primaryKeys, options, comment);
+    }
+
     // =================== Utils for reading =========================
 
     public static TableSchema fromJson(String json) {

@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
@@ -54,7 +55,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class CdcMultiplexRecordChannelComputerTest {
 
     @TempDir java.nio.file.Path tempDir;
-    private Catalog.Loader catalogLoader;
+    private CatalogLoader catalogLoader;
     private Path warehouse;
     private String databaseName;
     private Identifier tableWithPartition;

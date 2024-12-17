@@ -83,11 +83,45 @@ relationship between various table types and buckets in Paimon:
 The name of data file is `data-${uuid}-${id}.${format}`. For the append table, the file stores the data of the table
 without adding any new columns. But for the primary key table, each row of data stores additional system columns:
 
-1. `_VALUE_KIND`: row is deleted or added. Similar to RocksDB, each row of data can be deleted or added, which will be
+## Table with Primary key Data File
+
+1. Primary key columns, `_KEY_` prefix to key columns, this is to avoid conflicts with columns of the table. It's optional,
+   Paimon version 1.0 and above will retrieve the primary key fields from value_columns.
+2. `_VALUE_KIND`: TINYINT, row is deleted or added. Similar to RocksDB, each row of data can be deleted or added, which will be
    used for updating the primary key table.
-2. `_SEQUENCE_NUMBER`: this number is used for comparison during updates, determining which data came first and which
+3. `_SEQUENCE_NUMBER`: BIGINT, this number is used for comparison during updates, determining which data came first and which
    data came later.
-3. `_KEY_` prefix to key columns, this is to avoid conflicts with columns of the table.
+4. Value columns. All columns declared in the table.
+
+For example, data file for table:
+
+```sql
+CREATE TABLE T (
+    a INT PRIMARY KEY NOT ENFORCED,
+    b INT,
+    c INT
+);
+```
+
+Its file has 6 columns: `_KEY_a`, `_VALUE_KIND`, `_SEQUENCE_NUMBER`, `a`, `b`, `c`.
+
+When `data-file.thin-mode` enabled, its file has 5 columns: `_VALUE_KIND`, `_SEQUENCE_NUMBER`, `a`, `b`, `c`.
+
+## Table w/o Primary key Data File
+
+- Value columns. All columns declared in the table.
+
+For example, data file for table:
+
+```sql
+CREATE TABLE T (
+    a INT,
+    b INT,
+    c INT
+);
+```
+
+Its file has 3 columns: `a`, `b`, `c`.
 
 ## Changelog File
 

@@ -40,22 +40,24 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.catalog.Catalog.HIVE_LAST_UPDATE_TIME_PROP;
+import static org.apache.paimon.catalog.Catalog.LAST_UPDATE_TIME_PROP;
 import static org.apache.paimon.catalog.Catalog.NUM_FILES_PROP;
 import static org.apache.paimon.catalog.Catalog.NUM_ROWS_PROP;
 import static org.apache.paimon.catalog.Catalog.TOTAL_SIZE_PROP;
 import static org.apache.paimon.utils.PartitionPathUtils.extractPartitionSpecFromPath;
 
 /** Action to report the table statistic from the latest snapshot to HMS. */
-public class HmsReporter implements Closeable {
+public class PartitionStatisticsReporter implements Closeable {
 
-    private static final Logger LOG = LoggerFactory.getLogger(HmsReporter.class);
+    private static final Logger LOG = LoggerFactory.getLogger(PartitionStatisticsReporter.class);
+
+    private static final String HIVE_LAST_UPDATE_TIME_PROP = "transient_lastDdlTime";
 
     private final MetastoreClient metastoreClient;
     private final SnapshotReader snapshotReader;
     private final SnapshotManager snapshotManager;
 
-    public HmsReporter(FileStoreTable table, MetastoreClient client) {
+    public PartitionStatisticsReporter(FileStoreTable table, MetastoreClient client) {
         this.metastoreClient =
                 Preconditions.checkNotNull(client, "the metastore client factory is null");
         this.snapshotReader = table.newSnapshotReader();
@@ -90,10 +92,15 @@ public class HmsReporter implements Closeable {
             statistic.put(NUM_FILES_PROP, String.valueOf(fileCount));
             statistic.put(TOTAL_SIZE_PROP, String.valueOf(totalSize));
             statistic.put(NUM_ROWS_PROP, String.valueOf(rowCount));
-            statistic.put(HIVE_LAST_UPDATE_TIME_PROP, String.valueOf(modifyTime / 1000));
+
+            String modifyTimeSeconds = String.valueOf(modifyTime / 1000);
+            statistic.put(LAST_UPDATE_TIME_PROP, modifyTimeSeconds);
+
+            // just for being compatible with hive metastore
+            statistic.put(HIVE_LAST_UPDATE_TIME_PROP, modifyTimeSeconds);
 
             LOG.info("alter partition {} with statistic {}.", partitionSpec, statistic);
-            metastoreClient.alterPartition(partitionSpec, statistic, modifyTime);
+            metastoreClient.alterPartition(partitionSpec, statistic, modifyTime, true);
         }
     }
 

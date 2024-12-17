@@ -191,6 +191,16 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>purge_files</td>
+      <td>
+         To clear table with purge files directly. Argument:
+            <li>table: the target table identifier. Cannot be empty.</li>
+      </td>
+      <td>
+          CALL sys.purge_files(table => 'default.T')<br/><br/>
+      </td>
+    </tr>
+    <tr>
       <td>migrate_database</td>
       <td>
          Migrate hive table to a paimon table. Arguments:

@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.LogicalTypeConversion;
@@ -99,7 +100,7 @@ public abstract class ActionBase implements Action {
         env.execute(name);
     }
 
-    protected Catalog.Loader catalogLoader() {
+    protected CatalogLoader catalogLoader() {
         // to make the action workflow serializable
         Options catalogOptions = this.catalogOptions;
         return () -> FlinkCatalogFactory.createPaimonCatalog(catalogOptions);

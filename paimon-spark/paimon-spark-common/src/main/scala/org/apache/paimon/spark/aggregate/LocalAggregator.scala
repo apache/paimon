@@ -19,10 +19,10 @@
 package org.apache.paimon.spark.aggregate
 
 import org.apache.paimon.data.BinaryRow
-import org.apache.paimon.manifest.PartitionEntry
 import org.apache.paimon.spark.SparkTypeUtils
 import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.table.{DataTable, Table}
+import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.utils.{InternalRowUtils, ProjectedRow}
 
 import org.apache.spark.sql.catalyst.InternalRow
@@ -78,13 +78,7 @@ class LocalAggregator(table: Table) {
   }
 
   def pushAggregation(aggregation: Aggregation): Boolean = {
-    if (
-      !table.isInstanceOf[DataTable] ||
-      !table.primaryKeys.isEmpty
-    ) {
-      return false
-    }
-    if (table.asInstanceOf[DataTable].coreOptions.deletionVectorsEnabled) {
+    if (!table.isInstanceOf[DataTable]) {
       return false
     }
 
@@ -108,12 +102,12 @@ class LocalAggregator(table: Table) {
     SparkInternalRow.create(partitionType).replace(genericRow)
   }
 
-  def update(partitionEntry: PartitionEntry): Unit = {
+  def update(dataSplit: DataSplit): Unit = {
     assert(isInitialized)
-    val groupByRow = requiredGroupByRow(partitionEntry.partition())
+    val groupByRow = requiredGroupByRow(dataSplit.partition())
     val aggFuncEvaluator =
       groupByEvaluatorMap.getOrElseUpdate(groupByRow, aggFuncEvaluatorGetter())
-    aggFuncEvaluator.foreach(_.update(partitionEntry))
+    aggFuncEvaluator.foreach(_.update(dataSplit))
   }
 
   def result(): Array[InternalRow] = {
@@ -147,7 +141,7 @@ class LocalAggregator(table: Table) {
 }
 
 trait AggFuncEvaluator[T] {
-  def update(partitionEntry: PartitionEntry): Unit
+  def update(dataSplit: DataSplit): Unit
   def result(): T
   def resultType: DataType
   def prettyName: String
@@ -156,8 +150,8 @@ trait AggFuncEvaluator[T] {
 class CountStarEvaluator extends AggFuncEvaluator[Long] {
   private var _result: Long = 0L
 
-  override def update(partitionEntry: PartitionEntry): Unit = {
-    _result += partitionEntry.recordCount()
+  override def update(dataSplit: DataSplit): Unit = {
+    _result += dataSplit.mergedRowCount()
   }
 
   override def result(): Long = _result

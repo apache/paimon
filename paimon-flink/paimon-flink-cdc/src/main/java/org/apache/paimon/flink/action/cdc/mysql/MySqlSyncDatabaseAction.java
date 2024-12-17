@@ -139,11 +139,12 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
 
         TableNameConverter tableNameConverter =
                 new TableNameConverter(
-                        allowUpperCase, mergeShards, tablePrefix, tableSuffix, tableMapping);
+                        caseSensitive, mergeShards, tablePrefix, tableSuffix, tableMapping);
         for (JdbcTableInfo tableInfo : jdbcTableInfos) {
             Identifier identifier =
                     Identifier.create(
-                            database, tableNameConverter.convert(tableInfo.toPaimonTableName()));
+                            database,
+                            tableNameConverter.convert("", tableInfo.toPaimonTableName()));
             FileStoreTable table;
             Schema fromMySql =
                     CdcActionCommonUtils.buildPaimonSchema(
@@ -154,7 +155,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                             tableConfig,
                             tableInfo.schema(),
                             metadataConverters,
-                            allowUpperCase,
+                            caseSensitive,
                             false,
                             true);
             try {

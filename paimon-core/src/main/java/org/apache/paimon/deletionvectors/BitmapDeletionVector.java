@@ -117,4 +117,9 @@ public class BitmapDeletionVector implements DeletionVector {
         BitmapDeletionVector that = (BitmapDeletionVector) o;
         return Objects.equals(this.roaringBitmap, that.roaringBitmap);
     }
+
+    @Override
+    public int hashCode() {
+        return Objects.hashCode(roaringBitmap);
+    }
 }

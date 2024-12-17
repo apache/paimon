@@ -45,6 +45,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
 import java.util.function.Consumer;
@@ -883,6 +884,23 @@ public class SnapshotManager implements Serializable {
 
     private void commitHint(long snapshotId, String fileName, Path dir) throws IOException {
         Path hintFile = new Path(dir, fileName);
-        fileIO.overwriteFileUtf8(hintFile, String.valueOf(snapshotId));
+        int loopTime = 3;
+        while (loopTime-- > 0) {
+            try {
+                fileIO.overwriteFileUtf8(hintFile, String.valueOf(snapshotId));
+                return;
+            } catch (IOException e) {
+                try {
+                    Thread.sleep(ThreadLocalRandom.current().nextInt(1000) + 500);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    // throw root cause
+                    throw new RuntimeException(e);
+                }
+                if (loopTime == 0) {
+                    throw e;
+                }
+            }
+        }
     }
 }

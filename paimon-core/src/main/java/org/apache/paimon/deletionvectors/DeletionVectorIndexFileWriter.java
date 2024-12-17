@@ -20,9 +20,9 @@ package org.apache.paimon.deletionvectors;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.Preconditions;
 
@@ -104,13 +104,13 @@ public class DeletionVectorIndexFileWriter {
 
         private final Path path;
         private final DataOutputStream dataOutputStream;
-        private final LinkedHashMap<String, Pair<Integer, Integer>> dvRanges;
+        private final LinkedHashMap<String, DeletionVectorMeta> dvMetas;
 
         private SingleIndexFileWriter() throws IOException {
             this.path = indexPathFactory.newPath();
             this.dataOutputStream = new DataOutputStream(fileIO.newOutputStream(path, true));
             dataOutputStream.writeByte(VERSION_ID_V1);
-            this.dvRanges = new LinkedHashMap<>();
+            this.dvMetas = new LinkedHashMap<>();
         }
 
         private long writtenSizeInBytes() {
@@ -121,7 +121,10 @@ public class DeletionVectorIndexFileWriter {
             Preconditions.checkNotNull(dataOutputStream);
             byte[] data = deletionVector.serializeToBytes();
             int size = data.length;
-            dvRanges.put(key, Pair.of(dataOutputStream.size(), size));
+            dvMetas.put(
+                    key,
+                    new DeletionVectorMeta(
+                            key, dataOutputStream.size(), size, deletionVector.getCardinality()));
             dataOutputStream.writeInt(size);
             dataOutputStream.write(data);
             dataOutputStream.writeInt(calculateChecksum(data));
@@ -132,8 +135,8 @@ public class DeletionVectorIndexFileWriter {
                     DELETION_VECTORS_INDEX,
                     path.getName(),
                     writtenSizeInBytes(),
-                    dvRanges.size(),
-                    dvRanges);
+                    dvMetas.size(),
+                    dvMetas);
         }
 
         @Override

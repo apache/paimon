@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.action.cdc;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
@@ -202,7 +202,7 @@ public class SchemaEvolutionTest extends TableTestBase {
         DataStream<List<DataField>> upDataFieldStream = env.fromCollection(prepareData());
         Options options = new Options();
         options.set("warehouse", tempPath.toString());
-        final Catalog.Loader catalogLoader = () -> FlinkCatalogFactory.createPaimonCatalog(options);
+        final CatalogLoader catalogLoader = () -> FlinkCatalogFactory.createPaimonCatalog(options);
         Identifier identifier = Identifier.create(database, tableName);
         DataStream<Void> schemaChangeProcessFunction =
                 upDataFieldStream

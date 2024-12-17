@@ -529,6 +529,7 @@ under the License.
                         <exclude>release/**</exclude>
                         <!-- antlr grammar files -->
                         <exclude>paimon-common/src/main/antlr4/**</exclude>
+                        <exclude>paimon-core/src/test/resources/compatibility/**</exclude>
                     </excludes>
                 </configuration>
             </plugin>

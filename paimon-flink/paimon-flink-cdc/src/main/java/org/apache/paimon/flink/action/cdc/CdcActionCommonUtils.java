@@ -42,7 +42,7 @@ import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.DIVIDED;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
-import static org.apache.paimon.utils.StringUtils.caseSensitiveConversion;
+import static org.apache.paimon.utils.StringUtils.toLowerCaseIfNeed;
 
 /** Common utils for CDC Action. */
 public class CdcActionCommonUtils {
@@ -56,6 +56,8 @@ public class CdcActionCommonUtils {
     public static final String PULSAR_CONF = "pulsar_conf";
     public static final String TABLE_PREFIX = "table_prefix";
     public static final String TABLE_SUFFIX = "table_suffix";
+    public static final String TABLE_PREFIX_DB = "table_prefix_db";
+    public static final String TABLE_SUFFIX_DB = "table_suffix_db";
     public static final String TABLE_MAPPING = "table_mapping";
     public static final String INCLUDING_TABLES = "including_tables";
     public static final String EXCLUDING_TABLES = "excluding_tables";
@@ -127,21 +129,21 @@ public class CdcActionCommonUtils {
         List<String> allFieldNames = new ArrayList<>();
 
         for (DataField field : sourceSchema.fields()) {
-            String fieldName = caseSensitiveConversion(field.name(), caseSensitive);
+            String fieldName = toLowerCaseIfNeed(field.name(), caseSensitive);
             allFieldNames.add(fieldName);
             builder.column(fieldName, field.type(), field.description());
         }
 
         for (ComputedColumn computedColumn : computedColumns) {
             String computedColumnName =
-                    caseSensitiveConversion(computedColumn.columnName(), caseSensitive);
+                    toLowerCaseIfNeed(computedColumn.columnName(), caseSensitive);
             allFieldNames.add(computedColumnName);
             builder.column(computedColumnName, computedColumn.columnType());
         }
 
         for (CdcMetadataConverter metadataConverter : metadataConverters) {
             String metadataColumnName =
-                    caseSensitiveConversion(metadataConverter.columnName(), caseSensitive);
+                    toLowerCaseIfNeed(metadataConverter.columnName(), caseSensitive);
             allFieldNames.add(metadataColumnName);
             builder.column(metadataColumnName, metadataConverter.dataType());
         }

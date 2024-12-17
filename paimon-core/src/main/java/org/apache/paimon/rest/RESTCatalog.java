@@ -23,7 +23,6 @@ import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -58,6 +57,7 @@ import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
 /** A catalog implementation for REST. */
@@ -67,7 +67,7 @@ public class RESTCatalog implements Catalog {
 
     private final RESTClient client;
     private final ResourcePaths resourcePaths;
-    private final Map<String, String> options;
+    private final Options options;
     private final Map<String, String> baseHeader;
     private final AuthSession catalogAuth;
 
@@ -105,7 +105,7 @@ public class RESTCatalog implements Catalog {
         }
         Map<String, String> initHeaders =
                 RESTUtil.merge(configHeaders(options.toMap()), this.catalogAuth.getHeaders());
-        this.options = fetchOptionsFromServer(initHeaders, options.toMap());
+        this.options = new Options(fetchOptionsFromServer(initHeaders, options.toMap()));
         this.resourcePaths =
                 ResourcePaths.forCatalogProperties(
                         this.options.get(RESTCatalogInternalOptions.PREFIX));
@@ -118,7 +118,7 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public Map<String, String> options() {
-        return this.options;
+        return this.options.toMap();
     }
 
     @Override
@@ -211,11 +211,6 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public Path getTableLocation(Identifier identifier) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         return new ArrayList<String>();
     }
@@ -262,8 +257,8 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public boolean allowUpperCase() {
-        return false;
+    public boolean caseSensitive() {
+        return options.getOptional(CASE_SENSITIVE).orElse(true);
     }
 
     @Override

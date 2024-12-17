@@ -24,6 +24,8 @@ import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.apache.paimon.utils.StringUtils.toLowerCaseIfNeed;
+
 /** Used to convert a MySQL source table name to corresponding Paimon table name. */
 public class TableNameConverter implements Serializable {
 
@@ -31,6 +33,8 @@ public class TableNameConverter implements Serializable {
 
     private final boolean caseSensitive;
     private final boolean mergeShards;
+    private final Map<String, String> dbPrefix;
+    private final Map<String, String> dbSuffix;
     private final String prefix;
     private final String suffix;
     private final Map<String, String> tableMapping;
@@ -45,21 +49,54 @@ public class TableNameConverter implements Serializable {
             String prefix,
             String suffix,
             Map<String, String> tableMapping) {
+        this(
+                caseSensitive,
+                mergeShards,
+                new HashMap<>(),
+                new HashMap<>(),
+                prefix,
+                suffix,
+                tableMapping);
+    }
+
+    public TableNameConverter(
+            boolean caseSensitive,
+            boolean mergeShards,
+            Map<String, String> dbPrefix,
+            Map<String, String> dbSuffix,
+            String prefix,
+            String suffix,
+            Map<String, String> tableMapping) {
         this.caseSensitive = caseSensitive;
         this.mergeShards = mergeShards;
+        this.dbPrefix = dbPrefix;
+        this.dbSuffix = dbSuffix;
         this.prefix = prefix;
         this.suffix = suffix;
         this.tableMapping = lowerMapKey(tableMapping);
     }
 
-    public String convert(String originName) {
-        if (tableMapping.containsKey(originName.toLowerCase())) {
-            String mappedName = tableMapping.get(originName.toLowerCase());
-            return caseSensitive ? mappedName : mappedName.toLowerCase();
+    public String convert(String originDbName, String originTblName) {
+        // top priority: table mapping
+        if (tableMapping.containsKey(originTblName.toLowerCase())) {
+            String mappedName = tableMapping.get(originTblName.toLowerCase());
+            return toLowerCaseIfNeed(mappedName, caseSensitive);
         }
 
-        String tableName = caseSensitive ? originName : originName.toLowerCase();
-        return prefix + tableName + suffix;
+        String tblPrefix = prefix;
+        String tblSuffix = suffix;
+
+        // second priority: prefix and postfix specified by db
+        if (dbPrefix.containsKey(originDbName.toLowerCase())) {
+            tblPrefix = dbPrefix.get(originDbName.toLowerCase());
+        }
+        if (dbSuffix.containsKey(originDbName.toLowerCase())) {
+            tblSuffix = dbSuffix.get(originDbName.toLowerCase());
+        }
+
+        // third priority: normal prefix and suffix
+        String tableName = toLowerCaseIfNeed(originTblName, caseSensitive);
+        return tblPrefix + tableName + tblSuffix;
     }
 
     public String convert(Identifier originIdentifier) {
@@ -69,7 +106,7 @@ public class TableNameConverter implements Serializable {
                         : originIdentifier.getDatabaseName()
                                 + "_"
                                 + originIdentifier.getObjectName();
-        return convert(rawName);
+        return convert(originIdentifier.getDatabaseName(), rawName);
     }
 
     private Map<String, String> lowerMapKey(Map<String, String> map) {
