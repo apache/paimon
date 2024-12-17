@@ -18,15 +18,15 @@
 
 package org.apache.paimon.flink.sink.partition;
 
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.metastore.MetastoreClient;
+import org.apache.paimon.metastore.PartitionStats;
 import org.apache.paimon.partition.actions.AddDonePartitionAction;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -41,39 +41,41 @@ class AddDonePartitionActionTest {
         Set<String> donePartitions = new HashSet<>();
         MetastoreClient metastoreClient =
                 new MetastoreClient() {
+
                     @Override
-                    public void addPartition(BinaryRow partition) {
+                    public void addPartition(LinkedHashMap<String, String> partition) {
+                        donePartitions.add(generatePartitionPath(partition));
+                    }
+
+                    @Override
+                    public void addPartitions(List<LinkedHashMap<String, String>> partitions) {
+                        partitions.forEach(this::addPartition);
+                    }
+
+                    @Override
+                    public void dropPartition(LinkedHashMap<String, String> partition) {
                         throw new UnsupportedOperationException();
                     }
 
                     @Override
-                    public void addPartition(LinkedHashMap<String, String> partitionSpec) {
-                        donePartitions.add(generatePartitionPath(partitionSpec));
-                    }
-
-                    @Override
-                    public void deletePartition(LinkedHashMap<String, String> partitionSpec) {
+                    public void dropPartitions(List<LinkedHashMap<String, String>> partitions) {
                         throw new UnsupportedOperationException();
                     }
 
                     @Override
-                    public void markDone(LinkedHashMap<String, String> partitionSpec)
-                            throws Exception {
+                    public void markPartitionDone(LinkedHashMap<String, String> partitions) {
                         throw new UnsupportedOperationException();
                     }
 
                     @Override
                     public void alterPartition(
                             LinkedHashMap<String, String> partitionSpec,
-                            Map<String, String> parameters,
-                            long modifyTime,
-                            boolean ignoreIfNotExist)
-                            throws Exception {
+                            PartitionStats partitionStats) {
                         throw new UnsupportedOperationException();
                     }
 
                     @Override
-                    public void close() throws Exception {
+                    public void close() {
                         closed.set(true);
                     }
                 };
