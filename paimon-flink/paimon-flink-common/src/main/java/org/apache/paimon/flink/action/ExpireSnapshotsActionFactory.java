@@ -31,6 +31,7 @@ public class ExpireSnapshotsActionFactory implements ActionFactory {
     private static final String RETAIN_MIN = "retain_min";
     private static final String OLDER_THAN = "older_than";
     private static final String MAX_DELETES = "max_deletes";
+    private static final String OPTIONS = "options";
 
     @Override
     public String identifier() {
@@ -46,6 +47,7 @@ public class ExpireSnapshotsActionFactory implements ActionFactory {
         String olderThan = params.has(OLDER_THAN) ? params.get(OLDER_THAN) : null;
         Integer maxDeletes =
                 params.has(MAX_DELETES) ? Integer.parseInt(params.get(MAX_DELETES)) : null;
+        String options = params.has(OPTIONS) ? params.get(OPTIONS) : null;
 
         ExpireSnapshotsAction action =
                 new ExpireSnapshotsAction(
@@ -55,7 +57,8 @@ public class ExpireSnapshotsActionFactory implements ActionFactory {
                         retainMax,
                         retainMin,
                         olderThan,
-                        maxDeletes);
+                        maxDeletes,
+                        options);
 
         return Optional.of(action);
     }

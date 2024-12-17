@@ -39,7 +39,8 @@ class ExpireSnapshotsProcedureTest extends PaimonSparkTestBase with StreamTest {
           // define a change-log table and test `forEachBatch` api
           spark.sql(s"""
                        |CREATE TABLE T (a INT, b STRING)
-                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
+                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3',
+                       |'write-only' = 'true', 'snapshot.num-retained.min' = '1')
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
@@ -144,7 +145,8 @@ class ExpireSnapshotsProcedureTest extends PaimonSparkTestBase with StreamTest {
   test("Paimon Procedure: test parameter order_than with string type") {
     sql(
       "CREATE TABLE T (a INT, b STRING) " +
-        "TBLPROPERTIES ( 'num-sorted-run.compaction-trigger' = '999' )")
+        "TBLPROPERTIES ( 'num-sorted-run.compaction-trigger' = '999'," +
+        "'write-only' = 'true', 'snapshot.num-retained.min' = '1')")
     val table = loadTable("T")
     val snapshotManager = table.snapshotManager
 
@@ -158,6 +160,119 @@ class ExpireSnapshotsProcedureTest extends PaimonSparkTestBase with StreamTest {
     spark.sql(
       s"CALL paimon.sys.expire_snapshots(table => 'test.T', older_than => '${timestamp.toString}', max_deletes => 2)")
     checkSnapshots(snapshotManager, 3, 5)
+  }
+
+  test("Paimon Procedure: expire snapshots load table property first") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql(s"""
+                       |CREATE TABLE T (a INT, b STRING)
+                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3',
+                       |'snapshot.num-retained.max' = '2',
+                       |'snapshot.num-retained.min' = '1',
+                       |'write-only' = 'true')
+                       |""".stripMargin)
+          val location = loadTable("T").location().toString
+
+          val inputData = MemoryStream[(Int, String)]
+          val stream = inputData
+            .toDS()
+            .toDF("a", "b")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], _: Long) =>
+                batch.write.format("paimon").mode("append").save(location)
+            }
+            .start()
+
+          val query = () => spark.sql("SELECT * FROM T ORDER BY a")
+
+          try {
+            // snapshot-1
+            inputData.addData((1, "a"))
+            stream.processAllAvailable()
+            checkAnswer(query(), Row(1, "a") :: Nil)
+
+            // snapshot-2
+            inputData.addData((2, "b"))
+            stream.processAllAvailable()
+            checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
+
+            // snapshot-3
+            inputData.addData((2, "b2"))
+            stream.processAllAvailable()
+            checkAnswer(query(), Row(1, "a") :: Row(2, "b2") :: Nil)
+
+            // expire
+            checkAnswer(
+              spark.sql("CALL paimon.sys.expire_snapshots(table => 'test.T')"),
+              Row(1) :: Nil)
+
+            checkAnswer(
+              spark.sql("SELECT snapshot_id FROM paimon.test.`T$snapshots`"),
+              Row(2L) :: Row(3L) :: Nil)
+          } finally {
+            stream.stop()
+          }
+      }
+    }
+  }
+
+  test("Paimon Procedure: expire snapshots add options parameter") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql(s"""
+                       |CREATE TABLE T (a INT, b STRING)
+                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3', 'write-only' = 'true')
+                       |""".stripMargin)
+          val location = loadTable("T").location().toString
+
+          val inputData = MemoryStream[(Int, String)]
+          val stream = inputData
+            .toDS()
+            .toDF("a", "b")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], _: Long) =>
+                batch.write.format("paimon").mode("append").save(location)
+            }
+            .start()
+
+          val query = () => spark.sql("SELECT * FROM T ORDER BY a")
+
+          try {
+            // snapshot-1
+            inputData.addData((1, "a"))
+            stream.processAllAvailable()
+            checkAnswer(query(), Row(1, "a") :: Nil)
+
+            // snapshot-2
+            inputData.addData((2, "b"))
+            stream.processAllAvailable()
+            checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
+
+            // snapshot-3
+            inputData.addData((2, "b2"))
+            stream.processAllAvailable()
+            checkAnswer(query(), Row(1, "a") :: Row(2, "b2") :: Nil)
+
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.expire_snapshots(table => 'test.T', options => 'snapshot.num-retained.max=2, snapshot.num-retained.min=1')"),
+              Row(1L) :: Nil)
+
+            checkAnswer(
+              spark.sql("SELECT snapshot_id FROM paimon.test.`T$snapshots`"),
+              Row(2L) :: Row(3L) :: Nil)
+          } finally {
+            stream.stop()
+          }
+      }
+    }
   }
 
   def checkSnapshots(sm: SnapshotManager, earliest: Int, latest: Int): Unit = {

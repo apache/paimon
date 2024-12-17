@@ -33,6 +33,7 @@ public class ExpireSnapshotsAction extends ActionBase {
     private final Integer retainMin;
     private final String olderThan;
     private final Integer maxDeletes;
+    private final String options;
 
     public ExpireSnapshotsAction(
             String database,
@@ -41,14 +42,15 @@ public class ExpireSnapshotsAction extends ActionBase {
             Integer retainMax,
             Integer retainMin,
             String olderThan,
-            Integer maxDeletes) {
-        super(catalogConfig);
-        this.database = database;
-        this.table = table;
+            Integer maxDeletes,
+            String options) {
+        super(warehouse, catalogConfig);
+        this.identifier = identifier;
         this.retainMax = retainMax;
         this.retainMin = retainMin;
         this.olderThan = olderThan;
         this.maxDeletes = maxDeletes;
+        this.options = options;
     }
 
     public void run() throws Exception {
@@ -60,6 +62,7 @@ public class ExpireSnapshotsAction extends ActionBase {
                 retainMax,
                 retainMin,
                 olderThan,
-                maxDeletes);
+                maxDeletes,
+                options);
     }
 }

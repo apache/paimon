@@ -618,8 +618,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
     }
   }
 
-  test(
-    "Paimon Procedure: expire partitions load table property first and then procedure parameter") {
+  test("Paimon Procedure: expire partitions load table property first") {
     failAfter(streamingTimeout) {
       withTempDir {
         checkpointDir =>
