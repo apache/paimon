@@ -28,6 +28,7 @@ import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListTablesResponse;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
@@ -36,7 +37,9 @@ import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -51,7 +54,6 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /** Test for REST Catalog. */
 public class RESTCatalogTest {
@@ -61,6 +63,8 @@ public class RESTCatalogTest {
     private RESTCatalog restCatalog;
     private RESTCatalog mockRestCatalog;
     private CatalogContext context;
+    private String warehouseStr;
+    @Rule public TemporaryFolder folder = new TemporaryFolder();
 
     @Before
     public void setUp() throws IOException {
@@ -72,10 +76,14 @@ public class RESTCatalogTest {
         String initToken = "init_token";
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
+        warehouseStr = folder.getRoot().getPath();
         String mockResponse =
                 String.format(
-                        "{\"defaults\": {\"%s\": \"%s\"}}",
-                        RESTCatalogInternalOptions.PREFIX.key(), "prefix");
+                        "{\"defaults\": {\"%s\": \"%s\", \"%s\": \"%s\"}}",
+                        RESTCatalogInternalOptions.PREFIX.key(),
+                        "prefix",
+                        CatalogOptions.WAREHOUSE.key(),
+                        warehouseStr);
         mockResponse(mockResponse, 200);
         context = CatalogContext.create(options);
         restCatalog = new RESTCatalog(context);
@@ -90,7 +98,7 @@ public class RESTCatalogTest {
     @Test
     public void testInitFailWhenDefineWarehouse() {
         Options options = new Options();
-        options.set(CatalogOptions.WAREHOUSE, "/a/b/c");
+        options.set(CatalogOptions.WAREHOUSE, warehouseStr);
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new RESTCatalog(CatalogContext.create(options)));
@@ -169,8 +177,9 @@ public class RESTCatalogTest {
     public void testDropDatabaseWhenCascadeIsFalseAndNoTables() throws Exception {
         String name = MockRESTMessage.databaseName();
         boolean cascade = false;
+        ListTablesResponse response = MockRESTMessage.listTablesEmptyResponse();
+        mockResponse(mapper.writeValueAsString(response), 200);
         mockResponse("", 200);
-        when(mockRestCatalog.listTables(name)).thenReturn(new ArrayList<>());
         assertDoesNotThrow(() -> mockRestCatalog.dropDatabase(name, false, cascade));
         verify(mockRestCatalog, times(1)).dropDatabase(eq(name), eq(false), eq(cascade));
         verify(mockRestCatalog, times(1)).listTables(eq(name));
@@ -180,10 +189,8 @@ public class RESTCatalogTest {
     public void testDropDatabaseWhenCascadeIsFalseAndTablesExist() throws Exception {
         String name = MockRESTMessage.databaseName();
         boolean cascade = false;
-        mockResponse("", 200);
-        List<String> tables = new ArrayList<>();
-        tables.add("t1");
-        when(mockRestCatalog.listTables(name)).thenReturn(tables);
+        ListTablesResponse response = MockRESTMessage.listTablesResponse();
+        mockResponse(mapper.writeValueAsString(response), 200);
         assertThrows(
                 Catalog.DatabaseNotEmptyException.class,
                 () -> mockRestCatalog.dropDatabase(name, false, cascade));

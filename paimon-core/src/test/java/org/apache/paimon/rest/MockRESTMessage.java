@@ -25,6 +25,7 @@ import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListTablesResponse;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
@@ -80,5 +81,13 @@ public class MockRESTMessage {
     public static AlterDatabaseResponse alterDatabaseResponse() {
         return new AlterDatabaseResponse(
                 Lists.newArrayList("remove"), Lists.newArrayList("add"), new ArrayList<>());
+    }
+
+    public static ListTablesResponse listTablesResponse() {
+        return new ListTablesResponse(Lists.newArrayList("table"));
+    }
+
+    public static ListTablesResponse listTablesEmptyResponse() {
+        return new ListTablesResponse(Lists.newArrayList());
     }
 }
