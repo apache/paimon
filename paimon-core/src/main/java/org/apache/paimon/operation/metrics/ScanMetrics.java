@@ -80,11 +80,6 @@ public class ScanMetrics {
         durationHistogram.update(scanStats.getDuration());
     }
 
-    public void reportCache(CacheMetrics cacheMetrics) {
-        this.cacheMetrics = cacheMetrics;
-    }
-
-    @VisibleForTesting
     public CacheMetrics getCacheMetrics() {
         return cacheMetrics;
     }

@@ -31,7 +31,6 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
-import org.apache.paimon.operation.metrics.CacheMetrics;
 import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.operation.metrics.ScanStats;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -426,11 +425,11 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             ManifestFileMeta manifest,
             @Nullable Filter<InternalRow> additionalFilter,
             @Nullable Filter<ManifestEntry> additionalTFilter) {
-        CacheMetrics cacheMetrics = scanMetrics != null ? new CacheMetrics() : null;
         List<ManifestEntry> entries =
                 manifestFileFactory
                         .create()
-                        .withCacheMetrics(cacheMetrics)
+                        .withCacheMetrics(
+                                scanMetrics != null ? scanMetrics.getCacheMetrics() : null)
                         .read(
                                 manifest.fileName(),
                                 manifest.fileSize(),
@@ -447,9 +446,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                 copied.add(dropStats(entry));
             }
             entries = copied;
-        }
-        if (scanMetrics != null) {
-            scanMetrics.reportCache(cacheMetrics);
         }
         return entries;
     }
