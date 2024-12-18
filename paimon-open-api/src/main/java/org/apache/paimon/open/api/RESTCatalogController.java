@@ -21,12 +21,17 @@ package org.apache.paimon.open.api;
 import org.apache.paimon.rest.ResourcePaths;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.UpdateTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.schema.TableSchema;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -47,7 +52,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.HashMap;
 import java.util.Map;
 
-/** * RESTCatalog management APIs. */
+/** RESTCatalog management APIs. */
 @CrossOrigin(origins = "http://localhost:8081")
 @RestController
 public class RESTCatalogController {
@@ -180,4 +185,134 @@ public class RESTCatalogController {
                 Lists.newArrayList("add"),
                 Lists.newArrayList("missing"));
     }
+
+    @Operation(
+            summary = "List tables",
+            tags = {"table"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {@Content(schema = @Schema(implementation = ListTablesResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @GetMapping("/v1/{prefix}/databases/{database}")
+    public ListTablesResponse listTables(
+            @PathVariable String prefix, @PathVariable String database) {
+        return new ListTablesResponse(ImmutableList.of("user"));
+    }
+
+    @Operation(
+            summary = "Get table",
+            tags = {"table"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {@Content(schema = @Schema(implementation = ListTablesResponse.class))}),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @GetMapping("/v1/{prefix}/databases/{database}/tables/{table}")
+    public GetTableResponse getTable(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table) {
+        return new GetTableResponse(
+                "location",
+                new TableSchema(
+                        1,
+                        1,
+                        ImmutableList.of(),
+                        1,
+                        ImmutableList.of(),
+                        ImmutableList.of(),
+                        new HashMap<>(),
+                        "comment",
+                        1L));
+    }
+
+    @Operation(
+            summary = "Create table",
+            tags = {"table"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {@Content(schema = @Schema(implementation = GetTableResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @PostMapping("/v1/{prefix}/databases/{database}/tables")
+    public GetTableResponse createTable(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @RequestBody CreateTableRequest request) {
+        return new GetTableResponse(
+                "location",
+                new TableSchema(
+                        1,
+                        1,
+                        ImmutableList.of(),
+                        1,
+                        ImmutableList.of(),
+                        ImmutableList.of(),
+                        new HashMap<>(),
+                        "comment",
+                        1L));
+    }
+
+    @Operation(
+            summary = "Update table",
+            tags = {"table"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {@Content(schema = @Schema(implementation = GetTableResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/table")
+    public GetTableResponse updateTable(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table,
+            @RequestBody UpdateTableRequest request) {
+        return new GetTableResponse(
+                "location",
+                new TableSchema(
+                        1,
+                        1,
+                        ImmutableList.of(),
+                        1,
+                        ImmutableList.of(),
+                        ImmutableList.of(),
+                        new HashMap<>(),
+                        "comment",
+                        1L));
+    }
+
+    @Operation(
+            summary = "Update table",
+            tags = {"table"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @DeleteMapping("/v1/{prefix}/databases/{database}/tables/table")
+    public void dropTable(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table) {}
 }
