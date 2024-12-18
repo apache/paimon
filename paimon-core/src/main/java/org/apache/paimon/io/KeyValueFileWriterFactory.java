@@ -126,7 +126,7 @@ public class KeyValueFileWriterFactory {
                         options,
                         fileSource,
                         fileIndexOptions,
-                        formatContext.pathFactory(level).getDefaultWriteRootPath())
+                        formatContext.pathFactory(level).getDataRootLocation())
                 : new KeyValueDataFileWriterImpl(
                         fileIO,
                         formatContext.writerFactory(level),
@@ -141,7 +141,7 @@ public class KeyValueFileWriterFactory {
                         options,
                         fileSource,
                         fileIndexOptions,
-                        formatContext.pathFactory(level).getDefaultWriteRootPath());
+                        formatContext.pathFactory(level).getDataRootLocation());
     }
 
     public void deleteFile(String filename, int level) {

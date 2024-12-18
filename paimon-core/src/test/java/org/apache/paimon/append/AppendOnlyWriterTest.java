@@ -521,7 +521,7 @@ public class AppendOnlyWriterTest {
     private DataFilePathFactory createPathFactory() {
         TablePathProvider tablePathProvider = new TablePathProvider(new Path(tempDir.toString()));
         return new DataFilePathFactory(
-                tablePathProvider.getDataFileExternalPath(),
+                tablePathProvider.getDataRootLocation(),
                 new Path(
                         tablePathProvider.getReleativeTableWritePath()
                                 + "/dt="
@@ -656,7 +656,7 @@ public class AppendOnlyWriterTest {
         String fileName = "compact-" + UUID.randomUUID();
         LocalFileIO.create()
                 .newOutputStream(
-                        pathFactory.toPath(pathFactory.getDefaultWriteRootPath(), fileName), false)
+                        pathFactory.toPath(pathFactory.getDataRootLocation(), fileName), false)
                 .close();
         return DataFileMeta.forAppend(
                 fileName,
@@ -691,6 +691,6 @@ public class AppendOnlyWriterTest {
                 null,
                 FileSource.APPEND,
                 null,
-                pathFactory.getDefaultWriteRootPath());
+                pathFactory.getDataRootLocation().toString());
     }
 }

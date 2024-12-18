@@ -66,25 +66,24 @@ public class TablePathProvider implements Serializable {
         this.tableName = tableName;
     }
 
-    public String getTableWritePathString() {
-        return getTableWritePath().toString();
+    public Path getTableWriteDataPath() {
+        return new Path(getDataRootLocation(), new Path(databaseName + "/" + tableName));
     }
 
-    public Path getTableWritePath() {
-        Path location = dataFileExternalPath != null ? dataFileExternalPath : warehouseRootPath;
-        return new Path(location, new Path(databaseName + "/" + tableName));
+    public Path getTableSchemaPath() {
+        return new Path(warehouseRootPath, new Path(databaseName + "/" + tableName));
     }
 
     public Path getReleativeTableWritePath() {
         return new Path(databaseName + "/" + tableName);
     }
 
-    public Path getDataFileExternalPath() {
+    public Path getDataRootLocation() {
         return dataFileExternalPath != null ? dataFileExternalPath : warehouseRootPath;
     }
 
-    public String getWarehouseRootPathString() {
-        return warehouseRootPath.toString();
+    public @NotNull Path getWarehouseRootPath() {
+        return warehouseRootPath;
     }
 
     public String getDatabaseName() {

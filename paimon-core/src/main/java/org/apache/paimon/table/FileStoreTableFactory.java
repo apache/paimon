@@ -135,16 +135,4 @@ public class FileStoreTableFactory {
                                 fileIO, tablePathProvider, tableSchema, catalogEnvironment);
         return table.copy(dynamicOptions.toMap());
     }
-
-    private static String getDatabaseFullName(Path tablePath) {
-        return tablePath.getParent().getName();
-    }
-
-    private static String getWarehousePathString(Path tablePath) {
-        return tablePath.getParent().getParent().toString();
-    }
-
-    private static String getTableName(Path tablePath) {
-        return tablePath.getName();
-    }
 }

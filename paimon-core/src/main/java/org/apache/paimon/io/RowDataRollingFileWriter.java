@@ -65,7 +65,7 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
                                 fileSource,
                                 asyncFileWrite,
                                 statsDenseStore,
-                                pathFactory.getDefaultWriteRootPath()),
+                                pathFactory.getDataRootLocation()),
                 targetFileSize);
     }
 }

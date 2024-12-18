@@ -32,7 +32,7 @@ public class DataFilePathFactory {
 
     public static final String INDEX_PATH_SUFFIX = ".index";
 
-    private final Path defaultWriteRootPath;
+    private final Path dataRootLocation;
     private final Path relativeDataFilePath;
     private final Path parent;
     private final String uuid;
@@ -45,14 +45,14 @@ public class DataFilePathFactory {
     private final String fileCompression;
 
     public DataFilePathFactory(
-            Path defaultWriteRootPath,
+            Path dataRootLocation,
             Path relativeDataFilePath,
             String formatIdentifier,
             String dataFilePrefix,
             String changelogFilePrefix,
             boolean fileSuffixIncludeCompression,
             String fileCompression) {
-        this.defaultWriteRootPath = defaultWriteRootPath;
+        this.dataRootLocation = dataRootLocation;
         this.relativeDataFilePath = relativeDataFilePath;
         this.uuid = UUID.randomUUID().toString();
         this.pathCount = new AtomicInteger(0);
@@ -61,7 +61,7 @@ public class DataFilePathFactory {
         this.changelogFilePrefix = changelogFilePrefix;
         this.fileSuffixIncludeCompression = fileSuffixIncludeCompression;
         this.fileCompression = fileCompression;
-        this.parent = new Path(this.defaultWriteRootPath, this.relativeDataFilePath);
+        this.parent = new Path(this.dataRootLocation, this.relativeDataFilePath);
     }
 
     public Path newPath() {
@@ -137,7 +137,7 @@ public class DataFilePathFactory {
         return fileName.substring(index + 1);
     }
 
-    public Path getDefaultWriteRootPath() {
-        return defaultWriteRootPath;
+    public Path getDataRootLocation() {
+        return dataRootLocation;
     }
 }

@@ -36,7 +36,7 @@ public class DataFilePathFactoryTest {
         TablePathProvider tablePathProvider = new TablePathProvider(new Path(tempDir.toString()));
         DataFilePathFactory pathFactory =
                 new DataFilePathFactory(
-                        tablePathProvider.getDataFileExternalPath(),
+                        tablePathProvider.getDataRootLocation(),
                         new Path(tablePathProvider.getReleativeTableWritePath() + "/bucket-123"),
                         CoreOptions.FILE_FORMAT.defaultValue().toString(),
                         CoreOptions.DATA_FILE_PREFIX.defaultValue(),
@@ -66,7 +66,7 @@ public class DataFilePathFactoryTest {
         TablePathProvider tablePathProvider = new TablePathProvider(new Path(tempDir.toString()));
         DataFilePathFactory pathFactory =
                 new DataFilePathFactory(
-                        tablePathProvider.getDataFileExternalPath(),
+                        tablePathProvider.getDataRootLocation(),
                         new Path(
                                 tablePathProvider.getReleativeTableWritePath()
                                         + "/dt=20211224/bucket-123"),

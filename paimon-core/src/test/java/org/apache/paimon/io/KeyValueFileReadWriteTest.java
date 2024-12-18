@@ -86,7 +86,7 @@ public class KeyValueFileReadWriteTest {
                                         "dummy_file.avro",
                                         1,
                                         0,
-                                        tablePathProvider.getTableWritePath()))
+                                        tablePathProvider.getTableWriteDataPath()))
                 .hasMessageContaining(
                         "you can configure 'snapshot.time-retained' option with a larger value.");
     }

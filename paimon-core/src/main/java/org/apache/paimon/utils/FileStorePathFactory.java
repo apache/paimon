@@ -85,9 +85,10 @@ public class FileStorePathFactory {
         this.indexFileCount = new AtomicInteger(0);
         this.statsFileCount = new AtomicInteger(0);
         this.tablePathProvider = tablePathProvider;
-        this.root = tablePathProvider.getTableWritePath();
+        this.root = tablePathProvider.getTableSchemaPath();
     }
 
+    // todo @houliangqi, should check
     public Path root() {
         return root;
     }
@@ -124,7 +125,7 @@ public class FileStorePathFactory {
 
     public DataFilePathFactory createDataFilePathFactory(BinaryRow partition, int bucket) {
         return new DataFilePathFactory(
-                tablePathProvider.getDataFileExternalPath(),
+                tablePathProvider.getDataRootLocation(),
                 relativeDataFilePath(partition, bucket),
                 formatIdentifier,
                 dataFilePrefix,

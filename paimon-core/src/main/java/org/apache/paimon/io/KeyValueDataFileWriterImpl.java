@@ -53,7 +53,7 @@ public class KeyValueDataFileWriterImpl extends KeyValueDataFileWriter {
             CoreOptions options,
             FileSource fileSource,
             FileIndexOptions fileIndexOptions,
-            Path defaultWriteRootPath) {
+            Path dataRootLocation) {
         super(
                 fileIO,
                 factory,
@@ -69,7 +69,7 @@ public class KeyValueDataFileWriterImpl extends KeyValueDataFileWriter {
                 options,
                 fileSource,
                 fileIndexOptions,
-                defaultWriteRootPath);
+                dataRootLocation);
     }
 
     @Override

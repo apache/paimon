@@ -68,7 +68,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
         TablePathProvider tablePathProvider = new TablePathProvider(new Path(tempDir.toString()));
         DataFilePathFactory dataFilePathFactory =
                 new DataFilePathFactory(
-                        tablePathProvider.getDataFileExternalPath(),
+                        tablePathProvider.getDataRootLocation(),
                         new Path(tablePathProvider.getReleativeTableWritePath() + "/dt=1/bucket-1"),
                         format,
                         CoreOptions.DATA_FILE_PREFIX.defaultValue(),

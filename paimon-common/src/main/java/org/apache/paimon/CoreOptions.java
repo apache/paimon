@@ -2381,7 +2381,7 @@ public class CoreOptions implements Serializable {
         return options.get(WAREHOUSE_ROOT_PATH);
     }
 
-    public String getDataWriteRootPath() {
+    public String getDataRootLocation() {
         if (getDataFileExternalPath() == null || getDataFileExternalPath().isEmpty()) {
             return getWarehouseRootPath();
         }

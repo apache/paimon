@@ -76,7 +76,7 @@ public class RollingFileWriterTest {
                                         LocalFileIO.create(),
                                         fileFormat.createWriterFactory(SCHEMA),
                                         new DataFilePathFactory(
-                                                        tablePathProvider.getDataFileExternalPath(),
+                                                        tablePathProvider.getDataRootLocation(),
                                                         new Path(
                                                                 tablePathProvider
                                                                                 .getReleativeTableWritePath()
@@ -109,7 +109,7 @@ public class RollingFileWriterTest {
                                         FileSource.APPEND,
                                         true,
                                         statsDenseStore,
-                                        tablePathProvider.getTableWritePath()),
+                                        tablePathProvider.getTableWriteDataPath()),
                         TARGET_FILE_SIZE);
     }
 
