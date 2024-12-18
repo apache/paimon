@@ -64,23 +64,22 @@ public abstract class SynchronizationActionBase extends ActionBase {
     protected final String database;
     protected final Configuration cdcSourceConfig;
     protected final SyncJobHandler syncJobHandler;
-    protected final boolean allowUpperCase;
+    protected final boolean caseSensitive;
 
     protected Map<String, String> tableConfig = new HashMap<>();
     protected TypeMapping typeMapping = TypeMapping.defaultMapping();
     protected CdcMetadataConverter[] metadataConverters = new CdcMetadataConverter[] {};
 
     public SynchronizationActionBase(
-            String warehouse,
             String database,
             Map<String, String> catalogConfig,
             Map<String, String> cdcSourceConfig,
             SyncJobHandler syncJobHandler) {
-        super(warehouse, catalogConfig);
+        super(catalogConfig);
         this.database = database;
         this.cdcSourceConfig = Configuration.fromMap(cdcSourceConfig);
         this.syncJobHandler = syncJobHandler;
-        this.allowUpperCase = catalog.allowUpperCase();
+        this.caseSensitive = catalog.caseSensitive();
 
         this.syncJobHandler.registerJdbcDriver();
     }
@@ -114,8 +113,6 @@ public abstract class SynchronizationActionBase extends ActionBase {
 
         catalog.createDatabase(database, true);
 
-        validateCaseSensitivity();
-
         beforeBuildingSourceSink();
 
         DataStream<RichCdcMultiplexRecord> input =
@@ -125,8 +122,6 @@ public abstract class SynchronizationActionBase extends ActionBase {
 
         buildSink(input, parserFactory);
     }
-
-    protected abstract void validateCaseSensitivity();
 
     protected void beforeBuildingSourceSink() throws Exception {}
 

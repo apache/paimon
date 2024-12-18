@@ -48,7 +48,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -60,7 +59,6 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.CoreOptions.createCommitUser;
-import static org.apache.paimon.options.CatalogOptions.ALLOW_UPPER_CASE;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
@@ -82,7 +80,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected AbstractCatalog(FileIO fileIO, Options options) {
         this.fileIO = fileIO;
-        this.tableDefaultOptions = Catalog.tableDefaultOptions(options.toMap());
+        this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(options.toMap());
         this.catalogOptions = options;
     }
 
@@ -121,11 +119,6 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected boolean lockEnabled() {
         return catalogOptions.getOptional(LOCK_ENABLED).orElse(fileIO.isObjectStore());
-    }
-
-    @Override
-    public boolean allowUpperCase() {
-        return catalogOptions.getOptional(ALLOW_UPPER_CASE).orElse(true);
     }
 
     protected boolean allowCustomTablePath() {
@@ -230,6 +223,26 @@ public abstract class AbstractCatalog implements Catalog {
     protected abstract void dropDatabaseImpl(String name);
 
     @Override
+    public void alterDatabase(String name, List<PropertyChange> changes, boolean ignoreIfNotExists)
+            throws DatabaseNotExistException {
+        checkNotSystemDatabase(name);
+        try {
+            if (changes == null || changes.isEmpty()) {
+                return;
+            }
+            alterDatabaseImpl(name, changes);
+        } catch (DatabaseNotExistException e) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new DatabaseNotExistException(name);
+        }
+    }
+
+    protected abstract void alterDatabaseImpl(String name, List<PropertyChange> changes)
+            throws DatabaseNotExistException;
+
+    @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         if (isSystemDatabase(databaseName)) {
             return SystemTableLoader.loadGlobalTableNames();
@@ -268,8 +281,6 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableAlreadyExistException, DatabaseNotExistException {
         checkNotBranch(identifier, "createTable");
         checkNotSystemTable(identifier, "createTable");
-        validateIdentifierNameCaseInsensitive(identifier);
-        validateFieldNameCaseInsensitive(schema.rowType().getFieldNames());
         validateAutoCreateClose(schema.options());
         validateCustomTablePath(schema.options());
 
@@ -325,7 +336,6 @@ public abstract class AbstractCatalog implements Catalog {
         checkNotBranch(toTable, "renameTable");
         checkNotSystemTable(fromTable, "renameTable");
         checkNotSystemTable(toTable, "renameTable");
-        validateIdentifierNameCaseInsensitive(toTable);
 
         try {
             getTable(fromTable);
@@ -352,8 +362,6 @@ public abstract class AbstractCatalog implements Catalog {
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         checkNotSystemTable(identifier, "alterTable");
-        validateIdentifierNameCaseInsensitive(identifier);
-        validateFieldNameCaseInsensitiveInSchemaChange(changes);
 
         try {
             getTable(identifier);
@@ -423,7 +431,7 @@ public abstract class AbstractCatalog implements Catalog {
                                         lockFactory().orElse(null),
                                         lockContext().orElse(null),
                                         identifier),
-                                metastoreClientFactory(identifier, tableMeta.schema).orElse(null)));
+                                metastoreClientFactory(identifier).orElse(null)));
         CoreOptions options = table.coreOptions();
         if (options.type() == TableType.OBJECT_TABLE) {
             String objectLocation = options.objectLocation();
@@ -491,12 +499,10 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableNotExistException;
 
     /** Get metastore client factory for the table specified by {@code identifier}. */
-    public Optional<MetastoreClient.Factory> metastoreClientFactory(
-            Identifier identifier, TableSchema schema) {
+    public Optional<MetastoreClient.Factory> metastoreClientFactory(Identifier identifier) {
         return Optional.empty();
     }
 
-    @Override
     public Path getTableLocation(Identifier identifier) {
         return new Path(newDatabasePath(identifier.getDatabaseName()), identifier.getTableName());
     }
@@ -557,29 +563,6 @@ public abstract class AbstractCatalog implements Catalog {
         if (isSystemDatabase(database)) {
             throw new ProcessSystemDatabaseException();
         }
-    }
-
-    protected void validateIdentifierNameCaseInsensitive(Identifier identifier) {
-        Catalog.validateCaseInsensitive(allowUpperCase(), "Database", identifier.getDatabaseName());
-        Catalog.validateCaseInsensitive(allowUpperCase(), "Table", identifier.getObjectName());
-    }
-
-    private void validateFieldNameCaseInsensitiveInSchemaChange(List<SchemaChange> changes) {
-        List<String> fieldNames = new ArrayList<>();
-        for (SchemaChange change : changes) {
-            if (change instanceof SchemaChange.AddColumn) {
-                SchemaChange.AddColumn addColumn = (SchemaChange.AddColumn) change;
-                fieldNames.addAll(Arrays.asList(addColumn.fieldNames()));
-            } else if (change instanceof SchemaChange.RenameColumn) {
-                SchemaChange.RenameColumn rename = (SchemaChange.RenameColumn) change;
-                fieldNames.add(rename.newName());
-            }
-        }
-        validateFieldNameCaseInsensitive(fieldNames);
-    }
-
-    protected void validateFieldNameCaseInsensitive(List<String> fieldNames) {
-        Catalog.validateCaseInsensitive(allowUpperCase(), "Field", fieldNames);
     }
 
     private void validateAutoCreateClose(Map<String, String> options) {

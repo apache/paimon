@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.flink.sink.CommittableStateManager;
 import org.apache.paimon.flink.sink.Committer;
 import org.apache.paimon.flink.sink.CommitterOperatorFactory;
@@ -60,13 +60,13 @@ public class FlinkCdcMultiTableSink implements Serializable {
     private static final String GLOBAL_COMMITTER_NAME = "Multiplex Global Committer";
 
     private final boolean isOverwrite = false;
-    private final Catalog.Loader catalogLoader;
+    private final CatalogLoader catalogLoader;
     private final double commitCpuCores;
     @Nullable private final MemorySize commitHeapMemory;
     private final String commitUser;
 
     public FlinkCdcMultiTableSink(
-            Catalog.Loader catalogLoader,
+            CatalogLoader catalogLoader,
             double commitCpuCores,
             @Nullable MemorySize commitHeapMemory,
             String commitUser) {

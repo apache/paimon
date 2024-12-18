@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.compact;
 
-import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
@@ -47,7 +47,7 @@ public class MultiAwareBucketTableScan extends MultiTableScanBase<Tuple2<Split, 
     protected transient Map<Identifier, StreamTableScan> scansMap;
 
     public MultiAwareBucketTableScan(
-            Catalog.Loader catalogLoader,
+            CatalogLoader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,

@@ -27,16 +27,10 @@ under the License.
     </thead>
     <tbody>
         <tr>
-            <td><h5>allow-upper-case</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Boolean</td>
-            <td>Indicates whether this catalog allow upper case, its default value depends on the implementation of the specific catalog.</td>
-        </tr>
-        <tr>
             <td><h5>cache-enabled</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
-            <td>Controls whether the catalog will cache databases, tables and manifests.</td>
+            <td>Controls whether the catalog will cache databases, tables, manifests and partitions.</td>
         </tr>
         <tr>
             <td><h5>cache.expiration-interval</h5></td>
@@ -73,6 +67,12 @@ under the License.
             <td style="word-wrap: break-word;">20</td>
             <td>Integer</td>
             <td>Controls the max number for snapshots per table in the catalog are cached.</td>
+        </tr>
+        <tr>
+            <td><h5>case-sensitive</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Boolean</td>
+            <td>Indicates whether this catalog is case-sensitive.</td>
         </tr>
         <tr>
             <td><h5>client-pool-size</h5></td>

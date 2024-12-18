@@ -19,7 +19,6 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -43,8 +42,8 @@ public class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public boolean allowUpperCase() {
-        return wrapped.allowUpperCase();
+    public boolean caseSensitive() {
+        return wrapped.caseSensitive();
     }
 
     @Override
@@ -82,6 +81,12 @@ public class DelegateCatalog implements Catalog {
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException {
         wrapped.dropDatabase(name, ignoreIfNotExists, cascade);
+    }
+
+    @Override
+    public void alterDatabase(String name, List<PropertyChange> changes, boolean ignoreIfNotExists)
+            throws DatabaseNotExistException {
+        wrapped.alterDatabase(name, changes, ignoreIfNotExists);
     }
 
     @Override
@@ -145,11 +150,6 @@ public class DelegateCatalog implements Catalog {
     public void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
             throws ViewNotExistException, ViewAlreadyExistException {
         wrapped.renameView(fromView, toView, ignoreIfNotExists);
-    }
-
-    @Override
-    public Path getTableLocation(Identifier identifier) {
-        return wrapped.getTableLocation(identifier);
     }
 
     @Override

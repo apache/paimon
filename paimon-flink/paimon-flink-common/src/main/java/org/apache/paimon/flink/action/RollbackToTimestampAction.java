@@ -36,12 +36,11 @@ public class RollbackToTimestampAction extends TableActionBase {
     private final Long timestamp;
 
     public RollbackToTimestampAction(
-            String warehouse,
             String databaseName,
             String tableName,
             Long timestamp,
             Map<String, String> catalogConfig) {
-        super(warehouse, databaseName, tableName, catalogConfig);
+        super(databaseName, tableName, catalogConfig);
         this.timestamp = timestamp;
     }
 

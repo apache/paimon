@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.flink.log.LogSinkProvider;
 import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.log.LogStoreRegister;
@@ -83,6 +84,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -98,10 +100,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatCollection;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Test for {@link FlinkCatalog}. */
 public class FlinkCatalogTest {
+
     private static final String TESTING_LOG_STORE = "testing";
 
     private final ObjectPath path1 = new ObjectPath("db1", "t1");
@@ -348,12 +357,7 @@ public class FlinkCatalogTest {
         CatalogTable table1 = createTable(options);
         assertThatThrownBy(() -> catalog.createTable(this.path1, table1, false))
                 .hasMessageContaining(
-                        "You specified the Path when creating the table, "
-                                + "but the Path '/unknown/path' is different from where it should be");
-
-        options.put(PATH.key(), warehouse + "/db1.db/t1");
-        CatalogTable table2 = createTable(options);
-        catalog.createTable(this.path1, table2, false);
+                        "The current catalog FileSystemCatalog does not support specifying the table path when creating a table.");
     }
 
     @ParameterizedTest
@@ -575,11 +579,9 @@ public class FlinkCatalogTest {
     }
 
     @Test
-    public void testCreateDb_DatabaseWithCommentException() {
+    public void testCreateDb_DatabaseWithCommentSuccessful() throws DatabaseAlreadyExistException {
         CatalogDatabaseImpl database = new CatalogDatabaseImpl(Collections.emptyMap(), "haha");
-        assertThatThrownBy(() -> catalog.createDatabase(path1.getDatabaseName(), database, false))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Create database with description is unsupported.");
+        assertDoesNotThrow(() -> catalog.createDatabase(path1.getDatabaseName(), database, false));
     }
 
     @ParameterizedTest
@@ -598,6 +600,75 @@ public class FlinkCatalogTest {
         assertThatThrownBy(() -> catalog.dropDatabase(path1.getDatabaseName(), false, false))
                 .isInstanceOf(DatabaseNotExistException.class)
                 .hasMessage("Database db1 does not exist in Catalog test-catalog.");
+    }
+
+    @Test
+    public void testAlterDb() throws DatabaseAlreadyExistException, DatabaseNotExistException {
+        CatalogDatabaseImpl database = new CatalogDatabaseImpl(Collections.emptyMap(), null);
+        catalog.createDatabase(path1.getDatabaseName(), database, false);
+        Map<String, String> properties = Collections.singletonMap("haa", "ccc");
+        CatalogDatabaseImpl newDatabase = new CatalogDatabaseImpl(properties, "haha");
+        // as file system catalog don't support alter database, so we have to use mock to overview
+        // this method to test
+        Catalog mockCatalog = spy(catalog);
+        doNothing().when(mockCatalog).alterDatabase(path1.getDatabaseName(), newDatabase, false);
+        when(mockCatalog.getDatabase(path1.getDatabaseName())).thenReturn(database);
+        mockCatalog.alterDatabase(path1.getDatabaseName(), newDatabase, false);
+        verify(mockCatalog, times(1)).alterDatabase(path1.getDatabaseName(), newDatabase, false);
+        verify(mockCatalog, times(1)).getDatabase(path1.getDatabaseName());
+    }
+
+    @Test
+    public void testAlterDbComment()
+            throws DatabaseAlreadyExistException, DatabaseNotExistException {
+        CatalogDatabaseImpl database = new CatalogDatabaseImpl(Collections.emptyMap(), null);
+        catalog.createDatabase(path1.getDatabaseName(), database, false);
+        Catalog mockCatalog = spy(catalog);
+        when(mockCatalog.getDatabase(path1.getDatabaseName())).thenReturn(database);
+        CatalogDatabaseImpl newDatabase = new CatalogDatabaseImpl(Collections.emptyMap(), "aa");
+        doNothing().when(mockCatalog).alterDatabase(path1.getDatabaseName(), newDatabase, false);
+        mockCatalog.alterDatabase(path1.getDatabaseName(), newDatabase, false);
+        verify(mockCatalog, times(1)).alterDatabase(path1.getDatabaseName(), newDatabase, false);
+        verify(mockCatalog, times(1)).getDatabase(path1.getDatabaseName());
+    }
+
+    @Test
+    public void testAlterDb_DatabaseNotExistException() {
+        CatalogDatabaseImpl database = new CatalogDatabaseImpl(Collections.emptyMap(), null);
+        assertThatThrownBy(() -> catalog.alterDatabase(path1.getDatabaseName(), database, false))
+                .isInstanceOf(DatabaseNotExistException.class)
+                .hasMessage("Database db1 does not exist in Catalog test-catalog.");
+    }
+
+    @Test
+    public void testGetProperties() throws Exception {
+        Map<String, String> oldProperties = Collections.emptyMap();
+        Map<String, String> newProperties = Collections.singletonMap("haa", "ccc");
+        List<PropertyChange> propertyChanges =
+                FlinkCatalog.getPropertyChanges(oldProperties, newProperties);
+        assertThat(propertyChanges.size()).isEqualTo(1);
+        oldProperties = newProperties;
+        propertyChanges = FlinkCatalog.getPropertyChanges(oldProperties, newProperties);
+        assertThat(propertyChanges.size()).isEqualTo(0);
+        oldProperties = Collections.singletonMap("aa", "ccc");
+        propertyChanges = FlinkCatalog.getPropertyChanges(oldProperties, newProperties);
+        assertThat(propertyChanges.size()).isEqualTo(2);
+    }
+
+    @Test
+    public void testGetPropertyChangeFromComment() {
+        Optional<PropertyChange> commentChange =
+                FlinkCatalog.getPropertyChangeFromComment(Optional.empty(), Optional.empty());
+        assertThat(commentChange.isPresent()).isFalse();
+        commentChange =
+                FlinkCatalog.getPropertyChangeFromComment(Optional.of("aa"), Optional.of("bb"));
+        assertThat(commentChange.isPresent()).isTrue();
+        commentChange =
+                FlinkCatalog.getPropertyChangeFromComment(Optional.of("aa"), Optional.empty());
+        assertThat(commentChange.isPresent()).isFalse();
+        commentChange =
+                FlinkCatalog.getPropertyChangeFromComment(Optional.empty(), Optional.of("bb"));
+        assertThat(commentChange.isPresent()).isTrue();
     }
 
     @Test

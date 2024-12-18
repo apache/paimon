@@ -409,17 +409,17 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         }
 
         ArrayList<String> baseArgs =
-                Lists.newArrayList(
-                        "compact",
-                        "--warehouse",
-                        warehouse,
-                        "--database",
-                        database,
-                        "--table",
-                        tableName);
+                Lists.newArrayList("compact", "--database", database, "--table", tableName);
+
         ThreadLocalRandom random = ThreadLocalRandom.current();
+        if (random.nextBoolean()) {
+            baseArgs.addAll(Lists.newArrayList("--warehouse", warehouse));
+        } else {
+            baseArgs.addAll(Lists.newArrayList("--catalog_conf", "warehouse=" + warehouse));
+        }
+
         if (unawareBucket) {
-            if (true) {
+            if (random.nextBoolean()) {
                 baseArgs.addAll(Lists.newArrayList("--where", "k=1"));
             } else {
                 baseArgs.addAll(Lists.newArrayList("--partition", "k=1"));

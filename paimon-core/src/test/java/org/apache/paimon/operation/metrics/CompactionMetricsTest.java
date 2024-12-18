@@ -22,7 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.metrics.Counter;
 import org.apache.paimon.metrics.Gauge;
 import org.apache.paimon.metrics.Metric;
-import org.apache.paimon.metrics.MetricRegistryImpl;
+import org.apache.paimon.metrics.TestMetricRegistry;
 
 import org.junit.jupiter.api.Test;
 
@@ -33,7 +33,7 @@ public class CompactionMetricsTest {
 
     @Test
     public void testReportMetrics() {
-        CompactionMetrics metrics = new CompactionMetrics(new MetricRegistryImpl(), "myTable");
+        CompactionMetrics metrics = new CompactionMetrics(new TestMetricRegistry(), "myTable");
         assertThat(getMetric(metrics, CompactionMetrics.MAX_LEVEL0_FILE_COUNT)).isEqualTo(-1L);
         assertThat(getMetric(metrics, CompactionMetrics.AVG_LEVEL0_FILE_COUNT)).isEqualTo(-1.0);
         assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_THREAD_BUSY)).isEqualTo(0.0);

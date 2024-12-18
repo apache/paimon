@@ -18,8 +18,6 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.flink.api.java.tuple.Tuple3;
-
 import java.time.Duration;
 import java.util.Map;
 
@@ -35,19 +33,13 @@ public class CreateTagActionFactory extends CreateOrReplaceTagActionFactory {
 
     @Override
     Action createOrReplaceTagAction(
-            Tuple3<String, String, String> tablePath,
+            String database,
+            String table,
             Map<String, String> catalogConfig,
             String tagName,
             Long snapshot,
             Duration timeRetained) {
-        return new CreateTagAction(
-                tablePath.f0,
-                tablePath.f1,
-                tablePath.f2,
-                catalogConfig,
-                tagName,
-                snapshot,
-                timeRetained);
+        return new CreateTagAction(database, table, catalogConfig, tagName, snapshot, timeRetained);
     }
 
     @Override

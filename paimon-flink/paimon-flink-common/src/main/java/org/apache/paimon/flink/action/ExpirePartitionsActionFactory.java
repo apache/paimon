@@ -18,9 +18,6 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.flink.api.java.tuple.Tuple3;
-
-import java.util.Map;
 import java.util.Optional;
 
 /** Factory to create {@link ExpirePartitionsAction}. */
@@ -35,25 +32,16 @@ public class ExpirePartitionsActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        Tuple3<String, String, String> tablePath = getTablePath(params);
-
-        checkRequiredArgument(params, EXPIRATIONTIME);
-        checkRequiredArgument(params, TIMESTAMPFORMATTER);
-        String expirationTime = params.get(EXPIRATIONTIME);
-        String timestampFormatter = params.get(TIMESTAMPFORMATTER);
         String expireStrategy = params.get(EXPIRE_STRATEGY);
         String timestampPattern = params.get(TIMESTAMP_PATTERN);
 
-        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
-
         return Optional.of(
                 new ExpirePartitionsAction(
-                        tablePath.f0,
-                        tablePath.f1,
-                        tablePath.f2,
-                        catalogConfig,
-                        expirationTime,
-                        timestampFormatter,
+                        params.getRequired(DATABASE),
+                        params.getRequired(TABLE),
+                        catalogConfigMap(params),
+                        params.getRequired(EXPIRATIONTIME),
+                        params.getRequired(TIMESTAMPFORMATTER),
                         timestampPattern,
                         expireStrategy));
     }

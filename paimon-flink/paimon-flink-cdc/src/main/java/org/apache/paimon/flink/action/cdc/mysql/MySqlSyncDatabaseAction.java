@@ -102,11 +102,8 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
     private final List<Identifier> excludedTables = new ArrayList<>();
 
     public MySqlSyncDatabaseAction(
-            String warehouse,
-            String database,
-            Map<String, String> catalogConfig,
-            Map<String, String> mySqlConfig) {
-        super(warehouse, database, catalogConfig, mySqlConfig, SyncJobHandler.SourceType.MYSQL);
+            String database, Map<String, String> catalogConfig, Map<String, String> mySqlConfig) {
+        super(database, catalogConfig, mySqlConfig, SyncJobHandler.SourceType.MYSQL);
         this.mode = DIVIDED;
     }
 
@@ -139,7 +136,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
 
         TableNameConverter tableNameConverter =
                 new TableNameConverter(
-                        allowUpperCase, mergeShards, tablePrefix, tableSuffix, tableMapping);
+                        caseSensitive, mergeShards, tablePrefix, tableSuffix, tableMapping);
         for (JdbcTableInfo tableInfo : jdbcTableInfos) {
             Identifier identifier =
                     Identifier.create(
@@ -155,7 +152,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                             tableConfig,
                             tableInfo.schema(),
                             metadataConverters,
-                            allowUpperCase,
+                            caseSensitive,
                             false,
                             true);
             try {

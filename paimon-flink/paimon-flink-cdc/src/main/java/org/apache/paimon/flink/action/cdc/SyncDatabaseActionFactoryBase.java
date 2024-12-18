@@ -24,7 +24,9 @@ import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 
 import java.util.Optional;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.EXCLUDING_DBS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.EXCLUDING_TABLES;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.INCLUDING_DBS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.INCLUDING_TABLES;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MULTIPLE_TABLE_PARTITION_KEYS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PARTITION_KEYS;
@@ -40,13 +42,11 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TYPE_MAPPI
 public abstract class SyncDatabaseActionFactoryBase<T extends SyncDatabaseActionBase>
         extends SynchronizationActionFactoryBase<T> {
 
-    protected String warehouse;
     protected String database;
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        this.warehouse = getRequiredValue(params, WAREHOUSE);
-        this.database = getRequiredValue(params, DATABASE);
+        this.database = params.getRequired(DATABASE);
         return super.create(params);
     }
 
@@ -59,6 +59,8 @@ public abstract class SyncDatabaseActionFactoryBase<T extends SyncDatabaseAction
                 .withTableMapping(optionalConfigMap(params, TABLE_MAPPING))
                 .includingTables(params.get(INCLUDING_TABLES))
                 .excludingTables(params.get(EXCLUDING_TABLES))
+                .includingDbs(params.get(INCLUDING_DBS))
+                .excludingDbs(params.get(EXCLUDING_DBS))
                 .withPartitionKeyMultiple(
                         optionalConfigMapList(params, MULTIPLE_TABLE_PARTITION_KEYS))
                 .withPartitionKeys();

@@ -21,6 +21,7 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
@@ -662,7 +663,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
         return b;
     }
 
-    private Catalog.Loader catalogLoader() {
+    private CatalogLoader catalogLoader() {
         // to make the action workflow serializable
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
         return () -> FlinkCatalogFactory.createPaimonCatalog(catalogOptions);

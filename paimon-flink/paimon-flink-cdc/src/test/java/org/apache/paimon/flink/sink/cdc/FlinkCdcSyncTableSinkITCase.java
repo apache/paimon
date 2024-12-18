@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.InternalRow;
@@ -159,8 +159,7 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
 
         Options catalogOptions = new Options();
         catalogOptions.set("warehouse", tempDir.toString());
-        Catalog.Loader catalogLoader =
-                () -> FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
+        CatalogLoader catalogLoader = () -> FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
 
         new CdcSinkBuilder<TestCdcEvent>()
                 .withInput(source)

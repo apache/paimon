@@ -80,6 +80,43 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
+  /v1/{prefix}/databases/{database}/properties:
+    post:
+      tags:
+        - database
+      summary: Alter Database
+      operationId: alterDatabase
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlterDatabaseRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlterDatabaseResponse'
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
   /v1/{prefix}/databases/{database}:
     get:
       tags:
@@ -116,7 +153,7 @@ paths:
       tags:
         - database
       summary: Drop Database
-      operationId: dropDatabases
+      operationId: dropDatabase
       parameters:
         - name: prefix
           in: path
@@ -159,17 +196,6 @@ components:
       properties:
         name:
           type: string
-        ignoreIfExists:
-          type: boolean
-        options:
-          type: object
-          additionalProperties:
-            type: string
-    CreateDatabaseResponse:
-      type: object
-      properties:
-        name:
-          type: string
         options:
           type: object
           additionalProperties:
@@ -183,6 +209,41 @@ components:
           type: integer
           format: int32
         stack:
+          type: array
+          items:
+            type: string
+    CreateDatabaseResponse:
+      type: object
+      properties:
+        name:
+          type: string
+        options:
+          type: object
+          additionalProperties:
+            type: string
+    AlterDatabaseRequest:
+      type: object
+      properties:
+        removals:
+          type: array
+          items:
+            type: string
+        updates:
+          type: object
+          additionalProperties:
+            type: string
+    AlterDatabaseResponse:
+      type: object
+      properties:
+        removed:
+          type: array
+          items:
+            type: string
+        updated:
+          type: array
+          items:
+            type: string
+        missing:
           type: array
           items:
             type: string

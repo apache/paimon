@@ -21,8 +21,8 @@ package org.apache.paimon.rest;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -31,7 +31,9 @@ import org.apache.paimon.rest.auth.CredentialsProvider;
 import org.apache.paimon.rest.auth.CredentialsProviderFactory;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
+import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.DatabaseName;
@@ -40,6 +42,7 @@ import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.shade.guava30.com.google.common.annotations.VisibleForTesting;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -50,9 +53,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
 /** A catalog implementation for REST. */
@@ -62,7 +67,7 @@ public class RESTCatalog implements Catalog {
 
     private final RESTClient client;
     private final ResourcePaths resourcePaths;
-    private final Map<String, String> options;
+    private final Options options;
     private final Map<String, String> baseHeader;
     private final AuthSession catalogAuth;
 
@@ -100,7 +105,7 @@ public class RESTCatalog implements Catalog {
         }
         Map<String, String> initHeaders =
                 RESTUtil.merge(configHeaders(options.toMap()), this.catalogAuth.getHeaders());
-        this.options = fetchOptionsFromServer(initHeaders, options.toMap());
+        this.options = new Options(fetchOptionsFromServer(initHeaders, options.toMap()));
         this.resourcePaths =
                 ResourcePaths.forCatalogProperties(
                         this.options.get(RESTCatalogInternalOptions.PREFIX));
@@ -113,7 +118,7 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public Map<String, String> options() {
-        return this.options;
+        return this.options.toMap();
     }
 
     @Override
@@ -136,12 +141,14 @@ public class RESTCatalog implements Catalog {
     @Override
     public void createDatabase(String name, boolean ignoreIfExists, Map<String, String> properties)
             throws DatabaseAlreadyExistException {
-        CreateDatabaseRequest request = new CreateDatabaseRequest(name, ignoreIfExists, properties);
+        CreateDatabaseRequest request = new CreateDatabaseRequest(name, properties);
         try {
             client.post(
                     resourcePaths.databases(), request, CreateDatabaseResponse.class, headers());
         } catch (AlreadyExistsException e) {
-            throw new DatabaseAlreadyExistException(name);
+            if (!ignoreIfExists) {
+                throw new DatabaseAlreadyExistException(name);
+            }
         }
     }
 
@@ -173,12 +180,33 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public Table getTable(Identifier identifier) throws TableNotExistException {
-        throw new UnsupportedOperationException();
+    public void alterDatabase(String name, List<PropertyChange> changes, boolean ignoreIfNotExists)
+            throws DatabaseNotExistException {
+        try {
+            Pair<Map<String, String>, Set<String>> setPropertiesToRemoveKeys =
+                    PropertyChange.getSetPropertiesToRemoveKeys(changes);
+            Map<String, String> updateProperties = setPropertiesToRemoveKeys.getLeft();
+            Set<String> removeKeys = setPropertiesToRemoveKeys.getRight();
+            AlterDatabaseRequest request =
+                    new AlterDatabaseRequest(new ArrayList<>(removeKeys), updateProperties);
+            AlterDatabaseResponse response =
+                    client.post(
+                            resourcePaths.databaseProperties(name),
+                            request,
+                            AlterDatabaseResponse.class,
+                            headers());
+            if (response.getUpdated().isEmpty()) {
+                throw new IllegalStateException("Failed to update properties");
+            }
+        } catch (NoSuchResourceException e) {
+            if (!ignoreIfNotExists) {
+                throw new DatabaseNotExistException(name);
+            }
+        }
     }
 
     @Override
-    public Path getTableLocation(Identifier identifier) {
+    public Table getTable(Identifier identifier) throws TableNotExistException {
         throw new UnsupportedOperationException();
     }
 
@@ -229,8 +257,8 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public boolean allowUpperCase() {
-        return false;
+    public boolean caseSensitive() {
+        return options.getOptional(CASE_SENSITIVE).orElse(true);
     }
 
     @Override

@@ -37,12 +37,11 @@ public class RemoveOrphanFilesAction extends ActionBase {
     private boolean dryRun = false;
 
     public RemoveOrphanFilesAction(
-            String warehouse,
             String databaseName,
             @Nullable String tableName,
             @Nullable String parallelism,
             Map<String, String> catalogConfig) {
-        super(warehouse, catalogConfig);
+        super(catalogConfig);
         this.databaseName = databaseName;
         this.tableName = tableName;
         this.parallelism = parallelism;

@@ -188,6 +188,13 @@ public class CachingCatalog extends DelegateCatalog {
     }
 
     @Override
+    public void alterDatabase(String name, List<PropertyChange> changes, boolean ignoreIfNotExists)
+            throws DatabaseNotExistException {
+        super.alterDatabase(name, changes, ignoreIfNotExists);
+        databaseCache.invalidate(name);
+    }
+
+    @Override
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
             throws TableNotExistException {
         super.dropTable(identifier, ignoreIfNotExists);
@@ -305,13 +312,88 @@ public class CachingCatalog extends DelegateCatalog {
         }
     }
 
-    // ================================== refresh ================================================
-    // following caches will affect the latency of table, so refresh method is provided for engine
+    // ================================== Cache Public API
+    // ================================================
 
+    /**
+     * Partition cache will affect the latency of table, so refresh method is provided for compute
+     * engine.
+     */
     public void refreshPartitions(Identifier identifier) throws TableNotExistException {
         if (partitionCache != null) {
             List<PartitionEntry> result = wrapped.listPartitions(identifier);
             partitionCache.put(identifier, result);
+        }
+    }
+
+    /**
+     * Cache sizes for compute engine. This method can let the outside know the specific usage of
+     * cache.
+     */
+    public CacheSizes estimatedCacheSizes() {
+        long databaseCacheSize = databaseCache.estimatedSize();
+        long tableCacheSize = tableCache.estimatedSize();
+        long manifestCacheSize = 0L;
+        long manifestCacheBytes = 0L;
+        if (manifestCache != null) {
+            manifestCacheSize = manifestCache.estimatedSize();
+            manifestCacheBytes = manifestCache.totalCacheBytes();
+        }
+        long partitionCacheSize = 0L;
+        if (partitionCache != null) {
+            for (Map.Entry<Identifier, List<PartitionEntry>> entry :
+                    partitionCache.asMap().entrySet()) {
+                partitionCacheSize += entry.getValue().size();
+            }
+        }
+        return new CacheSizes(
+                databaseCacheSize,
+                tableCacheSize,
+                manifestCacheSize,
+                manifestCacheBytes,
+                partitionCacheSize);
+    }
+
+    /** Cache sizes of a caching catalog. */
+    public static class CacheSizes {
+
+        private final long databaseCacheSize;
+        private final long tableCacheSize;
+        private final long manifestCacheSize;
+        private final long manifestCacheBytes;
+        private final long partitionCacheSize;
+
+        public CacheSizes(
+                long databaseCacheSize,
+                long tableCacheSize,
+                long manifestCacheSize,
+                long manifestCacheBytes,
+                long partitionCacheSize) {
+            this.databaseCacheSize = databaseCacheSize;
+            this.tableCacheSize = tableCacheSize;
+            this.manifestCacheSize = manifestCacheSize;
+            this.manifestCacheBytes = manifestCacheBytes;
+            this.partitionCacheSize = partitionCacheSize;
+        }
+
+        public long databaseCacheSize() {
+            return databaseCacheSize;
+        }
+
+        public long tableCacheSize() {
+            return tableCacheSize;
+        }
+
+        public long manifestCacheSize() {
+            return manifestCacheSize;
+        }
+
+        public long manifestCacheBytes() {
+            return manifestCacheBytes;
+        }
+
+        public long partitionCacheSize() {
+            return partitionCacheSize;
         }
     }
 }

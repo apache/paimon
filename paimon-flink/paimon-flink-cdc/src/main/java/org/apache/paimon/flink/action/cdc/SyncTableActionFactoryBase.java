@@ -22,8 +22,6 @@ import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionFactory;
 import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 
-import org.apache.flink.api.java.tuple.Tuple3;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -39,11 +37,13 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TYPE_MAPPI
 public abstract class SyncTableActionFactoryBase
         extends SynchronizationActionFactoryBase<SyncTableActionBase> {
 
-    protected Tuple3<String, String, String> tablePath;
+    protected String database;
+    protected String table;
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        this.tablePath = getTablePath(params);
+        this.database = params.getRequired(DATABASE);
+        this.table = params.getRequired(TABLE);
         return super.create(params);
     }
 

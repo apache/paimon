@@ -25,6 +25,7 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 
 import org.apache.paimon.shade.guava30.com.google.common.cache.Cache;
 import org.apache.paimon.shade.guava30.com.google.common.cache.CacheBuilder;
@@ -48,9 +49,12 @@ public class AddPartitionCommitCallback implements CommitCallback {
                     .build();
 
     private final MetastoreClient client;
+    private final InternalRowPartitionComputer partitionComputer;
 
-    public AddPartitionCommitCallback(MetastoreClient client) {
+    public AddPartitionCommitCallback(
+            MetastoreClient client, InternalRowPartitionComputer partitionComputer) {
         this.client = client;
+        this.partitionComputer = partitionComputer;
     }
 
     @Override
@@ -81,7 +85,10 @@ public class AddPartitionCommitCallback implements CommitCallback {
                 }
             }
             if (!newPartitions.isEmpty()) {
-                client.addPartitions(newPartitions);
+                client.addPartitions(
+                        newPartitions.stream()
+                                .map(partitionComputer::generatePartValues)
+                                .collect(Collectors.toList()));
                 newPartitions.forEach(partition -> cache.put(partition, true));
             }
         } catch (Exception e) {

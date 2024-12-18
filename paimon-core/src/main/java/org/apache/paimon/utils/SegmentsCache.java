@@ -90,4 +90,14 @@ public class SegmentsCache<T> {
 
         return new SegmentsCache<>(pageSize, maxMemorySize, maxElementSize);
     }
+
+    public long estimatedSize() {
+        return cache.estimatedSize();
+    }
+
+    public long totalCacheBytes() {
+        return cache.asMap().entrySet().stream()
+                .mapToLong(entry -> weigh(entry.getKey(), entry.getValue()))
+                .sum();
+    }
 }

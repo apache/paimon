@@ -214,7 +214,7 @@ public class SchemaManager implements Serializable {
             if (latest.isPresent()) {
                 TableSchema latestSchema = latest.get();
                 if (externalTable) {
-                    checkSchemaForExternalTable(latestSchema, schema);
+                    checkSchemaForExternalTable(latestSchema.toSchema(), schema);
                     return latestSchema;
                 } else {
                     throw new IllegalStateException(
@@ -248,14 +248,15 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    private void checkSchemaForExternalTable(TableSchema existsSchema, Schema newSchema) {
+    private void checkSchemaForExternalTable(Schema existsSchema, Schema newSchema) {
         // When creating an external table, if the table already exists in the location, we can
         // choose not to specify the fields.
-        if (newSchema.fields().isEmpty()
-                // When the fields are explicitly specified, we need check for consistency.
-                || (Objects.equals(existsSchema.fields(), newSchema.fields())
-                        && Objects.equals(existsSchema.partitionKeys(), newSchema.partitionKeys())
-                        && Objects.equals(existsSchema.primaryKeys(), newSchema.primaryKeys()))) {
+        if ((newSchema.fields().isEmpty()
+                        || newSchema.rowType().equalsIgnoreFieldId(existsSchema.rowType()))
+                && (newSchema.partitionKeys().isEmpty()
+                        || Objects.equals(newSchema.partitionKeys(), existsSchema.partitionKeys()))
+                && (newSchema.primaryKeys().isEmpty()
+                        || Objects.equals(newSchema.primaryKeys(), existsSchema.primaryKeys()))) {
             // check for options
             Map<String, String> existsOptions = existsSchema.options();
             Map<String, String> newOptions = newSchema.options();

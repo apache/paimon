@@ -20,12 +20,15 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogUtils;
+import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
 import org.apache.paimon.flink.utils.FlinkDescriptorProperties;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.options.Options;
@@ -133,6 +136,7 @@ import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_REFRESH_HANDLER_D
 import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_REFRESH_MODE;
 import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_REFRESH_STATUS;
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
 import static org.apache.paimon.catalog.Catalog.LAST_UPDATE_TIME_PROP;
 import static org.apache.paimon.catalog.Catalog.NUM_FILES_PROP;
 import static org.apache.paimon.catalog.Catalog.NUM_ROWS_PROP;
@@ -236,19 +240,19 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public void createDatabase(String name, CatalogDatabase database, boolean ignoreIfExists)
             throws DatabaseAlreadyExistException, CatalogException {
+        Map<String, String> properties;
         if (database != null) {
+            properties = new HashMap<>(database.getProperties());
             if (database.getDescription().isPresent()
                     && !database.getDescription().get().equals("")) {
-                throw new UnsupportedOperationException(
-                        "Create database with description is unsupported.");
+                properties.put(COMMENT_PROP, database.getDescription().get());
             }
+        } else {
+            properties = Collections.emptyMap();
         }
 
         try {
-            catalog.createDatabase(
-                    name,
-                    ignoreIfExists,
-                    database == null ? Collections.emptyMap() : database.getProperties());
+            catalog.createDatabase(name, ignoreIfExists, properties);
         } catch (Catalog.DatabaseAlreadyExistException e) {
             throw new DatabaseAlreadyExistException(getName(), e.database());
         }
@@ -520,23 +524,9 @@ public class FlinkCatalog extends AbstractCatalog {
             // Although catalog.createTable will copy the default options, but we need this info
             // here before create table, such as table-default.kafka.bootstrap.servers defined in
             // catalog options. Temporarily, we copy the default options here.
-            Catalog.tableDefaultOptions(catalog.options()).forEach(options::putIfAbsent);
+            CatalogUtils.tableDefaultOptions(catalog.options()).forEach(options::putIfAbsent);
             options.put(REGISTER_TIMEOUT.key(), logStoreAutoRegisterTimeout.toString());
             registerLogSystem(catalog, identifier, options, classLoader);
-        }
-
-        // remove table path
-        String path = options.remove(PATH.key());
-        if (path != null) {
-            Path expectedPath = catalog.getTableLocation(identifier);
-            if (!new Path(path).equals(expectedPath)) {
-                throw new CatalogException(
-                        String.format(
-                                "You specified the Path when creating the table, "
-                                        + "but the Path '%s' is different from where it should be '%s'. "
-                                        + "Please remove the Path.",
-                                path, expectedPath));
-            }
         }
 
         if (catalogTable instanceof CatalogTable) {
@@ -634,7 +624,7 @@ public class FlinkCatalog extends AbstractCatalog {
 
             SchemaManager.checkAlterTablePath(key);
 
-            if (Catalog.COMMENT_PROP.equals(key)) {
+            if (COMMENT_PROP.equals(key)) {
                 schemaChanges.add(SchemaChange.updateComment(value));
             } else {
                 schemaChanges.add(SchemaChange.setOption(key, value));
@@ -643,7 +633,7 @@ public class FlinkCatalog extends AbstractCatalog {
         } else if (change instanceof ResetOption) {
             ResetOption resetOption = (ResetOption) change;
             String key = resetOption.getKey();
-            if (Catalog.COMMENT_PROP.equals(key)) {
+            if (COMMENT_PROP.equals(key)) {
                 schemaChanges.add(SchemaChange.updateComment(null));
             } else {
                 schemaChanges.add(SchemaChange.removeOption(resetOption.getKey()));
@@ -1223,13 +1213,22 @@ public class FlinkCatalog extends AbstractCatalog {
         return new Identifier(path.getDatabaseName(), path.getObjectName());
     }
 
-    // --------------------- unsupported methods ----------------------------
-
     @Override
     public final void alterDatabase(
             String name, CatalogDatabase newDatabase, boolean ignoreIfNotExists)
-            throws CatalogException {
-        throw new UnsupportedOperationException();
+            throws CatalogException, DatabaseNotExistException {
+        try {
+            Database oldDatabase = catalog.getDatabase(name);
+            List<PropertyChange> changes =
+                    getPropertyChanges(oldDatabase.options(), newDatabase.getProperties());
+            getPropertyChangeFromComment(oldDatabase.comment(), newDatabase.getDescription())
+                    .ifPresent(changes::add);
+            catalog.alterDatabase(name, changes, ignoreIfNotExists);
+        } catch (Catalog.DatabaseNotExistException e) {
+            if (!ignoreIfNotExists) {
+                throw new DatabaseNotExistException(getName(), e.database());
+            }
+        }
     }
 
     @Override
@@ -1276,6 +1275,36 @@ public class FlinkCatalog extends AbstractCatalog {
             return Collections.emptyList();
         }
         return getPartitionSpecs(tablePath, null);
+    }
+
+    @VisibleForTesting
+    static List<PropertyChange> getPropertyChanges(
+            Map<String, String> oldOptions, Map<String, String> newOptions) {
+        List<PropertyChange> changes = new ArrayList<>();
+        newOptions.forEach(
+                (k, v) -> {
+                    if (!oldOptions.containsKey(k) || !oldOptions.get(k).equals(v)) {
+                        changes.add(PropertyChange.setProperty(k, v));
+                    }
+                });
+        oldOptions
+                .keySet()
+                .forEach(
+                        (k) -> {
+                            if (!newOptions.containsKey(k)) {
+                                changes.add(PropertyChange.removeProperty(k));
+                            }
+                        });
+        return changes;
+    }
+
+    @VisibleForTesting
+    static Optional<PropertyChange> getPropertyChangeFromComment(
+            Optional<String> oldComment, Optional<String> newComment) {
+        if (newComment.isPresent() && !oldComment.equals(newComment)) {
+            return Optional.of(PropertyChange.setProperty(COMMENT_PROP, newComment.get()));
+        }
+        return Optional.empty();
     }
 
     private Table getPaimonTable(ObjectPath tablePath) throws TableNotExistException {

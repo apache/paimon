@@ -44,19 +44,17 @@ public class MigrateFileActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        String warehouse = params.get(WAREHOUSE);
         String connector = params.get(SOURCE_TYPE);
         String sourceHiveTable = params.get(SOURCE_TABLE);
         String targetTable = params.get(TARGET_TABLE);
         boolean deleteOrigin = Boolean.parseBoolean(params.get(DELETE_ORIGIN));
-        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
+        Map<String, String> catalogConfig = catalogConfigMap(params);
         String tableConf = params.get(OPTIONS);
         Integer parallelism = Integer.parseInt(params.get(PARALLELISM));
 
         MigrateFileAction migrateFileAction =
                 new MigrateFileAction(
                         connector,
-                        warehouse,
                         sourceHiveTable,
                         targetTable,
                         deleteOrigin,

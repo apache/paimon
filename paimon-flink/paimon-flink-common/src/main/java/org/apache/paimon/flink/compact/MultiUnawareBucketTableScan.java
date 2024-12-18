@@ -20,7 +20,7 @@ package org.apache.paimon.flink.compact;
 
 import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
 import org.apache.paimon.append.UnawareAppendTableCompactionCoordinator;
-import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
@@ -41,7 +41,7 @@ public class MultiUnawareBucketTableScan
     protected transient Map<Identifier, UnawareAppendTableCompactionCoordinator> tablesMap;
 
     public MultiUnawareBucketTableScan(
-            Catalog.Loader catalogLoader,
+            CatalogLoader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,

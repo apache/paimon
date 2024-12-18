@@ -82,7 +82,7 @@ public class ListDatabases {
 
 ## Drop Database
 
-You can use the catalog to drop databases.
+You can use the catalog to drop database.
 
 ```java
 import org.apache.paimon.catalog.Catalog;
@@ -95,6 +95,30 @@ public class DropDatabase {
             catalog.dropDatabase("my_db", false, true);
         } catch (Catalog.DatabaseNotEmptyException e) {
             // do something
+        } catch (Catalog.DatabaseNotExistException e) {
+            // do something
+        }
+    }
+}
+```
+
+## Alter Database
+
+You can use the catalog to alter database's properties.(ps: only support hive and jdbc catalog)
+
+```java
+import java.util.ArrayList;
+import org.apache.paimon.catalog.Catalog;
+
+public class AlterDatabase {
+
+    public static void main(String[] args) {
+        try {
+            Catalog catalog = CreateCatalog.createHiveCatalog();
+            List<DatabaseChange> changes = new ArrayList<>();
+            changes.add(DatabaseChange.setProperty("k1", "v1"));
+            changes.add(DatabaseChange.removeProperty("k2"));
+            catalog.alterDatabase("my_db", changes, true);
         } catch (Catalog.DatabaseNotExistException e) {
             // do something
         }

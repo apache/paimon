@@ -76,18 +76,11 @@ public class MySqlSyncTableAction extends SyncTableActionBase {
     private JdbcSchemasInfo mySqlSchemasInfo;
 
     public MySqlSyncTableAction(
-            String warehouse,
             String database,
             String table,
             Map<String, String> catalogConfig,
             Map<String, String> mySqlConfig) {
-        super(
-                warehouse,
-                database,
-                table,
-                catalogConfig,
-                mySqlConfig,
-                SyncJobHandler.SourceType.MYSQL);
+        super(database, table, catalogConfig, mySqlConfig, SyncJobHandler.SourceType.MYSQL);
     }
 
     @Override

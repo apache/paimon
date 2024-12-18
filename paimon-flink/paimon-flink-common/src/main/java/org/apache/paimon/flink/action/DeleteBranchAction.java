@@ -26,12 +26,11 @@ public class DeleteBranchAction extends TableActionBase {
     private final String branchNames;
 
     public DeleteBranchAction(
-            String warehouse,
             String databaseName,
             String tableName,
             Map<String, String> catalogConfig,
             String branchNames) {
-        super(warehouse, databaseName, tableName, catalogConfig);
+        super(databaseName, tableName, catalogConfig);
         this.branchNames = branchNames;
     }
 

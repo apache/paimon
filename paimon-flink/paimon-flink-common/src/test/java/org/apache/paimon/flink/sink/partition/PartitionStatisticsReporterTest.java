@@ -18,12 +18,12 @@
 
 package org.apache.paimon.flink.sink.partition;
 
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.metastore.MetastoreClient;
+import org.apache.paimon.metastore.PartitionStats;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
@@ -35,7 +35,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.PartitionPathUtils;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
@@ -49,8 +48,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Test for {@link HmsReporter}. */
-public class HmsReporterTest {
+/** Test for {@link PartitionStatisticsReporter}. */
+public class PartitionStatisticsReporterTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -86,66 +85,58 @@ public class HmsReporterTest {
         BatchTableCommit committer = table.newBatchWriteBuilder().newCommit();
         committer.commit(messages);
         AtomicBoolean closed = new AtomicBoolean(false);
-        Map<String, Map<String, String>> partitionParams = Maps.newHashMap();
+        Map<String, PartitionStats> partitionParams = Maps.newHashMap();
 
         MetastoreClient client =
                 new MetastoreClient() {
+
                     @Override
-                    public void addPartition(BinaryRow partition) throws Exception {
+                    public void addPartition(LinkedHashMap<String, String> partition) {
                         throw new UnsupportedOperationException();
                     }
 
                     @Override
-                    public void addPartition(LinkedHashMap<String, String> partitionSpec)
-                            throws Exception {
+                    public void addPartitions(List<LinkedHashMap<String, String>> partitions) {
                         throw new UnsupportedOperationException();
                     }
 
                     @Override
-                    public void deletePartition(LinkedHashMap<String, String> partitionSpec)
-                            throws Exception {
+                    public void dropPartition(LinkedHashMap<String, String> partition) {
                         throw new UnsupportedOperationException();
                     }
 
                     @Override
-                    public void markDone(LinkedHashMap<String, String> partitionSpec)
-                            throws Exception {
+                    public void dropPartitions(List<LinkedHashMap<String, String>> partitions) {
+                        throw new UnsupportedOperationException();
+                    }
+
+                    @Override
+                    public void markPartitionDone(LinkedHashMap<String, String> partitionSpec) {
                         throw new UnsupportedOperationException();
                     }
 
                     @Override
                     public void alterPartition(
                             LinkedHashMap<String, String> partitionSpec,
-                            Map<String, String> parameters,
-                            long modifyTime,
-                            boolean ignoreIfNotExist)
-                            throws Exception {
+                            PartitionStats partitionStats) {
                         partitionParams.put(
                                 PartitionPathUtils.generatePartitionPath(partitionSpec),
-                                parameters);
+                                partitionStats);
                     }
 
                     @Override
-                    public void close() throws Exception {
+                    public void close() {
                         closed.set(true);
                     }
                 };
 
-        HmsReporter action = new HmsReporter(table, client);
+        PartitionStatisticsReporter action = new PartitionStatisticsReporter(table, client);
         long time = 1729598544974L;
         action.report("c1=a/", time);
         Assertions.assertThat(partitionParams).containsKey("c1=a/");
-        Assertions.assertThat(partitionParams.get("c1=a/"))
+        Assertions.assertThat(partitionParams.get("c1=a/").toString())
                 .isEqualTo(
-                        ImmutableMap.of(
-                                "numFiles",
-                                "1",
-                                "totalSize",
-                                "591",
-                                "numRows",
-                                "1",
-                                "transient_lastDdlTime",
-                                String.valueOf(time / 1000)));
+                        "numFiles: 1, totalSize: 591, numRows: 1, lastUpdateTimeMillis: 1729598544974");
         action.close();
         Assertions.assertThat(closed).isTrue();
     }

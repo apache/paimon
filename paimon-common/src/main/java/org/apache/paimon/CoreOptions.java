@@ -184,6 +184,7 @@ public class CoreOptions implements Serializable {
                     .defaultValue("data-")
                     .withDescription("Specify the file name prefix of data files.");
 
+    @Immutable
     public static final ConfigOption<String> DATA_FILE_PATH_DIRECTORY =
             key("data-file.path-directory")
                     .stringType()

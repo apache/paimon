@@ -37,7 +37,6 @@ public class ExpirePartitionsAction extends TableActionBase {
     private final PartitionExpire partitionExpire;
 
     public ExpirePartitionsAction(
-            String warehouse,
             String databaseName,
             String tableName,
             Map<String, String> catalogConfig,
@@ -45,7 +44,7 @@ public class ExpirePartitionsAction extends TableActionBase {
             String timestampFormatter,
             String timestampPattern,
             String expireStrategy) {
-        super(warehouse, databaseName, tableName, catalogConfig);
+        super(databaseName, tableName, catalogConfig);
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(
                     String.format(

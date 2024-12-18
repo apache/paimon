@@ -18,9 +18,6 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.flink.api.java.tuple.Tuple3;
-
-import java.util.Map;
 import java.util.Optional;
 
 /** Factory to create {@link RollbackToTimestampAction}. */
@@ -37,20 +34,12 @@ public class RollbackToTimestampActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        Tuple3<String, String, String> tablePath = getTablePath(params);
-
-        checkRequiredArgument(params, TIMESTAMP);
-        String timestamp = params.get(TIMESTAMP);
-
-        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
-
         RollbackToTimestampAction action =
                 new RollbackToTimestampAction(
-                        tablePath.f0,
-                        tablePath.f1,
-                        tablePath.f2,
-                        Long.parseLong(timestamp),
-                        catalogConfig);
+                        params.getRequired(DATABASE),
+                        params.getRequired(TABLE),
+                        Long.parseLong(params.getRequired(TIMESTAMP)),
+                        catalogConfigMap(params));
 
         return Optional.of(action);
     }

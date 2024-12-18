@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.source.operator;
 
 import org.apache.paimon.append.UnawareAppendCompactionTask;
-import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSource;
 import org.apache.paimon.table.source.Split;
 
@@ -44,16 +44,17 @@ import java.util.regex.Pattern;
  * single (non-parallel) monitoring task, it is responsible for the new Paimon table.
  */
 public abstract class CombinedCompactorSource<T> extends AbstractNonCoordinatedSource<T> {
-    private static final long serialVersionUID = 2L;
 
-    protected final Catalog.Loader catalogLoader;
+    private static final long serialVersionUID = 3L;
+
+    protected final CatalogLoader catalogLoader;
     protected final Pattern includingPattern;
     protected final Pattern excludingPattern;
     protected final Pattern databasePattern;
     protected final boolean isStreaming;
 
     public CombinedCompactorSource(
-            Catalog.Loader catalogLoader,
+            CatalogLoader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,

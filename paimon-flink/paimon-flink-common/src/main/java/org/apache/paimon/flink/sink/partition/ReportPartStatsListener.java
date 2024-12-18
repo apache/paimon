@@ -49,7 +49,7 @@ import java.util.Set;
  * This listener will collect data from the newly touched partition and then decide when to trigger
  * a report based on the partition's idle time.
  */
-public class ReportHmsListener implements PartitionListener {
+public class ReportPartStatsListener implements PartitionListener {
 
     @SuppressWarnings("unchecked")
     private static final ListStateDescriptor<Map<String, Long>> PENDING_REPORT_STATE_DESC =
@@ -58,20 +58,20 @@ public class ReportHmsListener implements PartitionListener {
                     new MapSerializer<>(StringSerializer.INSTANCE, LongSerializer.INSTANCE));
 
     private final InternalRowPartitionComputer partitionComputer;
-    private final HmsReporter hmsReporter;
+    private final PartitionStatisticsReporter partitionStatisticsReporter;
     private final ListState<Map<String, Long>> pendingPartitionsState;
     private final Map<String, Long> pendingPartitions;
     private final long idleTime;
 
-    private ReportHmsListener(
+    private ReportPartStatsListener(
             InternalRowPartitionComputer partitionComputer,
-            HmsReporter hmsReporter,
+            PartitionStatisticsReporter partitionStatisticsReporter,
             OperatorStateStore store,
             boolean isRestored,
             long idleTime)
             throws Exception {
         this.partitionComputer = partitionComputer;
-        this.hmsReporter = hmsReporter;
+        this.partitionStatisticsReporter = partitionStatisticsReporter;
         this.pendingPartitionsState = store.getListState(PENDING_REPORT_STATE_DESC);
         this.pendingPartitions = new HashMap<>();
         if (isRestored) {
@@ -108,7 +108,7 @@ public class ReportHmsListener implements PartitionListener {
         try {
             Map<String, Long> partitions = reportPartition(endInput);
             for (Map.Entry<String, Long> entry : partitions.entrySet()) {
-                hmsReporter.report(entry.getKey(), entry.getValue());
+                partitionStatisticsReporter.report(entry.getKey(), entry.getValue());
             }
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -138,7 +138,7 @@ public class ReportHmsListener implements PartitionListener {
         pendingPartitionsState.update(Collections.singletonList(pendingPartitions));
     }
 
-    public static Optional<ReportHmsListener> create(
+    public static Optional<ReportPartStatsListener> create(
             boolean isRestored, OperatorStateStore stateStore, FileStoreTable table)
             throws Exception {
 
@@ -169,9 +169,9 @@ public class ReportHmsListener implements PartitionListener {
                         coreOptions.legacyPartitionName());
 
         return Optional.of(
-                new ReportHmsListener(
+                new ReportPartStatsListener(
                         partitionComputer,
-                        new HmsReporter(
+                        new PartitionStatisticsReporter(
                                 table,
                                 table.catalogEnvironment().metastoreClientFactory().create()),
                         stateStore,
@@ -182,8 +182,8 @@ public class ReportHmsListener implements PartitionListener {
 
     @Override
     public void close() throws IOException {
-        if (hmsReporter != null) {
-            hmsReporter.close();
+        if (partitionStatisticsReporter != null) {
+            partitionStatisticsReporter.close();
         }
     }
 }

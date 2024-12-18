@@ -18,9 +18,6 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.flink.api.java.tuple.Tuple3;
-
-import java.util.Map;
 import java.util.Optional;
 
 /** Factory to create {@link RenameTagActionFactory}. */
@@ -38,22 +35,13 @@ public class RenameTagActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        checkRequiredArgument(params, TAG_NAME);
-        checkRequiredArgument(params, TARGET_TAG_NAME);
-
-        Tuple3<String, String, String> tablePath = getTablePath(params);
-        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
-        String tagName = params.get(TAG_NAME);
-        String targetTagName = params.get(TARGET_TAG_NAME);
-
         RenameTagAction action =
                 new RenameTagAction(
-                        tablePath.f0,
-                        tablePath.f1,
-                        tablePath.f2,
-                        catalogConfig,
-                        tagName,
-                        targetTagName);
+                        params.getRequired(DATABASE),
+                        params.getRequired(TABLE),
+                        catalogConfigMap(params),
+                        params.getRequired(TAG_NAME),
+                        params.getRequired(TARGET_TAG_NAME));
         return Optional.of(action);
     }
 

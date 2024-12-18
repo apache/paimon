@@ -41,7 +41,6 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.time.Duration;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -61,17 +60,12 @@ public class CompactAction extends TableActionBase {
 
     private Boolean fullCompaction;
 
-    public CompactAction(String warehouse, String database, String tableName) {
-        this(warehouse, database, tableName, Collections.emptyMap(), Collections.emptyMap());
-    }
-
     public CompactAction(
-            String warehouse,
             String database,
             String tableName,
             Map<String, String> catalogConfig,
             Map<String, String> tableConf) {
-        super(warehouse, database, tableName, catalogConfig);
+        super(database, tableName, catalogConfig);
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(
                     String.format(

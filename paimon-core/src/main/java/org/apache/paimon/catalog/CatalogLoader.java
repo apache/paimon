@@ -18,19 +18,11 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.paimon.options.ConfigOption;
-import org.apache.paimon.options.ConfigOptions;
+import java.io.Serializable;
 
-/** Options for filesystem catalog. */
-public final class FileSystemCatalogOptions {
+/** Loader for creating a {@link Catalog}. */
+@FunctionalInterface
+public interface CatalogLoader extends Serializable {
 
-    public static final ConfigOption<Boolean> CASE_SENSITIVE =
-            ConfigOptions.key("case-sensitive")
-                    .booleanType()
-                    .defaultValue(true)
-                    .withFallbackKeys("allow-upper-case")
-                    .withDescription(
-                            "Is case sensitive. If case insensitive, you need to set this option to false, and the table name and fields be converted to lowercase.");
-
-    private FileSystemCatalogOptions() {}
+    Catalog load();
 }

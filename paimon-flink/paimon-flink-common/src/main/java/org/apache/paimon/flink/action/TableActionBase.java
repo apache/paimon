@@ -41,12 +41,8 @@ public abstract class TableActionBase extends ActionBase {
     protected Table table;
     protected final Identifier identifier;
 
-    TableActionBase(
-            String warehouse,
-            String databaseName,
-            String tableName,
-            Map<String, String> catalogConfig) {
-        super(warehouse, catalogConfig);
+    TableActionBase(String databaseName, String tableName, Map<String, String> catalogConfig) {
+        super(catalogConfig);
         identifier = new Identifier(databaseName, tableName);
         try {
             table = catalog.getTable(identifier);

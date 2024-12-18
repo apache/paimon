@@ -21,6 +21,11 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.SchemaManager;
 
+import java.util.Map;
+
+import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
+import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
+
 /** Utils for {@link Catalog}. */
 public class CatalogUtils {
 
@@ -50,5 +55,9 @@ public class CatalogUtils {
 
     public static String table(String path) {
         return SchemaManager.identifierFromPath(path, false).getObjectName();
+    }
+
+    public static Map<String, String> tableDefaultOptions(Map<String, String> options) {
+        return convertToPropertiesPrefixKey(options, TABLE_DEFAULT_OPTION_PREFIX);
     }
 }

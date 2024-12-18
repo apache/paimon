@@ -251,14 +251,10 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
         Map<String, String> catalogConf = new HashMap<>();
         catalogConf.put("metastore", "hive");
         catalogConf.put("uri", "thrift://localhost:" + PORT);
+        catalogConf.put(
+                "warehouse", System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname));
         MigrateDatabaseAction migrateDatabaseAction =
-                new MigrateDatabaseAction(
-                        "hive",
-                        System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
-                        "my_database",
-                        catalogConf,
-                        "",
-                        6);
+                new MigrateDatabaseAction("hive", "my_database", catalogConf, "", 6);
         migrateDatabaseAction.run();
 
         tEnv.executeSql(

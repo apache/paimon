@@ -43,4 +43,13 @@ public class ResourcePaths {
     public String database(String databaseName) {
         return SLASH.add("v1").add(prefix).add("databases").add(databaseName).toString();
     }
+
+    public String databaseProperties(String databaseName) {
+        return SLASH.add("v1")
+                .add(prefix)
+                .add("databases")
+                .add(databaseName)
+                .add("properties")
+                .toString();
+    }
 }

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.catalog.FileSystemCatalogOptions;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -475,7 +475,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         .withTableConfig(getBasicTableConfig())
                         .withCatalogConfig(
                                 Collections.singletonMap(
-                                        FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false"))
+                                        CatalogOptions.CASE_SENSITIVE.key(), "false"))
                         .build();
         runActionWithDefaultEnv(action);
 

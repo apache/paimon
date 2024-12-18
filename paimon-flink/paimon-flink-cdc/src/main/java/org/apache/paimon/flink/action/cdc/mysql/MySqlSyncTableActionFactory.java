@@ -39,12 +39,7 @@ public class MySqlSyncTableActionFactory extends SyncTableActionFactoryBase {
 
     @Override
     public MySqlSyncTableAction createAction() {
-        return new MySqlSyncTableAction(
-                this.tablePath.f0,
-                this.tablePath.f1,
-                this.tablePath.f2,
-                this.catalogConfig,
-                this.cdcSourceConfig);
+        return new MySqlSyncTableAction(database, table, this.catalogConfig, this.cdcSourceConfig);
     }
 
     @Override

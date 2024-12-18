@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
-import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.source.operator.CombinedAwareBatchSource;
 import org.apache.paimon.flink.source.operator.CombinedAwareStreamingSource;
@@ -44,7 +44,8 @@ import java.util.regex.Pattern;
  * compactor jobs in combined mode.
  */
 public class CombinedTableCompactorSourceBuilder {
-    private final Catalog.Loader catalogLoader;
+
+    private final CatalogLoader catalogLoader;
     private final Pattern includingPattern;
     private final Pattern excludingPattern;
     private final Pattern databasePattern;
@@ -55,7 +56,7 @@ public class CombinedTableCompactorSourceBuilder {
     @Nullable private Duration partitionIdleTime = null;
 
     public CombinedTableCompactorSourceBuilder(
-            Catalog.Loader catalogLoader,
+            CatalogLoader catalogLoader,
             Pattern databasePattern,
             Pattern includingPattern,
             Pattern excludingPattern,

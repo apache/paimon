@@ -85,23 +85,18 @@ public class HiveCatalogTest extends CatalogTestBase {
     @Test
     public void testCheckIdentifierUpperCase() throws Exception {
         catalog.createDatabase("test_db", false);
-        assertThatThrownBy(
-                        () ->
-                                catalog.createTable(
-                                        Identifier.create("TEST_DB", "new_table"),
-                                        DEFAULT_TABLE_SCHEMA,
-                                        false))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Database name [TEST_DB] cannot contain upper case in the catalog.");
-
+        assertThatThrownBy(() -> catalog.createDatabase("TEST_DB", false))
+                .isInstanceOf(Catalog.DatabaseAlreadyExistException.class)
+                .hasMessage("Database TEST_DB already exists.");
+        catalog.createTable(Identifier.create("TEST_DB", "new_table"), DEFAULT_TABLE_SCHEMA, false);
         assertThatThrownBy(
                         () ->
                                 catalog.createTable(
                                         Identifier.create("test_db", "NEW_TABLE"),
                                         DEFAULT_TABLE_SCHEMA,
                                         false))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Table name [NEW_TABLE] cannot contain upper case in the catalog.");
+                .isInstanceOf(Catalog.TableAlreadyExistException.class)
+                .hasMessage("Table test_db.NEW_TABLE already exists.");
     }
 
     private static final String HADOOP_CONF_DIR =
@@ -171,6 +166,11 @@ public class HiveCatalogTest extends CatalogTestBase {
                 HiveCatalog.createHiveConf(
                         null, null, HadoopUtils.getHadoopConfiguration(new Options()));
         assertThat(hiveConf.get("hive.metastore.uris")).isEqualTo("dummy-hms");
+    }
+
+    @Test
+    public void testAlterDatabase() throws Exception {
+        this.alterDatabaseWhenSupportAlter();
     }
 
     @Test
