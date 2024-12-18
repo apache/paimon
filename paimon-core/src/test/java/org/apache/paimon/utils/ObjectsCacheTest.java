@@ -21,6 +21,8 @@ package org.apache.paimon.utils;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.metrics.TestMetricRegistry;
+import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -40,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class ObjectsCacheTest {
 
     @Test
-    public void test() throws IOException {
+    public void testObjectsCacheAndMetrics() throws IOException {
         Map<String, List<String>> map = new HashMap<>();
         ObjectsCache<String, String> cache =
                 new ObjectsCache<>(
@@ -56,12 +58,15 @@ public class ObjectsCacheTest {
                                                 .map(r -> (InternalRow) r)
                                                 .iterator()));
 
+        ScanMetrics scanMetrics = new ScanMetrics(new TestMetricRegistry(), "table");
+        cache.withCacheMetrics(scanMetrics.getCacheMetrics());
         // test empty
         map.put("k1", Collections.emptyList());
         List<String> values =
                 cache.read(
                         "k1", null, Filter.alwaysTrue(), Filter.alwaysTrue(), Filter.alwaysTrue());
         assertThat(values).isEmpty();
+        assertThat(scanMetrics.getCacheMetrics().getMissedObject()).hasValue(1);
 
         // test values
         List<String> expect = Arrays.asList("v1", "v2", "v3");
@@ -70,12 +75,14 @@ public class ObjectsCacheTest {
                 cache.read(
                         "k2", null, Filter.alwaysTrue(), Filter.alwaysTrue(), Filter.alwaysTrue());
         assertThat(values).containsExactlyElementsOf(expect);
+        assertThat(scanMetrics.getCacheMetrics().getMissedObject()).hasValue(2);
 
         // test cache
         values =
                 cache.read(
                         "k2", null, Filter.alwaysTrue(), Filter.alwaysTrue(), Filter.alwaysTrue());
         assertThat(values).containsExactlyElementsOf(expect);
+        assertThat(scanMetrics.getCacheMetrics().getHitObject()).hasValue(1);
 
         // test filter
         values =

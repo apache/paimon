@@ -30,9 +30,14 @@ public class ScanMetrics {
     public static final String GROUP_NAME = "scan";
 
     private final MetricGroup metricGroup;
+    private Histogram durationHistogram;
+
+    private ScanStats latestScan;
+    private CacheMetrics cacheMetrics;
 
     public ScanMetrics(MetricRegistry registry, String tableName) {
         this.metricGroup = registry.tableMetricGroup(GROUP_NAME, tableName);
+        this.cacheMetrics = new CacheMetrics();
         registerGenericScanMetrics();
     }
 
@@ -41,17 +46,13 @@ public class ScanMetrics {
         return metricGroup;
     }
 
-    private Histogram durationHistogram;
-
-    private ScanStats latestScan;
-
     public static final String LAST_SCAN_DURATION = "lastScanDuration";
     public static final String SCAN_DURATION = "scanDuration";
     public static final String LAST_SCANNED_MANIFESTS = "lastScannedManifests";
-
     public static final String LAST_SCAN_SKIPPED_TABLE_FILES = "lastScanSkippedTableFiles";
-
     public static final String LAST_SCAN_RESULTED_TABLE_FILES = "lastScanResultedTableFiles";
+    public static final String MANIFEST_HIT_CACHE = "manifestHitCache";
+    public static final String MANIFEST_MISSED_CACHE = "manifestMissedCache";
 
     private void registerGenericScanMetrics() {
         metricGroup.gauge(
@@ -66,10 +67,20 @@ public class ScanMetrics {
         metricGroup.gauge(
                 LAST_SCAN_RESULTED_TABLE_FILES,
                 () -> latestScan == null ? 0L : latestScan.getResultedTableFiles());
+        metricGroup.gauge(
+                MANIFEST_HIT_CACHE,
+                () -> cacheMetrics == null ? 0L : cacheMetrics.getHitObject().get());
+        metricGroup.gauge(
+                MANIFEST_MISSED_CACHE,
+                () -> cacheMetrics == null ? 0L : cacheMetrics.getMissedObject().get());
     }
 
     public void reportScan(ScanStats scanStats) {
         latestScan = scanStats;
         durationHistogram.update(scanStats.getDuration());
+    }
+
+    public CacheMetrics getCacheMetrics() {
+        return cacheMetrics;
     }
 }
