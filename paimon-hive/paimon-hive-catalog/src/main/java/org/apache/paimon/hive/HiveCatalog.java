@@ -437,15 +437,12 @@ public class HiveCatalog extends AbstractCatalog {
     protected List<String> listTablesImpl(String databaseName) {
         try {
             List<String> allTables = clients.run(client -> client.getAllTables(databaseName));
+            List<Table> hmsTables =
+                    clients.run(client -> client.getTableObjectsByName(databaseName, allTables));
             List<String> result = new ArrayList<>(allTables.size());
-            for (String t : allTables) {
-                try {
-                    Identifier identifier = new Identifier(databaseName, t);
-                    Table table = getHmsTable(identifier);
-                    if (isPaimonTable(table) || (!formatTableDisabled() && isFormatTable(table))) {
-                        result.add(t);
-                    }
-                } catch (TableNotExistException ignored) {
+            for (Table table : hmsTables) {
+                if (isPaimonTable(table) || (!formatTableDisabled() && isFormatTable(table))) {
+                    result.add(table.getTableName());
                 }
             }
             return result;
