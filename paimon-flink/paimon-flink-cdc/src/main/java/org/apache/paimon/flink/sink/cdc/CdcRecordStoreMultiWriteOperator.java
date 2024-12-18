@@ -174,7 +174,7 @@ public class CdcRecordStoreMultiWriteOperator
         try {
             write.write(optionalConverted.get());
         } catch (Exception e) {
-            throw new IOException(e);
+            throw new IOException("Exception occurs for writing record to table: " + tableId, e);
         }
     }
 
@@ -235,12 +235,17 @@ public class CdcRecordStoreMultiWriteOperator
         for (Map.Entry<Identifier, StoreSinkWrite> entry : writes.entrySet()) {
             Identifier key = entry.getKey();
             StoreSinkWrite write = entry.getValue();
-            committables.addAll(
-                    write.prepareCommit(waitCompaction, checkpointId).stream()
-                            .map(
-                                    committable ->
-                                            MultiTableCommittable.fromCommittable(key, committable))
-                            .collect(Collectors.toList()));
+            try {
+                committables.addAll(
+                        write.prepareCommit(waitCompaction, checkpointId).stream()
+                                .map(
+                                        committable ->
+                                                MultiTableCommittable.fromCommittable(
+                                                        key, committable))
+                                .collect(Collectors.toList()));
+            } catch (Exception e) {
+                throw new IOException("Failed to prepare commit for table: " + key.toString(), e);
+            }
         }
         return committables;
     }
