@@ -1006,7 +1006,8 @@ public abstract class HiveCatalogITCaseBase {
 
         // the target table name has upper case.
         assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE t1 RENAME TO T1"))
-                .hasMessage("Table name [T1] cannot contain upper case in the catalog.");
+                .hasMessage(
+                        "Could not execute ALTER TABLE my_hive.test_db.t1 RENAME TO my_hive.test_db.T1.");
 
         tEnv.executeSql("ALTER TABLE t1 RENAME TO t3").await();
 
@@ -1168,7 +1169,8 @@ public abstract class HiveCatalogITCaseBase {
                                 tEnv.executeSql(
                                                 "CREATE TABLE tt ( A INT, b STRING, C STRING) WITH ( 'file.format' = 'avro' )")
                                         .await())
-                .hasRootCauseMessage("Table test_db.tt already exists.");
+                .hasRootCauseMessage(
+                        "Table (or view) test_db.tt already exists in Catalog my_hive.");
     }
 
     @Test

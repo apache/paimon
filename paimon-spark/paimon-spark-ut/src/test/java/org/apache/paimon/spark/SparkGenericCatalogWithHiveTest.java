@@ -69,7 +69,7 @@ public class SparkGenericCatalogWithHiveTest {
                         + " ('file.format'='avro')");
 
         assertThat(spark.sql("SHOW NAMESPACES").collectAsList().stream().map(Object::toString))
-                .containsExactlyInAnyOrder("[default]", "[my_db]", "[my_db1]");
+                .containsExactlyInAnyOrder("[default]", "[my_db]");
 
         assertThat(
                         spark.sql("SHOW TABLES").collectAsList().stream()

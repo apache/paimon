@@ -18,6 +18,7 @@
 
 package org.apache.paimon.jdbc;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.CatalogOptions;
@@ -95,7 +96,7 @@ public class JdbcCatalogTest extends CatalogTestBase {
                                         Identifier.create("TEST_DB", "new_table"),
                                         DEFAULT_TABLE_SCHEMA,
                                         false))
-                .isInstanceOf(Exception.class)
+                .isInstanceOf(Catalog.DatabaseNotExistException.class)
                 .hasMessage("Database TEST_DB does not exist.");
 
         catalog.createTable(Identifier.create("test_db", "new_TABLE"), DEFAULT_TABLE_SCHEMA, false);
