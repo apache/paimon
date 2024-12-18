@@ -21,6 +21,8 @@ package org.apache.paimon.rest;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
 
 /** Factory to create {@link RESTCatalog}. */
 public class RESTCatalogFactory implements CatalogFactory {
@@ -33,6 +35,10 @@ public class RESTCatalogFactory implements CatalogFactory {
 
     @Override
     public Catalog create(CatalogContext context) {
-        return new RESTCatalog(context.options());
+        Options options = context.options();
+        if (options.getOptional(CatalogOptions.WAREHOUSE).isPresent()) {
+            throw new IllegalArgumentException("Can not config warehouse in RESTCatalog.");
+        }
+        return new RESTCatalog(options);
     }
 }

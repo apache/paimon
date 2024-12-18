@@ -58,13 +58,14 @@ public class RESTCatalogTest {
     private MockWebServer mockWebServer;
     private RESTCatalog restCatalog;
     private RESTCatalog mockRestCatalog;
+    private Options options;
 
     @Before
     public void setUp() throws IOException {
         mockWebServer = new MockWebServer();
         mockWebServer.start();
         String baseUrl = mockWebServer.url("").toString();
-        Options options = new Options();
+        options = new Options();
         options.set(RESTCatalogOptions.URI, baseUrl);
         String initToken = "init_token";
         options.set(RESTCatalogOptions.TOKEN, initToken);
@@ -97,7 +98,9 @@ public class RESTCatalogTest {
         String mockResponse = String.format("{\"defaults\": {\"%s\": \"%s\"}}", key, value);
         mockResponse(mockResponse, 200);
         Map<String, String> header = new HashMap<>();
-        Map<String, String> response = restCatalog.fetchOptionsFromServer(header, new HashMap<>());
+        RESTClient client = RESTCatalog.getClient(options);
+        Map<String, String> response =
+                RESTCatalog.fetchOptionsFromServer(client, header, new HashMap<>());
         assertEquals(value, response.get(key));
     }
 
