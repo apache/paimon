@@ -19,7 +19,6 @@
 package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.FileStore;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
@@ -33,12 +32,9 @@ import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.unsafe.types.UTF8String;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
-import static org.apache.paimon.partition.PartitionExpireStrategy.createPartitionExpireStrategy;
 import static org.apache.spark.sql.types.DataTypes.IntegerType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
@@ -97,31 +93,15 @@ public class ExpirePartitionsProcedure extends BaseProcedure {
                                     expirationTime,
                                     maxExpires,
                                     options);
-
                     table = table.copy(dynamicOptions);
                     FileStoreTable fileStoreTable = (FileStoreTable) table;
                     FileStore fileStore = fileStoreTable.store();
 
-                    // check expiration time not null
-                    Preconditions.checkNotNull(
-                            fileStore.options().partitionExpireTime(),
-                            "The partition expiration time is must been required, you can set it by configuring the property 'partition.expiration-time' or adding the 'expiration_time' parameter in procedure.  ");
-
                     PartitionExpire partitionExpire =
-                            new PartitionExpire(
-                                    fileStore.options().partitionExpireTime(),
-                                    Duration.ofMillis(0L),
-                                    createPartitionExpireStrategy(
-                                            fileStore.options(), fileStore.partitionType()),
-                                    fileStore.newScan(),
-                                    fileStore.newCommit(""),
-                                    Optional.ofNullable(
-                                                    fileStoreTable
-                                                            .catalogEnvironment()
-                                                            .metastoreClientFactory())
-                                            .map(MetastoreClient.Factory::create)
-                                            .orElse(null),
-                                    fileStore.options().partitionExpireMaxNum());
+                            fileStore.newPartitionExpire(fileStore.options().createCommitUser());
+                    Preconditions.checkNotNull(
+                            partitionExpire,
+                            "Both the partition expiration time and partition field can not be null.");
 
                     List<Map<String, String>> expired = partitionExpire.expire(Long.MAX_VALUE);
                     return expired == null || expired.isEmpty()

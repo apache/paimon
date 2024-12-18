@@ -57,6 +57,8 @@ public class ProcedureUtils {
             dynamicOptions.put(
                     CoreOptions.PARTITION_EXPIRATION_MAX_NUM.key(), String.valueOf(maxExpires));
         }
+        // partition check interval is 0
+        dynamicOptions.put(CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "0");
         return dynamicOptions;
     }
 
