@@ -28,11 +28,8 @@ import org.apache.paimon.utils.ProcedureUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-
-import static org.apache.paimon.partition.PartitionExpireStrategy.createPartitionExpireStrategy;
 
 /** A procedure to expire partitions. */
 public class ExpirePartitionsProcedure extends ProcedureBase {

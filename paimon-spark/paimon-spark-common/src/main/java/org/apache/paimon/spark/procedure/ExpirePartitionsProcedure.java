@@ -35,7 +35,6 @@ import org.apache.spark.unsafe.types.UTF8String;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.partition.PartitionExpireStrategy.createPartitionExpireStrategy;
 import static org.apache.spark.sql.types.DataTypes.IntegerType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 

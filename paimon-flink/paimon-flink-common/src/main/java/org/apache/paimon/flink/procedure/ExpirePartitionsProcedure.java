@@ -34,11 +34,8 @@ import org.apache.flink.table.procedure.ProcedureContext;
 import org.apache.flink.types.Row;
 import org.apache.paimon.utils.TimeUtils;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-
-import static org.apache.paimon.partition.PartitionExpireStrategy.createPartitionExpireStrategy;
 
 /** A procedure to expire partitions. */
 public class ExpirePartitionsProcedure extends ProcedureBase {
@@ -90,13 +87,13 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
                         expirationTime,
                         maxExpires,
                         options);
-
         Table table = table(tableId).copy(dynamicOptions);
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         FileStore fileStore = fileStoreTable.store();
 
         PartitionExpire partitionExpire =
                 fileStore.newPartitionExpire("", fileStoreTable);
+
         Preconditions.checkNotNull(
                 partitionExpire,
                 "Both the partition expiration time and partition field can not be null.");
