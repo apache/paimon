@@ -484,7 +484,8 @@ public class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
         assertThatThrownBy(() -> sql("CALL sys.expire_partitions(`table` => 'default.T')"))
                 .rootCause()
                 .isInstanceOf(NullPointerException.class)
-                .hasMessageContaining("The partition expiration time is must been required");
+                .hasMessageContaining(
+                        "Both the partition expiration time and partition field can not be null.");
 
         // 'partition.timestamp-formatter' value using table property.
         // 'partition.expiration-time' value using procedure parameter.

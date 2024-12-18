@@ -28,11 +28,8 @@ import org.apache.paimon.utils.ProcedureUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-
-import static org.apache.paimon.partition.PartitionExpireStrategy.createPartitionExpireStrategy;
 
 /** A procedure to expire partitions. */
 public class ExpirePartitionsProcedure extends ProcedureBase {
@@ -86,21 +83,11 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         FileStore fileStore = fileStoreTable.store();
 
-        // check expiration time not null
-        Preconditions.checkNotNull(
-                fileStore.options().partitionExpireTime(),
-                "The partition expiration time is must been required, you can set it by configuring the property 'partition.expiration-time' or adding the 'expiration_time' parameter in procedure.  ");
-
         PartitionExpire partitionExpire =
-                new PartitionExpire(
-                        fileStore.options().partitionExpireTime(),
-                        Duration.ofMillis(0L),
-                        createPartitionExpireStrategy(
-                                fileStore.options(), fileStore.partitionType()),
-                        fileStore.newScan(),
-                        fileStore.newCommit(""),
-                        fileStoreTable.catalogEnvironment().partitionHandler(),
-                        fileStore.options().partitionExpireMaxNum());
+                fileStore.newPartitionExpire(fileStore.options().createCommitUser());
+        Preconditions.checkNotNull(
+                partitionExpire,
+                "Both the partition expiration time and partition field can not be null.");
 
         List<Map<String, String>> expired = partitionExpire.expire(Long.MAX_VALUE);
         return expired == null || expired.isEmpty()
