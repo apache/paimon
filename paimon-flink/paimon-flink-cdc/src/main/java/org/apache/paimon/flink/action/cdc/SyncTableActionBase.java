@@ -20,7 +20,6 @@ package org.apache.paimon.flink.action.cdc;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
@@ -111,12 +110,6 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
                 caseSensitive,
                 true,
                 true);
-    }
-
-    @Override
-    protected void validateCaseSensitivity() {
-        CatalogUtils.validateCaseInsensitive(caseSensitive, "Database", database);
-        CatalogUtils.validateCaseInsensitive(caseSensitive, "Table", table);
     }
 
     @Override

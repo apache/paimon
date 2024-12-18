@@ -21,14 +21,10 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.SchemaManager;
 
-import java.util.Arrays;
-import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for {@link Catalog}. */
 public class CatalogUtils {
@@ -63,26 +59,5 @@ public class CatalogUtils {
 
     public static Map<String, String> tableDefaultOptions(Map<String, String> options) {
         return convertToPropertiesPrefixKey(options, TABLE_DEFAULT_OPTION_PREFIX);
-    }
-
-    /** Validate database, table and field names must be lowercase when not case-sensitive. */
-    public static void validateCaseInsensitive(
-            boolean caseSensitive, String type, String... names) {
-        validateCaseInsensitive(caseSensitive, type, Arrays.asList(names));
-    }
-
-    /** Validate database, table and field names must be lowercase when not case-sensitive. */
-    public static void validateCaseInsensitive(
-            boolean caseSensitive, String type, List<String> names) {
-        if (caseSensitive) {
-            return;
-        }
-        List<String> illegalNames =
-                names.stream().filter(f -> !f.equals(f.toLowerCase())).collect(Collectors.toList());
-        checkArgument(
-                illegalNames.isEmpty(),
-                String.format(
-                        "%s name %s cannot contain upper case in the catalog.",
-                        type, illegalNames));
     }
 }

@@ -1160,24 +1160,15 @@ public abstract class HiveCatalogITCaseBase {
 
     @Test
     public void testUpperCase() {
+        tEnv.executeSql("CREATE TABLE T (a INT, b STRING ) WITH ( 'file.format' = 'avro' )");
+        tEnv.executeSql(
+                "CREATE TABLE tT (A INT, b STRING, C STRING) WITH ( 'file.format' = 'avro')");
         assertThatThrownBy(
                         () ->
                                 tEnv.executeSql(
-                                                "CREATE TABLE T ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
+                                                "CREATE TABLE tt ( A INT, b STRING, C STRING) WITH ( 'file.format' = 'avro' )")
                                         .await())
-                .hasRootCauseMessage(
-                        String.format(
-                                "Table name [%s] cannot contain upper case in the catalog.", "T"));
-
-        assertThatThrownBy(
-                        () ->
-                                tEnv.executeSql(
-                                                "CREATE TABLE t (A INT, b STRING, C STRING) WITH ( 'file.format' = 'avro')")
-                                        .await())
-                .hasRootCauseMessage(
-                        String.format(
-                                "Field name %s cannot contain upper case in the catalog.",
-                                "[A, C]"));
+                .hasRootCauseMessage("Table test_db.tt already exists.");
     }
 
     @Test

@@ -531,6 +531,53 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
     }
   }
 
+  test("Paimon DDL with hive catalog: case sensitive") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        Seq(false, true).foreach {
+          caseSensitive =>
+            withSparkSQLConf("spark.sql.caseSensitive" -> caseSensitive.toString) {
+              spark.sql(s"USE $catalogName")
+              withDatabase("paimon_case_sensitive_DB") {
+                spark.sql(s"CREATE DATABASE paimon_case_sensitive_DB")
+
+                // check create db
+                // note: db name is always lower case in hive
+                intercept[Exception](spark.sql("CREATE DATABASE paimon_case_sensitive_db"))
+
+                spark.sql(s"USE paimon_case_sensitive_DB")
+                withTable("tT", "tt") {
+                  spark.sql("CREATE TABLE tT (aA INT) USING paimon")
+                  spark.sql("INSERT INTO tT VALUES 1")
+
+                  // check select
+                  checkAnswer(spark.sql("SELECT aA FROM tT"), Row(1))
+                  if (caseSensitive) {
+                    intercept[Exception](spark.sql(s"SELECT aa FROM tT"))
+                  } else {
+                    checkAnswer(spark.sql("SELECT aa FROM tT"), Row(1))
+                  }
+
+                  // check alter table rename
+                  // note: table name is always lower case in hive
+                  intercept[Exception](spark.sql(s"ALTER TABLE tT RENAME TO tt"))
+
+                  // check alter table rename column
+                  // note: col name can be upper case in hive
+                  if (caseSensitive) {
+                    spark.sql("ALTER TABLE tT RENAME COLUMN aA TO aa")
+                    checkAnswer(spark.sql("SELECT aa FROM tT"), Row(1))
+                    intercept[Exception](spark.sql(s"SELECT aA FROM tT"))
+                  } else {
+                    intercept[Exception](spark.sql("ALTER TABLE tT RENAME COLUMN aA TO aa"))
+                  }
+                }
+              }
+            }
+        }
+    }
+  }
+
   def getDatabaseProp(dbName: String, propertyName: String): String = {
     spark
       .sql(s"DESC DATABASE EXTENDED $dbName")
