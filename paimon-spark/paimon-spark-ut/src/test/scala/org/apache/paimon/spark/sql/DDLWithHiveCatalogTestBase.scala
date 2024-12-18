@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.fs.Path
 import org.apache.paimon.hive.HiveMetastoreClient
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.table.FileStoreTable
@@ -296,43 +297,64 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
   test("Paimon DDL with hive catalog: sync partitions to HMS") {
     Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
       catalogName =>
-        val dbName = "default"
-        val tblName = "t"
-        spark.sql(s"USE $catalogName.$dbName")
-        withTable(tblName) {
-          spark.sql(s"""
-                       |CREATE TABLE $tblName (id INT, pt INT)
-                       |USING PAIMON
-                       |TBLPROPERTIES ('metastore.partitioned-table' = 'true')
-                       |PARTITIONED BY (pt)
-                       |""".stripMargin)
+        Seq("", "data").foreach {
+          dataFilePathDir =>
+            val dbName = "default"
+            val tblName = "t"
+            spark.sql(s"USE $catalogName.$dbName")
+            withTable(tblName) {
+              spark.sql(s"""
+                           |CREATE TABLE $tblName (id INT, pt INT)
+                           |USING PAIMON
+                           |TBLPROPERTIES (
+                           |${if (dataFilePathDir.isEmpty) ""
+                          else s"'data-file.path-directory' = '$dataFilePathDir',"}
+                           |'metastore.partitioned-table' = 'true'
+                           |)
+                           |PARTITIONED BY (pt)
+                           |""".stripMargin)
 
-          val metastoreClient = loadTable(dbName, tblName)
-            .catalogEnvironment()
-            .metastoreClientFactory()
-            .create()
-            .asInstanceOf[HiveMetastoreClient]
-            .client()
+              val table = loadTable(dbName, tblName)
+              val metastoreClient = table
+                .catalogEnvironment()
+                .metastoreClientFactory()
+                .create()
+                .asInstanceOf[HiveMetastoreClient]
+                .client()
+              val fileIO = table.fileIO()
 
-          spark.sql(s"INSERT INTO $tblName VALUES (1, 1), (2, 2), (3, 3)")
-          // check partitions in paimon
-          checkAnswer(
-            spark.sql(s"show partitions $tblName"),
-            Seq(Row("pt=1"), Row("pt=2"), Row("pt=3")))
-          // check partitions in HMS
-          assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 3)
+              def containsDir(root: Path, targets: Array[String]): Boolean = {
+                targets.forall(fileIO.listDirectories(root).map(_.getPath.getName).contains)
+              }
 
-          spark.sql(s"INSERT INTO $tblName VALUES (4, 3), (5, 4)")
-          checkAnswer(
-            spark.sql(s"show partitions $tblName"),
-            Seq(Row("pt=1"), Row("pt=2"), Row("pt=3"), Row("pt=4")))
-          assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 4)
+              spark.sql(s"INSERT INTO $tblName VALUES (1, 1), (2, 2), (3, 3)")
+              // check partitions in paimon
+              checkAnswer(
+                spark.sql(s"show partitions $tblName"),
+                Seq(Row("pt=1"), Row("pt=2"), Row("pt=3")))
+              // check partitions in HMS
+              assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 3)
+              // check partitions in filesystem
+              if (dataFilePathDir.isEmpty) {
+                assert(containsDir(table.location(), Array("pt=1", "pt=2", "pt=3")))
+              } else {
+                assert(!containsDir(table.location(), Array("pt=1", "pt=2", "pt=3")))
+                assert(
+                  containsDir(new Path(table.location(), "data"), Array("pt=1", "pt=2", "pt=3")))
+              }
 
-          spark.sql(s"ALTER TABLE $tblName DROP PARTITION (pt=1)")
-          checkAnswer(
-            spark.sql(s"show partitions $tblName"),
-            Seq(Row("pt=2"), Row("pt=3"), Row("pt=4")))
-          assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 3)
+              spark.sql(s"INSERT INTO $tblName VALUES (4, 3), (5, 4)")
+              checkAnswer(
+                spark.sql(s"show partitions $tblName"),
+                Seq(Row("pt=1"), Row("pt=2"), Row("pt=3"), Row("pt=4")))
+              assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 4)
+
+              spark.sql(s"ALTER TABLE $tblName DROP PARTITION (pt=1)")
+              checkAnswer(
+                spark.sql(s"show partitions $tblName"),
+                Seq(Row("pt=2"), Row("pt=3"), Row("pt=4")))
+              assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 3)
+            }
         }
     }
   }
