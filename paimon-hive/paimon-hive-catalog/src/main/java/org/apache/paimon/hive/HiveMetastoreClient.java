@@ -18,6 +18,7 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.hive.pool.CachedClientPool;
@@ -33,6 +34,7 @@ import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.PartitionEventType;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
+import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.thrift.TException;
 
 import java.util.ArrayList;
@@ -56,19 +58,25 @@ public class HiveMetastoreClient implements MetastoreClient {
 
     private final ClientPool<IMetaStoreClient, TException> clients;
     private final StorageDescriptor sd;
+    private final String dataFilePath;
 
     HiveMetastoreClient(Identifier identifier, ClientPool<IMetaStoreClient, TException> clients)
             throws TException, InterruptedException {
         this.identifier = identifier;
         this.clients = clients;
-        this.sd =
-                this.clients
-                        .run(
-                                client ->
-                                        client.getTable(
-                                                identifier.getDatabaseName(),
-                                                identifier.getTableName()))
-                        .getSd();
+        Table table =
+                this.clients.run(
+                        client ->
+                                client.getTable(
+                                        identifier.getDatabaseName(), identifier.getTableName()));
+        this.sd = table.getSd();
+        this.dataFilePath =
+                table.getParameters().containsKey(CoreOptions.DATA_FILE_PATH_DIRECTORY.key())
+                        ? sd.getLocation()
+                                + "/"
+                                + table.getParameters()
+                                        .get(CoreOptions.DATA_FILE_PATH_DIRECTORY.key())
+                        : sd.getLocation();
     }
 
     @Override
@@ -185,7 +193,7 @@ public class HiveMetastoreClient implements MetastoreClient {
         Partition hivePartition = new Partition();
         StorageDescriptor newSd = new StorageDescriptor(sd);
         newSd.setLocation(
-                sd.getLocation() + "/" + PartitionPathUtils.generatePartitionPath(partitionSpec));
+                dataFilePath + "/" + PartitionPathUtils.generatePartitionPath(partitionSpec));
         hivePartition.setDbName(identifier.getDatabaseName());
         hivePartition.setTableName(identifier.getTableName());
         hivePartition.setValues(new ArrayList<>(partitionSpec.values()));

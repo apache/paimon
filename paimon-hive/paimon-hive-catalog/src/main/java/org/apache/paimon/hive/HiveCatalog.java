@@ -95,6 +95,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTOREWAREHOUSE;
 import static org.apache.hadoop.hive.serde.serdeConstants.FIELD_DELIM;
+import static org.apache.paimon.CoreOptions.DATA_FILE_PATH_DIRECTORY;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
 import static org.apache.paimon.CoreOptions.TYPE;
@@ -771,22 +772,27 @@ public class HiveCatalog extends AbstractCatalog {
 
     private Table createHiveTable(
             Identifier identifier, TableSchema tableSchema, Path location, boolean externalTable) {
-        checkArgument(Options.fromMap(tableSchema.options()).get(TYPE) != FORMAT_TABLE);
+        Map<String, String> options = tableSchema.options();
+        checkArgument(Options.fromMap(options).get(TYPE) != FORMAT_TABLE);
 
         Map<String, String> tblProperties;
         if (syncAllProperties()) {
-            tblProperties = new HashMap<>(tableSchema.options());
-
+            tblProperties = new HashMap<>(options);
             // add primary-key, partition-key to tblproperties
             tblProperties.putAll(convertToPropertiesTableKey(tableSchema));
         } else {
-            tblProperties = convertToPropertiesPrefixKey(tableSchema.options(), HIVE_PREFIX);
-            if (tableSchema.options().containsKey(PARTITION_EXPIRATION_TIME.key())) {
+            tblProperties = convertToPropertiesPrefixKey(options, HIVE_PREFIX);
+            if (options.containsKey(PARTITION_EXPIRATION_TIME.key())) {
                 // This property will be stored in the 'table_params' table of the HMS database for
                 // querying by other engines or products.
                 tblProperties.put(
                         PARTITION_EXPIRATION_TIME.key(),
-                        tableSchema.options().get(PARTITION_EXPIRATION_TIME.key()));
+                        options.get(PARTITION_EXPIRATION_TIME.key()));
+            }
+            if (options.containsKey(DATA_FILE_PATH_DIRECTORY.key())) {
+                tblProperties.put(
+                        DATA_FILE_PATH_DIRECTORY.key(),
+                        options.get(DATA_FILE_PATH_DIRECTORY.key()));
             }
         }
 
