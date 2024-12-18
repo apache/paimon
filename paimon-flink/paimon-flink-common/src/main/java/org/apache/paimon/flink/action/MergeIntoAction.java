@@ -120,16 +120,8 @@ public class MergeIntoAction extends TableActionBase {
     @Nullable private String notMatchedInsertCondition;
     @Nullable private String notMatchedInsertValues;
 
-    public MergeIntoAction(String warehouse, String database, String tableName) {
-        this(warehouse, database, tableName, Collections.emptyMap());
-    }
-
-    public MergeIntoAction(
-            String warehouse,
-            String database,
-            String tableName,
-            Map<String, String> catalogConfig) {
-        super(warehouse, database, tableName, catalogConfig);
+    public MergeIntoAction(String database, String tableName, Map<String, String> catalogConfig) {
+        super(database, tableName, catalogConfig);
 
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(

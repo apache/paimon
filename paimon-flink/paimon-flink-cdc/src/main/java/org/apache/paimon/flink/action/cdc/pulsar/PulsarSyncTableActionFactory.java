@@ -39,12 +39,7 @@ public class PulsarSyncTableActionFactory extends SyncTableActionFactoryBase {
 
     @Override
     public PulsarSyncTableAction createAction() {
-        return new PulsarSyncTableAction(
-                this.tablePath.f0,
-                this.tablePath.f1,
-                this.tablePath.f2,
-                this.catalogConfig,
-                this.cdcSourceConfig);
+        return new PulsarSyncTableAction(database, table, this.catalogConfig, this.cdcSourceConfig);
     }
 
     @Override

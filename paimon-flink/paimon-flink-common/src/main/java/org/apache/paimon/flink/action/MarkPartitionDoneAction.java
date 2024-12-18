@@ -35,12 +35,11 @@ public class MarkPartitionDoneAction extends TableActionBase {
     private final List<Map<String, String>> partitions;
 
     public MarkPartitionDoneAction(
-            String warehouse,
             String databaseName,
             String tableName,
             List<Map<String, String>> partitions,
             Map<String, String> catalogConfig) {
-        super(warehouse, databaseName, tableName, catalogConfig);
+        super(databaseName, tableName, catalogConfig);
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(
                     String.format(

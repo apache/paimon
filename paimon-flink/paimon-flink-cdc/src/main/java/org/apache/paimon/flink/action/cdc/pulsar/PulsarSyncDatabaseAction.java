@@ -29,11 +29,8 @@ import java.util.Map;
 public class PulsarSyncDatabaseAction extends SyncDatabaseActionBase {
 
     public PulsarSyncDatabaseAction(
-            String warehouse,
-            String database,
-            Map<String, String> catalogConfig,
-            Map<String, String> pulsarConfig) {
-        super(warehouse, database, catalogConfig, pulsarConfig, SyncJobHandler.SourceType.PULSAR);
+            String database, Map<String, String> catalogConfig, Map<String, String> pulsarConfig) {
+        super(database, catalogConfig, pulsarConfig, SyncJobHandler.SourceType.PULSAR);
     }
 
     @Override

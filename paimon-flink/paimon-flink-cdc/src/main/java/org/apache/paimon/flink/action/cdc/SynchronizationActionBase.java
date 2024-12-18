@@ -71,12 +71,11 @@ public abstract class SynchronizationActionBase extends ActionBase {
     protected CdcMetadataConverter[] metadataConverters = new CdcMetadataConverter[] {};
 
     public SynchronizationActionBase(
-            String warehouse,
             String database,
             Map<String, String> catalogConfig,
             Map<String, String> cdcSourceConfig,
             SyncJobHandler syncJobHandler) {
-        super(warehouse, catalogConfig);
+        super(catalogConfig);
         this.database = database;
         this.cdcSourceConfig = Configuration.fromMap(cdcSourceConfig);
         this.syncJobHandler = syncJobHandler;

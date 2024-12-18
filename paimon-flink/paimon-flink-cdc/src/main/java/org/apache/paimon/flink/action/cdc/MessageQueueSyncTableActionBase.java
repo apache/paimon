@@ -54,13 +54,12 @@ import java.util.Map;
 public abstract class MessageQueueSyncTableActionBase extends SyncTableActionBase {
 
     public MessageQueueSyncTableActionBase(
-            String warehouse,
             String database,
             String table,
             Map<String, String> catalogConfig,
             Map<String, String> mqConfig,
             SyncJobHandler.SourceType sourceType) {
-        super(warehouse, database, table, catalogConfig, mqConfig, sourceType);
+        super(database, table, catalogConfig, mqConfig, sourceType);
     }
 
     @Override

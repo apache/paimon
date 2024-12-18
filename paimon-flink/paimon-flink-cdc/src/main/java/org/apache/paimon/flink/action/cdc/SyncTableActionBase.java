@@ -59,14 +59,12 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
     protected List<ComputedColumn> computedColumns = new ArrayList<>();
 
     public SyncTableActionBase(
-            String warehouse,
             String database,
             String table,
             Map<String, String> catalogConfig,
             Map<String, String> cdcSourceConfig,
             SyncJobHandler.SourceType sourceType) {
         super(
-                warehouse,
                 database,
                 catalogConfig,
                 cdcSourceConfig,

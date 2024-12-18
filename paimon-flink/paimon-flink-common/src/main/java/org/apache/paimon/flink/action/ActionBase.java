@@ -24,7 +24,6 @@ import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.LogicalTypeConversion;
-import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
@@ -54,9 +53,8 @@ public abstract class ActionBase implements Action {
     protected StreamExecutionEnvironment env;
     protected StreamTableEnvironment batchTEnv;
 
-    public ActionBase(String warehouse, Map<String, String> catalogConfig) {
+    public ActionBase(Map<String, String> catalogConfig) {
         catalogOptions = Options.fromMap(catalogConfig);
-        catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
 
         // disable cache to avoid concurrent modification exception
         if (!catalogOptions.contains(CACHE_ENABLED)) {

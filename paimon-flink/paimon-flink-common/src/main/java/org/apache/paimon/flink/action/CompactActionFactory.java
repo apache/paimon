@@ -21,8 +21,6 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.TimeUtils;
 
-import org.apache.flink.api.java.tuple.Tuple3;
-
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -46,9 +44,10 @@ public class CompactActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        Tuple3<String, String, String> tablePath = getTablePath(params);
-
-        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
+        String database = params.getRequired(DATABASE);
+        String table = params.getRequired(TABLE);
+        Map<String, String> catalogConfig = catalogConfigMap(params);
+        Map<String, String> tableConfig = optionalConfigMap(params, TABLE_CONF);
 
         CompactAction action;
         if (params.has(ORDER_STRATEGY)) {
@@ -56,22 +55,11 @@ public class CompactActionFactory implements ActionFactory {
                     !params.has(PARTITION_IDLE_TIME),
                     "sort compact do not support 'partition_idle_time'.");
             action =
-                    new SortCompactAction(
-                                    tablePath.f0,
-                                    tablePath.f1,
-                                    tablePath.f2,
-                                    catalogConfig,
-                                    optionalConfigMap(params, TABLE_CONF))
+                    new SortCompactAction(database, table, catalogConfig, tableConfig)
                             .withOrderStrategy(params.get(ORDER_STRATEGY))
-                            .withOrderColumns(getRequiredValue(params, ORDER_BY).split(","));
+                            .withOrderColumns(params.getRequired(ORDER_BY).split(","));
         } else {
-            action =
-                    new CompactAction(
-                            tablePath.f0,
-                            tablePath.f1,
-                            tablePath.f2,
-                            catalogConfig,
-                            optionalConfigMap(params, TABLE_CONF));
+            action = new CompactAction(database, table, catalogConfig, tableConfig);
             if (params.has(PARTITION_IDLE_TIME)) {
                 action.withPartitionIdleTime(
                         TimeUtils.parseDuration(params.get(PARTITION_IDLE_TIME)));
@@ -123,7 +111,6 @@ public class CompactActionFactory implements ActionFactory {
         System.out.println(
                 "  compact --warehouse s3://path/to/warehouse --database <database_name> "
                         + "--table <table_name> [--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]]");
-        System.out.println("  compact --path <table_path> [--partition <partition_name>]");
         System.out.println();
 
         System.out.println("Partition name syntax:");
@@ -142,8 +129,6 @@ public class CompactActionFactory implements ActionFactory {
         System.out.println("Examples:");
         System.out.println(
                 "  compact --warehouse hdfs:///path/to/warehouse --database test_db --table test_table");
-        System.out.println(
-                "  compact --path hdfs:///path/to/warehouse/test_db.db/test_table --partition dt=20221126,hh=08");
         System.out.println(
                 "  compact --warehouse hdfs:///path/to/warehouse --database test_db --table test_table "
                         + "--partition dt=20221126,hh=08 --partition dt=20221127,hh=09");

@@ -42,13 +42,11 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TYPE_MAPPI
 public abstract class SyncDatabaseActionFactoryBase<T extends SyncDatabaseActionBase>
         extends SynchronizationActionFactoryBase<T> {
 
-    protected String warehouse;
     protected String database;
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        this.warehouse = getRequiredValue(params, WAREHOUSE);
-        this.database = getRequiredValue(params, DATABASE);
+        this.database = params.getRequired(DATABASE);
         return super.create(params);
     }
 
