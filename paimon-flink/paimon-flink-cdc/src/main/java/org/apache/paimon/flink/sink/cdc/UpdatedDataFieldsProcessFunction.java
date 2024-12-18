@@ -77,7 +77,7 @@ public class UpdatedDataFieldsProcessFunction
                 extractSchemaChanges(schemaManager, actualUpdatedDataFields)) {
             applySchemaChange(schemaManager, schemaChange, identifier);
         }
-        /**
+        /*
          * Here, actualUpdatedDataFields cannot be used to update latestFields because there is a
          * non-SchemaChange.AddColumn scenario. Otherwise, the previously existing fields cannot be
          * modified again.

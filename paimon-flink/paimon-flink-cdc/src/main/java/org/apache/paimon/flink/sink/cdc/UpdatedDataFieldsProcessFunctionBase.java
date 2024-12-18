@@ -219,9 +219,11 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
             String newFieldName = StringUtils.toLowerCaseIfNeed(newField.name(), caseSensitive);
             if (oldFields.containsKey(newFieldName)) {
                 DataField oldField = oldFields.get(newFieldName);
-                // we compare by ignoring nullable, because partition keys and primary keys might be
-                // nullable in source database, but they can't be null in Paimon
-                if (oldField.type().equalsIgnoreNullable(newField.type())) {
+                // 1. we compare by ignoring nullable, because partition keys and primary keys might
+                // be nullable in source database, but they can't be null in Paimon
+                // 2. we compare by ignoring field id, the field ID is newly created and may be
+                // different, we should ignore it
+                if (oldField.type().copy(true).equalsIgnoreFieldId(newField.type().copy(true))) {
                     // update column comment
                     if (newField.description() != null
                             && !newField.description().equals(oldField.description())) {

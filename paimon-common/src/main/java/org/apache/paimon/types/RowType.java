@@ -213,7 +213,8 @@ public final class RowType extends DataType {
         return fields.equals(rowType.fields);
     }
 
-    public boolean equalsIgnoreFieldId(Object o) {
+    @Override
+    public boolean equalsIgnoreFieldId(DataType o) {
         if (this == o) {
             return true;
         }

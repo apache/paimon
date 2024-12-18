@@ -23,8 +23,6 @@ import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
-import javax.annotation.Nonnull;
-
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.Arrays;
@@ -124,15 +122,6 @@ public abstract class DataType implements Serializable {
         return copy(isNullable);
     }
 
-    /**
-     * Compare two data types without nullable.
-     *
-     * @param o the target data type
-     */
-    public boolean equalsIgnoreNullable(@Nonnull DataType o) {
-        return Objects.equals(this.copy(true), o.copy(true));
-    }
-
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -145,7 +134,21 @@ public abstract class DataType implements Serializable {
         return isNullable == that.isNullable && typeRoot == that.typeRoot;
     }
 
-    public boolean equalsIgnoreFieldId(Object o) {
+    /**
+     * Compare two data types without nullable.
+     *
+     * @param o the target data type
+     */
+    public boolean equalsIgnoreNullable(DataType o) {
+        return Objects.equals(this.copy(true), o.copy(true));
+    }
+
+    /**
+     * Compare two data types without field id.
+     *
+     * @param o the target data type
+     */
+    public boolean equalsIgnoreFieldId(DataType o) {
         return equals(o);
     }
 

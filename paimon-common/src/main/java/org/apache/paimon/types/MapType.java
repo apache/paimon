@@ -110,7 +110,7 @@ public class MapType extends DataType {
     }
 
     @Override
-    public boolean equalsIgnoreFieldId(Object o) {
+    public boolean equalsIgnoreFieldId(DataType o) {
         if (this == o) {
             return true;
         }
