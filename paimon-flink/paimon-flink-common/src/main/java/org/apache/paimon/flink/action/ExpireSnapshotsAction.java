@@ -44,8 +44,9 @@ public class ExpireSnapshotsAction extends ActionBase {
             String olderThan,
             Integer maxDeletes,
             String options) {
-        super(warehouse, catalogConfig);
-        this.identifier = identifier;
+        super(catalogConfig);
+        this.database = database;
+        this.table = table;
         this.retainMax = retainMax;
         this.retainMin = retainMin;
         this.olderThan = olderThan;
