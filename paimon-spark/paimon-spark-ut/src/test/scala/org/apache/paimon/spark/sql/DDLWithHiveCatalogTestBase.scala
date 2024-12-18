@@ -307,7 +307,8 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                            |CREATE TABLE $tblName (id INT, pt INT)
                            |USING PAIMON
                            |TBLPROPERTIES (
-                           |${if (dataFilePathDir.isEmpty) "" else s"'data-file.path-directory' = '$dataFilePathDir',"}
+                           |${if (dataFilePathDir.isEmpty) ""
+                          else s"'data-file.path-directory' = '$dataFilePathDir',"}
                            |'metastore.partitioned-table' = 'true'
                            |)
                            |PARTITIONED BY (pt)
