@@ -48,7 +48,8 @@ public class ObjectsCache<K, V> {
     private final ThreadLocal<InternalRowSerializer> formatSerializer;
     private final FunctionWithIOException<K, Long> fileSizeFunction;
     private final BiFunctionWithIOE<K, Long, CloseableIterator<InternalRow>> reader;
-    private CacheMetrics cacheMetrics;
+
+    @Nullable private CacheMetrics cacheMetrics;
 
     public ObjectsCache(
             SegmentsCache<K> cache,
@@ -62,6 +63,10 @@ public class ObjectsCache<K, V> {
                 ThreadLocal.withInitial(() -> new InternalRowSerializer(formatSchema));
         this.fileSizeFunction = fileSizeFunction;
         this.reader = reader;
+    }
+
+    public void withCacheMetrics(@Nullable CacheMetrics cacheMetrics) {
+        this.cacheMetrics = cacheMetrics;
     }
 
     public List<V> read(
@@ -137,9 +142,5 @@ public class ObjectsCache<K, V> {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-    }
-
-    public void withCacheMetrics(CacheMetrics cacheMetrics) {
-        this.cacheMetrics = cacheMetrics;
     }
 }

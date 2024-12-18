@@ -77,6 +77,13 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
                                 this::createIterator);
     }
 
+    public ObjectsFile<T> withCacheMetrics(@Nullable CacheMetrics cacheMetrics) {
+        if (cache != null) {
+            cache.withCacheMetrics(cacheMetrics);
+        }
+        return this;
+    }
+
     public FileIO fileIO() {
         return fileIO;
     }
@@ -207,12 +214,5 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-    }
-
-    public ObjectsFile<T> withCacheMetrics(CacheMetrics cacheMetrics) {
-        if (cache != null) {
-            cache.withCacheMetrics(cacheMetrics);
-        }
-        return this;
     }
 }

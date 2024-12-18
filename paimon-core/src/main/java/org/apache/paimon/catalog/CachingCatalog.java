@@ -312,14 +312,32 @@ public class CachingCatalog extends DelegateCatalog {
         }
     }
 
+    // ================================== Cache Public API
+    // ================================================
+
+    /**
+     * Partition cache will affect the latency of table, so refresh method is provided for compute
+     * engine.
+     */
+    public void refreshPartitions(Identifier identifier) throws TableNotExistException {
+        if (partitionCache != null) {
+            List<PartitionEntry> result = wrapped.listPartitions(identifier);
+            partitionCache.put(identifier, result);
+        }
+    }
+
+    /**
+     * Cache sizes for compute engine. This method can let the outside know the specific usage of
+     * cache.
+     */
     public CacheSizes estimatedCacheSizes() {
         long databaseCacheSize = databaseCache.estimatedSize();
         long tableCacheSize = tableCache.estimatedSize();
         long manifestCacheSize = 0L;
         long manifestCacheBytes = 0L;
         if (manifestCache != null) {
-            manifestCacheSize = manifestCache.getSegmentCacheSize();
-            manifestCacheBytes = manifestCache.getSegmentCacheBytes();
+            manifestCacheSize = manifestCache.estimatedSize();
+            manifestCacheBytes = manifestCache.totalCacheBytes();
         }
         long partitionCacheSize = 0L;
         if (partitionCache != null) {
@@ -336,18 +354,9 @@ public class CachingCatalog extends DelegateCatalog {
                 partitionCacheSize);
     }
 
-    // ================================== refresh ================================================
-    // following caches will affect the latency of table, so refresh method is provided for engine
-
-    public void refreshPartitions(Identifier identifier) throws TableNotExistException {
-        if (partitionCache != null) {
-            List<PartitionEntry> result = wrapped.listPartitions(identifier);
-            partitionCache.put(identifier, result);
-        }
-    }
-
     /** Cache sizes of a caching catalog. */
     public static class CacheSizes {
+
         private final long databaseCacheSize;
         private final long tableCacheSize;
         private final long manifestCacheSize;
