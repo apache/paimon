@@ -60,6 +60,8 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     protected List<String> partitionKeys = new ArrayList<>();
     protected List<String> primaryKeys = new ArrayList<>();
     @Nullable protected String excludingTables;
+    protected String includingDbs = ".*";
+    @Nullable protected String excludingDbs;
     protected List<FileStoreTable> tables = new ArrayList<>();
     protected Map<String, List<String>> partitionKeyMultiple = new HashMap<>();
 
@@ -144,6 +146,18 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
         return this;
     }
 
+    public SyncDatabaseActionBase includingDbs(@Nullable String includingDbs) {
+        if (includingDbs != null) {
+            this.includingDbs = includingDbs;
+        }
+        return this;
+    }
+
+    public SyncDatabaseActionBase excludingDbs(@Nullable String excludingDbs) {
+        this.excludingDbs = excludingDbs;
+        return this;
+    }
+
     public SyncDatabaseActionBase withPartitionKeys(String... partitionKeys) {
         this.partitionKeys.addAll(Arrays.asList(partitionKeys));
         return this;
@@ -186,9 +200,11 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
                         requirePrimaryKeys(),
                         partitionKeyMultiple,
                         metadataConverters);
-        Pattern includingPattern = Pattern.compile(includingTables);
-        Pattern excludingPattern =
+        Pattern tblIncludingPattern = Pattern.compile(includingTables);
+        Pattern tblExcludingPattern =
                 excludingTables == null ? null : Pattern.compile(excludingTables);
+        Pattern dbIncludingPattern = Pattern.compile(includingDbs);
+        Pattern dbExcludingPattern = excludingDbs == null ? null : Pattern.compile(excludingDbs);
         TableNameConverter tableNameConverter =
                 new TableNameConverter(
                         caseSensitive,
@@ -207,8 +223,10 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
         return () ->
                 new RichCdcMultiplexRecordEventParser(
                         schemaBuilder,
-                        includingPattern,
-                        excludingPattern,
+                        tblIncludingPattern,
+                        tblExcludingPattern,
+                        dbIncludingPattern,
+                        dbExcludingPattern,
                         tableNameConverter,
                         createdTables);
     }
