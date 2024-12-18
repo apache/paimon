@@ -23,7 +23,6 @@ import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.CredentialsProvider;
@@ -73,32 +72,28 @@ public class RESTCatalog extends AbstractCatalog {
     private volatile ScheduledExecutorService refreshExecutor = null;
 
     public RESTCatalog(Options options) {
-        this(null, options);
+        this(options, getClient(options), getCredentialsProvider(options));
     }
 
-    public RESTCatalog(FileIO fileIO, Options options) {
-        super(fileIO, options);
-        if (options.getOptional(CatalogOptions.WAREHOUSE).isPresent()) {
-            throw new IllegalArgumentException("Can not config warehouse in RESTCatalog.");
-        }
-        String uri = options.get(RESTCatalogOptions.URI);
-        Optional<Duration> connectTimeout =
-                options.getOptional(RESTCatalogOptions.CONNECTION_TIMEOUT);
-        Optional<Duration> readTimeout = options.getOptional(RESTCatalogOptions.READ_TIMEOUT);
-        Integer threadPoolSize = options.get(RESTCatalogOptions.THREAD_POOL_SIZE);
-        HttpClientOptions httpClientOptions =
-                new HttpClientOptions(
-                        uri,
-                        connectTimeout,
-                        readTimeout,
-                        OBJECT_MAPPER,
-                        threadPoolSize,
-                        DefaultErrorHandler.getInstance());
-        this.client = new HttpClient(httpClientOptions);
-        this.baseHeader = configHeaders(options.toMap());
-        CredentialsProvider credentialsProvider =
-                CredentialsProviderFactory.createCredentialsProvider(
-                        options, RESTCatalog.class.getClassLoader());
+    public RESTCatalog(
+            Options options, RESTClient client, CredentialsProvider credentialsProvider) {
+        this(
+                client,
+                credentialsProvider,
+                new Options(
+                        fetchOptionsFromServer(
+                                client,
+                                RESTUtil.merge(
+                                        configHeaders(options.toMap()),
+                                        credentialsProvider.authHeader()),
+                                options.toMap())));
+    }
+
+    public RESTCatalog(
+            RESTClient client, CredentialsProvider credentialsProvider, Options optionsWithServer) {
+        super(getFileIOFromOptions(optionsWithServer), optionsWithServer);
+        this.client = client;
+        this.baseHeader = configHeaders(optionsWithServer.toMap());
         if (credentialsProvider.keepRefreshed()) {
             this.catalogAuth =
                     AuthSession.fromRefreshCredentialsProvider(
@@ -107,9 +102,7 @@ public class RESTCatalog extends AbstractCatalog {
         } else {
             this.catalogAuth = new AuthSession(this.baseHeader, credentialsProvider);
         }
-        Map<String, String> initHeaders =
-                RESTUtil.merge(configHeaders(options.toMap()), this.catalogAuth.getHeaders());
-        this.options = new Options(fetchOptionsFromServer(initHeaders, options.toMap()));
+        this.options = optionsWithServer;
         this.resourcePaths =
                 ResourcePaths.forCatalogProperties(
                         this.options.get(RESTCatalogInternalOptions.PREFIX));
@@ -234,11 +227,38 @@ public class RESTCatalog extends AbstractCatalog {
     }
 
     @VisibleForTesting
-    Map<String, String> fetchOptionsFromServer(
-            Map<String, String> headers, Map<String, String> clientProperties) {
+    static Map<String, String> fetchOptionsFromServer(
+            RESTClient client, Map<String, String> headers, Map<String, String> clientProperties) {
         ConfigResponse response =
                 client.get(ResourcePaths.V1_CONFIG, ConfigResponse.class, headers);
         return response.merge(clientProperties);
+    }
+
+    @VisibleForTesting
+    static RESTClient getClient(Options options) {
+        String uri = options.get(RESTCatalogOptions.URI);
+        Optional<Duration> connectTimeout =
+                options.getOptional(RESTCatalogOptions.CONNECTION_TIMEOUT);
+        Optional<Duration> readTimeout = options.getOptional(RESTCatalogOptions.READ_TIMEOUT);
+        Integer threadPoolSize = options.get(RESTCatalogOptions.THREAD_POOL_SIZE);
+        HttpClientOptions httpClientOptions =
+                new HttpClientOptions(
+                        uri,
+                        connectTimeout,
+                        readTimeout,
+                        OBJECT_MAPPER,
+                        threadPoolSize,
+                        DefaultErrorHandler.getInstance());
+        return new HttpClient(httpClientOptions);
+    }
+
+    private static FileIO getFileIOFromOptions(Options options) {
+        return null;
+    }
+
+    private static CredentialsProvider getCredentialsProvider(Options options) {
+        return CredentialsProviderFactory.createCredentialsProvider(
+                options, RESTCatalog.class.getClassLoader());
     }
 
     private static Map<String, String> configHeaders(Map<String, String> properties) {
