@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -40,10 +41,11 @@ public class CloneActionFactory implements ActionFactory {
     public Optional<Action> create(MultipleParameterToolAdapter params) {
         Map<String, String> catalogConfig = catalogConfigMap(params);
 
-        Map<String, String> targetCatalogConfig = optionalConfigMap(params, TARGET_CATALOG_CONF);
+        Map<String, String> targetCatalogConfig =
+                new HashMap<>(optionalConfigMap(params, TARGET_CATALOG_CONF));
         String targetWarehouse = params.get(TARGET_WAREHOUSE);
-        if (targetWarehouse != null && !targetCatalogConfig.containsKey(TARGET_WAREHOUSE)) {
-            catalogConfig.put(TARGET_WAREHOUSE, targetWarehouse);
+        if (targetWarehouse != null && !targetCatalogConfig.containsKey(WAREHOUSE)) {
+            targetCatalogConfig.put(WAREHOUSE, targetWarehouse);
         }
 
         CloneAction cloneAction =

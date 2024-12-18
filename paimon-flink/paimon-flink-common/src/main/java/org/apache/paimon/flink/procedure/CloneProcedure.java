@@ -26,6 +26,7 @@ import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /** Clone Procedure. */
@@ -71,13 +72,15 @@ public class CloneProcedure extends ProcedureBase {
             String targetCatalogConfigStr,
             Integer parallelismStr)
             throws Exception {
-        Map<String, String> sourceCatalogConfig = optionalConfigMap(sourceCatalogConfigStr);
+        Map<String, String> sourceCatalogConfig =
+                new HashMap<>(optionalConfigMap(sourceCatalogConfigStr));
         if (!StringUtils.isNullOrWhitespaceOnly(warehouse)
                 && !sourceCatalogConfig.containsKey("warehouse")) {
             sourceCatalogConfig.put("warehouse", warehouse);
         }
 
-        Map<String, String> targetCatalogConfig = optionalConfigMap(targetCatalogConfigStr);
+        Map<String, String> targetCatalogConfig =
+                new HashMap<>(optionalConfigMap(targetCatalogConfigStr));
         if (!StringUtils.isNullOrWhitespaceOnly(warehouse)
                 && !targetCatalogConfig.containsKey("warehouse")) {
             targetCatalogConfig.put("warehouse", targetWarehouse);
