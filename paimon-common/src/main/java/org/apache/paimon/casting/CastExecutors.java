@@ -108,12 +108,12 @@ public class CastExecutors {
      * is in whitelist. Otherwise, return Optional.empty().
      */
     public static Optional<List<Object>> castLiteralsWithEvolution(
-            List<Object> literals, DataType inputType, DataType outputType) {
-        if (inputType.equalsIgnoreNullable(outputType)) {
+            List<Object> literals, DataType predicateType, DataType dataType) {
+        if (predicateType.equalsIgnoreNullable(dataType)) {
             return Optional.of(literals);
         }
 
-        CastRule<?, ?> castRule = INSTANCE.internalResolve(inputType, outputType);
+        CastRule<?, ?> castRule = INSTANCE.internalResolve(predicateType, dataType);
         if (castRule == null) {
             return Optional.empty();
         }
@@ -122,28 +122,24 @@ public class CastExecutors {
             // Ignore float literals because pushing down float filter result is unpredictable.
             // For example, (double) 0.1F in Java is 0.10000000149011612.
 
-            if (inputType.is(DataTypeFamily.INTEGER_NUMERIC)
-                    && outputType.is(DataTypeFamily.INTEGER_NUMERIC)) {
+            if (predicateType.is(DataTypeFamily.INTEGER_NUMERIC)
+                    && dataType.is(DataTypeFamily.INTEGER_NUMERIC)) {
                 // Ignore input scale < output scale because of overflow.
                 // For example, alter 383 from INT to TINYINT, the query result is (byte) 383 ==
                 // 127. If we push down filter f = 127, 383 will be filtered out mistakenly.
 
-                if (integerScaleLargerThan(inputType.getTypeRoot(), outputType.getTypeRoot())) {
-                    if (inputType.getTypeRoot() != DataTypeRoot.BIGINT) {
-                        return Optional.of(literals);
-                    }
-
-                    // Parquet filter Int comparator cannot handle long value.
-                    // See org.apache.parquet.schema.PrimitiveType.
-                    // So ignore filter if long literal is out of int scale.
+                if (integerScaleLargerThan(predicateType.getTypeRoot(), dataType.getTypeRoot())) {
+                    CastExecutor<Number, Number> castExecutor =
+                            (CastExecutor<Number, Number>) castRule.create(predicateType, dataType);
                     List<Object> newLiterals = new ArrayList<>(literals.size());
                     for (Object literal : literals) {
-                        long originalValue = (long) literal;
-                        int newValue = (int) originalValue;
-                        if (originalValue != newValue) {
+                        Number literalNumber = (Number) literal;
+                        Number newLiteralNumber = castExecutor.cast(literalNumber);
+                        // Ignore if any literal is overflowed.
+                        if (newLiteralNumber.longValue() != literalNumber.longValue()) {
                             return Optional.empty();
                         }
-                        newLiterals.add(newValue);
+                        newLiterals.add(newLiteralNumber);
                     }
                     return Optional.of(newLiterals);
                 }
