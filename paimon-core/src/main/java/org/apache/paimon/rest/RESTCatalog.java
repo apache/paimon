@@ -30,9 +30,11 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.CredentialsProvider;
 import org.apache.paimon.rest.auth.CredentialsProviderFactory;
+import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
@@ -206,7 +208,19 @@ public class RESTCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void createTableImpl(Identifier identifier, Schema schema) {}
+    protected void createTableImpl(Identifier identifier, Schema schema)
+            throws TableAlreadyExistException {
+        try {
+            CreateTableRequest request = new CreateTableRequest(identifier, schema);
+            client.post(
+                    resourcePaths.tables(identifier.getDatabaseName()),
+                    request,
+                    GetTableResponse.class,
+                    headers());
+        } catch (AlreadyExistsException e) {
+            throw new TableAlreadyExistException(identifier);
+        }
+    }
 
     @Override
     protected void renameTableImpl(Identifier fromTable, Identifier toTable) {}
