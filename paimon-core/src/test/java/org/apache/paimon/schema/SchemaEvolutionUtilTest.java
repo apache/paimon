@@ -20,7 +20,6 @@ package org.apache.paimon.schema;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.IsNotNull;
 import org.apache.paimon.predicate.IsNull;
 import org.apache.paimon.predicate.LeafPredicate;
@@ -263,7 +262,7 @@ public class SchemaEvolutionUtilTest {
     }
 
     @Test
-    public void testCreateDataFilters() {
+    public void testDevolveDataFilters() {
         List<Predicate> predicates = new ArrayList<>();
         predicates.add(
                 new LeafPredicate(
@@ -278,7 +277,7 @@ public class SchemaEvolutionUtilTest {
                         IsNull.INSTANCE, DataTypes.INT(), 7, "a", Collections.emptyList()));
 
         List<Predicate> filters =
-                SchemaEvolutionUtil.createDataFilters(tableFields2, dataFields, predicates);
+                SchemaEvolutionUtil.devolveDataFilters(tableFields2, dataFields, predicates);
         assert filters != null;
         assertThat(filters.size()).isEqualTo(1);
 
@@ -286,28 +285,5 @@ public class SchemaEvolutionUtilTest {
         assertThat(child1.function()).isEqualTo(IsNull.INSTANCE);
         assertThat(child1.fieldName()).isEqualTo("b");
         assertThat(child1.index()).isEqualTo(1);
-    }
-
-    @Test
-    public void testColumnTypeFilter() {
-        // (1, b, int) in data schema is updated to (1, c, double) in table2
-        List<Predicate> predicates = new ArrayList<>();
-        predicates.add(
-                new LeafPredicate(
-                        Equal.INSTANCE,
-                        DataTypes.DOUBLE(),
-                        0,
-                        "c",
-                        Collections.singletonList(1.0D)));
-        List<Predicate> filters =
-                SchemaEvolutionUtil.createDataFilters(tableFields2, dataFields, predicates);
-        assert filters != null;
-        assertThat(filters.size()).isEqualTo(1);
-
-        LeafPredicate child = (LeafPredicate) filters.get(0);
-        // Validate value 1 with index 1
-        assertThat(child.test(GenericRow.of(0, 1))).isTrue();
-        // Validate value 2 with index 1
-        assertThat(child.test(GenericRow.of(1, 2))).isFalse();
     }
 }

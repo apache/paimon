@@ -276,8 +276,10 @@ public class SchemaEvolutionUtil {
     }
 
     /**
-     * Create predicate list from data fields. We will visit all predicate in filters, reset it's
-     * field index, name and type, and ignore predicate if the field is not exist.
+     * When pushing down filters after schema evolution, we should devolve the literals from new
+     * types (in dataFields) to original types (in tableFields). We will visit all predicate in
+     * filters, reset its field index, name and type, and ignore predicate if the field is not
+     * exist.
      *
      * @param tableFields the table fields
      * @param dataFields the underlying data fields
@@ -285,7 +287,7 @@ public class SchemaEvolutionUtil {
      * @return the data filters
      */
     @Nullable
-    public static List<Predicate> createDataFilters(
+    public static List<Predicate> devolveDataFilters(
             List<DataField> tableFields, List<DataField> dataFields, List<Predicate> filters) {
         if (filters == null) {
             return null;
@@ -308,29 +310,16 @@ public class SchemaEvolutionUtil {
                         return Optional.empty();
                     }
 
-                    DataType dataValueType = dataField.type().copy(true);
-                    DataType predicateType = predicate.type().copy(true);
-                    CastExecutor<Object, Object> castExecutor =
-                            dataValueType.equals(predicateType)
-                                    ? null
-                                    : (CastExecutor<Object, Object>)
-                                            CastExecutors.resolve(
-                                                    predicate.type(), dataField.type());
-                    // Convert value from predicate type to underlying data type which may lose
-                    // information, for example, convert double value to int. But it doesn't matter
-                    // because it just for predicate push down and the data will be filtered
-                    // correctly after reading.
-                    List<Object> literals =
-                            predicate.literals().stream()
-                                    .map(v -> castExecutor == null ? v : castExecutor.cast(v))
-                                    .collect(Collectors.toList());
-                    return Optional.of(
-                            new LeafPredicate(
-                                    predicate.function(),
-                                    dataField.type(),
-                                    indexOf(dataField, idToDataFields),
-                                    dataField.name(),
-                                    literals));
+                    return CastExecutors.castLiteralsWithEvolution(
+                                    predicate.literals(), predicate.type(), dataField.type())
+                            .map(
+                                    literals ->
+                                            new LeafPredicate(
+                                                    predicate.function(),
+                                                    dataField.type(),
+                                                    indexOf(dataField, idToDataFields),
+                                                    dataField.name(),
+                                                    literals));
                 };
 
         for (Predicate predicate : filters) {
