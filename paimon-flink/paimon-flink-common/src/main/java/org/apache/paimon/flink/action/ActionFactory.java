@@ -147,7 +147,7 @@ public interface ActionFactory extends Factory {
     }
 
     default Map<String, String> catalogConfigMap(MultipleParameterToolAdapter params) {
-        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
+        Map<String, String> catalogConfig = new HashMap<>(optionalConfigMap(params, CATALOG_CONF));
         String warehouse = params.get(WAREHOUSE);
         if (warehouse != null && !catalogConfig.containsKey(WAREHOUSE)) {
             catalogConfig.put(WAREHOUSE, warehouse);
