@@ -18,6 +18,7 @@
 
 package org.apache.paimon.jdbc;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.CatalogOptions;
@@ -87,7 +88,7 @@ public class JdbcCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testCheckIdentifierUpperCase() throws Exception {
+    public void testUpperCase() throws Exception {
         catalog.createDatabase("test_db", false);
         assertThatThrownBy(
                         () ->
@@ -95,17 +96,10 @@ public class JdbcCatalogTest extends CatalogTestBase {
                                         Identifier.create("TEST_DB", "new_table"),
                                         DEFAULT_TABLE_SCHEMA,
                                         false))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Database name [TEST_DB] cannot contain upper case in the catalog.");
+                .isInstanceOf(Catalog.DatabaseNotExistException.class)
+                .hasMessage("Database TEST_DB does not exist.");
 
-        assertThatThrownBy(
-                        () ->
-                                catalog.createTable(
-                                        Identifier.create("test_db", "NEW_TABLE"),
-                                        DEFAULT_TABLE_SCHEMA,
-                                        false))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Table name [NEW_TABLE] cannot contain upper case in the catalog.");
+        catalog.createTable(Identifier.create("test_db", "new_TABLE"), DEFAULT_TABLE_SCHEMA, false);
     }
 
     @Test

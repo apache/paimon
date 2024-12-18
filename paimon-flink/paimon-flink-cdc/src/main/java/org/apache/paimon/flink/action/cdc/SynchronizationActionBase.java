@@ -113,8 +113,6 @@ public abstract class SynchronizationActionBase extends ActionBase {
 
         catalog.createDatabase(database, true);
 
-        validateCaseSensitivity();
-
         beforeBuildingSourceSink();
 
         DataStream<RichCdcMultiplexRecord> input =
@@ -124,8 +122,6 @@ public abstract class SynchronizationActionBase extends ActionBase {
 
         buildSink(input, parserFactory);
     }
-
-    protected abstract void validateCaseSensitivity();
 
     protected void beforeBuildingSourceSink() throws Exception {}
 

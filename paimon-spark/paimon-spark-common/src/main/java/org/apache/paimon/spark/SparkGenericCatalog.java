@@ -62,7 +62,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Callable;
 
-import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.apache.paimon.spark.SparkCatalogOptions.CREATE_UNDERLYING_SESSION_CATALOG;
@@ -242,7 +241,6 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
         SparkSession sparkSession = SparkSession.active();
         SessionState sessionState = sparkSession.sessionState();
         Configuration hadoopConf = sessionState.newHadoopConf();
-        SparkConf sparkConf = new SparkConf();
         if (options.containsKey(METASTORE.key())
                 && options.get(METASTORE.key()).equalsIgnoreCase("hive")) {
             String uri = options.get(CatalogOptions.URI.key());
@@ -257,11 +255,6 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
                 }
             }
         }
-        if ("in-memory"
-                .equals(sparkSession.conf().get(StaticSQLConf.CATALOG_IMPLEMENTATION().key()))) {
-            LOG.warn("InMemoryCatalog here may cause bad effect.");
-        }
-
         this.catalogName = name;
         this.sparkCatalog = new SparkCatalog();
 
@@ -273,6 +266,7 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
                 CREATE_UNDERLYING_SESSION_CATALOG.key(),
                 CREATE_UNDERLYING_SESSION_CATALOG.defaultValue())) {
             this.underlyingSessionCatalogEnabled = true;
+            SparkConf sparkConf = new SparkConf();
             for (Map.Entry<String, String> entry : options.entrySet()) {
                 sparkConf.set("spark.hadoop." + entry.getKey(), entry.getValue());
                 hadoopConf.set(entry.getKey(), entry.getValue());
@@ -329,11 +323,6 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
             }
         } else {
             options.put(DEFAULT_DATABASE.key(), sessionCatalogDefaultDatabase);
-        }
-
-        // if spark is case-insensitive, set case-sensitive to catalog
-        if (!sqlConf.caseSensitiveAnalysis()) {
-            options.put(CASE_SENSITIVE.key(), "true");
         }
     }
 

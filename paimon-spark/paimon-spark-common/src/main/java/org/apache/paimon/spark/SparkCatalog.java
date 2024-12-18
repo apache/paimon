@@ -52,7 +52,6 @@ import org.apache.spark.sql.execution.datasources.v2.FileTable;
 import org.apache.spark.sql.execution.datasources.v2.csv.CSVTable;
 import org.apache.spark.sql.execution.datasources.v2.orc.OrcTable;
 import org.apache.spark.sql.execution.datasources.v2.parquet.ParquetTable;
-import org.apache.spark.sql.internal.SessionState;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
@@ -70,7 +69,6 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
-import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 import static org.apache.paimon.spark.util.OptionUtils.copyWithSQLConf;
@@ -91,18 +89,10 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
     @Override
     public void initialize(String name, CaseInsensitiveStringMap options) {
         this.catalogName = name;
-        Map<String, String> newOptions = new HashMap<>(options.asCaseSensitiveMap());
-        SessionState sessionState = SparkSession.active().sessionState();
-
         CatalogContext catalogContext =
-                CatalogContext.create(Options.fromMap(options), sessionState.newHadoopConf());
-
-        // if spark is case-insensitive, set case-sensitive to catalog
-        if (!sessionState.conf().caseSensitiveAnalysis()) {
-            newOptions.put(CASE_SENSITIVE.key(), "true");
-        }
-        options = new CaseInsensitiveStringMap(newOptions);
-
+                CatalogContext.create(
+                        Options.fromMap(options),
+                        SparkSession.active().sessionState().newHadoopConf());
         this.catalog = CatalogFactory.createCatalog(catalogContext);
         this.defaultDatabase =
                 options.getOrDefault(DEFAULT_DATABASE.key(), DEFAULT_DATABASE.defaultValue());

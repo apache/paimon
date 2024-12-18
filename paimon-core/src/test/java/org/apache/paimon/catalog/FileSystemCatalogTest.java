@@ -19,7 +19,6 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataTypes;
@@ -29,7 +28,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FileSystemCatalog}. */
@@ -39,14 +37,13 @@ public class FileSystemCatalogTest extends CatalogTestBase {
     public void setUp() throws Exception {
         super.setUp();
         Options catalogOptions = new Options();
-        catalogOptions.set(CatalogOptions.CASE_SENSITIVE, false);
         catalog = new FileSystemCatalog(fileIO, new Path(warehouse), catalogOptions);
     }
 
     @Test
     public void testCreateTableCaseSensitive() throws Exception {
         catalog.createDatabase("test_db", false);
-        Identifier identifier = Identifier.create("test_db", "new_table");
+        Identifier identifier = Identifier.create("test_db", "new_TABLE");
         Schema schema =
                 Schema.newBuilder()
                         .column("Pk1", DataTypes.INT())
@@ -64,11 +61,7 @@ public class FileSystemCatalogTest extends CatalogTestBase {
                         .partitionKeys("Pk1", "pk2")
                         .primaryKey("Pk1", "pk2", "pk3")
                         .build();
-
-        // Create table throws Exception if using uppercase when 'allow-upper-case' is false
-        assertThatExceptionOfType(IllegalArgumentException.class)
-                .isThrownBy(() -> catalog.createTable(identifier, schema, false))
-                .withMessage("Field name [Pk1, Col1] cannot contain upper case in the catalog.");
+        catalog.createTable(identifier, schema, false);
     }
 
     @Test

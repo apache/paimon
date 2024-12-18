@@ -48,7 +48,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -282,8 +281,6 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableAlreadyExistException, DatabaseNotExistException {
         checkNotBranch(identifier, "createTable");
         checkNotSystemTable(identifier, "createTable");
-        validateIdentifierNameCaseInsensitive(identifier);
-        validateFieldNameCaseInsensitive(schema.rowType().getFieldNames());
         validateAutoCreateClose(schema.options());
         validateCustomTablePath(schema.options());
 
@@ -339,7 +336,6 @@ public abstract class AbstractCatalog implements Catalog {
         checkNotBranch(toTable, "renameTable");
         checkNotSystemTable(fromTable, "renameTable");
         checkNotSystemTable(toTable, "renameTable");
-        validateIdentifierNameCaseInsensitive(toTable);
 
         try {
             getTable(fromTable);
@@ -366,8 +362,6 @@ public abstract class AbstractCatalog implements Catalog {
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         checkNotSystemTable(identifier, "alterTable");
-        validateIdentifierNameCaseInsensitive(identifier);
-        validateFieldNameCaseInsensitiveInSchemaChange(changes);
 
         try {
             getTable(identifier);
@@ -569,30 +563,6 @@ public abstract class AbstractCatalog implements Catalog {
         if (isSystemDatabase(database)) {
             throw new ProcessSystemDatabaseException();
         }
-    }
-
-    protected void validateIdentifierNameCaseInsensitive(Identifier identifier) {
-        CatalogUtils.validateCaseInsensitive(
-                caseSensitive(), "Database", identifier.getDatabaseName());
-        CatalogUtils.validateCaseInsensitive(caseSensitive(), "Table", identifier.getObjectName());
-    }
-
-    private void validateFieldNameCaseInsensitiveInSchemaChange(List<SchemaChange> changes) {
-        List<String> fieldNames = new ArrayList<>();
-        for (SchemaChange change : changes) {
-            if (change instanceof SchemaChange.AddColumn) {
-                SchemaChange.AddColumn addColumn = (SchemaChange.AddColumn) change;
-                fieldNames.addAll(Arrays.asList(addColumn.fieldNames()));
-            } else if (change instanceof SchemaChange.RenameColumn) {
-                SchemaChange.RenameColumn rename = (SchemaChange.RenameColumn) change;
-                fieldNames.add(rename.newName());
-            }
-        }
-        validateFieldNameCaseInsensitive(fieldNames);
-    }
-
-    protected void validateFieldNameCaseInsensitive(List<String> fieldNames) {
-        CatalogUtils.validateCaseInsensitive(caseSensitive(), "Field", fieldNames);
     }
 
     private void validateAutoCreateClose(Map<String, String> options) {
