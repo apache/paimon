@@ -297,29 +297,22 @@ public abstract class AbstractCatalog implements Catalog {
         }
 
         copyTableDefaultOptions(schema.options());
-        try {
-            switch (Options.fromMap(schema.options()).get(TYPE)) {
-                case TABLE:
-                case MATERIALIZED_TABLE:
-                    createTableImpl(identifier, schema);
-                    break;
-                case OBJECT_TABLE:
-                    createObjectTable(identifier, schema);
-                    break;
-                case FORMAT_TABLE:
-                    createFormatTable(identifier, schema);
-                    break;
-            }
-        } catch (TableAlreadyExistException e) {
-            if (ignoreIfExists) {
-                return;
-            }
-            throw e;
+
+        switch (Options.fromMap(schema.options()).get(TYPE)) {
+            case TABLE:
+            case MATERIALIZED_TABLE:
+                createTableImpl(identifier, schema);
+                break;
+            case OBJECT_TABLE:
+                createObjectTable(identifier, schema);
+                break;
+            case FORMAT_TABLE:
+                createFormatTable(identifier, schema);
+                break;
         }
     }
 
-    private void createObjectTable(Identifier identifier, Schema schema)
-            throws TableAlreadyExistException {
+    private void createObjectTable(Identifier identifier, Schema schema) {
         RowType rowType = schema.rowType();
         checkArgument(
                 rowType.getFields().isEmpty()
@@ -334,8 +327,7 @@ public abstract class AbstractCatalog implements Catalog {
         createTableImpl(identifier, schema.copy(ObjectTable.SCHEMA));
     }
 
-    protected abstract void createTableImpl(Identifier identifier, Schema schema)
-            throws TableAlreadyExistException;
+    protected abstract void createTableImpl(Identifier identifier, Schema schema);
 
     @Override
     public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)

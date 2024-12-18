@@ -18,13 +18,14 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.catalog.AbstractCatalog;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.auth.AuthSession;
@@ -46,6 +47,7 @@ import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.shade.guava30.com.google.common.annotations.VisibleForTesting;
@@ -66,61 +68,92 @@ import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
 /** A catalog implementation for REST. */
-public class RESTCatalog extends AbstractCatalog {
+public class RESTCatalog implements Catalog {
 
     private static final ObjectMapper OBJECT_MAPPER = RESTObjectMapper.create();
 
     private final RESTClient client;
     private final ResourcePaths resourcePaths;
-    private final Options options;
+    private final Map<String, String> baseHeader;
     private final AuthSession catalogAuth;
+    private final CatalogContext context;
+    private final FileIO fileIO;
 
     private volatile ScheduledExecutorService refreshExecutor = null;
 
-    public RESTCatalog(CatalogContext context) {
-        this(context, getClient(context.options()), getCredentialsProvider(context.options()));
-    }
-
-    public RESTCatalog(
-            CatalogContext context, RESTClient client, CredentialsProvider credentialsProvider) {
-        this(
-                context,
-                client,
-                credentialsProvider,
-                new Options(
-                        fetchOptionsFromServer(
-                                client,
-                                RESTUtil.merge(
-                                        configHeaders(context.options().toMap()),
-                                        credentialsProvider.authHeader()),
-                                context.options().toMap())));
-    }
-
-    public RESTCatalog(
-            CatalogContext context,
-            RESTClient client,
-            CredentialsProvider credentialsProvider,
-            Options optionsWithServer) {
-        super(getFileIOFromOptions(context, optionsWithServer), optionsWithServer);
-        this.client = client;
-        Map<String, String> baseHeader = configHeaders(optionsWithServer.toMap());
+    public RESTCatalog(CatalogContext catalogContext) {
+        Options catalogOptions = catalogContext.options();
+        if (catalogOptions.getOptional(CatalogOptions.WAREHOUSE).isPresent()) {
+            throw new IllegalArgumentException("Can not config warehouse in RESTCatalog.");
+        }
+        String uri = catalogOptions.get(RESTCatalogOptions.URI);
+        Optional<Duration> connectTimeout =
+                catalogOptions.getOptional(RESTCatalogOptions.CONNECTION_TIMEOUT);
+        Optional<Duration> readTimeout =
+                catalogOptions.getOptional(RESTCatalogOptions.READ_TIMEOUT);
+        Integer threadPoolSize = catalogOptions.get(RESTCatalogOptions.THREAD_POOL_SIZE);
+        HttpClientOptions httpClientOptions =
+                new HttpClientOptions(
+                        uri,
+                        connectTimeout,
+                        readTimeout,
+                        OBJECT_MAPPER,
+                        threadPoolSize,
+                        DefaultErrorHandler.getInstance());
+        this.client = new HttpClient(httpClientOptions);
+        this.baseHeader = configHeaders(catalogOptions.toMap());
+        CredentialsProvider credentialsProvider =
+                CredentialsProviderFactory.createCredentialsProvider(
+                        catalogOptions, RESTCatalog.class.getClassLoader());
         if (credentialsProvider.keepRefreshed()) {
             this.catalogAuth =
                     AuthSession.fromRefreshCredentialsProvider(
-                            tokenRefreshExecutor(), baseHeader, credentialsProvider);
+                            tokenRefreshExecutor(), this.baseHeader, credentialsProvider);
 
         } else {
-            this.catalogAuth = new AuthSession(baseHeader, credentialsProvider);
+            this.catalogAuth = new AuthSession(this.baseHeader, credentialsProvider);
         }
-        this.options = optionsWithServer;
+        Map<String, String> initHeaders =
+                RESTUtil.merge(
+                        configHeaders(catalogOptions.toMap()), this.catalogAuth.getHeaders());
+        Options options = new Options(fetchOptionsFromServer(initHeaders, initHeaders));
+        this.context =
+                CatalogContext.create(
+                        options, catalogContext.preferIO(), catalogContext.fallbackIO());
         this.resourcePaths =
-                ResourcePaths.forCatalogProperties(
-                        this.options.get(RESTCatalogInternalOptions.PREFIX));
+                ResourcePaths.forCatalogProperties(options.get(RESTCatalogInternalOptions.PREFIX));
+        this.fileIO = getFileIOFromOptions(catalogContext);
+    }
+
+    // todo: whether it's ok
+    private static FileIO getFileIOFromOptions(CatalogContext context) {
+        Options options = context.options();
+        String warehouseStr = options.get(CatalogOptions.WAREHOUSE);
+        Path warehousePath = new Path(warehouseStr);
+        FileIO fileIO;
+        CatalogContext contextWithNewOptions =
+                CatalogContext.create(options, context.preferIO(), context.fallbackIO());
+        try {
+            fileIO = FileIO.get(warehousePath, contextWithNewOptions);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return fileIO;
     }
 
     @Override
     public String warehouse() {
-        throw new UnsupportedOperationException();
+        return context.options().get(CatalogOptions.WAREHOUSE);
+    }
+
+    @Override
+    public Map<String, String> options() {
+        return context.options().toMap();
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return this.fileIO;
     }
 
     @Override
@@ -134,13 +167,21 @@ public class RESTCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void createDatabaseImpl(String name, Map<String, String> properties) {
+    public void createDatabase(String name, boolean ignoreIfExists, Map<String, String> properties)
+            throws DatabaseAlreadyExistException {
         CreateDatabaseRequest request = new CreateDatabaseRequest(name, properties);
-        client.post(resourcePaths.databases(), request, CreateDatabaseResponse.class, headers());
+        try {
+            client.post(
+                    resourcePaths.databases(), request, CreateDatabaseResponse.class, headers());
+        } catch (AlreadyExistsException e) {
+            if (!ignoreIfExists) {
+                throw new DatabaseAlreadyExistException(name);
+            }
+        }
     }
 
     @Override
-    protected Database getDatabaseImpl(String name) throws DatabaseNotExistException {
+    public Database getDatabase(String name) throws DatabaseNotExistException {
         try {
             GetDatabaseResponse response =
                     client.get(resourcePaths.database(name), GetDatabaseResponse.class, headers());
@@ -152,12 +193,22 @@ public class RESTCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void dropDatabaseImpl(String name) {
-        client.delete(resourcePaths.database(name), headers());
+    public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
+            throws DatabaseNotExistException, DatabaseNotEmptyException {
+        try {
+            if (!cascade && !this.listTables(name).isEmpty()) {
+                throw new DatabaseNotEmptyException(name);
+            }
+            client.delete(resourcePaths.database(name), headers());
+        } catch (NoSuchResourceException e) {
+            if (!ignoreIfNotExists) {
+                throw new DatabaseNotExistException(name);
+            }
+        }
     }
 
     @Override
-    protected void alterDatabaseImpl(String name, List<PropertyChange> changes)
+    public void alterDatabase(String name, List<PropertyChange> changes, boolean ignoreIfNotExists)
             throws DatabaseNotExistException {
         try {
             Pair<Map<String, String>, Set<String>> setPropertiesToRemoveKeys =
@@ -176,12 +227,14 @@ public class RESTCatalog extends AbstractCatalog {
                 throw new IllegalStateException("Failed to update properties");
             }
         } catch (NoSuchResourceException e) {
-            throw new DatabaseNotExistException(name);
+            if (!ignoreIfNotExists) {
+                throw new DatabaseNotExistException(name);
+            }
         }
     }
 
     @Override
-    protected List<String> listTablesImpl(String databaseName) {
+    public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         ListTablesResponse response =
                 client.get(resourcePaths.tables(databaseName), ListTablesResponse.class, headers());
         if (response.getTables() != null) {
@@ -191,6 +244,10 @@ public class RESTCatalog extends AbstractCatalog {
     }
 
     @Override
+    public Table getTable(Identifier identifier) throws TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
     protected TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
         try {
             GetTableResponse response =
@@ -209,8 +266,8 @@ public class RESTCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void createTableImpl(Identifier identifier, Schema schema)
-            throws TableAlreadyExistException {
+    public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
+            throws TableAlreadyExistException, DatabaseNotExistException {
         try {
             CreateTableRequest request = new CreateTableRequest(identifier, schema);
             client.post(
@@ -224,36 +281,45 @@ public class RESTCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void renameTableImpl(Identifier fromTable, Identifier toTable) {
+    public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
+            throws TableNotExistException, TableAlreadyExistException {
         updateTable(fromTable, toTable, new ArrayList<>());
     }
 
     @Override
-    protected void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
+    public void alterTable(
+            Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         updateTable(identifier, null, changes);
     }
 
-    // todo: how know which exception to throw
-    private void updateTable(Identifier fromTable, Identifier toTable, List<SchemaChange> changes) {
-        UpdateTableRequest request = new UpdateTableRequest(fromTable, toTable, changes);
-        client.post(
-                resourcePaths.table(fromTable.getDatabaseName(), fromTable.getTableName()),
-                request,
-                GetTableResponse.class,
-                headers());
-    }
-
     @Override
-    protected void dropTableImpl(Identifier identifier) {
+    public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
+            throws TableNotExistException {
         client.delete(
                 resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),
                 headers());
     }
 
     @Override
+    public void createPartition(Identifier identifier, Map<String, String> partitionSpec)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void dropPartition(Identifier identifier, Map<String, String> partitions)
+            throws TableNotExistException, PartitionNotExistException {}
+
+    @Override
+    public List<PartitionEntry> listPartitions(Identifier identifier)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public boolean caseSensitive() {
-        return options.getOptional(CASE_SENSITIVE).orElse(true);
+        return context.options().getOptional(CASE_SENSITIVE).orElse(true);
     }
 
     @Override
@@ -267,49 +333,11 @@ public class RESTCatalog extends AbstractCatalog {
     }
 
     @VisibleForTesting
-    static Map<String, String> fetchOptionsFromServer(
-            RESTClient client, Map<String, String> headers, Map<String, String> clientProperties) {
+    Map<String, String> fetchOptionsFromServer(
+            Map<String, String> headers, Map<String, String> clientProperties) {
         ConfigResponse response =
                 client.get(ResourcePaths.V1_CONFIG, ConfigResponse.class, headers);
         return response.merge(clientProperties);
-    }
-
-    @VisibleForTesting
-    static RESTClient getClient(Options options) {
-        String uri = options.get(RESTCatalogOptions.URI);
-        Optional<Duration> connectTimeout =
-                options.getOptional(RESTCatalogOptions.CONNECTION_TIMEOUT);
-        Optional<Duration> readTimeout = options.getOptional(RESTCatalogOptions.READ_TIMEOUT);
-        Integer threadPoolSize = options.get(RESTCatalogOptions.THREAD_POOL_SIZE);
-        HttpClientOptions httpClientOptions =
-                new HttpClientOptions(
-                        uri,
-                        connectTimeout,
-                        readTimeout,
-                        OBJECT_MAPPER,
-                        threadPoolSize,
-                        DefaultErrorHandler.getInstance());
-        return new HttpClient(httpClientOptions);
-    }
-
-    // todo: whether it's ok
-    private static FileIO getFileIOFromOptions(CatalogContext context, Options options) {
-        String warehouseStr = options.get(CatalogOptions.WAREHOUSE);
-        Path warehousePath = new Path(warehouseStr);
-        FileIO fileIO;
-        CatalogContext contextWithNewOptions =
-                CatalogContext.create(options, context.preferIO(), context.fallbackIO());
-        try {
-            fileIO = FileIO.get(warehousePath, contextWithNewOptions);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        return fileIO;
-    }
-
-    private static CredentialsProvider getCredentialsProvider(Options options) {
-        return CredentialsProviderFactory.createCredentialsProvider(
-                options, RESTCatalog.class.getClassLoader());
     }
 
     private static Map<String, String> configHeaders(Map<String, String> properties) {
@@ -318,6 +346,16 @@ public class RESTCatalog extends AbstractCatalog {
 
     private Map<String, String> headers() {
         return catalogAuth.getHeaders();
+    }
+
+    // todo: how know which exception to throw
+    private void updateTable(Identifier fromTable, Identifier toTable, List<SchemaChange> changes) {
+        UpdateTableRequest request = new UpdateTableRequest(fromTable, toTable, changes);
+        client.post(
+                resourcePaths.table(fromTable.getDatabaseName(), fromTable.getTableName()),
+                request,
+                GetTableResponse.class,
+                headers());
     }
 
     private ScheduledExecutorService tokenRefreshExecutor() {
