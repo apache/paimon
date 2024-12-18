@@ -19,6 +19,7 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -35,7 +36,9 @@ import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -59,6 +62,9 @@ public class RESTCatalogTest {
     private RESTCatalog restCatalog;
     private RESTCatalog mockRestCatalog;
     private Options options;
+    private CatalogContext context;
+    private String warehouseStr;
+    @Rule public TemporaryFolder folder = new TemporaryFolder();
 
     @Before
     public void setUp() throws IOException {
@@ -70,12 +76,17 @@ public class RESTCatalogTest {
         String initToken = "init_token";
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
+        context = CatalogContext.create(options);
+        warehouseStr = folder.getRoot().getPath();
         String mockResponse =
                 String.format(
-                        "{\"defaults\": {\"%s\": \"%s\"}}",
-                        RESTCatalogInternalOptions.PREFIX.key(), "prefix");
+                        "{\"defaults\": {\"%s\": \"%s\", \"%s\": \"%s\"}}",
+                        RESTCatalogInternalOptions.PREFIX.key(),
+                        "prefix",
+                        CatalogOptions.WAREHOUSE.key(),
+                        warehouseStr);
         mockResponse(mockResponse, 200);
-        restCatalog = new RESTCatalog(options);
+        restCatalog = new RESTCatalog(context);
         mockRestCatalog = spy(restCatalog);
     }
 
@@ -87,8 +98,10 @@ public class RESTCatalogTest {
     @Test
     public void testInitFailWhenDefineWarehouse() {
         Options options = new Options();
-        options.set(CatalogOptions.WAREHOUSE, "/a/b/c");
-        assertThrows(IllegalArgumentException.class, () -> new RESTCatalog(options));
+        options.set(CatalogOptions.WAREHOUSE, warehouseStr);
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new RESTCatalog(CatalogContext.create(options)));
     }
 
     @Test
