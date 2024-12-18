@@ -35,6 +35,7 @@ import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.UpdateTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
@@ -223,14 +224,32 @@ public class RESTCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void renameTableImpl(Identifier fromTable, Identifier toTable) {}
+    protected void renameTableImpl(Identifier fromTable, Identifier toTable) {
+        updateTable(fromTable, toTable, new ArrayList<>());
+    }
 
     @Override
     protected void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
-            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {}
+            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
+        updateTable(identifier, null, changes);
+    }
+
+    // todo: how know which exception to throw
+    private void updateTable(Identifier fromTable, Identifier toTable, List<SchemaChange> changes) {
+        UpdateTableRequest request = new UpdateTableRequest(fromTable, toTable, changes);
+        client.post(
+                resourcePaths.table(fromTable.getDatabaseName(), fromTable.getTableName()),
+                request,
+                GetTableResponse.class,
+                headers());
+    }
 
     @Override
-    protected void dropTableImpl(Identifier identifier) {}
+    protected void dropTableImpl(Identifier identifier) {
+        client.delete(
+                resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),
+                headers());
+    }
 
     @Override
     public boolean caseSensitive() {

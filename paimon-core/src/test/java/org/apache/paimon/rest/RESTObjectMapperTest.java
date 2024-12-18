@@ -103,7 +103,7 @@ public class RESTObjectMapperTest {
         ListDatabasesResponse parseData =
                 mapper.readValue(responseStr, ListDatabasesResponse.class);
         assertEquals(response.getDatabases().size(), parseData.getDatabases().size());
-        assertEquals(name, parseData.getDatabases().get(0).getName());
+        assertEquals(name, parseData.getDatabases().get(0));
     }
 
     @Test
