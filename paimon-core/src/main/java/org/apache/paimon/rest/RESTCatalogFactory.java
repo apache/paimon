@@ -39,6 +39,6 @@ public class RESTCatalogFactory implements CatalogFactory {
         if (options.getOptional(CatalogOptions.WAREHOUSE).isPresent()) {
             throw new IllegalArgumentException("Can not config warehouse in RESTCatalog.");
         }
-        return new RESTCatalog(options);
+        return new RESTCatalog(context);
     }
 }

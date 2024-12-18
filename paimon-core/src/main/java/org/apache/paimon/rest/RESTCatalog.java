@@ -19,10 +19,13 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.AbstractCatalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.CredentialsProvider;
@@ -45,6 +48,8 @@ import org.apache.paimon.shade.guava30.com.google.common.annotations.VisibleForT
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -66,41 +71,44 @@ public class RESTCatalog extends AbstractCatalog {
     private final RESTClient client;
     private final ResourcePaths resourcePaths;
     private final Options options;
-    private final Map<String, String> baseHeader;
     private final AuthSession catalogAuth;
 
     private volatile ScheduledExecutorService refreshExecutor = null;
 
-    public RESTCatalog(Options options) {
-        this(options, getClient(options), getCredentialsProvider(options));
+    public RESTCatalog(CatalogContext context) {
+        this(context, getClient(context.options()), getCredentialsProvider(context.options()));
     }
 
     public RESTCatalog(
-            Options options, RESTClient client, CredentialsProvider credentialsProvider) {
+            CatalogContext context, RESTClient client, CredentialsProvider credentialsProvider) {
         this(
+                context,
                 client,
                 credentialsProvider,
                 new Options(
                         fetchOptionsFromServer(
                                 client,
                                 RESTUtil.merge(
-                                        configHeaders(options.toMap()),
+                                        configHeaders(context.options().toMap()),
                                         credentialsProvider.authHeader()),
-                                options.toMap())));
+                                context.options().toMap())));
     }
 
     public RESTCatalog(
-            RESTClient client, CredentialsProvider credentialsProvider, Options optionsWithServer) {
-        super(getFileIOFromOptions(optionsWithServer), optionsWithServer);
+            CatalogContext context,
+            RESTClient client,
+            CredentialsProvider credentialsProvider,
+            Options optionsWithServer) {
+        super(getFileIOFromOptions(context, optionsWithServer), optionsWithServer);
         this.client = client;
-        this.baseHeader = configHeaders(optionsWithServer.toMap());
+        Map<String, String> baseHeader = configHeaders(optionsWithServer.toMap());
         if (credentialsProvider.keepRefreshed()) {
             this.catalogAuth =
                     AuthSession.fromRefreshCredentialsProvider(
-                            tokenRefreshExecutor(), this.baseHeader, credentialsProvider);
+                            tokenRefreshExecutor(), baseHeader, credentialsProvider);
 
         } else {
-            this.catalogAuth = new AuthSession(this.baseHeader, credentialsProvider);
+            this.catalogAuth = new AuthSession(baseHeader, credentialsProvider);
         }
         this.options = optionsWithServer;
         this.resourcePaths =
@@ -252,8 +260,19 @@ public class RESTCatalog extends AbstractCatalog {
         return new HttpClient(httpClientOptions);
     }
 
-    private static FileIO getFileIOFromOptions(Options options) {
-        return null;
+    // todo: whether it's ok
+    private static FileIO getFileIOFromOptions(CatalogContext context, Options options) {
+        String warehouseStr = options.get(CatalogOptions.WAREHOUSE);
+        Path warehousePath = new Path(warehouseStr);
+        FileIO fileIO;
+        CatalogContext contextWithNewOptions =
+                CatalogContext.create(options, context.preferIO(), context.fallbackIO());
+        try {
+            fileIO = FileIO.get(warehousePath, contextWithNewOptions);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return fileIO;
     }
 
     private static CredentialsProvider getCredentialsProvider(Options options) {
