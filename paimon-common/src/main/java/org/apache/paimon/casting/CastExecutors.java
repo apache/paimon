@@ -24,6 +24,7 @@ import org.apache.paimon.types.DataTypeRoot;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -118,11 +119,33 @@ public class CastExecutors {
         }
 
         if (castRule instanceof NumericPrimitiveCastRule) {
+            // Ignore float literals because pushing down float filter result is unpredictable.
+            // For example, (double) 0.1F in Java is 0.10000000149011612.
+
             if (inputType.is(DataTypeFamily.INTEGER_NUMERIC)
                     && outputType.is(DataTypeFamily.INTEGER_NUMERIC)) {
+                // Ignore input scale < output scale because of overflow.
+                // For example, alter 383 from INT to TINYINT, the query result is (byte) 383 ==
+                // 127. If we push down filter f = 127, 383 will be filtered out mistakenly.
+
                 if (integerScaleLargerThan(inputType.getTypeRoot(), outputType.getTypeRoot())) {
-                    // Pushing down higher scale integer numeric filter is always correct.
-                    return Optional.of(literals);
+                    if (inputType.getTypeRoot() != DataTypeRoot.BIGINT) {
+                        return Optional.of(literals);
+                    }
+
+                    // Parquet filter Int comparator cannot handle long value.
+                    // See org.apache.parquet.schema.PrimitiveType.
+                    // So ignore filter if long literal is out of int scale.
+                    List<Object> newLiterals = new ArrayList<>(literals.size());
+                    for (Object literal : literals) {
+                        long originalValue = (long) literal;
+                        int newValue = (int) originalValue;
+                        if (originalValue != newValue) {
+                            return Optional.empty();
+                        }
+                        newLiterals.add(newValue);
+                    }
+                    return Optional.of(newLiterals);
                 }
             }
         }

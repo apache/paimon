@@ -186,6 +186,31 @@ public class FilterPushdownWithSchemaChangeITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT * FROM T WHERE f = 383")).isEmpty();
         assertThat(sql("SELECT * FROM T WHERE f <> 127")).isEmpty();
         assertThat(sql("SELECT * FROM T WHERE f <> 383")).containsExactly(Row.of(1, 127));
+
+        sql("DROP TABLE T");
+
+        // INT to BIGINT
+        sql(
+                "CREATE TABLE T ("
+                        + "  id INT,"
+                        + "  f INT"
+                        + ") with ("
+                        + "  'file.format' = '%s'"
+                        + ")",
+                fileFormat);
+        // (int) Integer.MAX_VALUE + 1 == Integer.MIN_VALUE -> (int) 2147483648L == -2147483648
+        sql("INSERT INTO T VALUES (1, 2147483647), (2, -2147483648)");
+        sql("ALTER TABLE T MODIFY (f BIGINT)");
+        assertThat(sql("SELECT * FROM T WHERE f < 2147483648"))
+                .containsExactlyInAnyOrder(Row.of(1, 2147483647L), Row.of(2, -2147483648L));
+        assertThat(sql("SELECT * FROM T WHERE f > 2147483648")).isEmpty();
+        assertThat(sql("SELECT * FROM T WHERE f = 2147483647"))
+                .containsExactly(Row.of(1, 2147483647L));
+        assertThat(sql("SELECT * FROM T WHERE f = 2147483648")).isEmpty();
+        assertThat(sql("SELECT * FROM T WHERE f <> 2147483647"))
+                .containsExactly(Row.of(2, -2147483648L));
+        assertThat(sql("SELECT * FROM T WHERE f <> 2147483648"))
+                .containsExactlyInAnyOrder(Row.of(1, 2147483647L), Row.of(2, -2147483648L));
     }
 
     @TestTemplate
