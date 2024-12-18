@@ -24,7 +24,6 @@ import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
-import org.apache.paimon.rest.responses.DatabaseName;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
@@ -86,7 +85,7 @@ public class RESTCatalogController {
     })
     @GetMapping("/v1/{prefix}/databases")
     public ListDatabasesResponse listDatabases(@PathVariable String prefix) {
-        return new ListDatabasesResponse(ImmutableList.of(new DatabaseName("account")));
+        return new ListDatabasesResponse(ImmutableList.of("account"));
     }
 
     @Operation(

@@ -36,9 +36,10 @@ import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
-import org.apache.paimon.rest.responses.DatabaseName;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
@@ -52,13 +53,11 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
@@ -122,23 +121,11 @@ public class RESTCatalog extends AbstractCatalog {
     }
 
     @Override
-    public Map<String, String> options() {
-        return this.options.toMap();
-    }
-
-    @Override
-    public FileIO fileIO() {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
     public List<String> listDatabases() {
         ListDatabasesResponse response =
                 client.get(resourcePaths.databases(), ListDatabasesResponse.class, headers());
         if (response.getDatabases() != null) {
-            return response.getDatabases().stream()
-                    .map(DatabaseName::getName)
-                    .collect(Collectors.toList());
+            return response.getDatabases();
         }
         return ImmutableList.of();
     }
@@ -191,26 +178,35 @@ public class RESTCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
-        return null;
-    }
-
-    @Override
     protected List<String> listTablesImpl(String databaseName) {
-        return Collections.emptyList();
+        ListTablesResponse response =
+                client.get(resourcePaths.tables(databaseName), ListTablesResponse.class, headers());
+        if (response.getTables() != null) {
+            return response.getTables();
+        }
+        return ImmutableList.of();
     }
 
     @Override
-    protected void dropTableImpl(Identifier identifier) {}
+    protected TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
+        try {
+            GetTableResponse response =
+                    client.get(
+                            resourcePaths.table(
+                                    identifier.getDatabaseName(), identifier.getTableName()),
+                            GetTableResponse.class,
+                            headers());
+            if (response.getSchema() != null) {
+                return response.getSchema();
+            }
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        }
+        throw new TableNotExistException(identifier);
+    }
 
     @Override
     protected void createTableImpl(Identifier identifier, Schema schema) {}
-
-    @Override
-    public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
-            throws TableNotExistException, TableAlreadyExistException {
-        throw new UnsupportedOperationException();
-    }
 
     @Override
     protected void renameTableImpl(Identifier fromTable, Identifier toTable) {}
@@ -218,6 +214,9 @@ public class RESTCatalog extends AbstractCatalog {
     @Override
     protected void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {}
+
+    @Override
+    protected void dropTableImpl(Identifier identifier) {}
 
     @Override
     public boolean caseSensitive() {
