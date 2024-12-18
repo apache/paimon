@@ -297,6 +297,7 @@ public abstract class AbstractCatalog implements Catalog {
         }
 
         copyTableDefaultOptions(schema.options());
+
         switch (Options.fromMap(schema.options()).get(TYPE)) {
             case TABLE:
             case MATERIALIZED_TABLE:
