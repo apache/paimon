@@ -108,6 +108,7 @@ class PaimonFunctionTest extends PaimonHiveTestBase {
 }
 
 private class MyIntSum extends UserDefinedAggregateFunction {
+
   override def inputSchema: StructType = new StructType().add("input", IntegerType)
 
   override def bufferSchema: StructType = new StructType().add("buffer", IntegerType)
@@ -121,7 +122,7 @@ private class MyIntSum extends UserDefinedAggregateFunction {
   }
 
   override def update(buffer: MutableAggregationBuffer, input: Row): Unit = {
-    buffer.update(0, input.getInt(0) + buffer.getInt(0))
+    buffer.update(0, buffer.getInt(0) + input.getInt(0))
   }
 
   override def merge(buffer1: MutableAggregationBuffer, buffer2: Row): Unit = {
