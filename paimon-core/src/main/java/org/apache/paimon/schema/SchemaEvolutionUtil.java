@@ -43,7 +43,6 @@ import org.apache.paimon.utils.ProjectedRow;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -223,56 +222,6 @@ public class SchemaEvolutionUtil {
                 KeyValue.createKeyValueFields(tableKeyFields, tableValueFields);
         List<DataField> dataFields = KeyValue.createKeyValueFields(dataKeyFields, dataValueFields);
         return createIndexCastMapping(tableProjection, tableFields, dataProjection, dataFields);
-    }
-
-    /**
-     * Create data projection from table projection. For example, the table and data fields are as
-     * follows
-     *
-     * <ul>
-     *   <li>table fields: 1->c, 3->a, 4->e, 5->d, 6->b
-     *   <li>data fields: 1->a, 2->b, 3->c, 4->d
-     * </ul>
-     *
-     * <p>When we project 1->c, 6->b, 3->a from table fields, the table projection is [[0], [4],
-     * [1]], in which 0 is the index of field 1->c, 4 is the index of field 6->b, 1 is the index of
-     * field 3->a in table fields. We need to create data projection from [[0], [4], [1]] as
-     * follows:
-     *
-     * <ul>
-     *   <li>Get field id of each index in table projection from table fields
-     *   <li>Get index of each field above from data fields
-     * </ul>
-     *
-     * <p>The we can create table projection as follows: [[0], [-1], [2]], in which 0, -1 and 2 are
-     * the index of fields [1->c, 6->b, 3->a] in data fields. When we project column from underlying
-     * data, we need to specify the field index and name. It is difficult to assign a proper field
-     * id and name for 6->b in data projection and add it to data fields, and we can't use 6->b
-     * directly because the field index of b in underlying is 2. We can remove the -1 field index in
-     * data projection, then the result data projection is: [[0], [2]].
-     *
-     * <p>We create {@link InternalRow} for 1->a, 3->c after projecting them from underlying data,
-     * then create {@link ProjectedRow} with a index mapping and return null for 6->b in table
-     * fields.
-     *
-     * @param tableFields the fields of table
-     * @param dataFields the fields of underlying data
-     * @param tableProjection the projection of table
-     * @return the projection of data
-     */
-    public static int[][] createDataProjection(
-            List<DataField> tableFields, List<DataField> dataFields, int[][] tableProjection) {
-        List<Integer> dataFieldIdList =
-                dataFields.stream().map(DataField::id).collect(Collectors.toList());
-        return Arrays.stream(tableProjection)
-                .map(p -> Arrays.copyOf(p, p.length))
-                .peek(
-                        p -> {
-                            int fieldId = tableFields.get(p[0]).id();
-                            p[0] = dataFieldIdList.indexOf(fieldId);
-                        })
-                .filter(p -> p[0] >= 0)
-                .toArray(int[][]::new);
     }
 
     /**

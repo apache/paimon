@@ -32,7 +32,6 @@ import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.utils.ProjectedRow;
-import org.apache.paimon.utils.Projection;
 
 import org.junit.jupiter.api.Test;
 
@@ -234,31 +233,6 @@ public class SchemaEvolutionUtilTest {
         assertThat(table2Field5Value).isNull();
         assertThat(table2Field6Value).isEqualTo(5L);
         assertThat(table2Field7Value).isEqualTo(6.0D);
-    }
-
-    @Test
-    public void testCreateDataProjection() {
-        int[][] table1Projection =
-                new int[][] {new int[] {2}, new int[] {0}}; // project 5->d and 1->c in tableField1
-        int[][] table2Projection =
-                new int[][] {
-                    new int[] {4}, new int[] {2}, new int[] {0}
-                }; // project 8->b, 5->f and 1->c in tableField2
-
-        int[][] table1DataProjection =
-                SchemaEvolutionUtil.createDataProjection(
-                        tableFields1, dataFields, table1Projection);
-        assertThat(Projection.of(table1DataProjection).toTopLevelIndexes()).containsExactly(1);
-
-        int[][] table2DataProjection =
-                SchemaEvolutionUtil.createDataProjection(
-                        tableFields2, dataFields, table2Projection);
-        assertThat(Projection.of(table2DataProjection).toTopLevelIndexes()).containsExactly(1);
-
-        int[][] table2Table1Projection =
-                SchemaEvolutionUtil.createDataProjection(
-                        tableFields2, tableFields1, table2Projection);
-        assertThat(Projection.of(table2Table1Projection).toTopLevelIndexes()).containsExactly(2, 0);
     }
 
     @Test
