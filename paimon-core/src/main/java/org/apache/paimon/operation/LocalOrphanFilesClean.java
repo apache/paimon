@@ -212,7 +212,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
             long olderThanMillis,
             SerializableConsumer<Path> fileCleaner,
             @Nullable Integer parallelism)
-            throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
+            throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException,
+                    Catalog.TableNoPermissionException {
         List<String> tableNames = Collections.singletonList(tableName);
         if (tableName == null || "*".equals(tableName)) {
             tableNames = catalog.listTables(databaseName);
@@ -253,7 +254,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
             long olderThanMillis,
             SerializableConsumer<Path> fileCleaner,
             @Nullable Integer parallelism)
-            throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
+            throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException,
+                    Catalog.TableNoPermissionException {
         List<LocalOrphanFilesClean> tableCleans =
                 createOrphanFilesCleans(
                         catalog,
