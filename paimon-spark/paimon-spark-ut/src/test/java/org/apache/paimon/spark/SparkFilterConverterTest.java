@@ -57,7 +57,7 @@ import java.util.List;
 
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.catchThrowableOfType;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link SparkFilterConverter}. */
 public class SparkFilterConverterTest {
@@ -225,7 +225,9 @@ public class SparkFilterConverterTest {
         SparkFilterConverter converter = new SparkFilterConverter(rowType);
 
         Not not = Not.apply(StringStartsWith.apply("name", "paimon"));
-        catchThrowableOfType(() -> converter.convert(not), UnsupportedOperationException.class);
+        assertThatThrownBy(() -> converter.convert(not, false))
+                .hasMessageContaining("Not(StringStartsWith(name,paimon)) is unsupported.");
+        assertThat(converter.convert(not, true)).isNull();
         assertThat(converter.convertIgnoreFailure(not)).isNull();
     }
 }

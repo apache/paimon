@@ -101,7 +101,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
     }
     if (condition != TrueLiteral) {
       val filter =
-        convertConditionToPaimonPredicate(condition, output, rowType, ignoreFailure = true)
+        convertConditionToPaimonPredicate(condition, output, rowType, ignorePartialFailure = true)
       filter.foreach(snapshotReader.withFilter)
     }
 
