@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
@@ -417,20 +418,7 @@ public class RESTCatalog implements Catalog {
                                 identifier.getTableName(),
                                 identifier.getBranchName(),
                                 null));
-        if (!(originTable instanceof FileStoreTable)) {
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "Only data table support system tables, but this table %s is %s.",
-                            identifier, originTable.getClass()));
-        }
-        Table table =
-                SystemTableLoader.load(
-                        Preconditions.checkNotNull(identifier.getSystemTableName()),
-                        (FileStoreTable) originTable);
-        if (table == null) {
-            throw new TableNotExistException(identifier);
-        }
-        return table;
+        return CatalogUtils.getSystemTable(identifier, originTable);
     }
 
     private Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {

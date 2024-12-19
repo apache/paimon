@@ -59,6 +59,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.lockFactory;
@@ -383,20 +384,7 @@ public abstract class AbstractCatalog implements Catalog {
                                     identifier.getTableName(),
                                     identifier.getBranchName(),
                                     null));
-            if (!(originTable instanceof FileStoreTable)) {
-                throw new UnsupportedOperationException(
-                        String.format(
-                                "Only data table support system tables, but this table %s is %s.",
-                                identifier, originTable.getClass()));
-            }
-            Table table =
-                    SystemTableLoader.load(
-                            Preconditions.checkNotNull(identifier.getSystemTableName()),
-                            (FileStoreTable) originTable);
-            if (table == null) {
-                throw new TableNotExistException(identifier);
-            }
-            return table;
+            return CatalogUtils.getSystemTable(identifier, originTable);
         } else {
             return getDataOrFormatTable(identifier);
         }
@@ -504,13 +492,6 @@ public abstract class AbstractCatalog implements Catalog {
 
     private void copyTableDefaultOptions(Map<String, String> options) {
         tableDefaultOptions.forEach(options::putIfAbsent);
-    }
-
-    /** Validate database cannot be a system database. */
-    protected void checkNotSystemDatabase(String database) {
-        if (isSystemDatabase(database)) {
-            throw new ProcessSystemDatabaseException();
-        }
     }
 
     private void validateAutoCreateClose(Map<String, String> options) {

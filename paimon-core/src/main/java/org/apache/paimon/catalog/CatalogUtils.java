@@ -23,6 +23,10 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.utils.Preconditions;
 
 import java.util.Map;
 import java.util.Optional;
@@ -71,6 +75,13 @@ public class CatalogUtils {
 
     public static boolean isSystemDatabase(String database) {
         return SYSTEM_DATABASE_NAME.equals(database);
+    }
+
+    /** Validate database cannot be a system database. */
+    public static void checkNotSystemDatabase(String database) {
+        if (isSystemDatabase(database)) {
+            throw new Catalog.ProcessSystemDatabaseException();
+        }
     }
 
     public static boolean isTableInSystemDatabase(Identifier identifier) {
@@ -131,5 +142,23 @@ public class CatalogUtils {
 
     public static boolean lockEnabled(Options options, FileIO fileIO) {
         return options.getOptional(LOCK_ENABLED).orElse(fileIO != null && fileIO.isObjectStore());
+    }
+
+    public static Table getSystemTable(Identifier identifier, Table originTable)
+            throws Catalog.TableNotExistException {
+        if (!(originTable instanceof FileStoreTable)) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Only data table support system tables, but this table %s is %s.",
+                            identifier, originTable.getClass()));
+        }
+        Table table =
+                SystemTableLoader.load(
+                        Preconditions.checkNotNull(identifier.getSystemTableName()),
+                        (FileStoreTable) originTable);
+        if (table == null) {
+            throw new Catalog.TableNotExistException(identifier);
+        }
+        return table;
     }
 }
