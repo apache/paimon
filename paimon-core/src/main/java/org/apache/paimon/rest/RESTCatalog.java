@@ -76,6 +76,8 @@ import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Supplier;
 
+import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
+import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.lockContext;
 import static org.apache.paimon.catalog.CatalogUtils.lockFactory;
 import static org.apache.paimon.catalog.CatalogUtils.newTableLocation;
@@ -185,6 +187,7 @@ public class RESTCatalog implements Catalog {
     @Override
     public void createDatabase(String name, boolean ignoreIfExists, Map<String, String> properties)
             throws DatabaseAlreadyExistException {
+        checkNotSystemDatabase(name);
         CreateDatabaseRequest request = new CreateDatabaseRequest(name, properties);
         try {
             client.post(
@@ -198,6 +201,9 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public Database getDatabase(String name) throws DatabaseNotExistException {
+        if (isSystemDatabase(name)) {
+            return Database.of(name);
+        }
         try {
             GetDatabaseResponse response =
                     client.get(resourcePaths.database(name), GetDatabaseResponse.class, headers());
@@ -211,6 +217,7 @@ public class RESTCatalog implements Catalog {
     @Override
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException {
+        checkNotSystemDatabase(name);
         try {
             if (!cascade && !this.listTables(name).isEmpty()) {
                 throw new DatabaseNotEmptyException(name);
@@ -226,6 +233,7 @@ public class RESTCatalog implements Catalog {
     @Override
     public void alterDatabase(String name, List<PropertyChange> changes, boolean ignoreIfNotExists)
             throws DatabaseNotExistException {
+        checkNotSystemDatabase(name);
         try {
             Pair<Map<String, String>, Set<String>> setPropertiesToRemoveKeys =
                     PropertyChange.getSetPropertiesToRemoveKeys(changes);
@@ -305,22 +313,40 @@ public class RESTCatalog implements Catalog {
     @Override
     public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
             throws TableNotExistException, TableAlreadyExistException {
-        updateTable(fromTable, toTable, new ArrayList<>());
+        try {
+            updateTable(fromTable, toTable, new ArrayList<>());
+        } catch (NoSuchResourceException e) {
+            if (!ignoreIfNotExists) {
+                throw new TableNotExistException(fromTable);
+            }
+        }
     }
 
     @Override
     public void alterTable(
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
-        updateTable(identifier, null, changes);
+        try {
+            updateTable(identifier, null, changes);
+        } catch (NoSuchResourceException e) {
+            if (!ignoreIfNotExists) {
+                throw new TableNotExistException(identifier);
+            }
+        }
     }
 
     @Override
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
             throws TableNotExistException {
-        client.delete(
-                resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),
-                headers());
+        try {
+            client.delete(
+                    resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),
+                    headers());
+        } catch (NoSuchResourceException e) {
+            if (!ignoreIfNotExists) {
+                throw new TableNotExistException(identifier);
+            }
+        }
     }
 
     @Override
