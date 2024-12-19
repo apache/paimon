@@ -66,7 +66,7 @@ public class ExpireSnapshotsProcedure extends ProcedureBase {
             Integer retainMin,
             String olderThanStr,
             Integer maxDeletes)
-            throws Catalog.TableNotExistException {
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException {
         ExpireSnapshots expireSnapshots = table(tableId).newExpireSnapshots();
         ExpireConfig.Builder builder = ExpireConfig.builder();
         if (retainMax != null) {

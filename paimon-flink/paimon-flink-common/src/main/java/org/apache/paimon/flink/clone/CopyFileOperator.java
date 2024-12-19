@@ -82,7 +82,7 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
                             try {
                                 return pathOfTable(
                                         sourceCatalog.getTable(Identifier.fromString(key)));
-                            } catch (Catalog.TableNotExistException e) {
+                            } catch (Catalog.TableNotExistException | Catalog.TableNoPermissionException e) {
                                 throw new RuntimeException(e);
                             }
                         });
@@ -93,7 +93,7 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
                             try {
                                 return pathOfTable(
                                         targetCatalog.getTable(Identifier.fromString(key)));
-                            } catch (Catalog.TableNotExistException e) {
+                            } catch (Catalog.TableNotExistException | Catalog.TableNoPermissionException e) {
                                 throw new RuntimeException(e);
                             }
                         });

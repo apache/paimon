@@ -213,7 +213,7 @@ public abstract class AbstractFlinkTableFactory
                             context.getObjectIdentifier().getObjectName());
             try {
                 fileStoreTable = (FileStoreTable) flinkCatalog.catalog().getTable(identifier);
-            } catch (Catalog.TableNotExistException e) {
+            } catch (Catalog.TableNotExistException | Catalog.TableNoPermissionException e) {
                 throw new RuntimeException(e);
             }
         }

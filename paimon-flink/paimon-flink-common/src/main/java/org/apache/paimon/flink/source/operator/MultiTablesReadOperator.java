@@ -150,6 +150,8 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
                 readsMap.put(tableId, table.newReadBuilder().newRead().withIOManager(ioManager));
             } catch (Catalog.TableNotExistException e) {
                 LOG.error(String.format("table: %s not found.", tableId.getFullName()));
+            } catch (Catalog.TableNoPermissionException e) {
+                LOG.error(String.format("table: %s no permission.", tableId.getFullName()));
             }
         }
 

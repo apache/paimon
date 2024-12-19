@@ -48,7 +48,7 @@ public class RollbackToWatermarkProcedure extends ProcedureBase {
                 @ArgumentHint(name = "watermark", type = @DataTypeHint("BIGINT"))
             })
     public String[] call(ProcedureContext procedureContext, String tableId, Long watermark)
-            throws Catalog.TableNotExistException {
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         Snapshot snapshot = fileStoreTable.snapshotManager().earlierOrEqualWatermark(watermark);

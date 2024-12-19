@@ -49,12 +49,12 @@ public class FastForwardProcedure extends ProcedureBase {
                 @ArgumentHint(name = "branch", type = @DataTypeHint("STRING"))
             })
     public String[] call(ProcedureContext procedureContext, String tableId, String branchName)
-            throws Catalog.TableNotExistException {
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException {
         return innerCall(tableId, branchName);
     }
 
     private String[] innerCall(String tableId, String branchName)
-            throws Catalog.TableNotExistException {
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
         table.fastForward(branchName);
         return new String[] {"Success"};

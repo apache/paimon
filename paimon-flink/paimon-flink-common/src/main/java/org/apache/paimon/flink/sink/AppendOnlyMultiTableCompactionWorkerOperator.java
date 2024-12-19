@@ -122,7 +122,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
                     commitUser,
                     this::workerExecutor,
                     getMetricGroup());
-        } catch (Catalog.TableNotExistException e) {
+        } catch (Catalog.TableNotExistException | Catalog.TableNoPermissionException e) {
             throw new RuntimeException(e);
         }
     }

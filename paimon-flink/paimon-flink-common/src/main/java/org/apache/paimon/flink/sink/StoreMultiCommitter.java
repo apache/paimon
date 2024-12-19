@@ -191,7 +191,7 @@ public class StoreMultiCommitter
             FileStoreTable table;
             try {
                 table = (FileStoreTable) catalog.getTable(tableId).copy(dynamicOptions);
-            } catch (Catalog.TableNotExistException e) {
+            } catch (Catalog.TableNotExistException | Catalog.TableNoPermissionException e) {
                 throw new RuntimeException(
                         String.format(
                                 "Failed to get committer for table %s", tableId.getFullName()),

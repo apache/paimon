@@ -207,7 +207,8 @@ public abstract class SynchronizationActionBase extends ActionBase {
             catalog.alterTable(identifier, optionChanges, false);
         } catch (Catalog.TableNotExistException
                 | Catalog.ColumnAlreadyExistException
-                | Catalog.ColumnNotExistException e) {
+                | Catalog.ColumnNotExistException
+                | Catalog.TableNoPermissionException e) {
             throw new RuntimeException("This is unexpected.", e);
         }
 

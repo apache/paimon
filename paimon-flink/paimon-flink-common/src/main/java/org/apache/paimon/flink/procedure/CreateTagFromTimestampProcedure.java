@@ -58,7 +58,7 @@ public class CreateTagFromTimestampProcedure extends ProcedureBase {
             String tagName,
             Long timestamp,
             @Nullable String timeRetained)
-            throws Catalog.TableNotExistException {
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException {
         FileStoreTable fileStoreTable = (FileStoreTable) table(tableId);
         SnapshotManager snapshotManager = fileStoreTable.snapshotManager();
 

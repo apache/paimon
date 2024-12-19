@@ -76,7 +76,7 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
             String timestampPattern,
             String expireStrategy,
             Integer maxExpires)
-            throws Catalog.TableNotExistException {
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException {
         FileStoreTable fileStoreTable = (FileStoreTable) table(tableId);
         FileStore fileStore = fileStoreTable.store();
         Map<String, String> map = new HashMap<>();

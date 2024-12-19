@@ -241,7 +241,7 @@ public class MultiTablesStoreCompactOperator
                     table = table.copy(dynamicOptions);
                     tables.put(tableId, table);
                     break;
-                } catch (Catalog.TableNotExistException e) {
+                } catch (Catalog.TableNotExistException | Catalog.TableNoPermissionException e) {
                     // table not found, waiting until table is created by
                     //     upstream operators
                 }

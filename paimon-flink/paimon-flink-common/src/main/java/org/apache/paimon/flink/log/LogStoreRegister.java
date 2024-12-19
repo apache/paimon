@@ -49,7 +49,7 @@ public interface LogStoreRegister {
         if (!tableOptions.get(LOG_SYSTEM).equalsIgnoreCase(NONE)) {
             try {
                 catalog.getTable(identifier);
-            } catch (Catalog.TableNotExistException e) {
+            } catch (Catalog.TableNotExistException | Catalog.TableNoPermissionException e) {
                 LogStoreRegister logStoreRegister =
                         getLogStoreRegister(identifier, classLoader, tableOptions, logStore);
                 options.putAll(logStoreRegister.registerTopic());

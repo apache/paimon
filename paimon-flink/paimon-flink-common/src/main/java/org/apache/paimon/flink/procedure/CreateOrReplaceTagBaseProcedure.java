@@ -54,7 +54,7 @@ public abstract class CreateOrReplaceTagBaseProcedure extends ProcedureBase {
             String tagName,
             @Nullable Long snapshotId,
             @Nullable String timeRetained)
-            throws Catalog.TableNotExistException {
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
         createOrReplaceTag(table, tagName, snapshotId, toDuration(timeRetained));
         return new String[] {"Success"};

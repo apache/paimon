@@ -47,7 +47,7 @@ public class PurgeFilesProcedure extends ProcedureBase {
 
     @ProcedureHint(argument = {@ArgumentHint(name = "table", type = @DataTypeHint("STRING"))})
     public String[] call(ProcedureContext procedureContext, String tableId)
-            throws Catalog.TableNotExistException {
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         FileIO fileIO = fileStoreTable.fileIO();

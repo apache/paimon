@@ -177,7 +177,7 @@ public class CompactDatabaseAction extends ActionBase {
                     }
                 }
             }
-        } catch (Catalog.DatabaseNotExistException | Catalog.TableNotExistException e) {
+        } catch (Catalog.DatabaseNotExistException | Catalog.TableNotExistException | Catalog.TableNoPermissionException e) {
             throw new RuntimeException(e);
         }
 

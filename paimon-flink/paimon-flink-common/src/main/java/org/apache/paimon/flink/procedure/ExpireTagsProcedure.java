@@ -50,7 +50,7 @@ public class ExpireTagsProcedure extends ProcedureBase {
             })
     public @DataTypeHint("ROW<expired_tags STRING>") Row[] call(
             ProcedureContext procedureContext, String tableId, @Nullable String olderThanStr)
-            throws Catalog.TableNotExistException {
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException {
         FileStoreTable fileStoreTable = (FileStoreTable) table(tableId);
         TagTimeExpire tagTimeExpire =
                 fileStoreTable.store().newTagCreationManager().getTagTimeExpire();

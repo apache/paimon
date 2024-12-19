@@ -48,7 +48,7 @@ public class RollbackToTimestampProcedure extends ProcedureBase {
                 @ArgumentHint(name = "timestamp", type = @DataTypeHint("BIGINT"))
             })
     public String[] call(ProcedureContext procedureContext, String tableId, Long timestamp)
-            throws Catalog.TableNotExistException {
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         Snapshot snapshot = fileStoreTable.snapshotManager().earlierOrEqualTimeMills(timestamp);

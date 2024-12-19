@@ -41,7 +41,7 @@ public class RefreshObjectTableProcedure extends ProcedureBase {
     @ProcedureHint(argument = {@ArgumentHint(name = "table", type = @DataTypeHint("STRING"))})
     public @DataTypeHint("ROW<file_number BIGINT>") Row[] call(
             ProcedureContext procedureContext, String tableId)
-            throws Catalog.TableNotExistException {
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException {
         ObjectTable table = (ObjectTable) table(tableId);
         long fileNumber = table.refresh();
         return new Row[] {Row.of(fileNumber)};

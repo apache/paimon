@@ -44,7 +44,7 @@ public class DeleteTagProcedure extends ProcedureBase {
                 @ArgumentHint(name = "tag", type = @DataTypeHint("STRING"))
             })
     public String[] call(ProcedureContext procedureContext, String tableId, String tagNameStr)
-            throws Catalog.TableNotExistException {
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
         table.deleteTags(tagNameStr);
         return new String[] {"Success"};

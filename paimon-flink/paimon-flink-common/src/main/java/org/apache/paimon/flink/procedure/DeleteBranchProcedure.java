@@ -48,7 +48,7 @@ public class DeleteBranchProcedure extends ProcedureBase {
                 @ArgumentHint(name = "branch", type = @DataTypeHint("STRING"))
             })
     public String[] call(ProcedureContext procedureContext, String tableId, String branchStr)
-            throws Catalog.TableNotExistException {
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException {
         Identifier identifier = Identifier.fromString(tableId);
         catalog.getTable(identifier).deleteBranches(branchStr);
         catalog.invalidateTable(

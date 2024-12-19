@@ -200,7 +200,8 @@ public class CreateTableITCase extends HiveTestBase {
     }
 
     @Test
-    public void testLowerTableName() throws Catalog.TableNotExistException {
+    public void testLowerTableName()
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException {
         // Use `partitioned by` to create hive partition table
         String tableName = "UPPER_NAME";
         hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
@@ -258,7 +259,8 @@ public class CreateTableITCase extends HiveTestBase {
     }
 
     @Test
-    public void testLowerDBName() throws Catalog.TableNotExistException {
+    public void testLowerDBName()
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException {
         String upperDB = "UPPER_DB";
 
         hiveShell.execute(String.format("create database %s", upperDB));
