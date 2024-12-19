@@ -185,7 +185,7 @@ trait ExpressionHelper extends PredicateHelper {
     if (filters.isEmpty) {
       None
     } else {
-      val predicates = filters.map(converter.convert(_, ignorePartialFailure)).filter(_ != null)
+      val predicates = filters.map(converter.convert(_, ignorePartialFailure))
       Some(PredicateBuilder.and(predicates: _*))
     }
   }
