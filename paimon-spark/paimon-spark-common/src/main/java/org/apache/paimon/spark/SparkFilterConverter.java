@@ -40,6 +40,8 @@ import org.apache.spark.sql.sources.StringContains;
 import org.apache.spark.sql.sources.StringEndsWith;
 import org.apache.spark.sql.sources.StringStartsWith;
 
+import javax.annotation.Nullable;
+
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -76,10 +78,12 @@ public class SparkFilterConverter {
         this.builder = new PredicateBuilder(rowType);
     }
 
+    @Nullable
     public Predicate convertIgnoreFailure(Filter filter) {
         return convert(filter, true);
     }
 
+    @Nullable
     public Predicate convert(Filter filter, boolean ignoreFailure) {
         try {
             return convert(filter);
