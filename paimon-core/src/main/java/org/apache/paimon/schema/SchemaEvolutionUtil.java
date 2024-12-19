@@ -18,7 +18,6 @@
 
 package org.apache.paimon.schema;
 
-import org.apache.paimon.KeyValue;
 import org.apache.paimon.casting.CastElementGetter;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
@@ -102,50 +101,6 @@ public class SchemaEvolutionUtil {
         return null;
     }
 
-    /**
-     * Create index mapping from table projection to underlying data projection. For example, the
-     * table and data fields are as follows
-     *
-     * <ul>
-     *   <li>table fields: 1->c, 3->a, 4->e, 5->d, 6->b
-     *   <li>data fields: 1->a, 2->b, 3->c, 4->d
-     * </ul>
-     *
-     * <p>The table and data top projections are as follows
-     *
-     * <ul>
-     *   <li>table projection: [0, 4, 1]
-     *   <li>data projection: [0, 2]
-     * </ul>
-     *
-     * <p>We can first get fields list for table and data projections from their fields as follows
-     *
-     * <ul>
-     *   <li>table projection field list: [1->c, 6->b, 3->a]
-     *   <li>data projection field list: [1->a, 3->c]
-     * </ul>
-     *
-     * <p>Then create index mapping based on the fields list and create cast mapping based on index
-     * mapping.
-     *
-     * <p>/// TODO should support nest index mapping when nest schema evolution is supported.
-     *
-     * @param tableProjection the table projection
-     * @param tableFields the fields in table
-     * @param dataProjection the underlying data projection
-     * @param dataFields the fields in underlying data
-     * @return the index mapping
-     */
-    public static IndexCastMapping createIndexCastMapping(
-            int[] tableProjection,
-            List<DataField> tableFields,
-            int[] dataProjection,
-            List<DataField> dataFields) {
-        return createIndexCastMapping(
-                projectDataFields(tableProjection, tableFields),
-                projectDataFields(dataProjection, dataFields));
-    }
-
     /** Create index mapping from table fields to underlying data fields. */
     public static IndexCastMapping createIndexCastMapping(
             List<DataField> tableFields, List<DataField> dataFields) {
@@ -165,63 +120,6 @@ public class SchemaEvolutionUtil {
                 return castMapping;
             }
         };
-    }
-
-    private static List<DataField> projectDataFields(int[] projection, List<DataField> dataFields) {
-        List<DataField> projectFields = new ArrayList<>(projection.length);
-        for (int index : projection) {
-            projectFields.add(dataFields.get(index));
-        }
-
-        return projectFields;
-    }
-
-    /**
-     * Create index mapping from table projection to data with key and value fields. We should first
-     * create table and data fields with their key/value fields, then create index mapping with
-     * their projections and fields. For example, the table and data projections and fields are as
-     * follows
-     *
-     * <ul>
-     *   <li>Table key fields: 1->ka, 3->kb, 5->kc, 6->kd; value fields: 0->a, 2->d, 4->b;
-     *       projection: [0, 2, 3, 4, 5, 7] where 0 is 1->ka, 2 is 5->kc, 3 is 5->kc, 4/5 are seq
-     *       and kind, 7 is 2->d
-     *   <li>Data key fields: 1->kb, 5->ka; value fields: 2->aa, 4->f; projection: [0, 1, 2, 3, 4]
-     *       where 0 is 1->kb, 1 is 5->ka, 2/3 are seq and kind, 4 is 2->aa
-     * </ul>
-     *
-     * <p>First we will get max key id from table and data fields which is 6, then create table and
-     * data fields on it
-     *
-     * <ul>
-     *   <li>Table fields: 1->ka, 3->kb, 5->kc, 6->kd, 7->seq, 8->kind, 9->a, 11->d, 13->b
-     *   <li>Data fields: 1->kb, 5->ka, 7->seq, 8->kind, 11->aa, 13->f
-     * </ul>
-     *
-     * <p>Finally we can create index mapping with table/data projections and fields, and create
-     * cast mapping based on index mapping.
-     *
-     * <p>/// TODO should support nest index mapping when nest schema evolution is supported.
-     *
-     * @param tableProjection the table projection
-     * @param tableKeyFields the table key fields
-     * @param tableValueFields the table value fields
-     * @param dataProjection the data projection
-     * @param dataKeyFields the data key fields
-     * @param dataValueFields the data value fields
-     * @return the result index and cast mapping
-     */
-    public static IndexCastMapping createIndexCastMapping(
-            int[] tableProjection,
-            List<DataField> tableKeyFields,
-            List<DataField> tableValueFields,
-            int[] dataProjection,
-            List<DataField> dataKeyFields,
-            List<DataField> dataValueFields) {
-        List<DataField> tableFields =
-                KeyValue.createKeyValueFields(tableKeyFields, tableValueFields);
-        List<DataField> dataFields = KeyValue.createKeyValueFields(dataKeyFields, dataValueFields);
-        return createIndexCastMapping(tableProjection, tableFields, dataProjection, dataFields);
     }
 
     /**
@@ -302,8 +200,6 @@ public class SchemaEvolutionUtil {
      * <p>We can get the column types (1->a BIGINT), (3->c DOUBLE) from data fields for (1->c INT)
      * and (3->a BIGINT) in table fields through index mapping [0, -1, 1], then compare the data
      * type and create getter and casting mapping.
-     *
-     * <p>/// TODO should support nest index mapping when nest schema evolution is supported.
      *
      * @param tableFields the fields of table
      * @param dataFields the fields of underlying data
