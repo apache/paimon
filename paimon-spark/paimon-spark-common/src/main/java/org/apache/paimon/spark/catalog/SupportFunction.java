@@ -29,6 +29,8 @@ import org.apache.spark.sql.connector.catalog.functions.UnboundFunction;
 
 import java.util.Arrays;
 
+import scala.Option;
+
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 
 /** Catalog methods for working with Functions. */
@@ -54,7 +56,8 @@ public interface SupportFunction extends FunctionCatalog, SupportsNamespaces {
             return new Identifier[0];
         }
 
-        throw new RuntimeException("Namespace " + Arrays.toString(namespace) + " is not valid");
+        throw new NoSuchNamespaceException(
+                "Namespace " + Arrays.toString(namespace) + " is not valid", Option.empty());
     }
 
     @Override
@@ -66,6 +69,7 @@ public interface SupportFunction extends FunctionCatalog, SupportsNamespaces {
             }
         }
 
-        throw new RuntimeException("Function " + ident + " is not a paimon function");
+        throw new NoSuchFunctionException(
+                "Function " + ident + " is not a paimon function", Option.empty());
     }
 }
