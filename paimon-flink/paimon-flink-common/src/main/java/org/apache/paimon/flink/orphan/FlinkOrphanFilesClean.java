@@ -323,7 +323,8 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
             @Nullable Integer parallelism,
             String databaseName,
             @Nullable String tableName)
-            throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
+            throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException,
+                    Catalog.TableNoPermissionException {
         List<String> tableNames = Collections.singletonList(tableName);
         if (tableName == null || "*".equals(tableName)) {
             tableNames = catalog.listTables(databaseName);

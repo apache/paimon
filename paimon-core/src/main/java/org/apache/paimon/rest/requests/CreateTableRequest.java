@@ -16,29 +16,43 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.responses;
+package org.apache.paimon.rest.requests;
 
-import org.apache.paimon.rest.RESTMessage;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.rest.RESTRequest;
+import org.apache.paimon.schema.Schema;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-/** Class for Database entity. */
-public class DatabaseName implements RESTMessage {
+/** Request for creating table. */
+public class CreateTableRequest implements RESTRequest {
 
-    private static final String FIELD_NAME = "name";
+    private static final String FIELD_IDENTIFIER = "identifier";
+    private static final String FIELD_SCHEMA = "schema";
 
-    @JsonProperty(FIELD_NAME)
-    private String name;
+    @JsonProperty(FIELD_IDENTIFIER)
+    private Identifier identifier;
+
+    @JsonProperty(FIELD_SCHEMA)
+    private Schema schema;
 
     @JsonCreator
-    public DatabaseName(@JsonProperty(FIELD_NAME) String name) {
-        this.name = name;
+    public CreateTableRequest(
+            @JsonProperty(FIELD_IDENTIFIER) Identifier identifier,
+            @JsonProperty(FIELD_SCHEMA) Schema schema) {
+        this.identifier = identifier;
+        this.schema = schema;
     }
 
-    @JsonGetter(FIELD_NAME)
-    public String getName() {
-        return this.name;
+    @JsonGetter(FIELD_IDENTIFIER)
+    public Identifier getIdentifier() {
+        return identifier;
+    }
+
+    @JsonGetter(FIELD_SCHEMA)
+    public Schema getSchema() {
+        return schema;
     }
 }

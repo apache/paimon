@@ -56,7 +56,7 @@ public class MarkPartitionDoneProcedure extends ProcedureBase {
                 @ArgumentHint(name = "partitions", type = @DataTypeHint("STRING"))
             })
     public String[] call(ProcedureContext procedureContext, String tableId, String partitions)
-            throws Catalog.TableNotExistException, IOException {
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException, IOException {
         String[] partitionStrings = partitions.split(";");
         checkArgument(
                 partitionStrings.length > 0,

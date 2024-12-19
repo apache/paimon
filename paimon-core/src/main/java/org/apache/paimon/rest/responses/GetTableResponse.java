@@ -19,27 +19,39 @@
 package org.apache.paimon.rest.responses;
 
 import org.apache.paimon.rest.RESTResponse;
+import org.apache.paimon.schema.TableSchema;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.util.List;
+/** Response for getting table. */
+public class GetTableResponse implements RESTResponse {
 
-/** Response for listing databases. */
-public class ListDatabasesResponse implements RESTResponse {
-    private static final String FIELD_DATABASES = "databases";
+    private static final String FIELD_LOCATION = "location";
+    private static final String FIELD_SCHEMA = "schema";
 
-    @JsonProperty(FIELD_DATABASES)
-    private List<String> databases;
+    @JsonProperty(FIELD_LOCATION)
+    private final String location;
+
+    @JsonProperty(FIELD_SCHEMA)
+    private final TableSchema schema;
 
     @JsonCreator
-    public ListDatabasesResponse(@JsonProperty(FIELD_DATABASES) List<String> databases) {
-        this.databases = databases;
+    public GetTableResponse(
+            @JsonProperty(FIELD_LOCATION) String location,
+            @JsonProperty(FIELD_SCHEMA) TableSchema schema) {
+        this.location = location;
+        this.schema = schema;
     }
 
-    @JsonGetter(FIELD_DATABASES)
-    public List<String> getDatabases() {
-        return this.databases;
+    @JsonGetter(FIELD_LOCATION)
+    public String getLocation() {
+        return this.location;
+    }
+
+    @JsonGetter(FIELD_SCHEMA)
+    public TableSchema getSchema() {
+        return this.schema;
     }
 }

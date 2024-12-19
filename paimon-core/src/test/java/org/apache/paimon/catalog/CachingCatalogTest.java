@@ -284,7 +284,8 @@ class CachingCatalogTest extends CatalogTestBase {
                                     identifier -> {
                                         try {
                                             return underlyCatalog.getTable(identifier);
-                                        } catch (Catalog.TableNotExistException e) {
+                                        } catch (Catalog.TableNotExistException
+                                                | Catalog.TableNoPermissionException e) {
                                             throw new RuntimeException(e);
                                         }
                                     });

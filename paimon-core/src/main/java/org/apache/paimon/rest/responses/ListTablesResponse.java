@@ -26,20 +26,20 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import java.util.List;
 
-/** Response for listing databases. */
-public class ListDatabasesResponse implements RESTResponse {
-    private static final String FIELD_DATABASES = "databases";
+/** Response for listing tables. */
+public class ListTablesResponse implements RESTResponse {
+    private static final String FIELD_TABLES = "tables";
 
-    @JsonProperty(FIELD_DATABASES)
-    private List<String> databases;
+    @JsonProperty(FIELD_TABLES)
+    private List<String> tables;
 
     @JsonCreator
-    public ListDatabasesResponse(@JsonProperty(FIELD_DATABASES) List<String> databases) {
-        this.databases = databases;
+    public ListTablesResponse(@JsonProperty(FIELD_TABLES) List<String> tables) {
+        this.tables = tables;
     }
 
-    @JsonGetter(FIELD_DATABASES)
-    public List<String> getDatabases() {
-        return this.databases;
+    @JsonGetter(FIELD_TABLES)
+    public List<String> getTables() {
+        return this.tables;
     }
 }

@@ -306,6 +306,8 @@ public class FlinkCatalog extends AbstractCatalog {
             }
 
             throw new TableNotExistException(getName(), tablePath);
+        } catch (Catalog.TableNoPermissionException e) {
+            throw new CatalogException(e);
         }
 
         if (table instanceof FormatTable) {
@@ -369,6 +371,8 @@ public class FlinkCatalog extends AbstractCatalog {
             } catch (Catalog.ViewNotExistException ex) {
                 return false;
             }
+        } catch (Catalog.TableNoPermissionException e) {
+            throw new CatalogException(e);
         }
     }
 
@@ -401,6 +405,8 @@ public class FlinkCatalog extends AbstractCatalog {
             }
         } catch (Catalog.TableNotExistException e) {
             throw new TableNotExistException(getName(), tablePath);
+        } catch (Catalog.TableNoPermissionException e) {
+            throw new CatalogException(e);
         }
     }
 
@@ -865,7 +871,9 @@ public class FlinkCatalog extends AbstractCatalog {
             catalog.alterTable(toIdentifier(tablePath), changes, ignoreIfNotExists);
         } catch (Catalog.TableNotExistException e) {
             throw new TableNotExistException(getName(), tablePath);
-        } catch (Catalog.ColumnAlreadyExistException | Catalog.ColumnNotExistException e) {
+        } catch (Catalog.ColumnAlreadyExistException
+                | Catalog.ColumnNotExistException
+                | Catalog.TableNoPermissionException e) {
             throw new CatalogException(e);
         }
     }
@@ -886,6 +894,8 @@ public class FlinkCatalog extends AbstractCatalog {
             table = catalog.getTable(toIdentifier(tablePath));
         } catch (Catalog.TableNotExistException e) {
             throw new TableNotExistException(getName(), tablePath);
+        } catch (Catalog.TableNoPermissionException e) {
+            throw new CatalogException(e);
         }
 
         checkArgument(
@@ -934,7 +944,8 @@ public class FlinkCatalog extends AbstractCatalog {
             catalog.alterTable(toIdentifier(tablePath), changes, ignoreIfNotExists);
         } catch (Catalog.TableNotExistException
                 | Catalog.ColumnAlreadyExistException
-                | Catalog.ColumnNotExistException e) {
+                | Catalog.ColumnNotExistException
+                | Catalog.TableNoPermissionException e) {
             throw new CatalogException(e);
         }
     }
@@ -1249,6 +1260,8 @@ public class FlinkCatalog extends AbstractCatalog {
             }
         } catch (Catalog.TableAlreadyExistException e) {
             throw new TableAlreadyExistException(getName(), toTable);
+        } catch (Catalog.TableNoPermissionException e) {
+            throw new CatalogException(e);
         }
     }
 
@@ -1313,6 +1326,8 @@ public class FlinkCatalog extends AbstractCatalog {
             return catalog.getTable(identifier);
         } catch (Catalog.TableNotExistException e) {
             throw new TableNotExistException(getName(), tablePath);
+        } catch (Catalog.TableNoPermissionException e) {
+            throw new CatalogException(e);
         }
     }
 
@@ -1564,6 +1579,8 @@ public class FlinkCatalog extends AbstractCatalog {
             if (!ignoreIfNotExists) {
                 throw new TableNotExistException(getName(), tablePath);
             }
+        } catch (Catalog.TableNoPermissionException e) {
+            throw new CatalogException(e);
         }
     }
 

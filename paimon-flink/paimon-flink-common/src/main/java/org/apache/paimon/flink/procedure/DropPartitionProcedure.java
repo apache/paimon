@@ -46,7 +46,7 @@ public class DropPartitionProcedure extends ProcedureBase {
 
     public String[] call(
             ProcedureContext procedureContext, String tableId, String... partitionStrings)
-            throws Catalog.TableNotExistException {
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException {
         checkArgument(
                 partitionStrings.length > 0, "drop-partition procedure must specify partitions.");
 

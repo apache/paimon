@@ -97,7 +97,9 @@ public class MultiUnawareTablesReadOperator
                 table = (FileStoreTable) newTable;
                 tablesMap.put(tableId, table);
             } catch (Catalog.TableNotExistException e) {
-                LOG.error(String.format("table: %s not found.", tableId.getFullName()));
+                LOG.error("table: {} not found.", tableId.getFullName());
+            } catch (Catalog.TableNoPermissionException e) {
+                LOG.error("table: {} no permission.", tableId.getFullName());
             }
         }
 

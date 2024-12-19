@@ -178,7 +178,8 @@ public class CdcRecordStoreMultiWriteOperator
         }
     }
 
-    private FileStoreTable getTable(Identifier tableId) throws InterruptedException {
+    private FileStoreTable getTable(Identifier tableId)
+            throws InterruptedException, Catalog.TableNoPermissionException {
         FileStoreTable table = tables.get(tableId);
         if (table == null) {
             while (true) {

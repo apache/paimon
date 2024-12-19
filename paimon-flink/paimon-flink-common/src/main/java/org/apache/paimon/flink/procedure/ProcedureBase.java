@@ -52,7 +52,8 @@ public abstract class ProcedureBase implements Procedure, Factory {
         return this;
     }
 
-    protected Table table(String tableId) throws Catalog.TableNotExistException {
+    protected Table table(String tableId)
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException {
         return catalog.getTable(Identifier.fromString(tableId));
     }
 

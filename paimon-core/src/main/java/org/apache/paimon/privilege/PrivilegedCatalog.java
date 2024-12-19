@@ -107,7 +107,7 @@ public class PrivilegedCatalog extends DelegateCatalog {
 
     @Override
     public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
-            throws TableNotExistException, TableAlreadyExistException {
+            throws TableNotExistException, TableAlreadyExistException, TableNoPermissionException {
         privilegeManager.getPrivilegeChecker().assertCanAlterTable(fromTable);
         wrapped.renameTable(fromTable, toTable, ignoreIfNotExists);
 
@@ -126,13 +126,15 @@ public class PrivilegedCatalog extends DelegateCatalog {
     @Override
     public void alterTable(
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
-            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
+            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException,
+                    TableNoPermissionException {
         privilegeManager.getPrivilegeChecker().assertCanAlterTable(identifier);
         wrapped.alterTable(identifier, changes, ignoreIfNotExists);
     }
 
     @Override
-    public Table getTable(Identifier identifier) throws TableNotExistException {
+    public Table getTable(Identifier identifier)
+            throws TableNotExistException, TableNoPermissionException {
         Table table = wrapped.getTable(identifier);
         if (table instanceof FileStoreTable) {
             return PrivilegedFileStoreTable.wrap(
@@ -186,6 +188,8 @@ public class PrivilegedCatalog extends DelegateCatalog {
             getTable(identifier);
         } catch (TableNotExistException e) {
             throw new IllegalArgumentException("Table " + identifier + " does not exist");
+        } catch (TableNoPermissionException e) {
+            throw new IllegalArgumentException("Table " + identifier + " has no permission");
         }
         privilegeManager.grant(user, identifier.getFullName(), privilege);
     }

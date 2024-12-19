@@ -22,10 +22,10 @@ import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
-import org.apache.paimon.rest.responses.DatabaseName;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListTablesResponse;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
@@ -63,9 +63,8 @@ public class MockRESTMessage {
     }
 
     public static ListDatabasesResponse listDatabasesResponse(String name) {
-        DatabaseName databaseName = new DatabaseName(name);
-        List<DatabaseName> databaseNameList = new ArrayList<>();
-        databaseNameList.add(databaseName);
+        List<String> databaseNameList = new ArrayList<>();
+        databaseNameList.add(name);
         return new ListDatabasesResponse(databaseNameList);
     }
 
@@ -82,5 +81,13 @@ public class MockRESTMessage {
     public static AlterDatabaseResponse alterDatabaseResponse() {
         return new AlterDatabaseResponse(
                 Lists.newArrayList("remove"), Lists.newArrayList("add"), new ArrayList<>());
+    }
+
+    public static ListTablesResponse listTablesResponse() {
+        return new ListTablesResponse(Lists.newArrayList("table"));
+    }
+
+    public static ListTablesResponse listTablesEmptyResponse() {
+        return new ListTablesResponse(Lists.newArrayList());
     }
 }

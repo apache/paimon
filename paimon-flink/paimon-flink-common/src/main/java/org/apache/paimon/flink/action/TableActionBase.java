@@ -46,7 +46,7 @@ public abstract class TableActionBase extends ActionBase {
         identifier = new Identifier(databaseName, tableName);
         try {
             table = catalog.getTable(identifier);
-        } catch (Catalog.TableNotExistException e) {
+        } catch (Catalog.TableNotExistException | Catalog.TableNoPermissionException e) {
             throw new RuntimeException(e);
         }
     }

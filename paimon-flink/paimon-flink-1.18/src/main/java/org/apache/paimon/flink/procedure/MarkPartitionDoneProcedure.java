@@ -49,7 +49,7 @@ public class MarkPartitionDoneProcedure extends ProcedureBase {
 
     public String[] call(
             ProcedureContext procedureContext, String tableId, String... partitionStrings)
-            throws Catalog.TableNotExistException, IOException {
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException, IOException {
         checkArgument(
                 partitionStrings.length > 0,
                 "mark_partition_done procedure must specify partitions.");

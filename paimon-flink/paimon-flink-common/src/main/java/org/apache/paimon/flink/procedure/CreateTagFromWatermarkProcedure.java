@@ -58,7 +58,7 @@ public class CreateTagFromWatermarkProcedure extends ProcedureBase {
             String tagName,
             Long watermark,
             @Nullable String timeRetained)
-            throws Catalog.TableNotExistException {
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException {
         FileStoreTable fileStoreTable = (FileStoreTable) table(tableId);
         SnapshotManager snapshotManager = fileStoreTable.snapshotManager();
 

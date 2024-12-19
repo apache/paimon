@@ -52,7 +52,7 @@ public class CreateBranchProcedure extends ProcedureBase {
             })
     public String[] call(
             ProcedureContext procedureContext, String tableId, String branchName, String tagName)
-            throws Catalog.TableNotExistException {
+            throws Catalog.TableNotExistException, Catalog.TableNoPermissionException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
         if (!StringUtils.isBlank(tagName)) {
             table.createBranch(branchName, tagName);

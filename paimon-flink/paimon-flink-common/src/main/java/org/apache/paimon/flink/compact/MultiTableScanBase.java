@@ -74,7 +74,8 @@ public abstract class MultiTableScanBase<T> implements AutoCloseable {
     }
 
     protected void updateTableMap()
-            throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
+            throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException,
+                    Catalog.TableNoPermissionException {
         List<String> databases = catalog.listDatabases();
 
         for (String databaseName : databases) {
@@ -102,7 +103,8 @@ public abstract class MultiTableScanBase<T> implements AutoCloseable {
     }
 
     public ScanResult scanTable(ReaderOutput<T> ctx)
-            throws Catalog.TableNotExistException, Catalog.DatabaseNotExistException {
+            throws Catalog.TableNotExistException, Catalog.DatabaseNotExistException,
+                    Catalog.TableNoPermissionException {
         try {
             updateTableMap();
             List<T> tasks = doScan();
