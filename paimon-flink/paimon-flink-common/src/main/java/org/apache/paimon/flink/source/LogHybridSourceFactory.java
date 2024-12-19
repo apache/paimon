@@ -20,7 +20,7 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.ProjectionRowData;
+import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.options.Options;
@@ -74,7 +74,7 @@ public class LogHybridSourceFactory
             Table table,
             @Nullable RowType readType,
             @Nullable Predicate predicate,
-            @Nullable ProjectionRowData rowData) {
+            @Nullable NestedProjectedRowData rowData) {
         if (!(table instanceof DataTable)) {
             throw new UnsupportedOperationException(
                     String.format(
@@ -108,7 +108,7 @@ public class LogHybridSourceFactory
                 ReadBuilder readBuilder,
                 SnapshotManager snapshotManager,
                 Options options,
-                @Nullable ProjectionRowData rowData) {
+                @Nullable NestedProjectedRowData rowData) {
             super(readBuilder, null, rowData);
             this.snapshotManager = snapshotManager;
             this.options = options;

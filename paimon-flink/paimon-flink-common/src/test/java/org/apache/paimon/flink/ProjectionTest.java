@@ -63,7 +63,7 @@ public class ProjectionTest {
                                         DataTypes.FIELD(0, "f0", DataTypes.INT()),
                                         DataTypes.FIELD(1, "f2", DataTypes.INT()))));
 
-        ProjectionRowData rowData = projection.getOuterProjectRow(writeType);
+        NestedProjectedRowData rowData = projection.getOuterProjectRow(writeType);
 
         assertThat(rowData.getRowType()).isEqualTo(toLogicalType(readTypeForFlink));
 

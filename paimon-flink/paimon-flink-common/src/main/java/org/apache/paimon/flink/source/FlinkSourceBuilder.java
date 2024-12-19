@@ -22,8 +22,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.StartupMode;
 import org.apache.paimon.CoreOptions.StreamingReadMode;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.Projection;
-import org.apache.paimon.flink.ProjectionRowData;
 import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.sink.FlinkSink;
 import org.apache.paimon.flink.source.align.AlignedContinuousFileStoreSource;
@@ -257,7 +257,7 @@ public class FlinkSourceBuilder {
                 .orElse(null);
     }
 
-    private @Nullable ProjectionRowData outerProject() {
+    private @Nullable NestedProjectedRowData outerProject() {
         return Optional.ofNullable(projectedFields)
                 .map(Projection::of)
                 .map(p -> p.getOuterProjectRow(table.rowType()))

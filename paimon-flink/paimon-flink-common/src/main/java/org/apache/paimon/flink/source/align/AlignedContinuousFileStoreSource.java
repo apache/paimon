@@ -21,7 +21,7 @@ package org.apache.paimon.flink.source.align;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.ProjectionRowData;
+import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.source.ContinuousFileStoreSource;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.flink.source.PendingSplitsCheckpoint;
@@ -54,7 +54,7 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
             Map<String, String> options,
             @Nullable Long limit,
             BucketMode bucketMode,
-            @Nullable ProjectionRowData rowData) {
+            @Nullable NestedProjectedRowData rowData) {
         super(readBuilder, options, limit, bucketMode, rowData);
     }
 

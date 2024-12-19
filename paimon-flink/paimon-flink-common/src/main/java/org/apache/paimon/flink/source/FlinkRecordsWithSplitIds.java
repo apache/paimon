@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.flink.ProjectionRowData;
+import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.utils.Reference;
 
@@ -111,7 +111,7 @@ public class FlinkRecordsWithSplitIds implements RecordsWithSplitIds<RecordItera
             SourceOutput<RowData> output,
             FileStoreSourceSplitState state,
             FileStoreSourceReaderMetrics metrics,
-            @Nullable ProjectionRowData projectionRowData) {
+            @Nullable NestedProjectedRowData nestedProjectedRowData) {
         long timestamp = TimestampAssigner.NO_TIMESTAMP;
         if (metrics.getLatestFileCreationTime() != FileStoreSourceReaderMetrics.UNDEFINED) {
             timestamp = metrics.getLatestFileCreationTime();
@@ -134,8 +134,8 @@ public class FlinkRecordsWithSplitIds implements RecordsWithSplitIds<RecordItera
             }
 
             RowData rowData = record.getRecord();
-            if (projectionRowData != null) {
-                rowData = projectionRowData.replaceRow(rowData);
+            if (nestedProjectedRowData != null) {
+                rowData = nestedProjectedRowData.replaceRow(rowData);
             }
             output.collect(rowData, timestamp);
             state.setPosition(record);

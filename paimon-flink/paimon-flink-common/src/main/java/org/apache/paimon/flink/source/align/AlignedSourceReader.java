@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.source.align;
 
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.flink.ProjectionRowData;
+import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.source.FileStoreSourceReader;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.flink.source.FileStoreSourceSplitState;
@@ -59,7 +59,7 @@ public class AlignedSourceReader extends FileStoreSourceReader
             @Nullable Long limit,
             FutureCompletingBlockingQueue<RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>>>
                     elementsQueue,
-            @Nullable ProjectionRowData rowData) {
+            @Nullable NestedProjectedRowData rowData) {
         super(readerContext, tableRead, metrics, ioManager, limit, rowData);
         this.elementsQueue = elementsQueue;
         this.nextCheckpointId = null;

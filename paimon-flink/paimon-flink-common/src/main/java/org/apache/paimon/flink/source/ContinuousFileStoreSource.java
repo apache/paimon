@@ -20,7 +20,7 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.ProjectionRowData;
+import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
@@ -57,7 +57,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
             Map<String, String> options,
             @Nullable Long limit,
             BucketMode bucketMode,
-            @Nullable ProjectionRowData rowData) {
+            @Nullable NestedProjectedRowData rowData) {
         super(readBuilder, limit, rowData);
         this.options = options;
         this.bucketMode = bucketMode;

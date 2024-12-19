@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.flink.ProjectionRowData;
+import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.table.source.TableRead;
@@ -50,7 +50,7 @@ public class FileStoreSourceReader
             FileStoreSourceReaderMetrics metrics,
             IOManager ioManager,
             @Nullable Long limit,
-            @Nullable ProjectionRowData rowData) {
+            @Nullable NestedProjectedRowData rowData) {
         // limiter is created in SourceReader, it can be shared in all split readers
         super(
                 () ->

@@ -48,7 +48,8 @@ public abstract class Projection {
     public abstract org.apache.paimon.types.RowType project(
             org.apache.paimon.types.RowType rowType);
 
-    public abstract ProjectionRowData getOuterProjectRow(org.apache.paimon.types.RowType rowType);
+    public abstract NestedProjectedRowData getOuterProjectRow(
+            org.apache.paimon.types.RowType rowType);
 
     /** @return {@code true} whether this projection is nested or not. */
     public abstract boolean isNested();
@@ -150,7 +151,7 @@ public abstract class Projection {
         }
 
         @Override
-        public ProjectionRowData getOuterProjectRow(org.apache.paimon.types.RowType rowType) {
+        public NestedProjectedRowData getOuterProjectRow(org.apache.paimon.types.RowType rowType) {
             return new NestedProjection(toNestedIndexes()).getOuterProjectRow(rowType);
         }
 
@@ -243,7 +244,7 @@ public abstract class Projection {
         }
 
         @Override
-        public ProjectionRowData getOuterProjectRow(org.apache.paimon.types.RowType rowType) {
+        public NestedProjectedRowData getOuterProjectRow(org.apache.paimon.types.RowType rowType) {
             if (!nested) {
                 return null;
             }
@@ -268,7 +269,7 @@ public abstract class Projection {
                 }
             }
 
-            return new ProjectionRowData(toLogicalType(resultType), resultIndices);
+            return new NestedProjectedRowData(toLogicalType(resultType), resultIndices);
         }
 
         @Override
@@ -310,7 +311,7 @@ public abstract class Projection {
         }
 
         @Override
-        public ProjectionRowData getOuterProjectRow(org.apache.paimon.types.RowType rowType) {
+        public NestedProjectedRowData getOuterProjectRow(org.apache.paimon.types.RowType rowType) {
             return new NestedProjection(toNestedIndexes()).getOuterProjectRow(rowType);
         }
 

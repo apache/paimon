@@ -19,9 +19,9 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
 import org.apache.paimon.flink.Projection;
-import org.apache.paimon.flink.ProjectionRowData;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.BucketMode;
@@ -82,7 +82,7 @@ public class SystemTableSource extends FlinkTableSource {
     public ScanRuntimeProvider getScanRuntimeProvider(ScanContext scanContext) {
         Source<RowData, ?, ?> source;
 
-        ProjectionRowData rowData = null;
+        NestedProjectedRowData rowData = null;
         org.apache.paimon.types.RowType readType = null;
         if (projectFields != null) {
             Projection projection = Projection.of(projectFields);

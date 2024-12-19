@@ -37,9 +37,10 @@ import java.util.function.BiFunction;
 
 /**
  * A {@link RowData} that provides a mapping view of the original {@link RowData} according to
- * projection information.
+ * projection information. Compared with {@link ProjectedRowData}, this class supports nested
+ * projection.
  */
-public class ProjectionRowData implements RowData, Serializable {
+public class NestedProjectedRowData implements RowData, Serializable {
     private static final long serialVersionUID = 1L;
 
     private final RowType producedDataType;
@@ -54,7 +55,7 @@ public class ProjectionRowData implements RowData, Serializable {
 
     private transient RowData row;
 
-    ProjectionRowData(RowType producedDataType, int[][] projectedFields) {
+    NestedProjectedRowData(RowType producedDataType, int[][] projectedFields) {
         this.producedDataType = producedDataType;
         this.projectedFields = projectedFields;
         this.lastProjectedFields = new int[projectedFields.length];
@@ -68,18 +69,18 @@ public class ProjectionRowData implements RowData, Serializable {
         this.isNullAtCached = new boolean[projectedFields.length];
     }
 
-    public ProjectionRowData replaceRow(RowData row) {
+    public NestedProjectedRowData replaceRow(RowData row) {
         this.row = row;
         Arrays.fill(isFieldsCached, false);
         Arrays.fill(isNullAtCached, false);
         return this;
     }
 
-    public static @Nullable ProjectionRowData copy(@Nullable ProjectionRowData rowData) {
+    public static @Nullable NestedProjectedRowData copy(@Nullable NestedProjectedRowData rowData) {
         if (rowData == null) {
             return null;
         }
-        return new ProjectionRowData(rowData.producedDataType, rowData.projectedFields);
+        return new NestedProjectedRowData(rowData.producedDataType, rowData.projectedFields);
     }
 
     @Override
