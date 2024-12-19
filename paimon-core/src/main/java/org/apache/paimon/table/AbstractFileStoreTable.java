@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.io.TablePathProvider;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -87,6 +88,7 @@ import java.util.SortedMap;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.WAREHOUSE_ROOT_PATH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Abstract {@link FileStoreTable}. */
@@ -97,7 +99,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     private static final String WATERMARK_PREFIX = "watermark-";
 
     protected final FileIO fileIO;
-    protected final Path path;
+    protected final TablePathProvider tablePathProvider;
     protected final TableSchema tableSchema;
     protected final CatalogEnvironment catalogEnvironment;
 
@@ -107,15 +109,15 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     protected AbstractFileStoreTable(
             FileIO fileIO,
-            Path path,
+            TablePathProvider tablePathProvider,
             TableSchema tableSchema,
             CatalogEnvironment catalogEnvironment) {
         this.fileIO = fileIO;
-        this.path = path;
+        this.tablePathProvider = tablePathProvider;
         if (!tableSchema.options().containsKey(PATH.key())) {
             // make sure table is always available
             Map<String, String> newOptions = new HashMap<>(tableSchema.options());
-            newOptions.put(PATH.key(), path.toString());
+            newOptions.put(PATH.key(), tablePathProvider.getTableWriteDataPath().toString());
             tableSchema = tableSchema.copy(newOptions);
         }
         this.tableSchema = tableSchema;
@@ -333,8 +335,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
         Options newOptions = Options.fromMap(options);
 
-        // set path always
-        newOptions.set(PATH, path.toString());
+        // set warehouse table path always
+        newOptions.set(PATH, tablePathProvider.getTableWriteDataPath().toString());
+
+        // set warehouse root path always
+        newOptions.set(WAREHOUSE_ROOT_PATH, tablePathProvider.getWarehouseRootPath().toString());
 
         // set dynamic options with default values
         CoreOptions.setDefaultValues(newOptions);
@@ -372,9 +377,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         AbstractFileStoreTable copied =
                 newTableSchema.primaryKeys().isEmpty()
                         ? new AppendOnlyFileStoreTable(
-                                fileIO, path, newTableSchema, catalogEnvironment)
+                                fileIO, tablePathProvider, newTableSchema, catalogEnvironment)
                         : new PrimaryKeyFileStoreTable(
-                                fileIO, path, newTableSchema, catalogEnvironment);
+                                fileIO, tablePathProvider, newTableSchema, catalogEnvironment);
         if (snapshotCache != null) {
             copied.setSnapshotCache(snapshotCache);
         }
@@ -389,7 +394,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public SchemaManager schemaManager() {
-        return new SchemaManager(fileIO(), path, currentBranch());
+        return new SchemaManager(fileIO(), tablePathProvider.getTableSchemaPath(), currentBranch());
     }
 
     @Override
@@ -402,9 +407,16 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         return fileIO;
     }
 
+    // TODO @qihouliang, should be changed according to the usage
+    // and check the schema's constructor use the right path
     @Override
     public Path location() {
-        return path;
+        return tablePathProvider.getTableWriteDataPath();
+    }
+
+    @Override
+    public TablePathProvider pathProvider() {
+        return tablePathProvider;
     }
 
     @Override
@@ -454,7 +466,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 options.writeOnly() ? null : store().newTagCreationManager(),
                 catalogEnvironment.lockFactory().create(),
                 CoreOptions.fromMap(options()).consumerExpireTime(),
-                new ConsumerManager(fileIO, path, snapshotManager().branch()),
+                new ConsumerManager(
+                        fileIO, tablePathProvider.getTableSchemaPath(), snapshotManager().branch()),
                 options.snapshotExpireExecutionMode(),
                 name(),
                 options.forceCreatingSnapshot());
@@ -712,12 +725,17 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public TagManager tagManager() {
-        return new TagManager(fileIO, path, currentBranch());
+        return new TagManager(fileIO, tablePathProvider.getTableSchemaPath(), currentBranch());
     }
 
     @Override
     public BranchManager branchManager() {
-        return new BranchManager(fileIO, path, snapshotManager(), tagManager(), schemaManager());
+        return new BranchManager(
+                fileIO,
+                tablePathProvider.getTableSchemaPath(),
+                snapshotManager(),
+                tagManager(),
+                schemaManager());
     }
 
     @Override
@@ -729,7 +747,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
 
         Optional<TableSchema> optionalSchema =
-                new SchemaManager(fileIO(), location(), targetBranch).latest();
+                new SchemaManager(fileIO(), tablePathProvider.getTableSchemaPath(), targetBranch)
+                        .latest();
         Preconditions.checkArgument(
                 optionalSchema.isPresent(), "Branch " + targetBranch + " does not exist");
 
@@ -764,6 +783,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             return false;
         }
         AbstractFileStoreTable that = (AbstractFileStoreTable) o;
-        return Objects.equals(path, that.path) && Objects.equals(tableSchema, that.tableSchema);
+        return Objects.equals(tablePathProvider, that.tablePathProvider)
+                && Objects.equals(tableSchema, that.tableSchema);
     }
 }

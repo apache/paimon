@@ -203,6 +203,7 @@ public abstract class AbstractFlinkTableFactory
             fileStoreTable = (FileStoreTable) ((DataCatalogTable) origin).table();
         } else if (flinkCatalog == null) {
             // In case Paimon is directly used as a Flink connector, instead of through catalog.
+            CatalogContext catalogContext = createCatalogContext(context);
             fileStoreTable = FileStoreTableFactory.create(createCatalogContext(context));
         } else {
             // In cases like materialized table, the Paimon table might not be DataCatalogTable,

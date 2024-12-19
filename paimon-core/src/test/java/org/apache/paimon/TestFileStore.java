@@ -26,6 +26,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.IndexIncrement;
+import org.apache.paimon.io.TablePathProvider;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
@@ -133,7 +134,8 @@ public class TestFileStore extends KeyValueFileStore {
                 keyValueFieldsExtractor,
                 mfFactory,
                 (new Path(root)).getName(),
-                CatalogEnvironment.empty());
+                CatalogEnvironment.empty(),
+                new TablePathProvider(new Path(root)));
         this.root = root;
         this.fileIO = FileIOFinder.find(new Path(root));
         this.keySerializer = new InternalRowSerializer(keyType);

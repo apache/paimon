@@ -76,6 +76,7 @@ public abstract class KeyValueDataFileWriter
     private long minSeqNumber = Long.MAX_VALUE;
     private long maxSeqNumber = Long.MIN_VALUE;
     private long deleteRecordCount = 0;
+    private final Path dataRootLocation;
 
     public KeyValueDataFileWriter(
             FileIO fileIO,
@@ -91,7 +92,8 @@ public abstract class KeyValueDataFileWriter
             String compression,
             CoreOptions options,
             FileSource fileSource,
-            FileIndexOptions fileIndexOptions) {
+            FileIndexOptions fileIndexOptions,
+            Path dataRootLocation) {
         super(
                 fileIO,
                 factory,
@@ -116,6 +118,7 @@ public abstract class KeyValueDataFileWriter
         this.dataFileIndexWriter =
                 DataFileIndexWriter.create(
                         fileIO, dataFileToFileIndexPath(path), valueType, fileIndexOptions);
+        this.dataRootLocation = dataRootLocation;
     }
 
     @Override
@@ -195,7 +198,8 @@ public abstract class KeyValueDataFileWriter
                 deleteRecordCount,
                 indexResult.embeddedIndexBytes(),
                 fileSource,
-                valueStatsPair.getKey());
+                valueStatsPair.getKey(),
+                dataRootLocation.toString());
     }
 
     abstract Pair<SimpleColStats[], SimpleColStats[]> fetchKeyValueStats(SimpleColStats[] rowStats);

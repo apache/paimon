@@ -77,7 +77,8 @@ public class KeyValueThinDataFileWriterImpl extends KeyValueDataFileWriter {
             String compression,
             CoreOptions options,
             FileSource fileSource,
-            FileIndexOptions fileIndexOptions) {
+            FileIndexOptions fileIndexOptions,
+            Path dataRootLocation) {
         super(
                 fileIO,
                 factory,
@@ -92,7 +93,8 @@ public class KeyValueThinDataFileWriterImpl extends KeyValueDataFileWriter {
                 compression,
                 options,
                 fileSource,
-                fileIndexOptions);
+                fileIndexOptions,
+                dataRootLocation);
         Map<Integer, Integer> idToIndex = new HashMap<>(valueType.getFieldCount());
         for (int i = 0; i < valueType.getFieldCount(); i++) {
             idToIndex.put(valueType.getFields().get(i).id(), i);

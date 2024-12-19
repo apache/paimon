@@ -24,6 +24,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.TablePathProvider;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -66,10 +67,12 @@ public class FallbackReadFileStoreTableTest {
     private String commitUser;
 
     private FileIO fileIO;
+    protected TablePathProvider tablePathProvider;
 
     @BeforeEach
     public void before() {
         tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
+        tablePathProvider = new TablePathProvider(tablePath);
         commitUser = UUID.randomUUID().toString();
         fileIO = FileIOFinder.find(tablePath);
     }
@@ -163,7 +166,7 @@ public class FallbackReadFileStoreTableTest {
                                 Collections.emptyList(),
                                 Collections.emptyMap(),
                                 ""));
-        return new AppendOnlyFileStoreTable(fileIO, tablePath, tableSchema);
+        return new AppendOnlyFileStoreTable(fileIO, tablePathProvider, tableSchema);
     }
 
     private FileStoreTable createTableFromBranch(FileStoreTable baseTable, String branchName) {
@@ -171,7 +174,7 @@ public class FallbackReadFileStoreTableTest {
         options.set(CoreOptions.BRANCH, branchName);
         return new AppendOnlyFileStoreTable(
                         fileIO,
-                        tablePath,
+                        tablePathProvider,
                         new SchemaManager(fileIO, tablePath, branchName).latest().get())
                 .copy(options.toMap());
     }

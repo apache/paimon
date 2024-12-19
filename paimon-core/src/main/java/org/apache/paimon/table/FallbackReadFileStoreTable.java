@@ -112,7 +112,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         branchSchema = branchSchema.copy(branchOptions.toMap());
         return FileStoreTableFactory.createWithoutFallbackBranch(
                 wrapped.fileIO(),
-                wrapped.location(),
+                wrapped.pathProvider(),
                 branchSchema,
                 new Options(),
                 wrapped.catalogEnvironment());

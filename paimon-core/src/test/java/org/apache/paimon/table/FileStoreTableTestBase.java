@@ -37,6 +37,7 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.TablePathProvider;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.operation.FileStoreTestUtils;
 import org.apache.paimon.options.MemorySize;
@@ -126,7 +127,6 @@ import static org.junit.jupiter.params.provider.Arguments.arguments;
 public abstract class FileStoreTableTestBase {
 
     protected static final String BRANCH_NAME = "branch1";
-
     protected static final RowType ROW_TYPE =
             RowType.of(
                     new DataType[] {
@@ -185,10 +185,12 @@ public abstract class FileStoreTableTestBase {
 
     protected Path tablePath;
     protected String commitUser;
+    protected TablePathProvider tablePathProvider;
 
     @BeforeEach
     public void before() {
         tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
+        tablePathProvider = new TablePathProvider(tablePath);
         commitUser = UUID.randomUUID().toString();
     }
 

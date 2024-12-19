@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.TablePathProvider;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
@@ -80,7 +81,7 @@ public class FileStorePathFactoryTest {
     public void testCreateDataFilePathFactoryWithPartition() {
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
-                        new Path(tempDir.toString()),
+                        new TablePathProvider(new Path(tempDir.toString())),
                         RowType.of(
                                 new DataType[] {new VarCharType(10), new IntType()},
                                 new String[] {"dt", "hr"}),
@@ -123,7 +124,7 @@ public class FileStorePathFactoryTest {
 
     public static FileStorePathFactory createNonPartFactory(Path root) {
         return new FileStorePathFactory(
-                root,
+                new TablePathProvider(root),
                 RowType.builder().build(),
                 PARTITION_DEFAULT_NAME.defaultValue(),
                 CoreOptions.FILE_FORMAT.defaultValue().toString(),

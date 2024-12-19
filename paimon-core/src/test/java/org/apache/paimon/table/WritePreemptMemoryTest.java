@@ -109,7 +109,8 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
                                 Arrays.asList("pt", "a"),
                                 options.toMap(),
                                 ""));
-        return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, schema);
+        return new PrimaryKeyFileStoreTable(
+                FileIOFinder.find(tablePath), tablePathProvider, schema);
     }
 
     @Override
@@ -134,7 +135,8 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
                                 Arrays.asList("pt", "a"),
                                 options.toMap(),
                                 ""));
-        return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, schema);
+        return new PrimaryKeyFileStoreTable(
+                FileIOFinder.find(tablePath), tablePathProvider, schema);
     }
 
     @Override
@@ -156,6 +158,7 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
                                 Arrays.asList("pk", "pt0", "pt1"),
                                 conf.toMap(),
                                 ""));
-        return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, schema);
+        return new PrimaryKeyFileStoreTable(
+                FileIOFinder.find(tablePath), tablePathProvider, schema);
     }
 }

@@ -244,7 +244,8 @@ public class PrimaryKeyFileDataTableTest extends FileDataFilterTestBase {
     @Override
     protected FileStoreTable createFileStoreTable(Map<Long, TableSchema> tableSchemas) {
         SchemaManager schemaManager = new TestingSchemaManager(tablePath, tableSchemas);
-        return new PrimaryKeyFileStoreTable(fileIO, tablePath, schemaManager.latest().get()) {
+        return new PrimaryKeyFileStoreTable(
+                fileIO, tablePathProvider, schemaManager.latest().get()) {
 
             @Override
             public SchemaManager schemaManager() {
