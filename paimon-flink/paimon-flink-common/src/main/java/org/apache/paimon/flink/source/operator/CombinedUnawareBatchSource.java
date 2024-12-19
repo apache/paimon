@@ -178,9 +178,9 @@ public class CombinedUnawareBatchSource
                                                 PartitionEntry::lastFileCreationTime));
                 multiTablesPartitionInfo.put(tableIdentifier, partitionInfo);
             } catch (Catalog.TableNotExistException e) {
-                LOGGER.error(String.format("table: %s not found.", tableIdentifier.getFullName()));
+                LOGGER.error("table: {} not found.", tableIdentifier.getFullName());
             } catch (Catalog.TableNoPermissionException e) {
-                LOGGER.error(String.format("table: %s no permission.", tableIdentifier.getFullName()));
+                LOGGER.error("table: {} no permission.", tableIdentifier.getFullName());
             }
         }
         return partitionInfo.get(partition);
