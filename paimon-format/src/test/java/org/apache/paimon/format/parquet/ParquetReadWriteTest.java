@@ -61,7 +61,6 @@ import org.apache.parquet.filter2.predicate.ParquetFilters;
 import org.apache.parquet.hadoop.ParquetFileWriter;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.example.ExampleParquetWriter;
-import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
 import org.apache.parquet.schema.ConversionPatterns;
 import org.apache.parquet.schema.GroupType;
@@ -840,14 +839,11 @@ public class ParquetReadWriteTest {
         MessageType schema =
                 ParquetSchemaConverter.convertToParquetMessageType(
                         "paimon-parquet", NESTED_ARRAY_MAP_TYPE);
-        String[] candidates = new String[] {"snappy", "zstd", "gzip"};
-        String compress = candidates[new Random().nextInt(3)];
         try (ParquetWriter<Group> writer =
                 ExampleParquetWriter.builder(
                                 HadoopOutputFile.fromPath(
                                         new org.apache.hadoop.fs.Path(path.toString()), conf))
                         .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
-                        .withCompressionCodec(CompressionCodecName.fromConf(compress))
                         .withConf(new Configuration())
                         .withType(schema)
                         .build()) {

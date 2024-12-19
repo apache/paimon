@@ -107,6 +107,11 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
 
     private boolean isFirstRow = true;
 
+    // When reading array, we need to read the next value's repetition level to know whether it's a
+    // new row. This is a flag to tell whether we need to cut the repetition level when getting
+    // LevelDelegation.
+    private boolean cutLevel = false;
+
     private final LastValueContainer lastValue = new LastValueContainer();
 
     public NestedPrimitiveColumnReader(
@@ -200,11 +205,13 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
             boolean needFilterSkip = pageRowId < rangeStart;
 
             do {
-
                 if (!lastValue.shouldSkip && !needFilterSkip) {
                     valueList.add(lastValue.value);
+                    valueIndex++;
+                } else if (readRowField) {
+                    valueIndex++;
                 }
-                valueIndex++;
+                readState.valuesToReadInPage = readState.valuesToReadInPage - 1;
             } while (readValue() && (repetitionLevel != 0));
 
             if (pageRowId == readState.rowId) {
@@ -214,6 +221,12 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
             if (!needFilterSkip) {
                 readState.rowsToReadInBatch = readState.rowsToReadInBatch - 1;
             }
+        }
+
+        // When the values to read in page > 0 and row to read in batch == 0, it means the
+        // repetition level contains the next value's, so need to set the cutLevel flag to true.
+        if (readState.valuesToReadInPage > 0 && readState.rowsToReadInBatch == 0) {
+            cutLevel = true;
         }
 
         return valueIndex;
@@ -226,6 +239,11 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
         definitionLevelList.clear();
         repetitionLevelList.add(repetitionLevel);
         definitionLevelList.add(definitionLevel);
+        if (cutLevel) {
+            repetition = Arrays.copyOf(repetition, repetition.length - 1);
+            definition = Arrays.copyOf(definition, definition.length - 1);
+            cutLevel = false;
+        }
         return new LevelDelegation(repetition, definition);
     }
 
@@ -289,7 +307,6 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
         // get the values of repetition and definitionLevel
         repetitionLevel = repetitionLevelColumn.nextInt();
         definitionLevel = definitionLevelColumn.nextInt();
-        readState.valuesToReadInPage = readState.valuesToReadInPage - 1;
         repetitionLevelList.add(repetitionLevel);
         definitionLevelList.add(definitionLevel);
     }
