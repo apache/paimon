@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.source.operator;
 
+import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSource;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
 import org.apache.paimon.flink.source.SimpleSourceSplit;
@@ -210,7 +211,8 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
             long monitorInterval,
             boolean emitSnapshotWatermark,
             boolean shuffleBucketWithPartition,
-            BucketMode bucketMode) {
+            BucketMode bucketMode,
+            NestedProjectedRowData nestedProjectedRowData) {
         SingleOutputStreamOperator<Split> singleOutputStreamOperator =
                 env.fromSource(
                                 new MonitorSource(
@@ -227,7 +229,7 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
                                 singleOutputStreamOperator, shuffleBucketWithPartition);
 
         return sourceDataStream.transform(
-                name + "-Reader", typeInfo, new ReadOperator(readBuilder));
+                name + "-Reader", typeInfo, new ReadOperator(readBuilder, nestedProjectedRowData));
     }
 
     private static DataStream<Split> shuffleUnwareBucket(

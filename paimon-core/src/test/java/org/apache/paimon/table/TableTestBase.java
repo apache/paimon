@@ -171,7 +171,7 @@ public abstract class TableTestBase {
 
     protected List<InternalRow> read(
             Table table,
-            @Nullable int[][] projection,
+            @Nullable int[] projection,
             Pair<ConfigOption<?>, String>... dynamicOptions)
             throws Exception {
         Map<String, String> options = new HashMap<>();

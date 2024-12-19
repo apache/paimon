@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.options.Options;
@@ -29,6 +30,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.api.connector.source.Boundedness;
@@ -69,7 +71,10 @@ public class LogHybridSourceFactory
     }
 
     public static FlinkSource buildHybridFirstSource(
-            Table table, @Nullable int[][] projectedFields, @Nullable Predicate predicate) {
+            Table table,
+            @Nullable RowType readType,
+            @Nullable Predicate predicate,
+            @Nullable NestedProjectedRowData rowData) {
         if (!(table instanceof DataTable)) {
             throw new UnsupportedOperationException(
                     String.format(
@@ -79,10 +84,16 @@ public class LogHybridSourceFactory
 
         DataTable dataTable = (DataTable) table;
 
+        ReadBuilder readBuilder = table.newReadBuilder();
+        if (readType != null) {
+            readBuilder.withReadType(readType);
+        }
+
         return new FlinkHybridFirstSource(
-                table.newReadBuilder().withProjection(projectedFields).withFilter(predicate),
+                readBuilder.withFilter(predicate),
                 dataTable.snapshotManager(),
-                dataTable.coreOptions().toConfiguration());
+                dataTable.coreOptions().toConfiguration(),
+                rowData);
     }
 
     /** The first source of a log {@link HybridSource}. */
@@ -94,8 +105,11 @@ public class LogHybridSourceFactory
         private final Options options;
 
         public FlinkHybridFirstSource(
-                ReadBuilder readBuilder, SnapshotManager snapshotManager, Options options) {
-            super(readBuilder, null);
+                ReadBuilder readBuilder,
+                SnapshotManager snapshotManager,
+                Options options,
+                @Nullable NestedProjectedRowData rowData) {
+            super(readBuilder, null, rowData);
             this.snapshotManager = snapshotManager;
             this.options = options;
         }
