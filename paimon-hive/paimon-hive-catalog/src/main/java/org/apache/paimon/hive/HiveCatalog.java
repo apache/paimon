@@ -100,6 +100,10 @@ import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
+import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
+import static org.apache.paimon.catalog.CatalogUtils.lockFactory;
 import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
@@ -632,7 +636,8 @@ public class HiveCatalog extends AbstractCatalog {
                             identifier,
                             tableMeta.uuid(),
                             Lock.factory(
-                                    lockFactory().orElse(null),
+                                    lockFactory(catalogOptions, fileIO(), defaultLockFactory())
+                                            .orElse(null),
                                     lockContext().orElse(null),
                                     identifier),
                             metastoreClientFactory(identifier).orElse(null)));

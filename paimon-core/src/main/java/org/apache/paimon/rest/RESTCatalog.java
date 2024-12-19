@@ -20,15 +20,11 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
-import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogLockContext;
-import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
-import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
@@ -79,9 +75,10 @@ import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Supplier;
 
+import static org.apache.paimon.catalog.CatalogUtils.lockContext;
+import static org.apache.paimon.catalog.CatalogUtils.lockFactory;
+import static org.apache.paimon.catalog.CatalogUtils.newTableLocation;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
-import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
-import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
@@ -393,7 +390,8 @@ public class RESTCatalog implements Catalog {
                                     allPaths.computeIfAbsent(database, d -> new HashMap<>());
                             for (String table : listTables(database)) {
                                 Path tableLocation =
-                                        getTableLocation(Identifier.create(database, table));
+                                        newTableLocation(
+                                                warehouse(), Identifier.create(database, table));
                                 tableMap.put(table, tableLocation);
                             }
                         }
@@ -435,12 +433,6 @@ public class RESTCatalog implements Catalog {
         return table;
     }
 
-    private Path getTableLocation(Identifier identifier) {
-        return new Path(
-                new Path(warehouse(), identifier.getDatabaseName() + DB_SUFFIX),
-                identifier.getTableName());
-    }
-
     private Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
         Preconditions.checkArgument(identifier.getSystemTableName() == null);
         TableSchema tableSchema = getDataTableSchema(identifier);
@@ -448,14 +440,15 @@ public class RESTCatalog implements Catalog {
         FileStoreTable table =
                 FileStoreTableFactory.create(
                         fileIO,
-                        getTableLocation(identifier),
+                        newTableLocation(warehouse(), identifier),
                         tableSchema,
                         new CatalogEnvironment(
                                 identifier,
                                 uuid,
                                 Lock.factory(
-                                        lockFactory().orElse(null),
-                                        lockContext().orElse(null),
+                                        lockFactory(context.options(), fileIO, Optional.empty())
+                                                .orElse(null),
+                                        lockContext(context.options()).orElse(null),
                                         identifier),
                                 null)); // todo: whether need MetastoreClient.Factory
         CoreOptions options = table.coreOptions();
@@ -470,29 +463,6 @@ public class RESTCatalog implements Catalog {
                             .build();
         }
         return table;
-    }
-
-    private boolean lockEnabled() {
-        return context.options().getOptional(LOCK_ENABLED).orElse(fileIO.isObjectStore());
-    }
-
-    private Optional<CatalogLockFactory> lockFactory() {
-        if (!lockEnabled()) {
-            return Optional.empty();
-        }
-
-        String lock = context.options().get(LOCK_TYPE);
-        if (lock == null) {
-            return Optional.empty();
-        }
-
-        return Optional.of(
-                FactoryUtil.discoverFactory(
-                        AbstractCatalog.class.getClassLoader(), CatalogLockFactory.class, lock));
-    }
-
-    private Optional<CatalogLockContext> lockContext() {
-        return Optional.of(CatalogLockContext.fromOptions(context.options()));
     }
 
     private ScheduledExecutorService tokenRefreshExecutor() {
