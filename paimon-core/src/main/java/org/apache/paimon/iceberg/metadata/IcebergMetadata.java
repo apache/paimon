@@ -106,7 +106,7 @@ public class IcebergMetadata {
     private final List<IcebergSnapshot> snapshots;
 
     @JsonProperty(FIELD_CURRENT_SNAPSHOT_ID)
-    private final int currentSnapshotId;
+    private final long currentSnapshotId;
 
     @JsonProperty(FIELD_PROPERTIES)
     @Nullable
@@ -122,7 +122,7 @@ public class IcebergMetadata {
             List<IcebergPartitionSpec> partitionSpecs,
             int lastPartitionId,
             List<IcebergSnapshot> snapshots,
-            int currentSnapshotId) {
+            long currentSnapshotId) {
         this(
                 CURRENT_FORMAT_VERSION,
                 tableUuid,
@@ -158,7 +158,7 @@ public class IcebergMetadata {
             @JsonProperty(FIELD_SORT_ORDERS) List<IcebergSortOrder> sortOrders,
             @JsonProperty(FIELD_DEFAULT_SORT_ORDER_ID) int defaultSortOrderId,
             @JsonProperty(FIELD_SNAPSHOTS) List<IcebergSnapshot> snapshots,
-            @JsonProperty(FIELD_CURRENT_SNAPSHOT_ID) int currentSnapshotId,
+            @JsonProperty(FIELD_CURRENT_SNAPSHOT_ID) long currentSnapshotId,
             @JsonProperty(FIELD_PROPERTIES) @Nullable Map<String, String> properties) {
         this.formatVersion = formatVersion;
         this.tableUuid = tableUuid;
@@ -249,7 +249,7 @@ public class IcebergMetadata {
     }
 
     @JsonGetter(FIELD_CURRENT_SNAPSHOT_ID)
-    public int currentSnapshotId() {
+    public long currentSnapshotId() {
         return currentSnapshotId;
     }
 
