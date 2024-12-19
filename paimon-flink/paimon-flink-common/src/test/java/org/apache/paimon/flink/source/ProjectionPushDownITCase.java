@@ -129,6 +129,15 @@ public class ProjectionPushDownITCase extends CatalogITCaseBase {
                 Row.ofKind(RowKind.INSERT, "3", false, "value3", 3));
     }
 
+    @Test
+    public void testSystemTableProjectionPushDown() {
+        String sql = "SELECT schema_id, primary_keys FROM T$schemas";
+        assertPlanAndResult(
+                sql,
+                "TableSourceScan(table=[[PAIMON, default, T$schemas, project=[schema_id, primary_keys]]], fields=[schema_id, primary_keys])",
+                Row.ofKind(RowKind.INSERT, 0L, "[]"));
+    }
+
     private void assertPlanAndResult(String sql, String planIdentifier, Row... expectedRows) {
         String plan = tEnv.explainSql(sql, ExplainFormat.TEXT);
         String[] lines = plan.split("\n");

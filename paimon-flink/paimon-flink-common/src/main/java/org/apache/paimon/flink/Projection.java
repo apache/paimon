@@ -31,7 +31,6 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 
@@ -223,8 +222,7 @@ public abstract class Projection {
                 for (index = 0; index < indexPath.length - 1; index++) {
                     String fieldName = sourceType.getFieldNames().get(indexPath[index]);
                     DataField field = sourceType.getField(fieldName);
-                    sourceType =
-                            (org.apache.paimon.types.RowType) sourceType.getField(fieldName).type();
+                    sourceType = (org.apache.paimon.types.RowType) field.type();
                     if (!targetType.containsField(fieldName)) {
                         targetType.appendDataField(
                                 fieldName,
@@ -239,10 +237,7 @@ public abstract class Projection {
                 String fieldName = sourceType.getFieldNames().get(indexPath[index]);
                 DataField field = sourceType.getField(fieldName);
                 targetType.appendDataField(
-                        fieldName,
-                        field.id(),
-                        sourceType.getField(fieldName).type(),
-                        field.description());
+                        fieldName, field.id(), field.type(), field.description());
             }
             return result.toRowType();
         }
@@ -341,21 +336,21 @@ public abstract class Projection {
      *
      * <p>It is mutable in aspect of the {@link #appendDataField} method.
      */
-    public static class MutableRowType extends org.apache.paimon.types.DataType {
+    private static class MutableRowType extends org.apache.paimon.types.DataType {
         private final List<DataField> fields;
         private final boolean isNullable;
 
-        public MutableRowType(org.apache.paimon.types.RowType rowType) {
+        private MutableRowType(org.apache.paimon.types.RowType rowType) {
             this(rowType.isNullable(), rowType.getFields());
         }
 
-        public MutableRowType(boolean isNullable, List<DataField> fields) {
+        private MutableRowType(boolean isNullable, List<DataField> fields) {
             super(isNullable, DataTypeRoot.ROW);
             this.fields = new ArrayList<>(fields);
             this.isNullable = isNullable;
         }
 
-        public org.apache.paimon.types.RowType toRowType() {
+        private org.apache.paimon.types.RowType toRowType() {
             for (int i = 0; i < fields.size(); i++) {
                 DataField field = fields.get(i);
                 if (field.type() instanceof MutableRowType) {
@@ -371,23 +366,7 @@ public abstract class Projection {
             return new org.apache.paimon.types.RowType(isNullable, fields);
         }
 
-        public List<DataField> getFields() {
-            return fields;
-        }
-
-        public List<String> getFieldNames() {
-            return fields.stream().map(DataField::name).collect(Collectors.toList());
-        }
-
-        public List<org.apache.paimon.types.DataType> getFieldTypes() {
-            return fields.stream().map(DataField::type).collect(Collectors.toList());
-        }
-
-        public int getFieldCount() {
-            return fields.size();
-        }
-
-        public boolean containsField(String fieldName) {
+        private boolean containsField(String fieldName) {
             for (DataField field : fields) {
                 if (field.name().equals(fieldName)) {
                     return true;
@@ -396,7 +375,7 @@ public abstract class Projection {
             return false;
         }
 
-        public DataField getField(String fieldName) {
+        private DataField getField(String fieldName) {
             for (DataField field : fields) {
                 if (field.name().equals(fieldName)) {
                     return field;
@@ -406,17 +385,23 @@ public abstract class Projection {
             throw new RuntimeException("Cannot find field: " + fieldName);
         }
 
-        public DataField getField(int fieldId) {
+        private void appendDataField(
+                String name, int newId, org.apache.paimon.types.DataType type, String description) {
             for (DataField field : fields) {
-                if (field.id() == fieldId) {
-                    return field;
+                if (field.name().equals(name)) {
+                    throw new IllegalStateException(
+                            String.format(
+                                    "A field with name %s has already been appended. Existing fields: %s",
+                                    name, fields));
+                }
+                if (field.id() == newId) {
+                    throw new IllegalStateException(
+                            String.format(
+                                    "A field with id %s has already been appended. Existing fields: %s",
+                                    newId, fields));
                 }
             }
-            throw new RuntimeException("Cannot find field by field id: " + fieldId);
-        }
 
-        public void appendDataField(
-                String name, int newId, org.apache.paimon.types.DataType type, String description) {
             if (type instanceof org.apache.paimon.types.RowType) {
                 type = new MutableRowType((org.apache.paimon.types.RowType) type);
             }
