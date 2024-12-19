@@ -374,4 +374,14 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
       Row(1, "20240601") :: Nil
     )
   }
+
+  test(s"Paimon Delete: delete with non-convertible partition filter") {
+    sql("CREATE TABLE T (id INT, p STRING) PARTITIONED BY (p)")
+    sql("INSERT INTO T VALUES (2, '2024-12-16'), (3, '2024-12-17'), (4, '2024-12-18')")
+    sql("DELETE FROM T WHERE p >= date_sub('2024-12-17', 0) AND p < '2024-12-18'")
+    checkAnswer(
+      sql("SELECT * FROM T ORDER BY id"),
+      Seq(Row(2, "2024-12-16"), Row(4, "2024-12-18"))
+    )
+  }
 }

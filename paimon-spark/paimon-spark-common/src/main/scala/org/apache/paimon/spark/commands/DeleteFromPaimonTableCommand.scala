@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions.MergeEngine
+import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
@@ -65,11 +66,15 @@ case class DeleteFromPaimonTableCommand(
       val partitionPredicate = if (partitionCondition.isEmpty) {
         None
       } else {
-        convertConditionToPaimonPredicate(
-          partitionCondition.reduce(And),
-          relation.output,
-          table.schema.logicalPartitionType(),
-          ignoreFailure = true)
+        try {
+          convertConditionToPaimonPredicate(
+            partitionCondition.reduce(And),
+            relation.output,
+            table.schema.logicalPartitionType())
+        } catch {
+          case _: Throwable =>
+            None
+        }
       }
 
       if (
@@ -106,17 +111,17 @@ case class DeleteFromPaimonTableCommand(
     Seq.empty[Row]
   }
 
-  def usePrimaryKeyDelete(): Boolean = {
+  private def usePrimaryKeyDelete(): Boolean = {
     withPrimaryKeys && table.coreOptions().mergeEngine() == MergeEngine.DEDUPLICATE
   }
 
-  def performPrimaryKeyDelete(sparkSession: SparkSession): Seq[CommitMessage] = {
+  private def performPrimaryKeyDelete(sparkSession: SparkSession): Seq[CommitMessage] = {
     val df = createDataset(sparkSession, Filter(condition, relation))
       .withColumn(ROW_KIND_COL, lit(RowKind.DELETE.toByteValue))
     writer.write(df)
   }
 
-  def performNonPrimaryKeyDelete(sparkSession: SparkSession): Seq[CommitMessage] = {
+  private def performNonPrimaryKeyDelete(sparkSession: SparkSession): Seq[CommitMessage] = {
     // Step1: the candidate data splits which are filtered by Paimon Predicate.
     val candidateDataSplits = findCandidateDataSplits(condition, relation.output)
     val dataFilePathToMeta = candidateFileMap(candidateDataSplits)
@@ -148,11 +153,10 @@ case class DeleteFromPaimonTableCommand(
       // only write new files, should have no compaction
       val addCommitMessage = writer.writeOnly().write(data)
 
-      // Step5: convert the deleted files that need to be wrote to commit message.
+      // Step5: convert the deleted files that need to be written to commit message.
       val deletedCommitMessage = buildDeletedCommitMessage(touchedFiles)
 
       addCommitMessage ++ deletedCommitMessage
     }
   }
-
 }
