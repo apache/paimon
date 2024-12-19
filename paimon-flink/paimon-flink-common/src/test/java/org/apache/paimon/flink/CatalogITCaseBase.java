@@ -179,7 +179,8 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
     }
 
     protected FileStoreTable paimonTable(String tableName)
-            throws org.apache.paimon.catalog.Catalog.TableNotExistException {
+            throws org.apache.paimon.catalog.Catalog.TableNotExistException,
+                    org.apache.paimon.catalog.Catalog.TableNoPermissionException {
         org.apache.paimon.catalog.Catalog catalog = flinkCatalog().catalog();
         return (FileStoreTable)
                 catalog.getTable(Identifier.create(tEnv.getCurrentDatabase(), tableName));
