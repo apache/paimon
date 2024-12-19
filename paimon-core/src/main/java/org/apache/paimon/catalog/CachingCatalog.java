@@ -210,7 +210,7 @@ public class CachingCatalog extends DelegateCatalog {
 
     @Override
     public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
-            throws TableNotExistException, TableAlreadyExistException {
+            throws TableNotExistException, TableAlreadyExistException, TableNoPermissionException {
         super.renameTable(fromTable, toTable, ignoreIfNotExists);
         invalidateTable(fromTable);
     }
@@ -218,13 +218,15 @@ public class CachingCatalog extends DelegateCatalog {
     @Override
     public void alterTable(
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
-            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
+            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException,
+                    TableNoPermissionException {
         super.alterTable(identifier, changes, ignoreIfNotExists);
         invalidateTable(identifier);
     }
 
     @Override
-    public Table getTable(Identifier identifier) throws TableNotExistException {
+    public Table getTable(Identifier identifier)
+            throws TableNotExistException, TableNoPermissionException {
         Table table = tableCache.getIfPresent(identifier);
         if (table != null) {
             return table;

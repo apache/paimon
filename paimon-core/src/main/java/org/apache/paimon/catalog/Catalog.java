@@ -148,7 +148,7 @@ public interface Catalog extends AutoCloseable {
      * @return The requested table
      * @throws TableNotExistException if the target does not exist
      */
-    Table getTable(Identifier identifier) throws TableNotExistException;
+    Table getTable(Identifier identifier) throws TableNotExistException, TableNoPermissionException;
 
     /**
      * Get names of all tables under this database. An empty list is returned if none exists.
@@ -204,7 +204,7 @@ public interface Catalog extends AutoCloseable {
      * @throws TableAlreadyExistException if the toTable already exists
      */
     void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
-            throws TableNotExistException, TableAlreadyExistException;
+            throws TableNotExistException, TableAlreadyExistException, TableNoPermissionException;
 
     /**
      * Modify an existing table from {@link SchemaChange}s.
@@ -218,7 +218,8 @@ public interface Catalog extends AutoCloseable {
      * @throws TableNotExistException if the table does not exist
      */
     void alterTable(Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
-            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException;
+            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException,
+                    TableNoPermissionException;
 
     /**
      * Invalidate cached table metadata for an {@link Identifier identifier}.
@@ -274,7 +275,8 @@ public interface Catalog extends AutoCloseable {
      * @throws TableNotExistException if the table does not exist
      */
     default void alterTable(Identifier identifier, SchemaChange change, boolean ignoreIfNotExists)
-            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
+            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException,
+                    TableNoPermissionException {
         alterTable(identifier, Collections.singletonList(change), ignoreIfNotExists);
     }
 
@@ -430,6 +432,27 @@ public interface Catalog extends AutoCloseable {
 
         public ProcessSystemDatabaseException() {
             super(MSG);
+        }
+    }
+
+    /** Exception for trying to operate on a table that doesn't have permission. */
+    class TableNoPermissionException extends Exception {
+
+        private static final String MSG = "No permission for Table %s.";
+
+        private final Identifier identifier;
+
+        public TableNoPermissionException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public TableNoPermissionException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
         }
     }
 

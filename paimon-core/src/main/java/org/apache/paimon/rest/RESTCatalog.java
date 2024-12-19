@@ -36,6 +36,7 @@ import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.CredentialsProvider;
 import org.apache.paimon.rest.auth.CredentialsProviderFactory;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
+import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
@@ -171,6 +172,7 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public FileIO fileIO() {
+        // todo: storage token need support refresh
         return this.fileIO;
     }
 
@@ -268,7 +270,8 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public Table getTable(Identifier identifier) throws TableNotExistException {
+    public Table getTable(Identifier identifier)
+            throws TableNotExistException, TableNoPermissionException {
         if (SYSTEM_DATABASE_NAME.equals(identifier.getDatabaseName())) {
             return getAllInSystemDatabase(identifier);
         } else if (identifier.isSystemTable()) {
@@ -276,23 +279,6 @@ public class RESTCatalog implements Catalog {
         } else {
             return getDataOrFormatTable(identifier);
         }
-    }
-
-    protected TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
-        try {
-            GetTableResponse response =
-                    client.get(
-                            resourcePaths.table(
-                                    identifier.getDatabaseName(), identifier.getTableName()),
-                            GetTableResponse.class,
-                            headers());
-            if (response.getSchema() != null) {
-                return response.getSchema();
-            }
-        } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
-        }
-        throw new TableNotExistException(identifier);
     }
 
     @Override
@@ -312,26 +298,33 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
-            throws TableNotExistException, TableAlreadyExistException {
+            throws TableNotExistException, TableAlreadyExistException, TableNoPermissionException {
         try {
             updateTable(fromTable, toTable, new ArrayList<>());
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 throw new TableNotExistException(fromTable);
             }
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(fromTable);
+        } catch (AlreadyExistsException e) {
+            throw new TableAlreadyExistException(toTable);
         }
     }
 
     @Override
     public void alterTable(
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
-            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
+            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException,
+                    TableNoPermissionException {
         try {
             updateTable(identifier, null, changes);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 throw new TableNotExistException(identifier);
             }
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier);
         }
     }
 
@@ -396,6 +389,23 @@ public class RESTCatalog implements Catalog {
         return catalogAuth.getHeaders();
     }
 
+    private TableSchema getDataTableSchema(Identifier identifier)
+            throws TableNotExistException, TableNoPermissionException {
+        try {
+            GetTableResponse response =
+                    client.get(
+                            resourcePaths.table(
+                                    identifier.getDatabaseName(), identifier.getTableName()),
+                            GetTableResponse.class,
+                            headers());
+            return response.getSchema();
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier);
+        }
+    }
+
     // todo: how know which exception to throw
     private void updateTable(Identifier fromTable, Identifier toTable, List<SchemaChange> changes) {
         UpdateTableRequest request = new UpdateTableRequest(fromTable, toTable, changes);
@@ -429,14 +439,15 @@ public class RESTCatalog implements Catalog {
                 };
         Table table =
                 SystemTableLoader.loadGlobal(
-                        tableName, fileIO, getAllTablePathsFunction, context.options());
+                        tableName, fileIO(), getAllTablePathsFunction, context.options());
         if (table == null) {
             throw new TableNotExistException(identifier);
         }
         return table;
     }
 
-    private Table getSystemTable(Identifier identifier) throws TableNotExistException {
+    private Table getSystemTable(Identifier identifier)
+            throws TableNotExistException, TableNoPermissionException {
         Table originTable =
                 getDataOrFormatTable(
                         new Identifier(
@@ -447,20 +458,24 @@ public class RESTCatalog implements Catalog {
         return CatalogUtils.getSystemTable(identifier, originTable);
     }
 
-    private Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
+    private Table getDataOrFormatTable(Identifier identifier)
+            throws TableNotExistException, TableNoPermissionException {
         Preconditions.checkArgument(identifier.getSystemTableName() == null);
         TableSchema tableSchema = getDataTableSchema(identifier);
         String uuid = null;
         FileStoreTable table =
                 FileStoreTableFactory.create(
-                        fileIO,
+                        this.fileIO(),
                         newTableLocation(warehouse(), identifier),
                         tableSchema,
                         new CatalogEnvironment(
                                 identifier,
                                 uuid,
                                 Lock.factory(
-                                        lockFactory(context.options(), fileIO, Optional.empty())
+                                        lockFactory(
+                                                        context.options(),
+                                                        this.fileIO(),
+                                                        Optional.empty())
                                                 .orElse(null),
                                         lockContext(context.options()).orElse(null),
                                         identifier),
@@ -473,7 +488,7 @@ public class RESTCatalog implements Catalog {
                     ObjectTable.builder()
                             .underlyingTable(table)
                             .objectLocation(objectLocation)
-                            .objectFileIO(this.fileIO)
+                            .objectFileIO(this.fileIO())
                             .build();
         }
         return table;

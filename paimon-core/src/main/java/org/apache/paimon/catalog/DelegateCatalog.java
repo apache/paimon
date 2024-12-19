@@ -108,19 +108,21 @@ public class DelegateCatalog implements Catalog {
 
     @Override
     public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
-            throws TableNotExistException, TableAlreadyExistException {
+            throws TableNotExistException, TableAlreadyExistException, TableNoPermissionException {
         wrapped.renameTable(fromTable, toTable, ignoreIfNotExists);
     }
 
     @Override
     public void alterTable(
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
-            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
+            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException,
+                    TableNoPermissionException {
         wrapped.alterTable(identifier, changes, ignoreIfNotExists);
     }
 
     @Override
-    public Table getTable(Identifier identifier) throws TableNotExistException {
+    public Table getTable(Identifier identifier)
+            throws TableNotExistException, TableNoPermissionException {
         return wrapped.getTable(identifier);
     }
 
