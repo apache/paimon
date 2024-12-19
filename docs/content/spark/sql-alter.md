@@ -174,9 +174,13 @@ The following SQL drops a nested column `f2` from a struct type, which is the va
 ALTER TABLE my_table DROP COLUMN v.value.f2;
 ```
 
-For hive catalog, you need to disable `'hive.metastore.disallow.incompatible.col.type.changes'`, otherwise this 
-operation may fail, throws an exception like `'The following columns have types incompatible with the existing columns
- in their respective positions'`.
+In hive catalog, you need to ensure:
+
+1. disable `hive.metastore.disallow.incompatible.col.type.changes` in your hive server
+2. or `spark-sql --conf spark.hadoop.hive.metastore.disallow.incompatible.col.type.changes=false` in your spark.
+
+Otherwise this operation may fail, throws an exception like `The following columns have types incompatible with the
+existing columns in their respective positions`.
 
 ## Dropping Partitions
 
