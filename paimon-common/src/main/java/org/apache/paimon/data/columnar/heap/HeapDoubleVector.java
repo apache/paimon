@@ -45,6 +45,10 @@ public class HeapDoubleVector extends AbstractHeapVector implements WritableDoub
         vector = new double[len];
     }
 
+    public HeapDoubleVector(int len, boolean[] isNull) {
+        super(len, isNull);
+    }
+
     @Override
     public double getDouble(int i) {
         if (dictionary == null) {

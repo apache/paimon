@@ -96,9 +96,16 @@ public class NestedPositionUtil {
 
                 offsets.add(offset);
                 valueCount++;
+            } else {
+                // else when definitionLevels[i] < collectionDefinitionLevel - 1, it means the
+                // collection is not defined, no need to increase offset.
+                if (readRowField) {
+                    nullCollectionFlags.add(true);
+                    nullValuesCount++;
+                    emptyCollectionFlags.add(false);
+                    valueCount++;
+                }
             }
-            // else when definitionLevels[i] < collectionDefinitionLevel - 1, it means the
-            // collection is not defined, just ignore it
         }
         long[] offsetsArray = offsets.toArray();
         long[] length = calculateLengthByOffsets(emptyCollectionFlags.toArray(), offsetsArray);

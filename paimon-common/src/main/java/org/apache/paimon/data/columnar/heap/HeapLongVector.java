@@ -39,6 +39,10 @@ public class HeapLongVector extends AbstractHeapVector implements WritableLongVe
         vector = new long[len];
     }
 
+    public HeapLongVector(int len, boolean[] isNull) {
+        super(len, isNull);
+    }
+
     @Override
     public long getLong(int i) {
         if (dictionary == null) {

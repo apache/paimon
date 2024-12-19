@@ -34,6 +34,10 @@ public class HeapBooleanVector extends AbstractHeapVector implements WritableBoo
         vector = new boolean[len];
     }
 
+    public HeapBooleanVector(int len, boolean[] isNull) {
+        super(len, isNull);
+    }
+
     @Override
     public HeapIntVector reserveDictionaryIds(int capacity) {
         throw new RuntimeException("HeapBooleanVector has no dictionary.");
