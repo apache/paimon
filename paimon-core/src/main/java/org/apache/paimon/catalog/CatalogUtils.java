@@ -18,12 +18,20 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.factories.FactoryUtil;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 
 import java.util.Map;
+import java.util.Optional;
 
+import static org.apache.paimon.catalog.Catalog.DB_SUFFIX;
+import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
+import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
+import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 
 /** Utils for {@link Catalog}. */
@@ -59,5 +67,69 @@ public class CatalogUtils {
 
     public static Map<String, String> tableDefaultOptions(Map<String, String> options) {
         return convertToPropertiesPrefixKey(options, TABLE_DEFAULT_OPTION_PREFIX);
+    }
+
+    public static boolean isSystemDatabase(String database) {
+        return SYSTEM_DATABASE_NAME.equals(database);
+    }
+
+    public static boolean isTableInSystemDatabase(Identifier identifier) {
+        return isSystemDatabase(identifier.getDatabaseName()) || identifier.isSystemTable();
+    }
+
+    public static void checkNotSystemTable(Identifier identifier, String method) {
+        if (isTableInSystemDatabase(identifier)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Cannot '%s' for system table '%s', please use data table.",
+                            method, identifier));
+        }
+    }
+
+    public static Path newDatabasePath(String warehouse, String database) {
+        return new Path(warehouse, database + DB_SUFFIX);
+    }
+
+    public static Path newTableLocation(String warehouse, Identifier identifier) {
+        checkNotBranch(identifier, "newTableLocation");
+        checkNotSystemTable(identifier, "newTableLocation");
+        return new Path(
+                newDatabasePath(warehouse, identifier.getDatabaseName()),
+                identifier.getTableName());
+    }
+
+    public static void checkNotBranch(Identifier identifier, String method) {
+        if (identifier.getBranchName() != null) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Cannot '%s' for branch table '%s', "
+                                    + "please modify the table with the default branch.",
+                            method, identifier));
+        }
+    }
+
+    public static Optional<CatalogLockFactory> lockFactory(
+            Options options, FileIO fileIO, Optional<CatalogLockFactory> defaultLockFactoryOpt) {
+        boolean lockEnabled = lockEnabled(options, fileIO);
+        if (!lockEnabled) {
+            return Optional.empty();
+        }
+
+        String lock = options.get(LOCK_TYPE);
+        if (lock == null) {
+            return defaultLockFactoryOpt;
+        }
+
+        return Optional.of(
+                FactoryUtil.discoverFactory(
+                        AbstractCatalog.class.getClassLoader(), CatalogLockFactory.class, lock));
+    }
+
+    public static Optional<CatalogLockContext> lockContext(Options options) {
+        return Optional.of(CatalogLockContext.fromOptions(options));
+    }
+
+    public static boolean lockEnabled(Options options, FileIO fileIO) {
+        return options.getOptional(LOCK_ENABLED).orElse(fileIO != null && fileIO.isObjectStore());
     }
 }
