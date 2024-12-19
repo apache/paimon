@@ -437,17 +437,13 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     protected List<String> listTablesImpl(String databaseName) {
         try {
-            List<String> allTables = clients.run(client -> client.getAllTables(databaseName));
-            List<String> result = new ArrayList<>(allTables.size());
-            for (String t : allTables) {
-                try {
-                    Identifier identifier = new Identifier(databaseName, t);
-                    Table table = getHmsTable(identifier);
-                    if (isPaimonTable(identifier, table)
-                            || (!formatTableDisabled() && isFormatTable(table))) {
-                        result.add(t);
-                    }
-                } catch (TableNotExistException ignored) {
+            List<String> tableNames = clients.run(client -> client.getAllTables(databaseName));
+            List<Table> hmsTables =
+                    clients.run(client -> client.getTableObjectsByName(databaseName, tableNames));
+            List<String> result = new ArrayList<>(hmsTables.size());
+            for (Table table : hmsTables) {
+                if (isPaimonTable(table) || (!formatTableDisabled() && isFormatTable(table))) {
+                    result.add(table.getTableName());
                 }
             }
             return result;
@@ -479,7 +475,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     private TableSchema getDataTableSchema(Identifier identifier, Table table)
             throws TableNotExistException {
-        if (!isPaimonTable(identifier, table)) {
+        if (!isPaimonTable(table)) {
             throw new TableNotExistException(identifier);
         }
 
@@ -876,7 +872,7 @@ public class HiveCatalog extends AbstractCatalog {
     protected void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         Table table = getHmsTable(identifier);
-        if (!isPaimonTable(identifier, table)) {
+        if (!isPaimonTable(table)) {
             throw new UnsupportedOperationException("Only data table support alter table.");
         }
 
@@ -1048,12 +1044,6 @@ public class HiveCatalog extends AbstractCatalog {
             throw new RuntimeException(
                     "Interrupted in call to tableExists " + identifier.getFullName(), e);
         }
-    }
-
-    private boolean isPaimonTable(Identifier identifier, Table table) {
-        return isPaimonTable(table)
-                && tableExistsInFileSystem(
-                        getTableLocation(identifier, table), identifier.getBranchNameOrDefault());
     }
 
     private static boolean isPaimonTable(Table table) {
