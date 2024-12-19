@@ -59,7 +59,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 meta.embeddedIndex(),
                 meta.fileSource().map(FileSource::toByteValue).orElse(null),
                 toStringArrayData(meta.valueStatsCols()),
-                BinaryString.fromString(meta.fileName()));
+                BinaryString.fromString(meta.getDataRootLocationString()));
     }
 
     @Override
