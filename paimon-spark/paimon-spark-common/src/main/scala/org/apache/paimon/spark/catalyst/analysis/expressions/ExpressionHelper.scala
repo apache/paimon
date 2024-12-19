@@ -180,12 +180,11 @@ trait ExpressionHelper extends PredicateHelper {
           }
           filter
       })
-      .toArray
 
-    if (filters.isEmpty) {
+    val predicates = filters.map(converter.convert(_, ignorePartialFailure)).filter(_ != null)
+    if (predicates.isEmpty) {
       None
     } else {
-      val predicates = filters.map(converter.convert(_, ignorePartialFailure))
       Some(PredicateBuilder.and(predicates: _*))
     }
   }
