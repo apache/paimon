@@ -47,7 +47,7 @@ import static org.apache.paimon.utils.SerializationUtils.newStringType;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** Serializer for {@link DataFileMeta} with 0.9 version. */
-public class DataFileMeta09Serializer implements Serializable {
+public class DataFileMeta10LegacySerializer implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
@@ -71,11 +71,15 @@ public class DataFileMeta09Serializer implements Serializable {
                             new DataField(12, "_CREATION_TIME", DataTypes.TIMESTAMP_MILLIS()),
                             new DataField(13, "_DELETE_ROW_COUNT", new BigIntType(true)),
                             new DataField(14, "_EMBEDDED_FILE_INDEX", newBytesType(true)),
-                            new DataField(15, "_FILE_SOURCE", new TinyIntType(true))));
+                            new DataField(15, "_FILE_SOURCE", new TinyIntType(true)),
+                            new DataField(
+                                    16,
+                                    "_VALUE_STATS_COLS",
+                                    DataTypes.ARRAY(DataTypes.STRING().notNull()))));
 
     protected final InternalRowSerializer rowSerializer;
 
-    public DataFileMeta09Serializer() {
+    public DataFileMeta10LegacySerializer() {
         this.rowSerializer = InternalSerializers.create(SCHEMA);
     }
 
@@ -105,7 +109,8 @@ public class DataFileMeta09Serializer implements Serializable {
                         meta.creationTime(),
                         meta.deleteRowCount().orElse(null),
                         meta.embeddedIndex(),
-                        meta.fileSource().map(FileSource::toByteValue).orElse(null));
+                        meta.fileSource().map(FileSource::toByteValue).orElse(null),
+                        toStringArrayData(meta.valueStatsCols()));
         rowSerializer.serialize(row, target);
     }
 
@@ -139,7 +144,7 @@ public class DataFileMeta09Serializer implements Serializable {
                 row.isNullAt(13) ? null : row.getLong(13),
                 row.isNullAt(14) ? null : row.getBinary(14),
                 row.isNullAt(15) ? null : FileSource.fromByteValue(row.getByte(15)),
-                null,
+                row.isNullAt(16) ? null : fromStringArrayData(row.getArray(16)),
                 null);
     }
 }
