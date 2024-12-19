@@ -279,7 +279,9 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
             return loadTable(ident);
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
-        } catch (Catalog.ColumnAlreadyExistException | Catalog.ColumnNotExistException e) {
+        } catch (Catalog.ColumnAlreadyExistException
+                | Catalog.ColumnNotExistException
+                | Catalog.TableNoPermissionException e) {
             throw new RuntimeException(e);
         }
     }
@@ -432,6 +434,8 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
             throw new NoSuchTableException(oldIdent);
         } catch (Catalog.TableAlreadyExistException e) {
             throw new TableAlreadyExistsException(newIdent);
+        } catch (Catalog.TableNoPermissionException e) {
+            throw new RuntimeException(String.format("Table %s no permission", oldIdent));
         }
     }
 
@@ -450,6 +454,8 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
             }
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
+        } catch (Catalog.TableNoPermissionException e) {
+            throw new RuntimeException(e);
         }
     }
 

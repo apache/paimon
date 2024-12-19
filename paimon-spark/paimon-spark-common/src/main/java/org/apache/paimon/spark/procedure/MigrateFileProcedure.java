@@ -93,6 +93,8 @@ public class MigrateFileProcedure extends BaseProcedure {
         } catch (Catalog.TableNotExistException e) {
             throw new IllegalArgumentException(
                     "Target paimon table does not exist: " + targetTable);
+        } catch (Catalog.TableNoPermissionException e) {
+            throw new IllegalArgumentException("Target paimon table no permission: " + targetTable);
         }
 
         try {
