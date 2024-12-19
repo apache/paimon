@@ -18,7 +18,6 @@
 
 package org.apache.paimon.schema;
 
-import org.apache.paimon.KeyValue;
 import org.apache.paimon.casting.CastElementGetter;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
@@ -43,7 +42,6 @@ import org.apache.paimon.utils.ProjectedRow;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -103,50 +101,6 @@ public class SchemaEvolutionUtil {
         return null;
     }
 
-    /**
-     * Create index mapping from table projection to underlying data projection. For example, the
-     * table and data fields are as follows
-     *
-     * <ul>
-     *   <li>table fields: 1->c, 3->a, 4->e, 5->d, 6->b
-     *   <li>data fields: 1->a, 2->b, 3->c, 4->d
-     * </ul>
-     *
-     * <p>The table and data top projections are as follows
-     *
-     * <ul>
-     *   <li>table projection: [0, 4, 1]
-     *   <li>data projection: [0, 2]
-     * </ul>
-     *
-     * <p>We can first get fields list for table and data projections from their fields as follows
-     *
-     * <ul>
-     *   <li>table projection field list: [1->c, 6->b, 3->a]
-     *   <li>data projection field list: [1->a, 3->c]
-     * </ul>
-     *
-     * <p>Then create index mapping based on the fields list and create cast mapping based on index
-     * mapping.
-     *
-     * <p>/// TODO should support nest index mapping when nest schema evolution is supported.
-     *
-     * @param tableProjection the table projection
-     * @param tableFields the fields in table
-     * @param dataProjection the underlying data projection
-     * @param dataFields the fields in underlying data
-     * @return the index mapping
-     */
-    public static IndexCastMapping createIndexCastMapping(
-            int[] tableProjection,
-            List<DataField> tableFields,
-            int[] dataProjection,
-            List<DataField> dataFields) {
-        return createIndexCastMapping(
-                projectDataFields(tableProjection, tableFields),
-                projectDataFields(dataProjection, dataFields));
-    }
-
     /** Create index mapping from table fields to underlying data fields. */
     public static IndexCastMapping createIndexCastMapping(
             List<DataField> tableFields, List<DataField> dataFields) {
@@ -166,113 +120,6 @@ public class SchemaEvolutionUtil {
                 return castMapping;
             }
         };
-    }
-
-    private static List<DataField> projectDataFields(int[] projection, List<DataField> dataFields) {
-        List<DataField> projectFields = new ArrayList<>(projection.length);
-        for (int index : projection) {
-            projectFields.add(dataFields.get(index));
-        }
-
-        return projectFields;
-    }
-
-    /**
-     * Create index mapping from table projection to data with key and value fields. We should first
-     * create table and data fields with their key/value fields, then create index mapping with
-     * their projections and fields. For example, the table and data projections and fields are as
-     * follows
-     *
-     * <ul>
-     *   <li>Table key fields: 1->ka, 3->kb, 5->kc, 6->kd; value fields: 0->a, 2->d, 4->b;
-     *       projection: [0, 2, 3, 4, 5, 7] where 0 is 1->ka, 2 is 5->kc, 3 is 5->kc, 4/5 are seq
-     *       and kind, 7 is 2->d
-     *   <li>Data key fields: 1->kb, 5->ka; value fields: 2->aa, 4->f; projection: [0, 1, 2, 3, 4]
-     *       where 0 is 1->kb, 1 is 5->ka, 2/3 are seq and kind, 4 is 2->aa
-     * </ul>
-     *
-     * <p>First we will get max key id from table and data fields which is 6, then create table and
-     * data fields on it
-     *
-     * <ul>
-     *   <li>Table fields: 1->ka, 3->kb, 5->kc, 6->kd, 7->seq, 8->kind, 9->a, 11->d, 13->b
-     *   <li>Data fields: 1->kb, 5->ka, 7->seq, 8->kind, 11->aa, 13->f
-     * </ul>
-     *
-     * <p>Finally we can create index mapping with table/data projections and fields, and create
-     * cast mapping based on index mapping.
-     *
-     * <p>/// TODO should support nest index mapping when nest schema evolution is supported.
-     *
-     * @param tableProjection the table projection
-     * @param tableKeyFields the table key fields
-     * @param tableValueFields the table value fields
-     * @param dataProjection the data projection
-     * @param dataKeyFields the data key fields
-     * @param dataValueFields the data value fields
-     * @return the result index and cast mapping
-     */
-    public static IndexCastMapping createIndexCastMapping(
-            int[] tableProjection,
-            List<DataField> tableKeyFields,
-            List<DataField> tableValueFields,
-            int[] dataProjection,
-            List<DataField> dataKeyFields,
-            List<DataField> dataValueFields) {
-        List<DataField> tableFields =
-                KeyValue.createKeyValueFields(tableKeyFields, tableValueFields);
-        List<DataField> dataFields = KeyValue.createKeyValueFields(dataKeyFields, dataValueFields);
-        return createIndexCastMapping(tableProjection, tableFields, dataProjection, dataFields);
-    }
-
-    /**
-     * Create data projection from table projection. For example, the table and data fields are as
-     * follows
-     *
-     * <ul>
-     *   <li>table fields: 1->c, 3->a, 4->e, 5->d, 6->b
-     *   <li>data fields: 1->a, 2->b, 3->c, 4->d
-     * </ul>
-     *
-     * <p>When we project 1->c, 6->b, 3->a from table fields, the table projection is [[0], [4],
-     * [1]], in which 0 is the index of field 1->c, 4 is the index of field 6->b, 1 is the index of
-     * field 3->a in table fields. We need to create data projection from [[0], [4], [1]] as
-     * follows:
-     *
-     * <ul>
-     *   <li>Get field id of each index in table projection from table fields
-     *   <li>Get index of each field above from data fields
-     * </ul>
-     *
-     * <p>The we can create table projection as follows: [[0], [-1], [2]], in which 0, -1 and 2 are
-     * the index of fields [1->c, 6->b, 3->a] in data fields. When we project column from underlying
-     * data, we need to specify the field index and name. It is difficult to assign a proper field
-     * id and name for 6->b in data projection and add it to data fields, and we can't use 6->b
-     * directly because the field index of b in underlying is 2. We can remove the -1 field index in
-     * data projection, then the result data projection is: [[0], [2]].
-     *
-     * <p>We create {@link InternalRow} for 1->a, 3->c after projecting them from underlying data,
-     * then create {@link ProjectedRow} with a index mapping and return null for 6->b in table
-     * fields.
-     *
-     * @param tableFields the fields of table
-     * @param dataFields the fields of underlying data
-     * @param tableProjection the projection of table
-     * @return the projection of data
-     */
-    public static int[][] createDataProjection(
-            List<DataField> tableFields, List<DataField> dataFields, int[][] tableProjection) {
-        List<Integer> dataFieldIdList =
-                dataFields.stream().map(DataField::id).collect(Collectors.toList());
-        return Arrays.stream(tableProjection)
-                .map(p -> Arrays.copyOf(p, p.length))
-                .peek(
-                        p -> {
-                            int fieldId = tableFields.get(p[0]).id();
-                            p[0] = dataFieldIdList.indexOf(fieldId);
-                        })
-                .filter(p -> p[0] >= 0)
-                .toArray(int[][]::new);
     }
 
     /**
@@ -353,8 +200,6 @@ public class SchemaEvolutionUtil {
      * <p>We can get the column types (1->a BIGINT), (3->c DOUBLE) from data fields for (1->c INT)
      * and (3->a BIGINT) in table fields through index mapping [0, -1, 1], then compare the data
      * type and create getter and casting mapping.
-     *
-     * <p>/// TODO should support nest index mapping when nest schema evolution is supported.
      *
      * @param tableFields the fields of table
      * @param dataFields the fields of underlying data
