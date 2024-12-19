@@ -140,7 +140,7 @@ public class RESTCatalog implements Catalog {
                         options, catalogContext.preferIO(), catalogContext.fallbackIO());
         this.resourcePaths =
                 ResourcePaths.forCatalogProperties(options.get(RESTCatalogInternalOptions.PREFIX));
-        this.fileIO = getFileIOFromOptions(catalogContext);
+        this.fileIO = getFileIOFromOptions(context);
     }
 
     // todo: whether it's ok
