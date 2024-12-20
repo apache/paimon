@@ -553,7 +553,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
     }
   }
 
-  test("Paimon DDL with hive catalog: create external based on managed table location") {
+  test("Paimon DDL with hive catalog: create external table on managed table location") {
     Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
       catalogName =>
         spark.sql(s"USE $catalogName")
