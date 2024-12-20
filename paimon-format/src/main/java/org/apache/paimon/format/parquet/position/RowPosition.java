@@ -16,10 +16,25 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.data.columnar.heap;
+package org.apache.paimon.format.parquet.position;
 
-/** Container with a known number of elements. */
-public interface ElementCountable {
+import javax.annotation.Nullable;
 
-    int getLen();
+/** To represent struct's position in repeated type. */
+public class RowPosition {
+    @Nullable private final boolean[] isNull;
+    private final int positionsCount;
+
+    public RowPosition(boolean[] isNull, int positionsCount) {
+        this.isNull = isNull;
+        this.positionsCount = positionsCount;
+    }
+
+    public boolean[] getIsNull() {
+        return isNull;
+    }
+
+    public int getPositionsCount() {
+        return positionsCount;
+    }
 }

@@ -23,7 +23,6 @@ import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
-import org.apache.paimon.data.columnar.heap.ElementCountable;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.parquet.reader.ColumnReader;
@@ -295,10 +294,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         for (int i = 0; i < writableVectors.length; i++) {
             switch (projectedFields[i].type().getTypeRoot()) {
                 case DECIMAL:
-                    vectors[i] =
-                            new ParquetDecimalVector(
-                                    writableVectors[i],
-                                    ((ElementCountable) writableVectors[i]).getLen());
+                    vectors[i] = new ParquetDecimalVector(writableVectors[i]);
                     break;
                 case TIMESTAMP_WITHOUT_TIME_ZONE:
                 case TIMESTAMP_WITH_LOCAL_TIME_ZONE:

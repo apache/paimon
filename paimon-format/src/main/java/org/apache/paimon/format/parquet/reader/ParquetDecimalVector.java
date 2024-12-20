@@ -25,7 +25,6 @@ import org.apache.paimon.data.columnar.DecimalColumnVector;
 import org.apache.paimon.data.columnar.Dictionary;
 import org.apache.paimon.data.columnar.IntColumnVector;
 import org.apache.paimon.data.columnar.LongColumnVector;
-import org.apache.paimon.data.columnar.heap.ElementCountable;
 import org.apache.paimon.data.columnar.writable.WritableBytesVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableIntVector;
@@ -39,18 +38,12 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * {@link DecimalColumnVector} interface.
  */
 public class ParquetDecimalVector
-        implements DecimalColumnVector,
-                WritableLongVector,
-                WritableIntVector,
-                WritableBytesVector,
-                ElementCountable {
+        implements DecimalColumnVector, WritableLongVector, WritableIntVector, WritableBytesVector {
 
     private final ColumnVector vector;
-    private final int len;
 
-    public ParquetDecimalVector(ColumnVector vector, int len) {
+    public ParquetDecimalVector(ColumnVector vector) {
         this.vector = vector;
-        this.len = len;
     }
 
     @Override
@@ -231,10 +224,5 @@ public class ParquetDecimalVector
         if (vector instanceof WritableLongVector) {
             ((WritableLongVector) vector).fill(value);
         }
-    }
-
-    @Override
-    public int getLen() {
-        return len;
     }
 }

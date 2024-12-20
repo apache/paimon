@@ -20,7 +20,6 @@ package org.apache.paimon.format.parquet.reader;
 
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.heap.AbstractHeapVector;
-import org.apache.paimon.data.columnar.heap.ElementCountable;
 import org.apache.paimon.data.columnar.heap.HeapArrayVector;
 import org.apache.paimon.data.columnar.heap.HeapMapVector;
 import org.apache.paimon.data.columnar.heap.HeapRowVector;
