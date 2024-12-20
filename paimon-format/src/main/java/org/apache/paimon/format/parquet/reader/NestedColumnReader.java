@@ -20,6 +20,7 @@ package org.apache.paimon.format.parquet.reader;
 
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.heap.AbstractHeapVector;
+import org.apache.paimon.data.columnar.heap.ElementCountable;
 import org.apache.paimon.data.columnar.heap.HeapArrayVector;
 import org.apache.paimon.data.columnar.heap.HeapMapVector;
 import org.apache.paimon.data.columnar.heap.HeapRowVector;
@@ -41,6 +42,7 @@ import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReadStore;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -112,11 +114,30 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
         WritableColumnVector[] childrenVectors = heapRowVector.getFields();
         WritableColumnVector[] finalChildrenVectors =
                 new WritableColumnVector[childrenVectors.length];
+
+        int len = -1;
+        boolean[] isNull = null;
+        boolean hasNull = false;
+
         for (int i = 0; i < children.size(); i++) {
             Pair<LevelDelegation, WritableColumnVector> tuple =
                     readData(children.get(i), readNumber, childrenVectors[i], true);
             levelDelegation = tuple.getLeft();
             finalChildrenVectors[i] = tuple.getRight();
+
+            WritableColumnVector writableColumnVector = tuple.getRight();
+            if (len == -1) {
+                len = ((ElementCountable) writableColumnVector).getLen();
+                isNull = new boolean[len];
+                Arrays.fill(isNull, true);
+            }
+
+            for (int j = 0; j < len; j++) {
+                isNull[j] = isNull[j] && writableColumnVector.isNullAt(j);
+                if (isNull[j]) {
+                    hasNull = true;
+                }
+            }
         }
         if (levelDelegation == null) {
             throw new RuntimeException(
@@ -138,8 +159,8 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
             heapRowVector.setFields(finalChildrenVectors);
         }
 
-        if (rowPosition.getIsNull() != null) {
-            setFieldNullFalg(rowPosition.getIsNull(), heapRowVector);
+        if (hasNull) {
+            setFieldNullFalg(isNull, heapRowVector);
         }
         return Pair.of(levelDelegation, heapRowVector);
     }
