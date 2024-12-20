@@ -115,7 +115,12 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
         // protected by 'snapshot.expire.limit'
         // (the maximum number of snapshots allowed to expire at a time)
-        maxExclusive = Math.min(maxExclusive, earliest + maxDeletes);
+        long maxExclusiveByExpireLimit = earliest + maxDeletes;
+        while (!snapshotManager.snapshotExists(maxExclusiveByExpireLimit)) {
+            // Ensure maxExclusive exist, deal some snapshot between earliest and latest is deleted
+            maxExclusiveByExpireLimit++;
+        }
+        maxExclusive = Math.min(maxExclusive, maxExclusiveByExpireLimit);
 
         for (long id = min; id < maxExclusive; id++) {
             // Early exit the loop for 'snapshot.time-retained'
