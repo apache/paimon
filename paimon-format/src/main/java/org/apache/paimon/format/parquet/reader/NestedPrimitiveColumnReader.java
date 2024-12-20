@@ -190,8 +190,10 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
             boolean needFilterSkip = pageRowId < rangeStart;
 
             do {
-                valueList.add(lastValue);
-                valueIndex++;
+                if (!needFilterSkip) {
+                    valueList.add(lastValue);
+                    valueIndex++;
+                }
             } while (readValue() && (repetitionLevel != 0));
 
             if (pageRowId == readState.rowId) {
