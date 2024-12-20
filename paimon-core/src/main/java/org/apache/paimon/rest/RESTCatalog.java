@@ -36,6 +36,7 @@ import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.CredentialsProvider;
 import org.apache.paimon.rest.auth.CredentialsProviderFactory;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
+import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
@@ -278,23 +279,6 @@ public class RESTCatalog implements Catalog {
         }
     }
 
-    protected TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
-        try {
-            GetTableResponse response =
-                    client.get(
-                            resourcePaths.table(
-                                    identifier.getDatabaseName(), identifier.getTableName()),
-                            GetTableResponse.class,
-                            headers());
-            if (response.getSchema() != null) {
-                return response.getSchema();
-            }
-        } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
-        }
-        throw new TableNotExistException(identifier);
-    }
-
     @Override
     public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException {
@@ -319,6 +303,10 @@ public class RESTCatalog implements Catalog {
             if (!ignoreIfNotExists) {
                 throw new TableNotExistException(fromTable);
             }
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(fromTable);
+        } catch (AlreadyExistsException e) {
+            throw new TableAlreadyExistException(toTable);
         }
     }
 
@@ -332,6 +320,8 @@ public class RESTCatalog implements Catalog {
             if (!ignoreIfNotExists) {
                 throw new TableNotExistException(identifier);
             }
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier);
         }
     }
 
@@ -346,6 +336,8 @@ public class RESTCatalog implements Catalog {
             if (!ignoreIfNotExists) {
                 throw new TableNotExistException(identifier);
             }
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier);
         }
     }
 
@@ -394,6 +386,22 @@ public class RESTCatalog implements Catalog {
 
     private Map<String, String> headers() {
         return catalogAuth.getHeaders();
+    }
+
+    protected TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
+        try {
+            GetTableResponse response =
+                    client.get(
+                            resourcePaths.table(
+                                    identifier.getDatabaseName(), identifier.getTableName()),
+                            GetTableResponse.class,
+                            headers());
+            return response.getSchema();
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
     }
 
     // todo: how know which exception to throw

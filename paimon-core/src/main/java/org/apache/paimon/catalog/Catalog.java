@@ -475,6 +475,28 @@ public interface Catalog extends AutoCloseable {
         }
     }
 
+    /**
+     * Exception for trying to operate on a table that doesn't have permission. Define as a runtime
+     * exception: 1. Other engine has no this type exception. 2. It wouldn't bring api break change.
+     */
+    class TableNoPermissionException extends RuntimeException {
+        private static final String MSG = "No permission for Table %s.";
+        private final Identifier identifier;
+
+        public TableNoPermissionException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public TableNoPermissionException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+    }
+
     /** Exception for trying to operate on a partition that doesn't exist. */
     class PartitionNotExistException extends Exception {
 
