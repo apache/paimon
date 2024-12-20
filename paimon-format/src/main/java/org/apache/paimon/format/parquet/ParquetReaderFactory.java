@@ -383,13 +383,14 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
         /** Advances to the next batch of rows. Returns false if there are no more. */
         private boolean nextBatch(ParquetReaderBatch batch) throws IOException {
+            if (rowsReturned >= totalRowCount) {
+                return false;
+            }
+
             for (WritableColumnVector v : batch.writableVectors) {
                 v.reset();
             }
             batch.columnarBatch.setNumRows(0);
-            if (rowsReturned >= totalRowCount) {
-                return false;
-            }
             if (rowsReturned == totalCountLoadedSoFar) {
                 readNextRowGroup();
             } else {
