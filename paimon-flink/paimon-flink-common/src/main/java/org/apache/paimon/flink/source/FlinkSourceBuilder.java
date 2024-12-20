@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.StartupMode;
 import org.apache.paimon.CoreOptions.StreamingReadMode;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.Projection;
 import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.sink.FlinkSink;
@@ -171,9 +172,12 @@ public class FlinkSourceBuilder {
         return this;
     }
 
-    private ReadBuilder createReadBuilder() {
-        ReadBuilder readBuilder =
-                table.newReadBuilder().withProjection(projectedFields).withFilter(predicate);
+    private ReadBuilder createReadBuilder(@Nullable org.apache.paimon.types.RowType readType) {
+        ReadBuilder readBuilder = table.newReadBuilder();
+        if (readType != null) {
+            readBuilder.withReadType(readType);
+        }
+        readBuilder.withFilter(predicate);
         if (limit != null) {
             readBuilder.withLimit(limit.intValue());
         }
@@ -184,24 +188,33 @@ public class FlinkSourceBuilder {
         Options options = Options.fromMap(table.options());
         return toDataStream(
                 new StaticFileStoreSource(
-                        createReadBuilder(),
+                        createReadBuilder(projectedRowType()),
                         limit,
                         options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
                         options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE),
-                        dynamicPartitionFilteringInfo));
+                        dynamicPartitionFilteringInfo,
+                        outerProject()));
     }
 
     private DataStream<RowData> buildContinuousFileSource() {
         return toDataStream(
                 new ContinuousFileStoreSource(
-                        createReadBuilder(), table.options(), limit, bucketMode));
+                        createReadBuilder(projectedRowType()),
+                        table.options(),
+                        limit,
+                        bucketMode,
+                        outerProject()));
     }
 
     private DataStream<RowData> buildAlignedContinuousFileSource() {
         assertStreamingConfigurationForAlignMode(env);
         return toDataStream(
                 new AlignedContinuousFileStoreSource(
-                        createReadBuilder(), table.options(), limit, bucketMode));
+                        createReadBuilder(projectedRowType()),
+                        table.options(),
+                        limit,
+                        bucketMode,
+                        outerProject()));
     }
 
     private DataStream<RowData> toDataStream(Source<RowData, ?, ?> source) {
@@ -235,6 +248,20 @@ public class FlinkSourceBuilder {
                         .map(p -> p.project(rowType))
                         .orElse(rowType);
         return InternalTypeInfo.of(produceType);
+    }
+
+    private @Nullable org.apache.paimon.types.RowType projectedRowType() {
+        return Optional.ofNullable(projectedFields)
+                .map(Projection::of)
+                .map(p -> p.project(table.rowType()))
+                .orElse(null);
+    }
+
+    private @Nullable NestedProjectedRowData outerProject() {
+        return Optional.ofNullable(projectedFields)
+                .map(Projection::of)
+                .map(p -> p.getOuterProjectRow(table.rowType()))
+                .orElse(null);
     }
 
     /** Build source {@link DataStream} with {@link RowData}. */
@@ -280,7 +307,10 @@ public class FlinkSourceBuilder {
                 return toDataStream(
                         HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(
                                         LogHybridSourceFactory.buildHybridFirstSource(
-                                                table, projectedFields, predicate))
+                                                table,
+                                                projectedRowType(),
+                                                predicate,
+                                                outerProject()))
                                 .addSource(
                                         new LogHybridSourceFactory(logSourceProvider),
                                         Boundedness.CONTINUOUS_UNBOUNDED)
@@ -310,12 +340,13 @@ public class FlinkSourceBuilder {
                         env,
                         sourceName,
                         produceTypeInfo(),
-                        createReadBuilder(),
+                        createReadBuilder(projectedRowType()),
                         conf.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis(),
                         watermarkStrategy == null,
                         conf.get(
                                 FlinkConnectorOptions.STREAMING_READ_SHUFFLE_BUCKET_WITH_PARTITION),
-                        bucketMode);
+                        bucketMode,
+                        outerProject());
         if (parallelism != null) {
             dataStream.getTransformation().setParallelism(parallelism);
         }
