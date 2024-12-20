@@ -364,6 +364,29 @@ public interface Catalog extends AutoCloseable {
         throw new UnsupportedOperationException();
     }
 
+    /**
+     * Exception for trying to operate on a resource that doesn't have permission. Define as a
+     * runtime exception: 1. Other engine has no this type exception. 2. It wouldn't bring api break
+     * change.
+     */
+    class NoPermissionException extends RuntimeException {
+        private static final String MSG = "No permission for %s %s.";
+
+        public static NoPermissionException createDatabaseNoPermissionException(
+                String databaseName, Throwable cause) {
+            return new NoPermissionException("database", databaseName, cause);
+        }
+
+        public static NoPermissionException createTableNoPermissionException(
+                Identifier identifier, Throwable cause) {
+            return new NoPermissionException("table", identifier.getFullName(), cause);
+        }
+
+        public NoPermissionException(String resourceType, String resourceName, Throwable cause) {
+            super(String.format(MSG, resourceType, resourceName), cause);
+        }
+    }
+
     /** Exception for trying to drop on a database that is not empty. */
     class DatabaseNotEmptyException extends Exception {
         private static final String MSG = "Database %s is not empty.";
@@ -466,28 +489,6 @@ public interface Catalog extends AutoCloseable {
         }
 
         public TableNotExistException(Identifier identifier, Throwable cause) {
-            super(String.format(MSG, identifier.getFullName()), cause);
-            this.identifier = identifier;
-        }
-
-        public Identifier identifier() {
-            return identifier;
-        }
-    }
-
-    /**
-     * Exception for trying to operate on a table that doesn't have permission. Define as a runtime
-     * exception: 1. Other engine has no this type exception. 2. It wouldn't bring api break change.
-     */
-    class TableNoPermissionException extends RuntimeException {
-        private static final String MSG = "No permission for Table %s.";
-        private final Identifier identifier;
-
-        public TableNoPermissionException(Identifier identifier) {
-            this(identifier, null);
-        }
-
-        public TableNoPermissionException(Identifier identifier, Throwable cause) {
             super(String.format(MSG, identifier.getFullName()), cause);
             this.identifier = identifier;
         }

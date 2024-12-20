@@ -197,6 +197,8 @@ public class RESTCatalog implements Catalog {
             if (!ignoreIfExists) {
                 throw new DatabaseAlreadyExistException(name);
             }
+        } catch (ForbiddenException e) {
+            throw NoPermissionException.createDatabaseNoPermissionException(name, e);
         }
     }
 
@@ -212,6 +214,8 @@ public class RESTCatalog implements Catalog {
                     name, response.options(), response.comment().orElseGet(() -> null));
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(name);
+        } catch (ForbiddenException e) {
+            throw NoPermissionException.createDatabaseNoPermissionException(name, e);
         }
     }
 
@@ -228,6 +232,8 @@ public class RESTCatalog implements Catalog {
             if (!ignoreIfNotExists) {
                 throw new DatabaseNotExistException(name);
             }
+        } catch (ForbiddenException e) {
+            throw NoPermissionException.createDatabaseNoPermissionException(name, e);
         }
     }
 
@@ -255,6 +261,8 @@ public class RESTCatalog implements Catalog {
             if (!ignoreIfNotExists) {
                 throw new DatabaseNotExistException(name);
             }
+        } catch (ForbiddenException e) {
+            throw NoPermissionException.createDatabaseNoPermissionException(name, e);
         }
     }
 
@@ -304,7 +312,7 @@ public class RESTCatalog implements Catalog {
                 throw new TableNotExistException(fromTable);
             }
         } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(fromTable);
+            throw NoPermissionException.createTableNoPermissionException(fromTable, e);
         } catch (AlreadyExistsException e) {
             throw new TableAlreadyExistException(toTable);
         }
@@ -321,7 +329,7 @@ public class RESTCatalog implements Catalog {
                 throw new TableNotExistException(identifier);
             }
         } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier);
+            throw NoPermissionException.createTableNoPermissionException(identifier, e);
         }
     }
 
@@ -337,7 +345,7 @@ public class RESTCatalog implements Catalog {
                 throw new TableNotExistException(identifier);
             }
         } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier);
+            throw NoPermissionException.createTableNoPermissionException(identifier, e);
         }
     }
 
@@ -400,7 +408,7 @@ public class RESTCatalog implements Catalog {
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
+            throw NoPermissionException.createTableNoPermissionException(identifier, e);
         }
     }
 
