@@ -129,7 +129,7 @@ public class FileStoreSourceMetricsTest {
     public void logHybridFileStoreSourceScanMetricsTest() throws Exception {
         writeOnce();
         FlinkSource logHybridFileStoreSource =
-                LogHybridSourceFactory.buildHybridFirstSource(table, null, null);
+                LogHybridSourceFactory.buildHybridFirstSource(table, null, null, null);
         logHybridFileStoreSource.restoreEnumerator(context, null);
         assertThat(TestingMetricUtils.getGauge(scanMetricGroup, "lastScannedManifests").getValue())
                 .isEqualTo(1L);

@@ -40,6 +40,7 @@ import org.apache.flink.table.connector.source.abilities.SupportsFilterPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsLimitPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
 import org.apache.flink.table.expressions.ResolvedExpression;
+import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -123,11 +124,11 @@ public abstract class FlinkTableSource
 
     @Override
     public boolean supportsNestedProjection() {
-        return false;
+        return true;
     }
 
     @Override
-    public void applyProjection(int[][] projectedFields) {
+    public void applyProjection(int[][] projectedFields, DataType producedDataType) {
         this.projectFields = projectedFields;
     }
 
