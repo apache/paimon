@@ -120,7 +120,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             // Ensure maxExclusive exist, deal some snapshot between earliest and latest is deleted
             maxExclusiveByExpireLimit++;
         }
-        maxExclusive = Math.min(maxExclusive, maxExclusiveByExpireLimit);
+        maxExclusive = Math.min(maxExclusive, earliest + maxDeletes);
 
         for (long id = min; id < maxExclusive; id++) {
             // Early exit the loop for 'snapshot.time-retained'
