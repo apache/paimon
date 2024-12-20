@@ -99,134 +99,136 @@ public class NestedProjectedRowData implements RowData, Serializable {
     }
 
     @Override
-    public boolean isNullAt(int i) {
-        if (isNullAtCached[i]) {
-            return cachedNullAt[i];
+    public boolean isNullAt(int pos) {
+        if (isNullAtCached[pos]) {
+            return cachedNullAt[pos];
         }
 
-        RowData rowData = extractInternalRow(i);
+        RowData rowData = extractInternalRow(pos);
         boolean result;
         if (rowData == null) {
             result = true;
         } else {
-            result = rowData.isNullAt(lastProjectedFields[i]);
+            result = rowData.isNullAt(lastProjectedFields[pos]);
         }
 
-        isNullAtCached[i] = true;
-        cachedNullAt[i] = result;
+        isNullAtCached[pos] = true;
+        cachedNullAt[pos] = result;
 
         return result;
     }
 
     @Override
-    public boolean getBoolean(int i) {
-        return getFieldAs(i, RowData::getBoolean);
+    public boolean getBoolean(int pos) {
+        return getFieldAs(pos, RowData::getBoolean);
     }
 
     @Override
-    public byte getByte(int i) {
-        return getFieldAs(i, RowData::getByte);
+    public byte getByte(int pos) {
+        return getFieldAs(pos, RowData::getByte);
     }
 
     @Override
-    public short getShort(int i) {
-        return getFieldAs(i, RowData::getShort);
+    public short getShort(int pos) {
+        return getFieldAs(pos, RowData::getShort);
     }
 
     @Override
-    public int getInt(int i) {
-        return getFieldAs(i, RowData::getInt);
+    public int getInt(int pos) {
+        return getFieldAs(pos, RowData::getInt);
     }
 
     @Override
-    public long getLong(int i) {
-        return getFieldAs(i, RowData::getLong);
+    public long getLong(int pos) {
+        return getFieldAs(pos, RowData::getLong);
     }
 
     @Override
-    public float getFloat(int i) {
-        return getFieldAs(i, RowData::getFloat);
+    public float getFloat(int pos) {
+        return getFieldAs(pos, RowData::getFloat);
     }
 
     @Override
-    public double getDouble(int i) {
-        return getFieldAs(i, RowData::getDouble);
+    public double getDouble(int pos) {
+        return getFieldAs(pos, RowData::getDouble);
     }
 
     @Override
-    public StringData getString(int i) {
-        return getFieldAs(i, RowData::getString);
+    public StringData getString(int pos) {
+        return getFieldAs(pos, RowData::getString);
     }
 
     @Override
-    public DecimalData getDecimal(int i, int i1, int i2) {
-        return getFieldAs(i, (rowData, j) -> rowData.getDecimal(j, i1, i2));
+    public DecimalData getDecimal(int pos, int precision, int scale) {
+        return getFieldAs(
+                pos, (rowData, internalPos) -> rowData.getDecimal(internalPos, precision, scale));
     }
 
     @Override
-    public TimestampData getTimestamp(int i, int i1) {
-        return getFieldAs(i, (rowData, j) -> rowData.getTimestamp(j, i1));
+    public TimestampData getTimestamp(int pos, int precision) {
+        return getFieldAs(
+                pos, (rowData, internalPos) -> rowData.getTimestamp(internalPos, precision));
     }
 
     @Override
-    public <T> RawValueData<T> getRawValue(int i) {
-        return getFieldAs(i, RowData::getRawValue);
+    public <T> RawValueData<T> getRawValue(int pos) {
+        return getFieldAs(pos, RowData::getRawValue);
     }
 
     @Override
-    public byte[] getBinary(int i) {
-        return getFieldAs(i, RowData::getBinary);
+    public byte[] getBinary(int pos) {
+        return getFieldAs(pos, RowData::getBinary);
     }
 
     @Override
-    public ArrayData getArray(int i) {
-        return getFieldAs(i, RowData::getArray);
+    public ArrayData getArray(int pos) {
+        return getFieldAs(pos, RowData::getArray);
     }
 
     @Override
-    public MapData getMap(int i) {
-        return getFieldAs(i, RowData::getMap);
+    public MapData getMap(int pos) {
+        return getFieldAs(pos, RowData::getMap);
     }
 
     @Override
-    public RowData getRow(int i, int i1) {
-        return getFieldAs(i, (rowData, j) -> rowData.getRow(j, i1));
+    public RowData getRow(int pos, int numFields) {
+        return getFieldAs(pos, (rowData, internalPos) -> rowData.getRow(internalPos, numFields));
     }
 
-    private @Nullable RowData extractInternalRow(int i) {
-        int[] projectedField = projectedFields[i];
+    private @Nullable RowData extractInternalRow(int pos) {
+        int[] projectedField = projectedFields[pos];
         RowData rowData = this.row;
         RowType dataType = producedDataType;
-        for (int j = 0; j < projectedField.length - 1; j++) {
-            dataType = (RowType) dataType.getTypeAt(projectedField[j]);
-            if (rowData.isNullAt(projectedField[j])) {
+        for (int i = 0; i < projectedField.length - 1; i++) {
+            dataType = (RowType) dataType.getTypeAt(projectedField[i]);
+            if (rowData.isNullAt(projectedField[i])) {
                 return null;
             }
-            rowData = rowData.getRow(projectedField[j], dataType.getFieldCount());
+            rowData = rowData.getRow(projectedField[i], dataType.getFieldCount());
         }
         return rowData;
     }
 
     @SuppressWarnings("unchecked")
-    private <T> T getFieldAs(int i, BiFunction<RowData, Integer, T> getter) {
-        if (isFieldsCached[i]) {
-            return (T) cachedFields[i];
+    private <T> T getFieldAs(int pos, BiFunction<RowData, Integer, T> getter) {
+        if (isFieldsCached[pos]) {
+            return (T) cachedFields[pos];
         }
 
-        RowData rowData = extractInternalRow(i);
+        RowData rowData = extractInternalRow(pos);
         T result;
         if (rowData == null) {
-            isNullAtCached[i] = true;
-            cachedNullAt[i] = true;
-            isFieldsCached[i] = true;
-            cachedFields[i] = null;
+            isNullAtCached[pos] = true;
+            cachedNullAt[pos] = true;
+            isFieldsCached[pos] = true;
+            cachedFields[pos] = null;
             result = null;
         } else {
-            result = getter.apply(rowData, lastProjectedFields[i]);
-            isNullAtCached[i] = true;
-            cachedNullAt[i] = result == null;
-            isFieldsCached[i] = true;
-            cachedFields[i] = result;
+            result = getter.apply(rowData, lastProjectedFields[pos]);
+            isNullAtCached[pos] = true;
+            cachedNullAt[pos] = result == null;
+            isFieldsCached[pos] = true;
+            cachedFields[pos] = result;
         }
 
         return result;
