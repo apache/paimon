@@ -371,15 +371,17 @@ public interface Catalog extends AutoCloseable {
      */
     class NoPermissionException extends RuntimeException {
         private static final String MSG = "No permission for %s %s.";
+        private static final String DATABASE_TYPE_NAME = "database";
+        private static final String TABLE_TYPE_NAME = "table";
 
         public static NoPermissionException createDatabaseNoPermissionException(
                 String databaseName, Throwable cause) {
-            return new NoPermissionException("database", databaseName, cause);
+            return new NoPermissionException(DATABASE_TYPE_NAME, databaseName, cause);
         }
 
         public static NoPermissionException createTableNoPermissionException(
                 Identifier identifier, Throwable cause) {
-            return new NoPermissionException("table", identifier.getFullName(), cause);
+            return new NoPermissionException(TABLE_TYPE_NAME, identifier.getFullName(), cause);
         }
 
         public NoPermissionException(String resourceType, String resourceName, Throwable cause) {

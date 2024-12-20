@@ -154,21 +154,7 @@ public class JsonSerdeUtil {
         }
     }
 
-    private static Module createPaimonJacksonModule() {
-        SimpleModule module = new SimpleModule("Paimon");
-        registerJsonObjects(
-                module, TableSchema.class, SchemaSerializer.INSTANCE, SchemaSerializer.INSTANCE);
-        registerJsonObjects(
-                module,
-                DataField.class,
-                DataField::serializeJson,
-                DataTypeJsonParser::parseDataField);
-        registerJsonObjects(
-                module, DataType.class, DataType::serializeJson, DataTypeJsonParser::parseDataType);
-        return module;
-    }
-
-    private static <T> void registerJsonObjects(
+    public static <T> void registerJsonObjects(
             SimpleModule module,
             Class<T> clazz,
             JsonSerializer<T> serializer,
@@ -190,6 +176,20 @@ public class JsonSerdeUtil {
                         return deserializer.deserialize(parser.readValueAsTree());
                     }
                 });
+    }
+
+    private static Module createPaimonJacksonModule() {
+        SimpleModule module = new SimpleModule("Paimon");
+        registerJsonObjects(
+                module, TableSchema.class, SchemaSerializer.INSTANCE, SchemaSerializer.INSTANCE);
+        registerJsonObjects(
+                module,
+                DataField.class,
+                DataField::serializeJson,
+                DataTypeJsonParser::parseDataField);
+        registerJsonObjects(
+                module, DataType.class, DataType::serializeJson, DataTypeJsonParser::parseDataType);
+        return module;
     }
 
     /**
