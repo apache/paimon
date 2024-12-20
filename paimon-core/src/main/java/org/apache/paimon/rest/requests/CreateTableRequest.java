@@ -29,30 +29,60 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 /** Request for creating table. */
 public class CreateTableRequest implements RESTRequest {
 
-    private static final String FIELD_IDENTIFIER = "identifier";
+    private static final String FIELD_DATABASE_NAME = "database";
+    private static final String FIELD_TABLE_NAME = "table";
+    private static final String FIELD_BRANCH_NAME = "branch";
     private static final String FIELD_SCHEMA = "schema";
 
-    @JsonProperty(FIELD_IDENTIFIER)
-    private Identifier identifier;
+    @JsonProperty(FIELD_DATABASE_NAME)
+    private String databaseName;
+
+    @JsonProperty(FIELD_TABLE_NAME)
+    private String tableName;
+
+    @JsonProperty(FIELD_BRANCH_NAME)
+    private String branchName;
 
     @JsonProperty(FIELD_SCHEMA)
-    private Schema schema;
+    private TableSchema schema;
 
     @JsonCreator
     public CreateTableRequest(
-            @JsonProperty(FIELD_IDENTIFIER) Identifier identifier,
-            @JsonProperty(FIELD_SCHEMA) Schema schema) {
-        this.identifier = identifier;
+            @JsonProperty(FIELD_DATABASE_NAME) String databaseName,
+            @JsonProperty(FIELD_TABLE_NAME) String tableName,
+            @JsonProperty(FIELD_BRANCH_NAME) String branchName,
+            @JsonProperty(FIELD_SCHEMA) TableSchema schema) {
+        this.databaseName = databaseName;
+        this.tableName = tableName;
+        this.branchName = branchName;
         this.schema = schema;
     }
 
-    @JsonGetter(FIELD_IDENTIFIER)
-    public Identifier getIdentifier() {
-        return identifier;
+    public CreateTableRequest(Identifier identifier, Schema schema) {
+        this(
+                identifier.getDatabaseName(),
+                identifier.getTableName(),
+                identifier.getBranchName(),
+                new TableSchema(schema));
+    }
+
+    @JsonGetter(FIELD_DATABASE_NAME)
+    public String getDatabaseName() {
+        return databaseName;
+    }
+
+    @JsonGetter(FIELD_TABLE_NAME)
+    public String getTableName() {
+        return tableName;
+    }
+
+    @JsonGetter(FIELD_BRANCH_NAME)
+    public String getBranchName() {
+        return branchName;
     }
 
     @JsonGetter(FIELD_SCHEMA)
-    public Schema getSchema() {
+    public TableSchema getSchema() {
         return schema;
     }
 }

@@ -20,12 +20,16 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.IntType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -124,5 +128,34 @@ public class RESTObjectMapperTest {
         assertEquals(response.getRemoved().size(), parseData.getRemoved().size());
         assertEquals(response.getUpdated().size(), parseData.getUpdated().size());
         assertEquals(response.getMissing().size(), parseData.getMissing().size());
+    }
+
+    @Test
+    public void createTableRequestParseTest() throws Exception {
+        CreateTableRequest request = MockRESTMessage.createTableRequest("t1");
+        String requestStr = mapper.writeValueAsString(request);
+        CreateTableRequest parseData = mapper.readValue(requestStr, CreateTableRequest.class);
+        assertEquals(request.getDatabaseName(), parseData.getDatabaseName());
+        assertEquals(request.getTableName(), parseData.getTableName());
+        assertEquals(request.getBranchName(), parseData.getBranchName());
+        assertEquals(request.getSchema(), parseData.getSchema());
+    }
+
+    // This test is to guarantee the compatibility of field name in RESTCatalog.
+    @Test
+    public void dataFieldParseTest() throws Exception {
+        int id = 1;
+        String name = "col1";
+        IntType type = DataTypes.INT();
+        String descStr = "desc";
+        String dataFieldStr =
+                String.format(
+                        "{\"id\": %d,\"name\":\"%s\",\"type\":\"%s\", \"description\":\"%s\"}",
+                        id, name, type, descStr);
+        DataField parseData = mapper.readValue(dataFieldStr, DataField.class);
+        assertEquals(id, parseData.id());
+        assertEquals(name, parseData.name());
+        assertEquals(type, parseData.type());
+        assertEquals(descStr, parseData.description());
     }
 }
