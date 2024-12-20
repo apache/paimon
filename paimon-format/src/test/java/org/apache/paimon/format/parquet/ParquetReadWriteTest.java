@@ -175,7 +175,11 @@ public class ParquetReadWriteTest {
                                                             new ArrayType(true, new IntType())))
                                             .field("c", new IntType())
                                             .build()),
-                            new IntType()));
+                            new IntType()),
+                    RowType.of(
+                            new ArrayType(RowType.of(new VarCharType(255))),
+                            RowType.of(new IntType()),
+                            new VarCharType(255)));
 
     @TempDir public File folder;
 
@@ -605,41 +609,9 @@ public class ParquetReadWriteTest {
                     }
                     Integer v = expected.get(cnt.get());
                     if (v == null) {
-                        assertThat(row.isNullAt(0)).isTrue();
-                        assertThat(row.isNullAt(1)).isTrue();
-                        assertThat(row.isNullAt(2)).isTrue();
-                        assertThat(row.isNullAt(3)).isTrue();
-                        assertThat(row.isNullAt(4)).isTrue();
-                        assertThat(row.isNullAt(5)).isTrue();
-                        assertThat(row.isNullAt(6)).isTrue();
-                        assertThat(row.isNullAt(7)).isTrue();
-                        assertThat(row.isNullAt(8)).isTrue();
-                        assertThat(row.isNullAt(9)).isTrue();
-                        assertThat(row.isNullAt(10)).isTrue();
-                        assertThat(row.isNullAt(11)).isTrue();
-                        assertThat(row.isNullAt(12)).isTrue();
-                        assertThat(row.isNullAt(13)).isTrue();
-                        assertThat(row.isNullAt(14)).isTrue();
-                        assertThat(row.isNullAt(15)).isTrue();
-                        assertThat(row.isNullAt(16)).isTrue();
-                        assertThat(row.isNullAt(17)).isTrue();
-                        assertThat(row.isNullAt(18)).isTrue();
-                        assertThat(row.isNullAt(19)).isTrue();
-                        assertThat(row.isNullAt(20)).isTrue();
-                        assertThat(row.isNullAt(21)).isTrue();
-                        assertThat(row.isNullAt(22)).isTrue();
-                        assertThat(row.isNullAt(23)).isTrue();
-                        assertThat(row.isNullAt(24)).isTrue();
-                        assertThat(row.isNullAt(25)).isTrue();
-                        assertThat(row.isNullAt(26)).isTrue();
-                        assertThat(row.isNullAt(27)).isTrue();
-                        assertThat(row.isNullAt(28)).isTrue();
-                        assertThat(row.isNullAt(29)).isTrue();
-                        assertThat(row.isNullAt(30)).isTrue();
-                        assertThat(row.isNullAt(31)).isTrue();
-                        assertThat(row.isNullAt(32)).isTrue();
-                        assertThat(row.isNullAt(33)).isTrue();
-                        assertThat(row.isNullAt(34)).isTrue();
+                        for (int i = 0; i < 35; i++) {
+                            assertThat(row.isNullAt(i)).isTrue();
+                        }
                     } else {
                         assertThat(row.getString(0)).hasToString("" + v);
                         assertThat(row.getBoolean(1)).isEqualTo(v % 2 == 0);
@@ -855,7 +827,8 @@ public class ParquetReadWriteTest {
                                                                 }),
                                                         i)
                                             }),
-                                    i)));
+                                    i),
+                            null));
         }
         return rows;
     }
@@ -1046,6 +1019,10 @@ public class ParquetReadWriteTest {
                     origin.getRow(5, 2).getArray(0).getRow(0, 2).getInt(1),
                     result.getRow(5, 2).getArray(0).getRow(0, 2).getInt(1));
             Assertions.assertEquals(origin.getRow(5, 2).getInt(1), result.getRow(5, 2).getInt(1));
+            Assertions.assertTrue(result.isNullAt(6));
+            Assertions.assertTrue(result.getRow(6, 2).isNullAt(0));
+            Assertions.assertTrue(result.getRow(6, 2).isNullAt(1));
+            Assertions.assertTrue(result.getRow(6, 2).isNullAt(2));
         }
     }
 
