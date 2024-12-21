@@ -34,7 +34,6 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
@@ -176,7 +175,11 @@ public class ParquetReadWriteTest {
                                                             new ArrayType(true, new IntType())))
                                             .field("c", new IntType())
                                             .build()),
-                            new IntType()));
+                            new IntType()),
+                    RowType.of(
+                            new ArrayType(RowType.of(new VarCharType(255))),
+                            RowType.of(new IntType()),
+                            new VarCharType(255)));
 
     @TempDir public File folder;
 
@@ -464,7 +467,9 @@ public class ParquetReadWriteTest {
                 format.createReader(
                         new FormatReaderContext(
                                 new LocalFileIO(), path, new LocalFileIO().getFileSize(path)));
-        compareNestedRow(rows, new RecordReaderIterator<>(reader));
+        List<InternalRow> results = new ArrayList<>(1283);
+        reader.forEachRemaining(results::add);
+        compareNestedRow(rows, results);
     }
 
     @Test
@@ -822,7 +827,8 @@ public class ParquetReadWriteTest {
                                                                 }),
                                                         i)
                                             }),
-                                    i)));
+                                    i),
+                            null));
         }
         return rows;
     }
@@ -873,6 +879,7 @@ public class ParquetReadWriteTest {
                 row1.add(0, i);
                 Group row2 = rowList.addGroup(0);
                 row2.add(0, i + 1);
+                f4.addGroup(0);
 
                 // add ROW<`f0` ARRAY<ROW<`b` ARRAY<ARRAY<INT>>, `c` INT>>, `f1` INT>>
                 Group f5 = row.addGroup("f5");
@@ -881,6 +888,7 @@ public class ParquetReadWriteTest {
                 Group insideArray = insideRow.addGroup(0);
                 createParquetDoubleNestedArray(insideArray, i);
                 insideRow.add(1, i);
+                arrayRow.addGroup(0);
                 f5.add(1, i);
                 writer.write(row);
             }
@@ -918,12 +926,12 @@ public class ParquetReadWriteTest {
         }
     }
 
-    private void compareNestedRow(
-            List<InternalRow> rows, RecordReaderIterator<InternalRow> iterator) throws Exception {
-        for (InternalRow origin : rows) {
-            assertThat(iterator.hasNext()).isTrue();
-            InternalRow result = iterator.next();
+    private void compareNestedRow(List<InternalRow> rows, List<InternalRow> results) {
+        Assertions.assertEquals(rows.size(), results.size());
 
+        for (InternalRow result : results) {
+            int index = result.getInt(0);
+            InternalRow origin = rows.get(index);
             Assertions.assertEquals(origin.getInt(0), result.getInt(0));
 
             // int[]
@@ -1011,9 +1019,11 @@ public class ParquetReadWriteTest {
                     origin.getRow(5, 2).getArray(0).getRow(0, 2).getInt(1),
                     result.getRow(5, 2).getArray(0).getRow(0, 2).getInt(1));
             Assertions.assertEquals(origin.getRow(5, 2).getInt(1), result.getRow(5, 2).getInt(1));
+            Assertions.assertTrue(result.isNullAt(6));
+            Assertions.assertTrue(result.getRow(6, 2).isNullAt(0));
+            Assertions.assertTrue(result.getRow(6, 2).isNullAt(1));
+            Assertions.assertTrue(result.getRow(6, 2).isNullAt(2));
         }
-        assertThat(iterator.hasNext()).isFalse();
-        iterator.close();
     }
 
     private void fillWithMap(Map<String, String> map, InternalMap internalMap, int index) {

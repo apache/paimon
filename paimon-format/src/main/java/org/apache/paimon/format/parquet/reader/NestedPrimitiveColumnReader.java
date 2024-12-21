@@ -75,14 +75,12 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
     private final ColumnDescriptor descriptor;
     private final Type type;
     private final DataType dataType;
-    private final boolean readRowField;
-    private final boolean readMapKey;
     /** The dictionary, if this column has dictionary encoding. */
     private final ParquetDataColumnReader dictionary;
     /** Maximum definition level for this column. */
     private final int maxDefLevel;
 
-    private final boolean isUtcTimestamp;
+    private boolean isUtcTimestamp;
 
     /** If true, the current page is dictionary encoded. */
     private boolean isCurrentPageDictionaryEncoded;
@@ -106,16 +104,14 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
 
     private boolean isFirstRow = true;
 
-    private final LastValueContainer lastValue = new LastValueContainer();
+    private Object lastValue;
 
     public NestedPrimitiveColumnReader(
             ColumnDescriptor descriptor,
             PageReadStore pageReadStore,
             boolean isUtcTimestamp,
             Type parquetType,
-            DataType dataType,
-            boolean readRowField,
-            boolean readMapKey)
+            DataType dataType)
             throws IOException {
         this.descriptor = descriptor;
         this.type = parquetType;
@@ -123,8 +119,6 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
         this.maxDefLevel = descriptor.getMaxDefinitionLevel();
         this.isUtcTimestamp = isUtcTimestamp;
         this.dataType = dataType;
-        this.readRowField = readRowField;
-        this.readMapKey = readMapKey;
 
         DictionaryPage dictionaryPage = pageReader.readDictionaryPage();
 
@@ -196,9 +190,8 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
             boolean needFilterSkip = pageRowId < rangeStart;
 
             do {
-
-                if (!lastValue.shouldSkip && !needFilterSkip) {
-                    valueList.add(lastValue.value);
+                if (!needFilterSkip) {
+                    valueList.add(lastValue);
                     valueIndex++;
                 }
             } while (readValue() && (repetitionLevel != 0));
@@ -225,27 +218,6 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
         return new LevelDelegation(repetition, definition);
     }
 
-    /**
-     * An ARRAY[ARRAY[INT]] Example: {[[0, null], [1], [], null], [], null} => [5, 4, 5, 3, 2, 1, 0]
-     *
-     * <ul>
-     *   <li>definitionLevel == maxDefLevel => not null value
-     *   <li>definitionLevel == maxDefLevel - 1 => null value
-     *   <li>definitionLevel == maxDefLevel - 2 => empty set, skip
-     *   <li>definitionLevel == maxDefLevel - 3 => null set, skip
-     *   <li>definitionLevel == maxDefLevel - 4 => empty outer set, skip
-     *   <li>definitionLevel == maxDefLevel - 5 => null outer set, skip
-     *   <li>... skip
-     * </ul>
-     *
-     * <p>When (definitionLevel <= maxDefLevel - 2) we skip the value because children ColumnVector
-     * for OrcArrayColumnVector don't contain empty and null set value. Stay consistent here.
-     *
-     * <p>For MAP, the value vector is the same as ARRAY. But the key vector isn't nullable, so just
-     * read value when definitionLevel == maxDefLevel.
-     *
-     * <p>For ROW, RowColumnVector still get null value when definitionLevel == maxDefLevel - 2.
-     */
     private boolean readValue() throws IOException {
         int left = readPageIfNeed();
         if (left > 0) {
@@ -255,24 +227,12 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
             if (definitionLevel == maxDefLevel) {
                 if (isCurrentPageDictionaryEncoded) {
                     int dictionaryId = dataColumn.readValueDictionaryId();
-                    lastValue.setValue(dictionaryDecodeValue(dataType, dictionaryId));
+                    lastValue = dictionaryDecodeValue(dataType, dictionaryId);
                 } else {
-                    lastValue.setValue(readPrimitiveTypedRow(dataType));
+                    lastValue = readPrimitiveTypedRow(dataType);
                 }
             } else {
-                if (readMapKey) {
-                    lastValue.skip();
-                } else {
-                    if (definitionLevel == maxDefLevel - 1) {
-                        // null value inner set
-                        lastValue.setValue(null);
-                    } else if (definitionLevel == maxDefLevel - 2 && readRowField) {
-                        lastValue.setValue(null);
-                    } else {
-                        // current set is empty or null
-                        lastValue.skip();
-                    }
-                }
+                lastValue = null;
             }
             return true;
         } else {
@@ -719,20 +679,6 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
         @Override
         public int nextInt() {
             return 0;
-        }
-    }
-
-    private static class LastValueContainer {
-        protected boolean shouldSkip;
-        protected Object value;
-
-        protected void setValue(Object value) {
-            this.value = value;
-            this.shouldSkip = false;
-        }
-
-        protected void skip() {
-            this.shouldSkip = true;
         }
     }
 }
