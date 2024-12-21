@@ -318,7 +318,7 @@ public class SplitTest {
                         new byte[] {1, 2, 4},
                         FileSource.COMPACT,
                         Arrays.asList("field1", "field2", "field3"),
-                        null);
+                        "hdfs:///path/to/warehouse");
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
         DeletionFile deletionFile = new DeletionFile("deletion_file", 100, 22, null);
