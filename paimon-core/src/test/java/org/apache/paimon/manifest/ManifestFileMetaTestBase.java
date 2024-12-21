@@ -95,6 +95,7 @@ public abstract class ManifestFileMetaTestBase {
                         0L, // not used
                         embeddedIndex, // not used
                         FileSource.APPEND,
+                        null,
                         null));
     }
 

@@ -131,6 +131,20 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("The file path of this table in the filesystem.");
 
+    @ExcludeFromDocumentation("Internal use only")
+    public static final ConfigOption<String> WAREHOUSE_ROOT_PATH =
+            key("warehouse.root-path")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("The file path of the warehouse in the filesystem.");
+
+    public static final ConfigOption<String> DATA_FILE_EXTERNAL_PATH =
+            key("data-file.external-path")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The location where the data of this table is currently written.");
+
     public static final ConfigOption<String> BRANCH =
             key("branch").stringType().defaultValue("main").withDescription("Specify branch name.");
 
@@ -2366,6 +2380,21 @@ public class CoreOptions implements Serializable {
 
     public boolean dataFileThinMode() {
         return options.get(DATA_FILE_THIN_MODE);
+    }
+
+    public String getDataFileExternalPath() {
+        return options.get(DATA_FILE_EXTERNAL_PATH);
+    }
+
+    public String getWarehouseRootPath() {
+        return options.get(WAREHOUSE_ROOT_PATH);
+    }
+
+    public String getDataRootLocation() {
+        if (getDataFileExternalPath() == null || getDataFileExternalPath().isEmpty()) {
+            return getWarehouseRootPath();
+        }
+        return getDataFileExternalPath();
     }
 
     /** Specifies the merge engine for table with primary key. */

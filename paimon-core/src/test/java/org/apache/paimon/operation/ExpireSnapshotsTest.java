@@ -214,6 +214,7 @@ public class ExpireSnapshotsTest {
                         0L,
                         null,
                         FileSource.APPEND,
+                        null,
                         null);
         ManifestEntry add = new ManifestEntry(FileKind.ADD, partition, 0, 1, dataFile);
         ManifestEntry delete = new ManifestEntry(FileKind.DELETE, partition, 0, 1, dataFile);
