@@ -57,6 +57,7 @@ public class DataFileTestUtils {
                 maxSeq - minSeq + 1,
                 null,
                 FileSource.APPEND,
+                null,
                 null);
     }
 

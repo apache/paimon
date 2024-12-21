@@ -75,7 +75,8 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         11L,
                         new byte[] {1, 2, 4},
                         FileSource.COMPACT,
-                        Arrays.asList("field1", "field2", "field3"));
+                        Arrays.asList("field1", "field2", "field3"),
+                        null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
         LinkedHashMap<String, DeletionVectorMeta> dvMetas = new LinkedHashMap<>();
@@ -136,7 +137,8 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         11L,
                         new byte[] {1, 2, 4},
                         FileSource.COMPACT,
-                        Arrays.asList("field1", "field2", "field3"));
+                        Arrays.asList("field1", "field2", "field3"),
+                        "hdfs://localhost:9000/path/to/file");
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
         LinkedHashMap<String, DeletionVectorMeta> dvMetas = new LinkedHashMap<>();
@@ -162,9 +164,9 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         Collections.singletonList(commitMessage));
 
         ManifestCommittableSerializer serializer = new ManifestCommittableSerializer();
-        // byte[] bytes = serializer.serialize(manifestCommittable);
-        // ManifestCommittable deserialized = serializer.deserialize(3, bytes);
-        // assertThat(deserialized).isEqualTo(manifestCommittable);
+        byte[] bytes = serializer.serialize(manifestCommittable);
+        ManifestCommittable deserialized = serializer.deserialize(3, bytes);
+        assertThat(deserialized).isEqualTo(manifestCommittable);
 
         byte[] v2Bytes =
                 IOUtils.readFully(
@@ -172,7 +174,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
                                 .getClassLoader()
                                 .getResourceAsStream("compatibility/manifest-committable-v4"),
                         true);
-        ManifestCommittable deserialized = serializer.deserialize(2, v2Bytes);
+        deserialized = serializer.deserialize(2, v2Bytes);
         assertThat(deserialized).isEqualTo(manifestCommittable);
     }
 
@@ -206,6 +208,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         11L,
                         new byte[] {1, 2, 4},
                         FileSource.COMPACT,
+                        null,
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
@@ -276,6 +279,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         11L,
                         new byte[] {1, 2, 4},
                         null,
+                        null,
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
@@ -343,6 +347,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         3,
                         Arrays.asList("extra1", "extra2"),
                         Timestamp.fromLocalDateTime(LocalDateTime.parse("2022-03-02T20:20:12")),
+                        null,
                         null,
                         null,
                         null,

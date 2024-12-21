@@ -75,7 +75,8 @@ public class DataFileMeta10Serializer implements Serializable {
                             new DataField(
                                     16,
                                     "_VALUE_STATS_COLS",
-                                    DataTypes.ARRAY(DataTypes.STRING().notNull()))));
+                                    DataTypes.ARRAY(DataTypes.STRING().notNull())),
+                            new DataField(17, "_DATA_ROOT_LOCATION", newStringType(true))));
 
     protected final InternalRowSerializer rowSerializer;
 

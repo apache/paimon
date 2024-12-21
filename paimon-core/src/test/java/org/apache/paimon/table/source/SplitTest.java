@@ -139,7 +139,8 @@ public class SplitTest {
                         11L,
                         new byte[] {1, 2, 4},
                         FileSource.COMPACT,
-                        Arrays.asList("field1", "field2", "field3"));
+                        Arrays.asList("field1", "field2", "field3"),
+                        null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
         DeletionFile deletionFile = new DeletionFile("deletion_file", 100, 22, 33L);
@@ -193,6 +194,7 @@ public class SplitTest {
                         Timestamp.fromLocalDateTime(LocalDateTime.parse("2022-03-02T20:20:12")),
                         11L,
                         new byte[] {1, 2, 4},
+                        null,
                         null,
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
@@ -254,6 +256,7 @@ public class SplitTest {
                         11L,
                         new byte[] {1, 2, 4},
                         FileSource.COMPACT,
+                        null,
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
@@ -314,7 +317,8 @@ public class SplitTest {
                         11L,
                         new byte[] {1, 2, 4},
                         FileSource.COMPACT,
-                        Arrays.asList("field1", "field2", "field3"));
+                        Arrays.asList("field1", "field2", "field3"),
+                        null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
         DeletionFile deletionFile = new DeletionFile("deletion_file", 100, 22, null);

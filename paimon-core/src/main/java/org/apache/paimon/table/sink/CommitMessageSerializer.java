@@ -26,7 +26,6 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMeta08Serializer;
 import org.apache.paimon.io.DataFileMeta09Serializer;
-import org.apache.paimon.io.DataFileMeta10Serializer;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.DataInputDeserializer;
@@ -53,7 +52,7 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
     private final DataFileMetaSerializer dataFileSerializer;
     private final IndexFileMetaSerializer indexEntrySerializer;
 
-    private DataFileMeta10Serializer dataFile10Serializer;
+    // private DataFileMeta10Serializer dataFile10Serializer;
     private DataFileMeta09Serializer dataFile09Serializer;
     private DataFileMeta08Serializer dataFile08Serializer;
     private IndexFileMeta09Serializer indexEntry09Serializer;
@@ -131,14 +130,8 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
 
     private IOExceptionSupplier<List<DataFileMeta>> fileDeserializer(
             int version, DataInputView view) {
-        if (version >= 5) {
+        if (version >= 4) {
             return () -> dataFileSerializer.deserializeList(view);
-        }
-        if (version == 4) {
-            if (dataFile10Serializer == null) {
-                dataFile10Serializer = new DataFileMeta10Serializer();
-            }
-            return () -> dataFile10Serializer.deserializeList(view);
         } else if (version == 3) {
             if (dataFile09Serializer == null) {
                 dataFile09Serializer = new DataFileMeta09Serializer();
