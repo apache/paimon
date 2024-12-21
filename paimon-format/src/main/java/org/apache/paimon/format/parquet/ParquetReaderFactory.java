@@ -540,7 +540,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             this.recycler = recycler;
             this.result =
                     new ColumnarRowIterator(
-                            filePath, new ColumnarRow(columnarBatch), this::recycle);
+                            filePath, new ColumnarRow(columnarBatch), this::recycle, false);
         }
 
         public void recycle() {

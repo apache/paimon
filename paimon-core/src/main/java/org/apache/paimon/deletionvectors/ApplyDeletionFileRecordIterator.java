@@ -56,6 +56,11 @@ public class ApplyDeletionFileRecordIterator implements FileRecordIterator<Inter
         return iterator.filePath();
     }
 
+    @Override
+    public boolean vectorizedAndCompactly() {
+        return iterator.vectorizedAndCompactly();
+    }
+
     @Nullable
     @Override
     public InternalRow next() throws IOException {

@@ -35,15 +35,19 @@ public final class IteratorResultIterator extends RecyclableIterator<InternalRow
     private final Path filePath;
     private long nextFilePos;
 
+    private final boolean vectorizedAndCompactly;
+
     public IteratorResultIterator(
             final IteratorWithException<InternalRow, IOException> records,
             final @Nullable Runnable recycler,
             final Path filePath,
-            long pos) {
+            long pos,
+            boolean vectorizedAndCompactly) {
         super(recycler);
         this.records = records;
         this.filePath = filePath;
         this.nextFilePos = pos;
+        this.vectorizedAndCompactly = vectorizedAndCompactly;
     }
 
     @Nullable
@@ -65,5 +69,10 @@ public final class IteratorResultIterator extends RecyclableIterator<InternalRow
     @Override
     public Path filePath() {
         return filePath;
+    }
+
+    @Override
+    public boolean vectorizedAndCompactly() {
+        return vectorizedAndCompactly;
     }
 }

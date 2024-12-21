@@ -35,7 +35,6 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.deletionvectors.ApplyDeletionFileRecordIterator;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.VectorizedRecordIterator;
 import org.apache.paimon.schema.Schema;
@@ -888,7 +887,7 @@ public class ArrowBatchConverterTest {
                         .withProjection(projection)
                         .createReader(table.newReadBuilder().newScan().plan())
                         .readBatch();
-        assertThat(isVectorizedWithDv(iterator)).isTrue();
+        assertThat(VectorSchemaRootConverter.isVectorizedWithDv(iterator)).isTrue();
         return iterator;
     }
 
@@ -922,16 +921,6 @@ public class ArrowBatchConverterTest {
             rowWriter.reset(iterator);
             return rowWriter;
         }
-    }
-
-    private boolean isVectorizedWithDv(RecordReader.RecordIterator<InternalRow> iterator) {
-        if (iterator instanceof ApplyDeletionFileRecordIterator) {
-            ApplyDeletionFileRecordIterator deletionIterator =
-                    (ApplyDeletionFileRecordIterator) iterator;
-            FileRecordIterator<InternalRow> innerIterator = deletionIterator.iterator();
-            return innerIterator instanceof VectorizedRecordIterator;
-        }
-        return false;
     }
 
     private Object[] randomRowValues(boolean[] nullable) {

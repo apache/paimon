@@ -170,7 +170,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             this.paimonColumnBatch = paimonColumnBatch;
             this.result =
                     new ColumnarRowIterator(
-                            filePath, new ColumnarRow(paimonColumnBatch), this::recycle);
+                            filePath, new ColumnarRow(paimonColumnBatch), this::recycle, true);
         }
 
         /**

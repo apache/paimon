@@ -42,6 +42,17 @@ public interface FileRecordIterator<T> extends RecordReader.RecordIterator<T> {
     /** @return the file path */
     Path filePath();
 
+    /**
+     * Return true only if this FileRecordIterator contains a batch and the batch's nested vectors
+     * are compactly (See <a href="https://github.com/apache/paimon/pull/3883">Reverted #3883</a>).
+     * If a FileRecordIterator contains a batch and the batch's nested vectors are not compactly,
+     * it's not safe to use VectorizedColumnBatch directly. Currently, we should use {@link #next()}
+     * to handle it row by row.
+     *
+     * <p>TODO: delete this after #3883 is fixed completely.
+     */
+    boolean vectorizedAndCompactly();
+
     @Override
     default <R> FileRecordIterator<R> transform(Function<T, R> function) {
         FileRecordIterator<T> thisIterator = this;
@@ -54,6 +65,11 @@ public interface FileRecordIterator<T> extends RecordReader.RecordIterator<T> {
             @Override
             public Path filePath() {
                 return thisIterator.filePath();
+            }
+
+            @Override
+            public boolean vectorizedAndCompactly() {
+                return thisIterator.vectorizedAndCompactly();
             }
 
             @Nullable
@@ -85,6 +101,11 @@ public interface FileRecordIterator<T> extends RecordReader.RecordIterator<T> {
             @Override
             public Path filePath() {
                 return thisIterator.filePath();
+            }
+
+            @Override
+            public boolean vectorizedAndCompactly() {
+                return thisIterator.vectorizedAndCompactly();
             }
 
             @Nullable

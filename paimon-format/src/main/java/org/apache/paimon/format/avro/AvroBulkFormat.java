@@ -110,7 +110,7 @@ public class AvroBulkFormat implements FormatReaderFactory {
             IteratorWithException<InternalRow, IOException> iterator =
                     new AvroBlockIterator(reader.getBlockCount(), reader);
             return new IteratorResultIterator(
-                    iterator, () -> pool.recycler().recycle(ticket), filePath, rowPosition);
+                    iterator, () -> pool.recycler().recycle(ticket), filePath, rowPosition, false);
         }
 
         private boolean readNextBlock() throws IOException {

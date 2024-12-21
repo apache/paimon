@@ -53,6 +53,11 @@ public class ApplyBitmapIndexFileRecordIterator implements FileRecordIterator<In
         return iterator.filePath();
     }
 
+    @Override
+    public boolean vectorizedAndCompactly() {
+        return iterator.vectorizedAndCompactly();
+    }
+
     @Nullable
     @Override
     public InternalRow next() throws IOException {

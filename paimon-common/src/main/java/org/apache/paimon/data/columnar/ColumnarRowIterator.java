@@ -44,11 +44,18 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
     private int nextPos;
     private long nextFilePos;
 
-    public ColumnarRowIterator(Path filePath, ColumnarRow row, @Nullable Runnable recycler) {
+    private final boolean vectorizedAndCompactly;
+
+    public ColumnarRowIterator(
+            Path filePath,
+            ColumnarRow row,
+            @Nullable Runnable recycler,
+            boolean vectorizedAndCompactly) {
         super(recycler);
         this.filePath = filePath;
         this.row = row;
         this.recycler = recycler;
+        this.vectorizedAndCompactly = vectorizedAndCompactly;
     }
 
     public void reset(long nextFilePos) {
@@ -79,9 +86,15 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
         return this.filePath;
     }
 
+    @Override
+    public boolean vectorizedAndCompactly() {
+        return vectorizedAndCompactly;
+    }
+
     public ColumnarRowIterator copy(ColumnVector[] vectors) {
         ColumnarRowIterator newIterator =
-                new ColumnarRowIterator(filePath, row.copy(vectors), recycler);
+                new ColumnarRowIterator(
+                        filePath, row.copy(vectors), recycler, vectorizedAndCompactly);
         newIterator.reset(nextFilePos);
         return newIterator;
     }
