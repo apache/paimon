@@ -46,6 +46,10 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
 
     private final boolean vectorizedAndCompactly;
 
+    public ColumnarRowIterator(Path filePath, ColumnarRow row, @Nullable Runnable recycler) {
+        this(filePath, row, recycler, true);
+    }
+
     public ColumnarRowIterator(
             Path filePath,
             ColumnarRow row,
