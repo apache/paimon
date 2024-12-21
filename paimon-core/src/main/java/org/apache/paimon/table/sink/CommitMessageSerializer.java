@@ -52,7 +52,6 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
     private final DataFileMetaSerializer dataFileSerializer;
     private final IndexFileMetaSerializer indexEntrySerializer;
 
-    // private DataFileMeta10Serializer dataFile10Serializer;
     private DataFileMeta09Serializer dataFile09Serializer;
     private DataFileMeta08Serializer dataFile08Serializer;
     private IndexFileMeta09Serializer indexEntry09Serializer;
