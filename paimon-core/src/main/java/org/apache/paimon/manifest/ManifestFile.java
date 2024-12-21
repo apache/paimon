@@ -110,13 +110,34 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         return writer.result();
     }
 
+    /**
+     * Write several {@link ManifestEntry}s into manifest file.
+     *
+     * <p>NOTE: This method is atomic.
+     */
+    public ManifestFileMeta writeInOneSingleFile(List<ManifestEntry> entries, Path manifestPath)
+            throws IOException {
+        ManifestEntryWriter writer = createManifestEntryWriter(manifestPath);
+        try {
+            writer.write(entries);
+            writer.close();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return writer.result();
+    }
+
     public RollingFileWriter<ManifestEntry, ManifestFileMeta> createRollingWriter() {
         return new RollingFileWriter<>(
                 () -> new ManifestEntryWriter(writerFactory, pathFactory.newPath(), compression),
                 suggestedFileSize);
     }
 
-    private class ManifestEntryWriter extends SingleFileWriter<ManifestEntry, ManifestFileMeta> {
+    public ManifestEntryWriter createManifestEntryWriter(Path manifestPath) {
+        return new ManifestEntryWriter(writerFactory, manifestPath, compression);
+    }
+
+    public class ManifestEntryWriter extends SingleFileWriter<ManifestEntry, ManifestFileMeta> {
 
         private final SimpleStatsCollector partitionStatsCollector;
         private final SimpleStatsConverter partitionStatsSerializer;

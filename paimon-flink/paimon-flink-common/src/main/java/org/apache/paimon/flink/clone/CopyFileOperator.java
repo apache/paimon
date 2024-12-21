@@ -18,12 +18,18 @@
 
 package org.apache.paimon.flink.clone;
 
+import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Catalog.TableNotExistException;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFile;
+import org.apache.paimon.manifest.ManifestFile.ManifestEntryWriter;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.IOUtils;
 
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
@@ -32,6 +38,9 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /** A Operator to copy files. */
@@ -100,14 +109,47 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
         if (LOG.isDebugEnabled()) {
             LOG.debug("Begin copy file from {} to {}.", sourcePath, targetPath);
         }
-        IOUtils.copyBytes(
-                sourceTableFileIO.newInputStream(sourcePath),
-                targetTableFileIO.newOutputStream(targetPath, true));
+
+        if (cloneFileInfo.getFileType() == FileType.MANIFEST_FILE) {
+            copyManifestFile(sourcePath, targetPath, cloneFileInfo);
+        } else {
+            IOUtils.copyBytes(
+                    sourceTableFileIO.newInputStream(sourcePath),
+                    targetTableFileIO.newOutputStream(targetPath, true));
+        }
         if (LOG.isDebugEnabled()) {
             LOG.debug("End copy file from {} to {}.", sourcePath, targetPath);
         }
 
         output.collect(streamRecord);
+    }
+
+    private void copyManifestFile(Path sourcePath, Path targetPath, CloneFileInfo cloneFileInfo)
+            throws TableNotExistException, IOException {
+        Identifier sourceIdentifier = Identifier.fromString(cloneFileInfo.getSourceIdentifier());
+        FileStoreTable sourceTable = (FileStoreTable) sourceCatalog.getTable(sourceIdentifier);
+        FileStore<?> store = sourceTable.store();
+        ManifestFile manifestFile = store.manifestFileFactory().create();
+
+        List<ManifestEntry> manifestEntries =
+                manifestFile.readWithIOException(sourcePath.getName());
+        List<ManifestEntry> targetManifestEntries = new ArrayList<>(manifestEntries.size());
+
+        for (ManifestEntry manifestEntry : manifestEntries) {
+            ManifestEntry newManifestEntry =
+                    new ManifestEntry(
+                            manifestEntry.kind(),
+                            manifestEntry.partition(),
+                            manifestEntry.bucket(),
+                            manifestEntry.totalBuckets(),
+                            manifestEntry.file().copy(targetCatalog.warehouse()));
+            targetManifestEntries.add(newManifestEntry);
+        }
+
+        ManifestEntryWriter manifestEntryWriter =
+                manifestFile.createManifestEntryWriter(targetPath);
+        manifestEntryWriter.write(targetManifestEntries);
+        manifestEntryWriter.close();
     }
 
     @Override

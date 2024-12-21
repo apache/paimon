@@ -94,6 +94,30 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
         }
     }
 
+    public void writeWithNoRolling(T row) throws IOException {
+        try {
+            // Open the current writer if write the first record or roll over happen before.
+            if (currentWriter == null) {
+                openCurrentWriter();
+            }
+
+            currentWriter.write(row);
+            recordCount += 1;
+
+            if (rollingFile(false)) {
+                closeCurrentWriter();
+            }
+        } catch (Throwable e) {
+            LOG.warn(
+                    "Exception occurs when writing file "
+                            + (currentWriter == null ? null : currentWriter.path())
+                            + ". Cleaning up.",
+                    e);
+            abort();
+            throw e;
+        }
+    }
+
     public void writeBundle(BundleRecords bundle) throws IOException {
         try {
             // Open the current writer if write the first record or roll over happen before.

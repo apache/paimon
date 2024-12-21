@@ -24,12 +24,17 @@ public class CloneFileInfo {
     private final String filePathExcludeTableRoot;
     private final String sourceIdentifier;
     private final String targetIdentifier;
+    private FileType fileType;
 
     public CloneFileInfo(
-            String filePathExcludeTableRoot, String sourceIdentifier, String targetIdentifier) {
+            String filePathExcludeTableRoot,
+            String sourceIdentifier,
+            String targetIdentifier,
+            FileType fileType) {
         this.filePathExcludeTableRoot = filePathExcludeTableRoot;
         this.sourceIdentifier = sourceIdentifier;
         this.targetIdentifier = targetIdentifier;
+        this.fileType = fileType;
     }
 
     public String getFilePathExcludeTableRoot() {
@@ -44,10 +49,14 @@ public class CloneFileInfo {
         return targetIdentifier;
     }
 
+    public FileType getFileType() {
+        return fileType;
+    }
+
     @Override
     public String toString() {
         return String.format(
-                "{ filePath: %s, sourceIdentifier: %s, targetIdentifier: %s }",
-                filePathExcludeTableRoot, sourceIdentifier, targetIdentifier);
+                "{ filePath: %s, sourceIdentifier: %s, targetIdentifier: %s, fileType: %s }",
+                filePathExcludeTableRoot, sourceIdentifier, targetIdentifier, fileType);
     }
 }

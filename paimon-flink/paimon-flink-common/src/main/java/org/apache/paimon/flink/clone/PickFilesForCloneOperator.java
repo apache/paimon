@@ -115,15 +115,21 @@ public class PickFilesForCloneOperator extends AbstractStreamOperator<CloneFileI
     }
 
     private List<CloneFileInfo> toCloneFileInfos(
-            List<Path> files,
+            Map<FileType, List<Path>> filesMap,
             Path sourceTableRoot,
             String sourceIdentifier,
             String targetIdentifier) {
         List<CloneFileInfo> result = new ArrayList<>();
-        for (Path file : files) {
-            Path relativePath = getPathExcludeTableRoot(file, sourceTableRoot);
-            result.add(
-                    new CloneFileInfo(relativePath.toString(), sourceIdentifier, targetIdentifier));
+        for (Map.Entry<FileType, List<Path>> entry : filesMap.entrySet()) {
+            for (Path file : entry.getValue()) {
+                Path relativePath = getPathExcludeTableRoot(file, sourceTableRoot);
+                result.add(
+                        new CloneFileInfo(
+                                relativePath.toString(),
+                                sourceIdentifier,
+                                targetIdentifier,
+                                entry.getKey()));
+            }
         }
         return result;
     }
