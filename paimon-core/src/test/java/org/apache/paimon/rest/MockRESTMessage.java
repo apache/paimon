@@ -18,14 +18,18 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
-import org.apache.paimon.rest.responses.DatabaseName;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
@@ -63,9 +67,8 @@ public class MockRESTMessage {
     }
 
     public static ListDatabasesResponse listDatabasesResponse(String name) {
-        DatabaseName databaseName = new DatabaseName(name);
-        List<DatabaseName> databaseNameList = new ArrayList<>();
-        databaseNameList.add(databaseName);
+        List<String> databaseNameList = new ArrayList<>();
+        databaseNameList.add(name);
         return new ListDatabasesResponse(databaseNameList);
     }
 
@@ -82,5 +85,30 @@ public class MockRESTMessage {
     public static AlterDatabaseResponse alterDatabaseResponse() {
         return new AlterDatabaseResponse(
                 Lists.newArrayList("remove"), Lists.newArrayList("add"), new ArrayList<>());
+    }
+
+    public static ListTablesResponse listTablesResponse() {
+        return new ListTablesResponse(Lists.newArrayList("table"));
+    }
+
+    public static ListTablesResponse listTablesEmptyResponse() {
+        return new ListTablesResponse(Lists.newArrayList());
+    }
+
+    public static CreateTableRequest createTableRequest(String name) {
+        Identifier identifier = Identifier.create(databaseName(), name);
+        Map<String, String> options = new HashMap<>();
+        options.put("k1", "v1");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .column("col2", DataTypes.STRING())
+                        .partitionKeys("pt")
+                        .primaryKey("pk", "pt")
+                        .options(options)
+                        .build();
+        return new CreateTableRequest(identifier, schema);
     }
 }

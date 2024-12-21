@@ -52,4 +52,23 @@ public class ResourcePaths {
                 .add("properties")
                 .toString();
     }
+
+    public String tables(String databaseName) {
+        return SLASH.add("v1")
+                .add(prefix)
+                .add("databases")
+                .add(databaseName)
+                .add("tables")
+                .toString();
+    }
+
+    public String table(String databaseName, String tableName) {
+        return SLASH.add("v1")
+                .add(prefix)
+                .add("databases")
+                .add(databaseName)
+                .add("tables")
+                .add(tableName)
+                .toString();
+    }
 }
