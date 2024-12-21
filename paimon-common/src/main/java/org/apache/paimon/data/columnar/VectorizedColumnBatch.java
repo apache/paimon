@@ -38,12 +38,6 @@ public class VectorizedColumnBatch implements Serializable {
 
     private static final long serialVersionUID = 8180323238728166155L;
 
-    /**
-     * This number is carefully chosen to minimize overhead and typically allows one
-     * VectorizedColumnBatch to fit in cache.
-     */
-    public static final int DEFAULT_SIZE = 2048;
-
     private int numRows;
 
     public final ColumnVector[] columns;

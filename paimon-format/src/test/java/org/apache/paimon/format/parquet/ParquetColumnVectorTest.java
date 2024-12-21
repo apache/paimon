@@ -29,8 +29,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.ArrayColumnVector;
 import org.apache.paimon.data.columnar.BytesColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.data.columnar.IntColumnVector;
-import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
@@ -64,6 +64,7 @@ import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.paimon.data.BinaryString.fromString;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Validate the {@link ColumnVector}s read by Parquet format. */
@@ -77,6 +78,25 @@ public class ParquetColumnVectorTest {
                     cv.isNullAt(i)
                             ? "null"
                             : new String(((BytesColumnVector) cv).getBytes(i).getBytes());
+
+    @Test
+    public void testNormalStrings() throws IOException {
+        RowType rowType =
+                RowType.builder()
+                        .field("s1", DataTypes.STRING())
+                        .field("s2", DataTypes.STRING())
+                        .field("s3", DataTypes.STRING())
+                        .build();
+
+        int numRows = RND.nextInt(5) + 5;
+        List<InternalRow> rows = new ArrayList<>(numRows);
+        for (int i = 0; i < numRows; i++) {
+            rows.add(GenericRow.of(fromString(i + ""), fromString(i + ""), fromString(i + "")));
+        }
+
+        ColumnarRowIterator iterator = createRecordIterator(rowType, rows);
+        assertThat(iterator).isInstanceOf(VectorizedRecordIterator.class);
+    }
 
     @Test
     public void testArrayString() throws IOException {
@@ -107,8 +127,8 @@ public class ParquetColumnVectorTest {
             rows.add(GenericRow.of(array));
         }
 
-        VectorizedRecordIterator iterator = createVectorizedRecordIterator(rowType, rows);
-        VectorizedColumnBatch batch = iterator.batch();
+        ColumnarRowIterator iterator = createRecordIterator(rowType, rows);
+        assertThat(iterator).isNotInstanceOf(VectorizedRecordIterator.class);
         InternalArray.ElementGetter getter = InternalArray.createElementGetter(DataTypes.STRING());
 
         // validate row by row
@@ -175,8 +195,8 @@ public class ParquetColumnVectorTest {
             rows.add(GenericRow.of(new GenericArray(innerArrays)));
         }
 
-        VectorizedRecordIterator iterator = createVectorizedRecordIterator(rowType, rows);
-        VectorizedColumnBatch batch = iterator.batch();
+        ColumnarRowIterator iterator = createRecordIterator(rowType, rows);
+        assertThat(iterator).isNotInstanceOf(VectorizedRecordIterator.class);
         InternalArray.ElementGetter getter = InternalArray.createElementGetter(DataTypes.STRING());
 
         // validate row by row
@@ -224,13 +244,13 @@ public class ParquetColumnVectorTest {
             expectedData.add(currentStringArray);
             Map<Integer, BinaryString> map = new HashMap<>();
             for (int idx = 0; idx < currentSize; idx++) {
-                map.put(idx, BinaryString.fromString(currentStringArray.get(idx)));
+                map.put(idx, fromString(currentStringArray.get(idx)));
             }
             rows.add(GenericRow.of(new GenericMap(map)));
         }
 
-        VectorizedRecordIterator iterator = createVectorizedRecordIterator(rowType, rows);
-        VectorizedColumnBatch batch = iterator.batch();
+        ColumnarRowIterator iterator = createRecordIterator(rowType, rows);
+        assertThat(iterator).isNotInstanceOf(VectorizedRecordIterator.class);
         InternalArray.ElementGetter getter = InternalArray.createElementGetter(DataTypes.STRING());
 
         // validate row by row
@@ -310,8 +330,9 @@ public class ParquetColumnVectorTest {
             rows.add(GenericRow.of(new GenericMap(map)));
         }
 
-        VectorizedRecordIterator iterator = createVectorizedRecordIterator(rowType, rows);
-        VectorizedColumnBatch batch = iterator.batch();
+        ColumnarRowIterator iterator = createRecordIterator(rowType, rows);
+        assertThat(iterator).isNotInstanceOf(VectorizedRecordIterator.class);
+
         InternalArray.ElementGetter getter = InternalArray.createElementGetter(DataTypes.STRING());
 
         // validate row by row
@@ -420,8 +441,8 @@ public class ParquetColumnVectorTest {
             rows.add(GenericRow.of(GenericRow.of(i, array)));
         }
 
-        VectorizedRecordIterator iterator = createVectorizedRecordIterator(rowType, rows);
-        VectorizedColumnBatch batch = iterator.batch();
+        ColumnarRowIterator iterator = createRecordIterator(rowType, rows);
+        assertThat(iterator).isNotInstanceOf(VectorizedRecordIterator.class);
         InternalArray.ElementGetter getter = InternalArray.createElementGetter(DataTypes.STRING());
 
         // validate row by row
@@ -487,7 +508,7 @@ public class ParquetColumnVectorTest {
         List<InternalRow> rows = new ArrayList<>(4);
         List<BinaryString> f0 = new ArrayList<>(3);
         for (int i = 0; i < 3; i++) {
-            f0.add(BinaryString.fromString(randomString()));
+            f0.add(fromString(randomString()));
         }
 
         GenericRow row00 = GenericRow.of(f0.get(0), new GenericArray(new Object[] {0, null}));
@@ -504,8 +525,8 @@ public class ParquetColumnVectorTest {
         GenericArray array3 = new GenericArray(new GenericRow[] {});
         rows.add(GenericRow.of(array3));
 
-        VectorizedRecordIterator iterator = createVectorizedRecordIterator(rowType, rows);
-        VectorizedColumnBatch batch = iterator.batch();
+        ColumnarRowIterator iterator = createRecordIterator(rowType, rows);
+        assertThat(iterator).isNotInstanceOf(VectorizedRecordIterator.class);
 
         // validate row by row
         InternalRow row0 = iterator.next();
@@ -625,8 +646,9 @@ public class ParquetColumnVectorTest {
         InternalRow row3 =
                 GenericRow.of(GenericRow.of(new GenericArray(new GenericRow[] {null}), null));
 
-        VectorizedRecordIterator iterator =
-                createVectorizedRecordIterator(rowType, Arrays.asList(row0, row1, row2, row3));
+        ColumnarRowIterator iterator =
+                createRecordIterator(rowType, Arrays.asList(row0, row1, row2, row3));
+        assertThat(iterator).isNotInstanceOf(VectorizedRecordIterator.class);
 
         // validate column vector
         //        VectorizedColumnBatch batch = iterator.batch();
@@ -704,8 +726,8 @@ public class ParquetColumnVectorTest {
         iterator.releaseBatch();
     }
 
-    private VectorizedRecordIterator createVectorizedRecordIterator(
-            RowType rowType, List<InternalRow> rows) throws IOException {
+    private ColumnarRowIterator createRecordIterator(RowType rowType, List<InternalRow> rows)
+            throws IOException {
         Path path = new Path(tempDir.toString(), UUID.randomUUID().toString());
         LocalFileIO fileIO = LocalFileIO.create();
 
@@ -725,7 +747,7 @@ public class ParquetColumnVectorTest {
                         new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
 
         RecordReader.RecordIterator<InternalRow> iterator = reader.readBatch();
-        return (VectorizedRecordIterator) iterator;
+        return (ColumnarRowIterator) iterator;
     }
 
     @Nullable
