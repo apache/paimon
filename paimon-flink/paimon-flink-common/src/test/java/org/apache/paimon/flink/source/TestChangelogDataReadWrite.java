@@ -30,6 +30,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
+import org.apache.paimon.io.TablePathProvider;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
@@ -102,7 +103,7 @@ public class TestChangelogDataReadWrite {
         this.tablePath = new Path(root);
         this.pathFactory =
                 new FileStorePathFactory(
-                        tablePath,
+                        new TablePathProvider(tablePath),
                         RowType.of(new IntType()),
                         "default",
                         CoreOptions.FILE_FORMAT.defaultValue().toString(),

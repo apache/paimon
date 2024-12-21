@@ -52,7 +52,8 @@ public class KeyValueDataFileWriterImpl extends KeyValueDataFileWriter {
             String compression,
             CoreOptions options,
             FileSource fileSource,
-            FileIndexOptions fileIndexOptions) {
+            FileIndexOptions fileIndexOptions,
+            Path dataRootLocation) {
         super(
                 fileIO,
                 factory,
@@ -67,7 +68,8 @@ public class KeyValueDataFileWriterImpl extends KeyValueDataFileWriter {
                 compression,
                 options,
                 fileSource,
-                fileIndexOptions);
+                fileIndexOptions,
+                dataRootLocation);
     }
 
     @Override

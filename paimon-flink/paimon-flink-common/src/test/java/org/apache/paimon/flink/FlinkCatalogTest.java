@@ -92,6 +92,7 @@ import java.util.stream.Stream;
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
+import static org.apache.paimon.CoreOptions.WAREHOUSE_ROOT_PATH;
 import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
@@ -709,6 +710,7 @@ public class FlinkCatalogTest {
 
         Map<String, String> expected = got.getOptions();
         expected.remove("path");
+        expected.remove("warehouse.root-path");
         expected.remove(FlinkCatalogOptions.REGISTER_TIMEOUT.key());
         assertThat(catalogTable.getOptions()).isEqualTo(expected);
     }
@@ -892,6 +894,7 @@ public class FlinkCatalogTest {
             Map<String, String> optionsToAdd,
             Set<String> optionsToRemove) {
         Path tablePath;
+        Path warehousePath;
         try {
             tablePath =
                     new Path(
@@ -900,11 +903,21 @@ public class FlinkCatalogTest {
                                     .getTable(FlinkCatalog.toIdentifier(path))
                                     .options()
                                     .get(PATH.key()));
+
+            warehousePath =
+                    new Path(
+                            ((FlinkCatalog) catalog)
+                                    .catalog()
+                                    .getTable(FlinkCatalog.toIdentifier(path))
+                                    .options()
+                                    .get(WAREHOUSE_ROOT_PATH.key()));
+
         } catch (org.apache.paimon.catalog.Catalog.TableNotExistException e) {
             throw new RuntimeException(e);
         }
         Map<String, String> options = new HashMap<>(t1.getOptions());
         options.put("path", tablePath.toString());
+        options.put("warehouse.root-path", warehousePath.toString());
         options.putAll(optionsToAdd);
         optionsToRemove.forEach(options::remove);
         if (t1.getTableKind() == CatalogBaseTable.TableKind.TABLE) {

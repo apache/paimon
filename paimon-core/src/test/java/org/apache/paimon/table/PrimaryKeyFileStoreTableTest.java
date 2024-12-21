@@ -2198,7 +2198,8 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 Arrays.asList("pk", "pt0", "pt1"),
                                 conf.toMap(),
                                 ""));
-        return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
+        return new PrimaryKeyFileStoreTable(
+                FileIOFinder.find(tablePath), tablePathProvider, tableSchema);
     }
 
     @Override
@@ -2217,7 +2218,8 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 Arrays.asList("pt", "a"),
                                 options.toMap(),
                                 ""));
-        return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
+        return new PrimaryKeyFileStoreTable(
+                FileIOFinder.find(tablePath), tablePathProvider, tableSchema);
     }
 
     @Override
@@ -2244,6 +2246,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                         latestSchema.primaryKeys(),
                         options.toMap(),
                         latestSchema.comment());
-        return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
+        return new PrimaryKeyFileStoreTable(
+                FileIOFinder.find(tablePath), tablePathProvider, tableSchema);
     }
 }

@@ -31,7 +31,7 @@ public class AppendOnlyFileDataTableTest extends FileDataFilterTestBase {
     protected FileStoreTable createFileStoreTable(Map<Long, TableSchema> tableSchemas) {
         SchemaManager schemaManager = new TestingSchemaManager(tablePath, tableSchemas);
         return new AppendOnlyFileStoreTable(
-                FileIOFinder.find(tablePath), tablePath, schemaManager.latest().get()) {
+                FileIOFinder.find(tablePath), tablePathProvider, schemaManager.latest().get()) {
             @Override
             public SchemaManager schemaManager() {
                 return schemaManager;

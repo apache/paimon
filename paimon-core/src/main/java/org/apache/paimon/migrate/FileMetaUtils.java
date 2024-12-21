@@ -158,6 +158,7 @@ public class FileMetaUtils {
                 simpleStatsExtractor.extractWithFileInfo(fileIO, path);
         SimpleStats stats = statsArraySerializer.toBinaryAllMode(fileInfo.getLeft());
 
+        String dataRootLocation = ((FileStoreTable) table).coreOptions().getDataRootLocation();
         return DataFileMeta.forAppend(
                 fileName,
                 fileSize,
@@ -169,7 +170,8 @@ public class FileMetaUtils {
                 Collections.emptyList(),
                 null,
                 FileSource.APPEND,
-                null);
+                null,
+                dataRootLocation);
     }
 
     public static BinaryRow writePartitionValue(
