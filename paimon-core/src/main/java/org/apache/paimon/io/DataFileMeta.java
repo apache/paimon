@@ -122,11 +122,10 @@ public class DataFileMeta {
     private final @Nullable List<String> valueStatsCols;
 
     /**
-     * the data root location that the file resides in, if it is null, the file is in the default
-     * warehouse path, when {@link CoreOptions#DATA_FILE_PATH_DIRECTORY} is set, new writen files
-     * will be persisted in {@link CoreOptions#DATA_FILE_PATH_DIRECTORY}.
+     * the external that the file resides in, if it is null, the file is in the default warehouse
+     * path.
      */
-    private final @Nullable String dataRootLocation;
+    private final @Nullable String externalPath;
 
     public static DataFileMeta forAppend(
             String fileName,
@@ -254,7 +253,7 @@ public class DataFileMeta {
             @Nullable byte[] embeddedIndex,
             @Nullable FileSource fileSource,
             @Nullable List<String> valueStatsCols,
-            @Nullable String dataRootLocation) {
+            @Nullable String externalPath) {
         this.fileName = fileName;
         this.fileSize = fileSize;
 
@@ -276,7 +275,7 @@ public class DataFileMeta {
         this.deleteRowCount = deleteRowCount;
         this.fileSource = fileSource;
         this.valueStatsCols = valueStatsCols;
-        this.dataRootLocation = dataRootLocation;
+        this.externalPath = externalPath;
     }
 
     public String fileName() {
@@ -372,15 +371,15 @@ public class DataFileMeta {
 
     @Nullable
     public String getDataRootLocationString() {
-        return dataRootLocation;
+        return externalPath;
     }
 
     @Nullable
-    public Path getDataRootLocation() {
-        if (dataRootLocation == null) {
+    public Path getExternalPath() {
+        if (externalPath == null) {
             return null;
         }
-        return new Path(dataRootLocation);
+        return new Path(externalPath);
     }
 
     public Optional<FileSource> fileSource() {
@@ -412,7 +411,7 @@ public class DataFileMeta {
                 embeddedIndex,
                 fileSource,
                 valueStatsCols,
-                dataRootLocation);
+                externalPath);
     }
 
     public DataFileMeta rename(String newFileName) {
@@ -434,7 +433,7 @@ public class DataFileMeta {
                 embeddedIndex,
                 fileSource,
                 valueStatsCols,
-                dataRootLocation);
+                externalPath);
     }
 
     public DataFileMeta copyWithoutStats() {
@@ -456,7 +455,7 @@ public class DataFileMeta {
                 embeddedIndex,
                 fileSource,
                 Collections.emptyList(),
-                dataRootLocation);
+                externalPath);
     }
 
     public List<Path> collectFiles(DataFilePathFactory pathFactory) {
@@ -485,7 +484,7 @@ public class DataFileMeta {
                 embeddedIndex,
                 fileSource,
                 valueStatsCols,
-                dataRootLocation);
+                externalPath);
     }
 
     public DataFileMeta copy(byte[] newEmbeddedIndex) {
@@ -507,7 +506,7 @@ public class DataFileMeta {
                 newEmbeddedIndex,
                 fileSource,
                 valueStatsCols,
-                dataRootLocation);
+                externalPath);
     }
 
     @Override
@@ -536,7 +535,7 @@ public class DataFileMeta {
                 && Objects.equals(deleteRowCount, that.deleteRowCount)
                 && Objects.equals(fileSource, that.fileSource)
                 && Objects.equals(valueStatsCols, that.valueStatsCols)
-                && Objects.equals(dataRootLocation, that.dataRootLocation);
+                && Objects.equals(externalPath, that.externalPath);
     }
 
     @Override
@@ -559,7 +558,7 @@ public class DataFileMeta {
                 deleteRowCount,
                 fileSource,
                 valueStatsCols,
-                dataRootLocation);
+                externalPath);
     }
 
     @Override
@@ -587,7 +586,7 @@ public class DataFileMeta {
                 deleteRowCount,
                 fileSource,
                 valueStatsCols,
-                dataRootLocation);
+                externalPath);
     }
 
     public static long getMaxSequenceNumber(List<DataFileMeta> fileMetas) {
