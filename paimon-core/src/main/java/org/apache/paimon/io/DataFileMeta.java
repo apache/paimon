@@ -370,16 +370,8 @@ public class DataFileMeta {
     }
 
     @Nullable
-    public String getDataRootLocationString() {
+    public String getExternalPath() {
         return externalPath;
-    }
-
-    @Nullable
-    public Path getExternalPath() {
-        if (externalPath == null) {
-            return null;
-        }
-        return new Path(externalPath);
     }
 
     public Optional<FileSource> fileSource() {
@@ -568,7 +560,7 @@ public class DataFileMeta {
                         + "minKey: %s, maxKey: %s, keyStats: %s, valueStats: %s, "
                         + "minSequenceNumber: %d, maxSequenceNumber: %d, "
                         + "schemaId: %d, level: %d, extraFiles: %s, creationTime: %s, "
-                        + "deleteRowCount: %d, fileSource: %s, valueStatsCols: %s, dataRootLocation: %s}",
+                        + "deleteRowCount: %d, fileSource: %s, valueStatsCols: %s, externalPath: %s}",
                 fileName,
                 fileSize,
                 rowCount,

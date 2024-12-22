@@ -363,10 +363,10 @@ public class DataSplit implements Split {
         } else if (version == 2) {
             DataFileMeta09Serializer serializer = new DataFileMeta09Serializer();
             return serializer::deserialize;
-        } else if (version >= 3 && version <= 4) {
+        } else if (version == 3) {
             DataFileMeta10LegacySerializer serializer = new DataFileMeta10LegacySerializer();
             return serializer::deserialize;
-        } else if (version >= 5) {
+        } else if (version >= 4) {
             DataFileMetaSerializer serializer = new DataFileMetaSerializer();
             return serializer::deserialize;
         } else {

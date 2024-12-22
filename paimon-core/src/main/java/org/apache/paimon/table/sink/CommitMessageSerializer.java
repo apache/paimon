@@ -131,9 +131,9 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
 
     private IOExceptionSupplier<List<DataFileMeta>> fileDeserializer(
             int version, DataInputView view) {
-        if (version >= 6) {
+        if (version >= 5) {
             return () -> dataFileSerializer.deserializeList(view);
-        } else if (version >= 4) {
+        } else if (version == 4) {
             if (dataFileMeta10LegacySerializer == null) {
                 dataFileMeta10LegacySerializer = new DataFileMeta10LegacySerializer();
             }
