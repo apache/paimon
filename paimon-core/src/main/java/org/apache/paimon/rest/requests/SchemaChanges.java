@@ -20,39 +20,78 @@ package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.schema.SchemaChange;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/** Schema changes to serialize List of SchemaChange . */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class SchemaChanges {
-    private static final String FIELD_SET_OPTIONS_NAME = "set-options";
-    private static final String FIELD_REMOVE_OPTIONS_NAME = "remove-options";
-    private static final String FIELD_COMMENT_NAME = "comment";
-    private static final String FIELD_ADD_COLUMNS_NAME = "add-columns";
-    private static final String FIELD_RENAME_COLUMNS_NAME = "rename-columns";
 
+    private static final String FIELD_SET_OPTIONS = "set-options";
+    private static final String FIELD_REMOVE_OPTIONS = "remove-options";
+    private static final String FIELD_COMMENT = "comment";
+    private static final String FIELD_ADD_COLUMNS = "add-columns";
+    private static final String FIELD_RENAME_COLUMNS = "rename-columns";
+    private static final String FIELD_DROP_COLUMNS = "drop-columns";
+    private static final String FIELD_UPDATE_COLUMN_TYPES = "update-column-types";
+    private static final String FIELD_UPDATE_COLUMN_NULLABILITIES = "update-column-nullabilities";
+    private static final String FIELD_UPDATE_COLUMN_COMMENTS = "update-column-comments";
+    private static final String FIELD_UPDATE_COLUMN_POSITIONS = "update-column-positions";
+
+    @JsonProperty(FIELD_SET_OPTIONS)
     private Map<String, String> setOptions;
-    private List<String> removeOptions;
-    private String comment;
-    private List<SchemaChange.AddColumn> addColumns;
-    private List<SchemaChange.RenameColumn> renameColumns;
-    private List<SchemaChange.DropColumn> dropColumns;
-    private List<SchemaChange.UpdateColumnType> updateColumnTypes;
-    private List<SchemaChange.UpdateColumnNullability> updateColumnNullabilities;
-    private List<SchemaChange.UpdateColumnComment> updateColumnComments;
-    private List<SchemaChange.UpdateColumnPosition> updateColumnPositions;
 
+    @JsonProperty(FIELD_REMOVE_OPTIONS)
+    private List<String> removeOptions;
+
+    @JsonProperty(FIELD_COMMENT)
+    private String comment;
+
+    @JsonProperty(FIELD_ADD_COLUMNS)
+    private List<SchemaChange.AddColumn> addColumns;
+
+    @JsonProperty(FIELD_RENAME_COLUMNS)
+    private List<SchemaChange.RenameColumn> renameColumns;
+
+    @JsonProperty(FIELD_DROP_COLUMNS)
+    private List<String> dropColumns;
+
+    @JsonProperty(FIELD_UPDATE_COLUMN_TYPES)
+    private List<SchemaChange.UpdateColumnType> updateColumnTypes;
+
+    @JsonProperty(FIELD_UPDATE_COLUMN_NULLABILITIES)
+    private List<SchemaChange.UpdateColumnNullability> updateColumnNullabilities;
+
+    @JsonProperty(FIELD_UPDATE_COLUMN_COMMENTS)
+    private List<SchemaChange.UpdateColumnComment> updateColumnComments;
+
+    @JsonProperty(FIELD_UPDATE_COLUMN_POSITIONS)
+    private List<SchemaChange.Move> updateColumnPositions;
+
+    @JsonCreator
     public SchemaChanges(
-            Map<String, String> setOptions,
-            List<String> removeOptions,
-            String comment,
-            List<SchemaChange.AddColumn> addColumns,
-            List<SchemaChange.RenameColumn> renameColumns,
-            List<SchemaChange.DropColumn> dropColumns,
-            List<SchemaChange.UpdateColumnType> updateColumnTypes,
-            List<SchemaChange.UpdateColumnNullability> updateColumnNullabilities,
-            List<SchemaChange.UpdateColumnComment> updateColumnComments,
-            List<SchemaChange.UpdateColumnPosition> updateColumnPositions) {
+            @JsonProperty(FIELD_SET_OPTIONS) Map<String, String> setOptions,
+            @JsonProperty(FIELD_REMOVE_OPTIONS) List<String> removeOptions,
+            @JsonProperty(FIELD_COMMENT) String comment,
+            @JsonProperty(FIELD_ADD_COLUMNS) List<SchemaChange.AddColumn> addColumns,
+            @JsonProperty(FIELD_RENAME_COLUMNS) List<SchemaChange.RenameColumn> renameColumns,
+            @JsonProperty(FIELD_DROP_COLUMNS) List<String> dropColumns,
+            @JsonProperty(FIELD_UPDATE_COLUMN_TYPES)
+                    List<SchemaChange.UpdateColumnType> updateColumnTypes,
+            @JsonProperty(FIELD_UPDATE_COLUMN_NULLABILITIES)
+                    List<SchemaChange.UpdateColumnNullability> updateColumnNullabilities,
+            @JsonProperty(FIELD_UPDATE_COLUMN_COMMENTS)
+                    List<SchemaChange.UpdateColumnComment> updateColumnComments,
+            @JsonProperty(FIELD_UPDATE_COLUMN_POSITIONS)
+                    List<SchemaChange.Move> updateColumnPositions) {
         this.setOptions = setOptions;
         this.removeOptions = removeOptions;
         this.comment = comment;
@@ -66,10 +105,16 @@ public class SchemaChanges {
     }
 
     public SchemaChanges(List<SchemaChange> changes) {
-        Map<String, String> setOptions = null;
+        Map<String, String> setOptions = new HashMap<>();
         List<String> removeOptions = new ArrayList<>();
         String comment = null;
         List<SchemaChange.AddColumn> addColumns = new ArrayList<>();
+        List<SchemaChange.RenameColumn> renameColumns = new ArrayList<>();
+        List<String> dropColumns = new ArrayList<>();
+        List<SchemaChange.UpdateColumnType> updateColumnTypes = new ArrayList<>();
+        List<SchemaChange.UpdateColumnNullability> updateColumnNullabilities = new ArrayList<>();
+        List<SchemaChange.UpdateColumnComment> updateColumnComments = new ArrayList<>();
+        List<SchemaChange.Move> updateColumnPositions = new ArrayList<>();
         for (SchemaChange change : changes) {
             if (change instanceof SchemaChange.SetOption) {
                 setOptions.put(
@@ -81,51 +126,79 @@ public class SchemaChanges {
                 comment = ((SchemaChange.UpdateComment) change).comment();
             } else if (change instanceof SchemaChange.AddColumn) {
                 addColumns.add((SchemaChange.AddColumn) change);
+            } else if (change instanceof SchemaChange.RenameColumn) {
+                renameColumns.add((SchemaChange.RenameColumn) change);
+            } else if (change instanceof SchemaChange.DropColumn) {
+                dropColumns.addAll(Arrays.asList(((SchemaChange.DropColumn) change).fieldNames()));
+            } else if (change instanceof SchemaChange.UpdateColumnType) {
+                updateColumnTypes.add((SchemaChange.UpdateColumnType) change);
+            } else if (change instanceof SchemaChange.UpdateColumnNullability) {
+                updateColumnNullabilities.add((SchemaChange.UpdateColumnNullability) change);
+            } else if (change instanceof SchemaChange.UpdateColumnComment) {
+                updateColumnComments.add((SchemaChange.UpdateColumnComment) change);
+            } else if (change instanceof SchemaChange.UpdateColumnPosition) {
+                updateColumnPositions.add(((SchemaChange.UpdateColumnPosition) change).move());
             }
         }
         this.setOptions = setOptions;
         this.removeOptions = removeOptions;
         this.comment = comment;
         this.addColumns = addColumns;
+        this.renameColumns = renameColumns;
+        this.dropColumns = dropColumns;
+        this.updateColumnTypes = updateColumnTypes;
+        this.updateColumnNullabilities = updateColumnNullabilities;
+        this.updateColumnComments = updateColumnComments;
+        this.updateColumnPositions = updateColumnPositions;
     }
 
+    @JsonGetter(FIELD_SET_OPTIONS)
     public Map<String, String> getSetOptions() {
         return setOptions;
     }
 
+    @JsonGetter(FIELD_REMOVE_OPTIONS)
     public List<String> getRemoveOptions() {
         return removeOptions;
     }
 
+    @JsonGetter(FIELD_COMMENT)
     public String getComment() {
         return comment;
     }
 
+    @JsonGetter(FIELD_ADD_COLUMNS)
     public List<SchemaChange.AddColumn> getAddColumns() {
         return addColumns;
     }
 
+    @JsonGetter(FIELD_RENAME_COLUMNS)
     public List<SchemaChange.RenameColumn> getRenameColumns() {
         return renameColumns;
     }
 
-    public List<SchemaChange.DropColumn> getDropColumns() {
+    @JsonGetter(FIELD_DROP_COLUMNS)
+    public List<String> getDropColumns() {
         return dropColumns;
     }
 
+    @JsonGetter(FIELD_UPDATE_COLUMN_TYPES)
     public List<SchemaChange.UpdateColumnType> getUpdateColumnTypes() {
         return updateColumnTypes;
     }
 
+    @JsonGetter(FIELD_UPDATE_COLUMN_NULLABILITIES)
     public List<SchemaChange.UpdateColumnNullability> getUpdateColumnNullabilities() {
         return updateColumnNullabilities;
     }
 
+    @JsonGetter(FIELD_UPDATE_COLUMN_COMMENTS)
     public List<SchemaChange.UpdateColumnComment> getUpdateColumnComments() {
         return updateColumnComments;
     }
 
-    public List<SchemaChange.UpdateColumnPosition> getUpdateColumnPositions() {
+    @JsonGetter(FIELD_UPDATE_COLUMN_POSITIONS)
+    public List<SchemaChange.Move> getUpdateColumnPositions() {
         return updateColumnPositions;
     }
 }

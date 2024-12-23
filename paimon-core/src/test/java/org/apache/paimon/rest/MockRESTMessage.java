@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.SchemaChanges;
 import org.apache.paimon.rest.requests.UpdateTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
@@ -30,6 +31,7 @@ import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -116,6 +118,52 @@ public class MockRESTMessage {
     public static UpdateTableRequest updateTableRequest(String fromTableName, String toTableName) {
         Identifier fromIdentifier = Identifier.create(databaseName(), fromTableName);
         Identifier toIdentifier = Identifier.create(databaseName(), toTableName);
-        return new UpdateTableRequest(fromIdentifier, toIdentifier, null);
+        // add option
+        SchemaChange addOption = SchemaChange.setOption("snapshot.time-retained", "2h");
+        // remove option
+        SchemaChange removeOption = SchemaChange.removeOption("compaction.max.file-num");
+        // add column
+        SchemaChange addColumn = SchemaChange.addColumn("col1_after", DataTypes.STRING());
+        // add a column after col1
+        SchemaChange.Move after = SchemaChange.Move.after("col1_after", "col1");
+        SchemaChange addColumnAfterField =
+                SchemaChange.addColumn("col7", DataTypes.STRING(), "", after);
+        // rename column
+        SchemaChange renameColumn = SchemaChange.renameColumn("col3", "col3_new_name");
+        // drop column
+        SchemaChange dropColumn = SchemaChange.dropColumn("col6");
+        // update column comment
+        SchemaChange updateColumnComment =
+                SchemaChange.updateColumnComment(new String[] {"col4"}, "col4 field");
+        // update nested column comment
+        SchemaChange updateNestedColumnComment =
+                SchemaChange.updateColumnComment(new String[] {"col5", "f1"}, "col5 f1 field");
+        // update column type
+        SchemaChange updateColumnType = SchemaChange.updateColumnType("col4", DataTypes.DOUBLE());
+        // update column position, you need to pass in a parameter of type Move
+        SchemaChange updateColumnPosition =
+                SchemaChange.updateColumnPosition(SchemaChange.Move.first("col4"));
+        // update column nullability
+        SchemaChange updateColumnNullability =
+                SchemaChange.updateColumnNullability(new String[] {"col4"}, false);
+        // update nested column nullability
+        SchemaChange updateNestedColumnNullability =
+                SchemaChange.updateColumnNullability(new String[] {"col5", "f2"}, false);
+
+        List<SchemaChange> schemaChanges = new ArrayList<>();
+        schemaChanges.add(addOption);
+        schemaChanges.add(removeOption);
+        schemaChanges.add(addColumn);
+        schemaChanges.add(addColumnAfterField);
+        schemaChanges.add(renameColumn);
+        schemaChanges.add(dropColumn);
+        schemaChanges.add(updateColumnComment);
+        schemaChanges.add(updateNestedColumnComment);
+        schemaChanges.add(updateColumnType);
+        schemaChanges.add(updateColumnPosition);
+        schemaChanges.add(updateColumnNullability);
+        schemaChanges.add(updateNestedColumnNullability);
+        SchemaChanges changes = new SchemaChanges(schemaChanges);
+        return new UpdateTableRequest(fromIdentifier, toIdentifier, changes);
     }
 }

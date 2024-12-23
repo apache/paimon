@@ -29,10 +29,10 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 /** Request for creating table. */
 public class CreateTableRequest implements RESTRequest {
 
-    private static final String FIELD_IDENTIFIER_NAME = "identifier";
+    private static final String FIELD_IDENTIFIER = "identifier";
     private static final String FIELD_SCHEMA = "schema";
 
-    @JsonProperty(FIELD_IDENTIFIER_NAME)
+    @JsonProperty(FIELD_IDENTIFIER)
     private Identifier identifier;
 
     @JsonProperty(FIELD_SCHEMA)
@@ -40,12 +40,12 @@ public class CreateTableRequest implements RESTRequest {
 
     @JsonCreator
     public CreateTableRequest(
-            @JsonProperty(FIELD_IDENTIFIER_NAME) Identifier identifier,
+            @JsonProperty(FIELD_IDENTIFIER) Identifier identifier,
             @JsonProperty(FIELD_SCHEMA) Schema schema) {
         this.schema = schema;
     }
 
-    @JsonGetter(FIELD_IDENTIFIER_NAME)
+    @JsonGetter(FIELD_IDENTIFIER)
     public Identifier getIdentifier() {
         return identifier;
     }

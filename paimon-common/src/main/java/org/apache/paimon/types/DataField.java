@@ -20,6 +20,7 @@ package org.apache.paimon.types;
 
 import org.apache.paimon.annotation.Public;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
 import javax.annotation.Nullable;
@@ -37,6 +38,7 @@ import static org.apache.paimon.utils.EncodingUtils.escapeSingleQuotes;
  * @since 0.4.0
  */
 @Public
+@JsonIgnoreProperties(ignoreUnknown = true)
 public final class DataField implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -74,6 +76,23 @@ public final class DataField implements Serializable {
 
     public DataType type() {
         return type;
+    }
+
+    public int getId() {
+        return id;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public DataType getType() {
+        return type;
+    }
+
+    @Nullable
+    public String getDescription() {
+        return description;
     }
 
     public DataField newId(int newid) {

@@ -18,10 +18,6 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.rest.serializer.IdentifierSerializer;
-import org.apache.paimon.rest.serializer.SchemaSerializer;
-import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeJsonParser;
@@ -54,14 +50,7 @@ public class RESTObjectMapper {
                 DataField::serializeJson,
                 DataTypeJsonParser::parseDataField);
         registerJsonObjects(
-                module, Schema.class, SchemaSerializer.INSTANCE, SchemaSerializer.INSTANCE);
-        registerJsonObjects(
                 module, DataType.class, DataType::serializeJson, DataTypeJsonParser::parseDataType);
-        registerJsonObjects(
-                module,
-                Identifier.class,
-                IdentifierSerializer.INSTANCE,
-                IdentifierSerializer.INSTANCE);
         return module;
     }
 }

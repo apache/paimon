@@ -21,6 +21,11 @@ package org.apache.paimon.schema;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.types.DataType;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
@@ -221,16 +226,34 @@ public interface SchemaChange extends Serializable {
     }
 
     /** A SchemaChange to add a field. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     final class AddColumn implements SchemaChange {
 
         private static final long serialVersionUID = 1L;
 
+        private static final String FIELD_FILED_NAMES = "field-names";
+        private static final String FIELD_DATA_TYPES = "data-types";
+        private static final String FIELD_COMMENT = "comment";
+        private static final String FIELD_MOVE = "move";
+
+        @JsonProperty(FIELD_FILED_NAMES)
         private final String[] fieldNames;
+
+        @JsonProperty(FIELD_DATA_TYPES)
         private final DataType dataType;
+
+        @JsonProperty(FIELD_COMMENT)
         private final String description;
+
+        @JsonProperty(FIELD_MOVE)
         private final Move move;
 
-        private AddColumn(String[] fieldNames, DataType dataType, String description, Move move) {
+        @JsonCreator
+        private AddColumn(
+                @JsonProperty(FIELD_FILED_NAMES) String[] fieldNames,
+                @JsonProperty(FIELD_DATA_TYPES) DataType dataType,
+                @JsonProperty(FIELD_COMMENT) String description,
+                @JsonProperty(FIELD_MOVE) Move move) {
             this.fieldNames = fieldNames;
             this.dataType = dataType;
             this.description = description;
@@ -252,6 +275,28 @@ public interface SchemaChange extends Serializable {
 
         @Nullable
         public Move move() {
+            return move;
+        }
+
+        @JsonGetter(FIELD_FILED_NAMES)
+        public String[] getFieldNames() {
+            return fieldNames;
+        }
+
+        @JsonGetter(FIELD_DATA_TYPES)
+        public DataType getDataType() {
+            return dataType;
+        }
+
+        @JsonGetter(FIELD_COMMENT)
+        @Nullable
+        public String getDescription() {
+            return description;
+        }
+
+        @JsonGetter(FIELD_MOVE)
+        @Nullable
+        public Move getMove() {
             return move;
         }
 
@@ -280,14 +325,24 @@ public interface SchemaChange extends Serializable {
     }
 
     /** A SchemaChange to rename a field. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     final class RenameColumn implements SchemaChange {
 
         private static final long serialVersionUID = 1L;
 
+        private static final String FIELD_FILED_NAMES = "field-names";
+        private static final String FIELD_NEW_NAME = "new-name";
+
+        @JsonProperty(FIELD_FILED_NAMES)
         private final String[] fieldNames;
+
+        @JsonProperty(FIELD_NEW_NAME)
         private final String newName;
 
-        private RenameColumn(String[] fieldNames, String newName) {
+        @JsonCreator
+        private RenameColumn(
+                @JsonProperty(FIELD_FILED_NAMES) String[] fieldNames,
+                @JsonProperty(FIELD_NEW_NAME) String newName) {
             this.fieldNames = fieldNames;
             this.newName = newName;
         }
@@ -297,6 +352,16 @@ public interface SchemaChange extends Serializable {
         }
 
         public String newName() {
+            return newName;
+        }
+
+        @JsonGetter(FIELD_FILED_NAMES)
+        public String[] getFieldNames() {
+            return fieldNames;
+        }
+
+        @JsonGetter(FIELD_NEW_NAME)
+        public String getNewName() {
             return newName;
         }
 
@@ -322,17 +387,27 @@ public interface SchemaChange extends Serializable {
     }
 
     /** A SchemaChange to drop a field. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     final class DropColumn implements SchemaChange {
 
         private static final long serialVersionUID = 1L;
 
+        private static final String FIELD_FILED_NAMES = "field-names";
+
+        @JsonProperty(FIELD_FILED_NAMES)
         private final String[] fieldNames;
 
-        private DropColumn(String[] fieldNames) {
+        @JsonCreator
+        private DropColumn(@JsonProperty(FIELD_FILED_NAMES) String[] fieldNames) {
             this.fieldNames = fieldNames;
         }
 
         public String[] fieldNames() {
+            return fieldNames;
+        }
+
+        @JsonGetter(FIELD_FILED_NAMES)
+        public String[] getFieldNames() {
             return fieldNames;
         }
 
@@ -355,17 +430,28 @@ public interface SchemaChange extends Serializable {
     }
 
     /** A SchemaChange to update the field type. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     final class UpdateColumnType implements SchemaChange {
 
         private static final long serialVersionUID = 1L;
+        private static final String FIELD_FILED_NAMES = "field-names";
+        private static final String FIELD_NEW_DATA_TYPE = "new-data-types";
+        private static final String FIELD_KEEP_NULLABILITY = "keep-nullability";
 
+        @JsonProperty(FIELD_FILED_NAMES)
         private final String[] fieldNames;
+
+        @JsonProperty(FIELD_NEW_DATA_TYPE)
         private final DataType newDataType;
         // If true, do not change the target field nullability
+        @JsonProperty(FIELD_KEEP_NULLABILITY)
         private final boolean keepNullability;
 
+        @JsonCreator
         private UpdateColumnType(
-                String[] fieldNames, DataType newDataType, boolean keepNullability) {
+                @JsonProperty(FIELD_FILED_NAMES) String[] fieldNames,
+                @JsonProperty(FIELD_NEW_DATA_TYPE) DataType newDataType,
+                @JsonProperty(FIELD_KEEP_NULLABILITY) boolean keepNullability) {
             this.fieldNames = fieldNames;
             this.newDataType = newDataType;
             this.keepNullability = keepNullability;
@@ -380,6 +466,21 @@ public interface SchemaChange extends Serializable {
         }
 
         public boolean keepNullability() {
+            return keepNullability;
+        }
+
+        @JsonGetter(FIELD_FILED_NAMES)
+        public String[] getFieldNames() {
+            return fieldNames;
+        }
+
+        @JsonGetter(FIELD_NEW_DATA_TYPE)
+        public DataType getNewDataType() {
+            return newDataType;
+        }
+
+        @JsonGetter(FIELD_KEEP_NULLABILITY)
+        public boolean isKeepNullability() {
             return keepNullability;
         }
 
@@ -438,6 +539,7 @@ public interface SchemaChange extends Serializable {
     }
 
     /** Represents a requested column move in a struct. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     class Move implements Serializable {
 
         public enum MoveType {
@@ -465,11 +567,24 @@ public interface SchemaChange extends Serializable {
 
         private static final long serialVersionUID = 1L;
 
+        private static final String FIELD_FILED_NAMES = "field-name";
+        private static final String FIELD_REFERENCE_FIELD_NAME = "reference-field-name";
+        private static final String FIELD_TYPE = "type";
+
+        @JsonProperty(FIELD_FILED_NAMES)
         private final String fieldName;
+
+        @JsonProperty(FIELD_REFERENCE_FIELD_NAME)
         private final String referenceFieldName;
+
+        @JsonProperty(FIELD_TYPE)
         private final MoveType type;
 
-        public Move(String fieldName, String referenceFieldName, MoveType type) {
+        @JsonCreator
+        public Move(
+                @JsonProperty(FIELD_FILED_NAMES) String fieldName,
+                @JsonProperty(FIELD_REFERENCE_FIELD_NAME) String referenceFieldName,
+                @JsonProperty(FIELD_TYPE) MoveType type) {
             this.fieldName = fieldName;
             this.referenceFieldName = referenceFieldName;
             this.type = type;
@@ -484,6 +599,21 @@ public interface SchemaChange extends Serializable {
         }
 
         public MoveType type() {
+            return type;
+        }
+
+        @JsonGetter(FIELD_FILED_NAMES)
+        public String getFieldName() {
+            return fieldName;
+        }
+
+        @JsonGetter(FIELD_REFERENCE_FIELD_NAME)
+        public String getReferenceFieldName() {
+            return referenceFieldName;
+        }
+
+        @JsonGetter(FIELD_TYPE)
+        public MoveType getType() {
             return type;
         }
 
@@ -508,14 +638,24 @@ public interface SchemaChange extends Serializable {
     }
 
     /** A SchemaChange to update the (nested) field nullability. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     final class UpdateColumnNullability implements SchemaChange {
 
         private static final long serialVersionUID = 1L;
 
+        private static final String FIELD_FILED_NAMES = "field-names";
+        private static final String FIELD_NEW_NULLABILITY = "new-nullability";
+
+        @JsonProperty(FIELD_FILED_NAMES)
         private final String[] fieldNames;
+
+        @JsonProperty(FIELD_NEW_NULLABILITY)
         private final boolean newNullability;
 
-        public UpdateColumnNullability(String[] fieldNames, boolean newNullability) {
+        @JsonCreator
+        public UpdateColumnNullability(
+                @JsonProperty(FIELD_FILED_NAMES) String[] fieldNames,
+                @JsonProperty(FIELD_NEW_NULLABILITY) boolean newNullability) {
             this.fieldNames = fieldNames;
             this.newNullability = newNullability;
         }
@@ -525,6 +665,16 @@ public interface SchemaChange extends Serializable {
         }
 
         public boolean newNullability() {
+            return newNullability;
+        }
+
+        @JsonGetter(FIELD_FILED_NAMES)
+        public String[] getFieldNames() {
+            return fieldNames;
+        }
+
+        @JsonGetter(FIELD_NEW_NULLABILITY)
+        public boolean isNewNullability() {
             return newNullability;
         }
 
@@ -550,14 +700,24 @@ public interface SchemaChange extends Serializable {
     }
 
     /** A SchemaChange to update the (nested) field comment. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     final class UpdateColumnComment implements SchemaChange {
 
         private static final long serialVersionUID = 1L;
 
+        private static final String FIELD_FILED_NAMES = "field-names";
+        private static final String FIELD_NEW_COMMENT = "new-comment";
+
+        @JsonProperty(FIELD_FILED_NAMES)
         private final String[] fieldNames;
+
+        @JsonProperty(FIELD_NEW_COMMENT)
         private final String newDescription;
 
-        public UpdateColumnComment(String[] fieldNames, String newDescription) {
+        @JsonCreator
+        public UpdateColumnComment(
+                @JsonProperty(FIELD_FILED_NAMES) String[] fieldNames,
+                @JsonProperty(FIELD_NEW_COMMENT) String newDescription) {
             this.fieldNames = fieldNames;
             this.newDescription = newDescription;
         }
@@ -567,6 +727,16 @@ public interface SchemaChange extends Serializable {
         }
 
         public String newDescription() {
+            return newDescription;
+        }
+
+        @JsonGetter(FIELD_FILED_NAMES)
+        public String[] getFieldNames() {
+            return fieldNames;
+        }
+
+        @JsonGetter(FIELD_NEW_COMMENT)
+        public String getNewDescription() {
             return newDescription;
         }
 
