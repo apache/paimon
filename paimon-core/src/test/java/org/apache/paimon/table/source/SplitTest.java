@@ -109,62 +109,6 @@ public class SplitTest {
     }
 
     @Test
-    public void testSerializerNormal() throws Exception {
-        SimpleStats keyStats =
-                new SimpleStats(
-                        singleColumn("min_key"),
-                        singleColumn("max_key"),
-                        fromLongArray(new Long[] {0L}));
-        SimpleStats valueStats =
-                new SimpleStats(
-                        singleColumn("min_value"),
-                        singleColumn("max_value"),
-                        fromLongArray(new Long[] {0L}));
-
-        DataFileMeta dataFile =
-                new DataFileMeta(
-                        "my_file",
-                        1024 * 1024,
-                        1024,
-                        singleColumn("min_key"),
-                        singleColumn("max_key"),
-                        keyStats,
-                        valueStats,
-                        15,
-                        200,
-                        5,
-                        3,
-                        Arrays.asList("extra1", "extra2"),
-                        Timestamp.fromLocalDateTime(LocalDateTime.parse("2022-03-02T20:20:12")),
-                        11L,
-                        new byte[] {1, 2, 4},
-                        FileSource.COMPACT,
-                        Arrays.asList("field1", "field2", "field3"),
-                        "hdfs:///path/to/warehouse");
-        List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
-
-        DeletionFile deletionFile = new DeletionFile("deletion_file", 100, 22, 33L);
-        List<DeletionFile> deletionFiles = Collections.singletonList(deletionFile);
-
-        BinaryRow partition = new BinaryRow(1);
-        BinaryRowWriter binaryRowWriter = new BinaryRowWriter(partition);
-        binaryRowWriter.writeString(0, BinaryString.fromString("aaaaa"));
-        binaryRowWriter.complete();
-
-        DataSplit split =
-                DataSplit.builder()
-                        .withSnapshot(18)
-                        .withPartition(partition)
-                        .withBucket(20)
-                        .withDataFiles(dataFiles)
-                        .withDataDeletionFiles(deletionFiles)
-                        .withBucketPath("my path")
-                        .build();
-
-        assertThat(InstantiationUtil.clone(split)).isEqualTo(split);
-    }
-
-    @Test
     public void testSerializerCompatibleV1() throws Exception {
         SimpleStats keyStats =
                 new SimpleStats(
@@ -212,6 +156,8 @@ public class SplitTest {
                         .withDataFiles(dataFiles)
                         .withBucketPath("my path")
                         .build();
+
+        assertThat(InstantiationUtil.clone(split)).isEqualTo(split);
 
         byte[] v2Bytes =
                 IOUtils.readFully(
@@ -273,6 +219,8 @@ public class SplitTest {
                         .withDataFiles(dataFiles)
                         .withBucketPath("my path")
                         .build();
+
+        assertThat(InstantiationUtil.clone(split)).isEqualTo(split);
 
         byte[] v2Bytes =
                 IOUtils.readFully(
@@ -339,6 +287,8 @@ public class SplitTest {
                         .withBucketPath("my path")
                         .build();
 
+        assertThat(InstantiationUtil.clone(split)).isEqualTo(split);
+
         byte[] v2Bytes =
                 IOUtils.readFully(
                         SplitTest.class
@@ -404,6 +354,8 @@ public class SplitTest {
                         .withBucketPath("my path")
                         .build();
 
+        assertThat(InstantiationUtil.clone(split)).isEqualTo(split);
+
         byte[] v4Bytes =
                 IOUtils.readFully(
                         SplitTest.class
@@ -413,6 +365,73 @@ public class SplitTest {
 
         DataSplit actual =
                 InstantiationUtil.deserializeObject(v4Bytes, DataSplit.class.getClassLoader());
+        assertThat(actual).isEqualTo(split);
+    }
+
+    @Test
+    public void testSerializerCompatibleV5() throws Exception {
+        SimpleStats keyStats =
+                new SimpleStats(
+                        singleColumn("min_key"),
+                        singleColumn("max_key"),
+                        fromLongArray(new Long[] {0L}));
+        SimpleStats valueStats =
+                new SimpleStats(
+                        singleColumn("min_value"),
+                        singleColumn("max_value"),
+                        fromLongArray(new Long[] {0L}));
+
+        DataFileMeta dataFile =
+                new DataFileMeta(
+                        "my_file",
+                        1024 * 1024,
+                        1024,
+                        singleColumn("min_key"),
+                        singleColumn("max_key"),
+                        keyStats,
+                        valueStats,
+                        15,
+                        200,
+                        5,
+                        3,
+                        Arrays.asList("extra1", "extra2"),
+                        Timestamp.fromLocalDateTime(LocalDateTime.parse("2022-03-02T20:20:12")),
+                        11L,
+                        new byte[] {1, 2, 4},
+                        FileSource.COMPACT,
+                        Arrays.asList("field1", "field2", "field3"),
+                        "hdfs:///path/to/warehouse");
+        List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
+
+        DeletionFile deletionFile = new DeletionFile("deletion_file", 100, 22, 33L);
+        List<DeletionFile> deletionFiles = Collections.singletonList(deletionFile);
+
+        BinaryRow partition = new BinaryRow(1);
+        BinaryRowWriter binaryRowWriter = new BinaryRowWriter(partition);
+        binaryRowWriter.writeString(0, BinaryString.fromString("aaaaa"));
+        binaryRowWriter.complete();
+
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(18)
+                        .withPartition(partition)
+                        .withBucket(20)
+                        .withDataFiles(dataFiles)
+                        .withDataDeletionFiles(deletionFiles)
+                        .withBucketPath("my path")
+                        .build();
+
+        assertThat(InstantiationUtil.clone(split)).isEqualTo(split);
+
+        byte[] v5Bytes =
+                IOUtils.readFully(
+                        SplitTest.class
+                                .getClassLoader()
+                                .getResourceAsStream("compatibility/datasplit-v5"),
+                        true);
+
+        DataSplit actual =
+                InstantiationUtil.deserializeObject(v5Bytes, DataSplit.class.getClassLoader());
         assertThat(actual).isEqualTo(split);
     }
 
