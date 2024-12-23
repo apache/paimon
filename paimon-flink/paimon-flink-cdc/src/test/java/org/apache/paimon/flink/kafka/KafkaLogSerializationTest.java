@@ -23,6 +23,7 @@ import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.types.RowKind;
 
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
+import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.util.Collector;
@@ -30,8 +31,13 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.apache.paimon.CoreOptions.LOG_FORMAT;
+import static org.apache.paimon.CoreOptions.LOG_IGNORE_DELETE;
 import static org.apache.paimon.flink.FlinkRowData.toFlinkRowKind;
 import static org.apache.paimon.flink.kafka.KafkaLogTestUtils.discoverKafkaLogFactory;
 import static org.apache.paimon.flink.kafka.KafkaLogTestUtils.testContext;
@@ -69,6 +75,50 @@ public class KafkaLogSerializationTest {
         checkNonKeyed(LogChangelogMode.ALL, -1, 5, 3);
     }
 
+    @Test
+    public void testNonKeyedWithInsertOnlyFormat() throws Exception {
+        check(
+                LogChangelogMode.AUTO,
+                false,
+                -1,
+                3,
+                5,
+                RowKind.INSERT,
+                Collections.singletonMap(LOG_FORMAT.key(), "json"));
+        check(
+                LogChangelogMode.AUTO,
+                false,
+                -1,
+                3,
+                5,
+                RowKind.UPDATE_AFTER,
+                Collections.singletonMap(LOG_FORMAT.key(), "json"));
+    }
+
+    @Test
+    public void testKeyedWithInsertOnlyFormat() throws Exception {
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(LOG_FORMAT.key(), "json");
+
+        assertThatThrownBy(
+                        () ->
+                                check(
+                                        LogChangelogMode.AUTO,
+                                        true,
+                                        -1,
+                                        3,
+                                        5,
+                                        RowKind.INSERT,
+                                        dynamicOptions))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining(
+                        "A value format should deal with all records. But json has a changelog mode of [INSERT]");
+
+        dynamicOptions.put(LOG_IGNORE_DELETE.key(), "true");
+        check(LogChangelogMode.AUTO, true, -1, 3, 5, RowKind.INSERT, dynamicOptions);
+        check(LogChangelogMode.AUTO, true, -1, 3, 5, RowKind.UPDATE_AFTER, dynamicOptions);
+    }
+
     private void checkKeyed(LogChangelogMode mode, int bucket, int key, int value)
             throws Exception {
         check(mode, true, bucket, key, value, RowKind.INSERT);
@@ -88,11 +138,23 @@ public class KafkaLogSerializationTest {
     private void check(
             LogChangelogMode mode, boolean keyed, int bucket, int key, int value, RowKind rowKind)
             throws Exception {
+        check(mode, keyed, bucket, key, value, rowKind, Collections.emptyMap());
+    }
+
+    private void check(
+            LogChangelogMode mode,
+            boolean keyed,
+            int bucket,
+            int key,
+            int value,
+            RowKind rowKind,
+            Map<String, String> dynamicOptions)
+            throws Exception {
         KafkaLogSerializationSchema serializer =
-                createTestSerializationSchema(testContext("", mode, keyed));
+                createTestSerializationSchema(testContext("", mode, keyed, dynamicOptions));
         serializer.open(null);
         KafkaRecordDeserializationSchema<RowData> deserializer =
-                createTestDeserializationSchema(testContext("", mode, keyed));
+                createTestDeserializationSchema(testContext("", mode, keyed, dynamicOptions));
         deserializer.open(null);
 
         SinkRecord input = testRecord(keyed, bucket, key, value, rowKind);

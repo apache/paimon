@@ -65,6 +65,7 @@ import java.util.stream.IntStream;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
+import static org.apache.paimon.CoreOptions.LOG_IGNORE_DELETE;
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_ASYNC;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_ASYNC_THREAD_NUMBER;
@@ -147,6 +148,10 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             if (logStoreTableFactory == null
                     && options.get(CHANGELOG_PRODUCER) != ChangelogProducer.NONE) {
                 return ChangelogMode.all();
+            }
+
+            if (logStoreTableFactory != null && options.get(LOG_IGNORE_DELETE)) {
+                return ChangelogMode.insertOnly();
             }
 
             // optimization: transaction consistency and all changelog mode avoid the generation of

@@ -175,7 +175,21 @@ public class KafkaLogTestUtils {
 
     public static DynamicTableFactory.Context testContext(
             String servers, LogChangelogMode changelogMode, boolean keyed) {
-        return testContext("table", servers, changelogMode, LogConsistency.TRANSACTIONAL, keyed);
+        return testContext(servers, changelogMode, keyed, Collections.emptyMap());
+    }
+
+    public static DynamicTableFactory.Context testContext(
+            String servers,
+            LogChangelogMode changelogMode,
+            boolean keyed,
+            Map<String, String> dynamicOptions) {
+        return testContext(
+                "table",
+                servers,
+                changelogMode,
+                LogConsistency.TRANSACTIONAL,
+                keyed,
+                dynamicOptions);
     }
 
     static DynamicTableFactory.Context testContext(
@@ -183,7 +197,8 @@ public class KafkaLogTestUtils {
             String servers,
             LogChangelogMode changelogMode,
             LogConsistency consistency,
-            boolean keyed) {
+            boolean keyed,
+            Map<String, String> dynamicOptions) {
         return testContext(
                 name,
                 servers,
@@ -191,7 +206,7 @@ public class KafkaLogTestUtils {
                 consistency,
                 RowType.of(new IntType(), new IntType()),
                 keyed ? new int[] {0} : new int[0],
-                new HashMap<>());
+                dynamicOptions);
     }
 
     public static DynamicTableFactory.Context testContext(
