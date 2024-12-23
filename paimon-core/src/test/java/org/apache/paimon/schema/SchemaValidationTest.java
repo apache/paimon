@@ -107,7 +107,7 @@ class SchemaValidationTest {
 
     @Test
     public void testRecordLevelTimeField() {
-        Map<String, String> options = new HashMap<>();
+        Map<String, String> options = new HashMap<>(2);
         options.put(CoreOptions.RECORD_LEVEL_TIME_FIELD.key(), "f0");
         options.put(CoreOptions.RECORD_LEVEL_EXPIRE_TIME.key(), "1 m");
         assertThatThrownBy(() -> validateTableSchemaExec(options))

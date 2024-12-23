@@ -40,6 +40,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
+
     @Override
     @BeforeEach
     public void beforeEachBase() throws Exception {

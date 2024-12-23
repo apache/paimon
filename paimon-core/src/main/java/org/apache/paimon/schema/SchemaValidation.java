@@ -181,16 +181,17 @@ public class SchemaValidation {
             }
         }
 
-        if (schema.options().containsKey(CoreOptions.RECORD_LEVEL_TIME_FIELD.key())) {
-            String fieldName = options.recordLevelTimeField();
+        String recordLevelTimeField = options.recordLevelTimeField();
+        if (recordLevelTimeField != null) {
             Optional<DataField> field =
                     schema.fields().stream()
-                            .filter(dataField -> dataField.name().equals(fieldName))
+                            .filter(dataField -> dataField.name().equals(recordLevelTimeField))
                             .findFirst();
             if (!field.isPresent()) {
                 throw new IllegalArgumentException(
                         String.format(
-                                "Can not find time field %s for record level expire.", fieldName));
+                                "Can not find time field %s for record level expire.",
+                                recordLevelTimeField));
             }
             DataType dataType = field.get().type();
             if (!(dataType instanceof IntType
@@ -206,7 +207,7 @@ public class SchemaValidation {
                 throw new IllegalArgumentException(
                         String.format(
                                 "Time field %s for record-level expire should be not null.",
-                                fieldName));
+                                recordLevelTimeField));
             }
         }
 
