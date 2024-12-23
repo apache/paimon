@@ -34,7 +34,7 @@ under the License.
     <packaging>jar</packaging>
 
     <properties>
-        <hive.version>2.3.10</hive.version>
+        <hive.version>4.0.0</hive.version>
     </properties>
 
     <dependencies>
