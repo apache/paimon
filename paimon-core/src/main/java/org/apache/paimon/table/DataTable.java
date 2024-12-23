@@ -52,7 +52,9 @@ public interface DataTable extends InnerTable {
      */
     DataTable switchToBranch(String branchName);
 
-    Path location();
+    Path tableSchemaPath();
+
+    Path tableDataPath();
 
     FileIO fileIO();
 }

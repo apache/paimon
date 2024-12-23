@@ -184,7 +184,7 @@ public class PaimonMetaHook implements HiveMetaHook {
 
     private CatalogContext catalogContext(Table table, String location) {
         Options options = HiveUtils.extractCatalogConfig(conf);
-        options.set(CoreOptions.PATH, location);
+        options.set(CoreOptions.TABLE_SCHEMA_PATH, location);
         table.getParameters().forEach(options::set);
         return CatalogContext.create(options, conf);
     }

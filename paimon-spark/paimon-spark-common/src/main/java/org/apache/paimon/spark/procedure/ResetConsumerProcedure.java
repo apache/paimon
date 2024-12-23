@@ -85,7 +85,7 @@ public class ResetConsumerProcedure extends BaseProcedure {
                     ConsumerManager consumerManager =
                             new ConsumerManager(
                                     fileStoreTable.fileIO(),
-                                    fileStoreTable.location(),
+                                    fileStoreTable.tableDataPath(),
                                     fileStoreTable.snapshotManager().branch());
                     if (nextSnapshotId == null) {
                         consumerManager.deleteConsumer(consumerId);

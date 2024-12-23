@@ -103,7 +103,7 @@ public class TableCommitTest {
                         new String[] {"k", "v"});
 
         Options conf = new Options();
-        conf.set(CoreOptions.PATH, path);
+        conf.set(CoreOptions.TABLE_SCHEMA_PATH, path);
         conf.set(CoreOptions.BUCKET, bucket);
         conf.set(CoreOptions.COMMIT_CALLBACKS, TestCommitCallback.class.getName());
         conf.set(
@@ -201,7 +201,7 @@ public class TableCommitTest {
                         new String[] {"k", "v"});
 
         Options options = new Options();
-        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.TABLE_SCHEMA_PATH, path);
         options.set(CoreOptions.BUCKET, 1);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(

@@ -49,7 +49,7 @@ class PaimonQueryTest extends PaimonSparkTestBase {
                           |VALUES (1, 'x1'), (2, 'x3'), (3, 'x3'), (4, 'x4'), (5, 'x5')
                           |""".stripMargin)
 
-              val location = loadTable("T").location().toUri.toString
+              val location = loadTable("T").tableDataPath().toUri.toString
               val res = spark.sql(
                 s"""
                    |SELECT SUM(cnt)
@@ -129,7 +129,7 @@ class PaimonQueryTest extends PaimonSparkTestBase {
                            |TBLPROPERTIES ('file.format'='$fileFormat' $bucketProp)
                            |""".stripMargin)
 
-              val location = loadTable("T").location().toUri.toString
+              val location = loadTable("T").tableDataPath().toUri.toString
 
               spark.sql("INSERT INTO T VALUES (1, 'x1'), (3, 'x3')")
 
@@ -176,7 +176,7 @@ class PaimonQueryTest extends PaimonSparkTestBase {
                            |TBLPROPERTIES ('file.format'='$fileFormat' $bucketProp)
                            |""".stripMargin)
 
-              val location = loadTable("T").location().toUri.toString
+              val location = loadTable("T").tableDataPath().toUri.toString
 
               spark.sql("INSERT INTO T VALUES (1, 'x1', '2024'), (3, 'x3', '2024')")
 
@@ -373,7 +373,7 @@ class PaimonQueryTest extends PaimonSparkTestBase {
       partitions: Seq[String],
       partitionFilter: java.util.Map[String, String]): Array[String] = {
     val paimonTable = loadTable(tableName)
-    val location = paimonTable.location()
+    val location = paimonTable.tableDataPath()
 
     val files = paimonTable
       .newSnapshotReader()

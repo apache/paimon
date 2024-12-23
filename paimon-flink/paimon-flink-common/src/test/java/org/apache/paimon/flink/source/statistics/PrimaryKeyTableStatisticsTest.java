@@ -60,7 +60,7 @@ public class PrimaryKeyTableStatisticsTest extends FileStoreTableStatisticsTestB
     @Override
     FileStoreTable createStoreTable() throws Exception {
         Options options = new Options();
-        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(CoreOptions.TABLE_SCHEMA_PATH, tablePath.toString());
         options.set(CoreOptions.BUCKET, 1);
         Schema.Builder builder = schemaBuilder();
         builder.options(options.toMap());

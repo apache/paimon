@@ -57,7 +57,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
-import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.TABLE_SCHEMA_PATH;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.utils.FailingFileIO.retryArtificialException;
 
@@ -152,13 +152,13 @@ public class FlinkEndInputWatermarkITCase extends CatalogITCaseBase {
             throws Exception {
         Options options = new Options();
         options.set(BUCKET, 3);
-        options.set(PATH, getTempDirPath());
+        options.set(TABLE_SCHEMA_PATH, getTempDirPath());
         options.set(FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         options.set(
                 FlinkConnectorOptions.END_INPUT_WATERMARK.key(),
                 String.valueOf(END_INPUT_WATERMARK));
 
-        Path tablePath = new CoreOptions(options.toMap()).path();
+        Path tablePath = new CoreOptions(options.toMap()).schemaPath();
         if (primaryKey.length == 0) {
             options.set(BUCKET_KEY, "_k");
         }

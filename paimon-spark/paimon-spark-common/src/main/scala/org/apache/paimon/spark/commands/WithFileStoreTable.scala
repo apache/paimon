@@ -27,7 +27,7 @@ private[spark] trait WithFileStoreTable {
 
   def table: FileStoreTable
 
-  def root: Path = table.location()
+  def root: Path = table.tableDataPath()
 
   def withPrimaryKeys: Boolean = !table.primaryKeys().isEmpty
 

@@ -107,7 +107,8 @@ public class CdcSinkBuilder<T> {
                                 parsed, CdcParsingProcessFunction.NEW_DATA_FIELD_LIST_OUTPUT_TAG)
                         .process(
                                 new UpdatedDataFieldsProcessFunction(
-                                        new SchemaManager(dataTable.fileIO(), dataTable.location()),
+                                        new SchemaManager(
+                                                dataTable.fileIO(), dataTable.tableDataPath()),
                                         identifier,
                                         catalogLoader))
                         .name("Schema Evolution");

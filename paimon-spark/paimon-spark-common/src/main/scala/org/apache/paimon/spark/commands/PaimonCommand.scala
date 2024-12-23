@@ -86,7 +86,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
 
   /** Gets a relative path against the table path. */
   protected def relativePath(absolutePath: String): String = {
-    val location = table.location().toUri
+    val location = table.tableDataPath().toUri
     location.relativize(new URI(absolutePath)).toString
   }
 
@@ -230,7 +230,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
       dataFilePathToMeta.mapValues(meta => (meta.partition, meta.bucket)).toArray
 
     val my_table = table
-    val location = my_table.location
+    val location = my_table.tableDataPath
     dataWithMetadataColumns
       .select(FILE_PATH_COLUMN, ROW_INDEX_COLUMN)
       .as[(String, Long)]

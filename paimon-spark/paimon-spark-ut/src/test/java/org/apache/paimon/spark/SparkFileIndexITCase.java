@@ -161,6 +161,7 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                         CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null,
                         null);
 
         Table table = fileSystemCatalog.getTable(Identifier.create("db", "T"));
@@ -185,7 +186,7 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                 try (FileIndexFormat.Reader reader =
                         FileIndexFormat.createReader(
                                 fileIO.newInputStream(
-                                        dataFilePathFactory.toPath(indexFiles.get(0))),
+                                        dataFilePathFactory.toPath(indexFiles.get(0), null)),
                                 tableSchema.logicalRowType())) {
                     Optional<FileIndexReader> fileIndexReader =
                             reader.readColumnIndex("a").stream().findFirst();

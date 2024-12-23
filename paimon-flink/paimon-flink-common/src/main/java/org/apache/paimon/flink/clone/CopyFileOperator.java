@@ -136,7 +136,7 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
     }
 
     private Path pathOfTable(Table table) {
-        return new Path(table.options().get(CoreOptions.PATH.key()));
+        return new Path(table.options().get(CoreOptions.TABLE_SCHEMA_PATH.key()));
     }
 
     @Override

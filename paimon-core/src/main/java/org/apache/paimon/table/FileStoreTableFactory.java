@@ -21,40 +21,35 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.HybridFileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.StringUtils;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.Optional;
 
-import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.TABLE_SCHEMA_PATH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Factory to create {@link FileStoreTable}. */
 public class FileStoreTableFactory {
 
     public static FileStoreTable create(CatalogContext context) {
-        FileIO fileIO;
-        try {
-            fileIO = FileIO.get(CoreOptions.path(context.options()), context);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        FileIO fileIO = new HybridFileIO();
+        fileIO.configure(context);
         return create(fileIO, context.options());
     }
 
     public static FileStoreTable create(FileIO fileIO, Path path) {
         Options options = new Options();
-        options.set(PATH, path.toString());
+        options.set(TABLE_SCHEMA_PATH, path.toString());
         return create(fileIO, options);
     }
 
     public static FileStoreTable create(FileIO fileIO, Options options) {
-        Path tablePath = CoreOptions.path(options);
+        Path tablePath = CoreOptions.schemaPath(options);
         String branchName = CoreOptions.branch(options.toMap());
         TableSchema tableSchema =
                 new SchemaManager(fileIO, tablePath, branchName)
@@ -82,21 +77,33 @@ public class FileStoreTableFactory {
 
     public static FileStoreTable create(
             FileIO fileIO,
-            Path tablePath,
+            Path tableSchemaPath,
             TableSchema tableSchema,
             Options dynamicOptions,
             CatalogEnvironment catalogEnvironment) {
+        CoreOptions coreOptions = CoreOptions.fromMap(tableSchema.options());
+        Path tableDataPath = null;
+        if (coreOptions.getDataFileExternalPath() != null) {
+            String dbAndTableName =
+                    tableSchemaPath.getParent().getParent() + "/" + tableSchemaPath.getParent();
+            tableDataPath = new Path(coreOptions.getDataFileExternalPath(), dbAndTableName);
+        }
         FileStoreTable table =
                 createWithoutFallbackBranch(
-                        fileIO, tablePath, tableSchema, dynamicOptions, catalogEnvironment);
-
+                        fileIO,
+                        tableSchemaPath,
+                        tableSchema,
+                        dynamicOptions,
+                        catalogEnvironment,
+                        tableDataPath);
         Options options = new Options(table.options());
         String fallbackBranch = options.get(CoreOptions.SCAN_FALLBACK_BRANCH);
+
         if (!StringUtils.isNullOrWhitespaceOnly(fallbackBranch)) {
             Options branchOptions = new Options(dynamicOptions.toMap());
             branchOptions.set(CoreOptions.BRANCH, fallbackBranch);
             Optional<TableSchema> schema =
-                    new SchemaManager(fileIO, tablePath, fallbackBranch).latest();
+                    new SchemaManager(fileIO, tableSchemaPath, fallbackBranch).latest();
             checkArgument(
                     schema.isPresent(),
                     "Cannot set '%s' = '%s' because the branch '%s' isn't existed.",
@@ -105,7 +112,12 @@ public class FileStoreTableFactory {
                     fallbackBranch);
             FileStoreTable fallbackTable =
                     createWithoutFallbackBranch(
-                            fileIO, tablePath, schema.get(), branchOptions, catalogEnvironment);
+                            fileIO,
+                            tableSchemaPath,
+                            schema.get(),
+                            branchOptions,
+                            catalogEnvironment,
+                            tableDataPath);
             table = new FallbackReadFileStoreTable(table, fallbackTable);
         }
 
@@ -114,16 +126,25 @@ public class FileStoreTableFactory {
 
     public static FileStoreTable createWithoutFallbackBranch(
             FileIO fileIO,
-            Path tablePath,
+            Path tableSchemaPath,
             TableSchema tableSchema,
             Options dynamicOptions,
-            CatalogEnvironment catalogEnvironment) {
+            CatalogEnvironment catalogEnvironment,
+            Path tableDataPath) {
         FileStoreTable table =
                 tableSchema.primaryKeys().isEmpty()
                         ? new AppendOnlyFileStoreTable(
-                                fileIO, tablePath, tableSchema, catalogEnvironment)
+                                fileIO,
+                                tableSchemaPath,
+                                tableSchema,
+                                catalogEnvironment,
+                                tableDataPath)
                         : new PrimaryKeyFileStoreTable(
-                                fileIO, tablePath, tableSchema, catalogEnvironment);
+                                fileIO,
+                                tableSchemaPath,
+                                tableSchema,
+                                catalogEnvironment,
+                                tableDataPath);
         return table.copy(dynamicOptions.toMap());
     }
 }

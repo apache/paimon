@@ -142,14 +142,15 @@ public class KeyValueFileWriterFactory {
                         fileIndexOptions);
     }
 
-    public void deleteFile(String filename, int level) {
-        fileIO.deleteQuietly(formatContext.pathFactory(level).toPath(filename));
+    public void deleteFile(String filename, int level, String externalPath) {
+        fileIO.deleteQuietly(formatContext.pathFactory(level).toPath(filename, externalPath));
     }
 
-    public void copyFile(String sourceFileName, String targetFileName, int level)
+    public void copyFile(
+            String sourceFileName, String targetFileName, int level, String externalPath)
             throws IOException {
-        Path sourcePath = formatContext.pathFactory(level).toPath(sourceFileName);
-        Path targetPath = formatContext.pathFactory(level).toPath(targetFileName);
+        Path sourcePath = formatContext.pathFactory(level).toPath(sourceFileName, externalPath);
+        Path targetPath = formatContext.pathFactory(level).toPath(targetFileName, externalPath);
         fileIO.copyFile(sourcePath, targetPath, true);
     }
 

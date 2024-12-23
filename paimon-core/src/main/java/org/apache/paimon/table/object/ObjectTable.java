@@ -19,6 +19,7 @@
 package org.apache.paimon.table.object;
 
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.DelegatedFileStoreTable;
@@ -214,6 +215,11 @@ public interface ObjectTable extends FileStoreTable {
         public ObjectTable switchToBranch(String branchName) {
             return new ObjectTableImpl(
                     wrapped.switchToBranch(branchName), objectFileIO, objectLocation);
+        }
+
+        @Override
+        public Path tableSchemaPath() {
+            return wrapped.tableSchemaPath();
         }
     }
 }

@@ -264,7 +264,7 @@ public class SchemaManager implements Serializable {
                     (key, value) -> {
                         // ignore `owner` and `path`
                         if (!key.equals(Catalog.OWNER_PROP)
-                                && !key.equals(CoreOptions.PATH.key())
+                                && !key.equals(CoreOptions.TABLE_SCHEMA_PATH.key())
                                 && (!existsOptions.containsKey(key)
                                         || !existsOptions.get(key).equals(value))) {
                             throw new RuntimeException(
@@ -890,7 +890,7 @@ public class SchemaManager implements Serializable {
     }
 
     public static void checkAlterTablePath(String key) {
-        if (CoreOptions.PATH.key().equalsIgnoreCase(key)) {
+        if (CoreOptions.TABLE_SCHEMA_PATH.key().equalsIgnoreCase(key)) {
             throw new UnsupportedOperationException("Change path is not supported yet.");
         }
     }

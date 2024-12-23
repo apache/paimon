@@ -144,7 +144,7 @@ public class TestFileStore extends KeyValueFileStore {
     }
 
     private static SchemaManager schemaManager(String root, CoreOptions options) {
-        return new SchemaManager(FileIOFinder.find(new Path(root)), options.path());
+        return new SchemaManager(FileIOFinder.find(new Path(root)), options.schemaPath());
     }
 
     public AbstractFileStoreWrite<KeyValue> newWrite() {
@@ -159,7 +159,7 @@ public class TestFileStore extends KeyValueFileStore {
         return new ExpireSnapshotsImpl(
                         snapshotManager(),
                         newSnapshotDeletion(),
-                        new TagManager(fileIO, options.path()))
+                        new TagManager(fileIO, options.schemaPath()))
                 .config(
                         ExpireConfig.builder()
                                 .snapshotRetainMax(numRetainedMax)
@@ -172,7 +172,7 @@ public class TestFileStore extends KeyValueFileStore {
         return new ExpireSnapshotsImpl(
                         snapshotManager(),
                         newSnapshotDeletion(),
-                        new TagManager(fileIO, options.path()))
+                        new TagManager(fileIO, options.schemaPath()))
                 .config(expireConfig);
     }
 
@@ -180,7 +180,7 @@ public class TestFileStore extends KeyValueFileStore {
         ExpireChangelogImpl impl =
                 new ExpireChangelogImpl(
                         snapshotManager(),
-                        new TagManager(fileIO, options.path()),
+                        new TagManager(fileIO, options.schemaPath()),
                         newChangelogDeletion());
         impl.config(config);
         return impl;
@@ -532,7 +532,7 @@ public class TestFileStore extends KeyValueFileStore {
     private Set<Path> getFilesInUse() {
         Set<Path> result = new HashSet<>();
 
-        SchemaManager schemaManager = new SchemaManager(fileIO, options.path());
+        SchemaManager schemaManager = new SchemaManager(fileIO, options.schemaPath());
         schemaManager.listAllIds().forEach(id -> result.add(schemaManager.toSchemaPath(id)));
 
         SnapshotManager snapshotManager = snapshotManager();
@@ -646,7 +646,7 @@ public class TestFileStore extends KeyValueFileStore {
         for (ManifestEntry entry : entries) {
             result.add(
                     new Path(
-                            pathFactory.bucketPath(entry.partition(), entry.bucket()),
+                            pathFactory.externalBucketPath(entry.partition(), entry.bucket()),
                             entry.file().fileName()));
         }
 
@@ -668,7 +668,8 @@ public class TestFileStore extends KeyValueFileStore {
                                 == FileSource.APPEND) {
                     result.add(
                             new Path(
-                                    pathFactory.bucketPath(entry.partition(), entry.bucket()),
+                                    pathFactory.externalBucketPath(
+                                            entry.partition(), entry.bucket()),
                                     entry.file().fileName()));
                 }
             }
@@ -718,7 +719,8 @@ public class TestFileStore extends KeyValueFileStore {
                 if (entry.file().fileSource().orElse(FileSource.APPEND) == FileSource.APPEND) {
                     result.add(
                             new Path(
-                                    pathFactory.bucketPath(entry.partition(), entry.bucket()),
+                                    pathFactory.externalBucketPath(
+                                            entry.partition(), entry.bucket()),
                                     entry.file().fileName()));
                 }
             }
@@ -733,7 +735,7 @@ public class TestFileStore extends KeyValueFileStore {
             for (ManifestEntry entry : files) {
                 result.add(
                         new Path(
-                                pathFactory.bucketPath(entry.partition(), entry.bucket()),
+                                pathFactory.externalBucketPath(entry.partition(), entry.bucket()),
                                 entry.file().fileName()));
             }
         }
@@ -797,7 +799,7 @@ public class TestFileStore extends KeyValueFileStore {
 
             conf.set(CoreOptions.FILE_FORMAT, format);
             conf.set(CoreOptions.MANIFEST_FORMAT, format);
-            conf.set(CoreOptions.PATH, root);
+            conf.set(CoreOptions.TABLE_SCHEMA_PATH, root);
             conf.set(CoreOptions.BUCKET, numBuckets);
 
             conf.set(CoreOptions.CHANGELOG_PRODUCER, changelogProducer);

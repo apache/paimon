@@ -679,7 +679,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
             waitForResult(newExpected, table, newRowType, Arrays.asList("pt", "_id"));
         } finally {
             statement.executeUpdate("ALTER TABLE all_types_table DROP COLUMN v");
-            SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+            SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.tableDataPath());
             schemaManager.commitChanges(SchemaChange.dropColumn("v"));
         }
     }

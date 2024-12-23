@@ -1855,7 +1855,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                         false);
 
         // create table
-        Path path = CoreOptions.path(context.getCatalogTable().getOptions());
+        Path path = CoreOptions.schemaPath(context.getCatalogTable().getOptions());
         LocalFileIO.create().mkdirs(path);
         // update schema
         new SchemaManager(LocalFileIO.create(), path)

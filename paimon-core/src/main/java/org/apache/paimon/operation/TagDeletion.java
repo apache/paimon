@@ -80,7 +80,7 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
         Set<Path> dataFileToDelete = new HashSet<>();
         for (ExpireFileEntry entry : manifestEntries) {
             if (!skipper.test(entry)) {
-                Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
+                Path bucketPath = pathFactory.externalBucketPath(entry.partition(), entry.bucket());
                 dataFileToDelete.add(new Path(bucketPath, entry.fileName()));
                 for (String file : entry.extraFiles()) {
                     dataFileToDelete.add(new Path(bucketPath, file));

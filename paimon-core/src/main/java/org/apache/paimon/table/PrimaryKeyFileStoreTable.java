@@ -57,15 +57,16 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     private transient KeyValueFileStore lazyStore;
 
     PrimaryKeyFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
-        this(fileIO, path, tableSchema, CatalogEnvironment.empty());
+        this(fileIO, path, tableSchema, CatalogEnvironment.empty(), null);
     }
 
     PrimaryKeyFileStoreTable(
             FileIO fileIO,
-            Path path,
+            Path tableSchemaPath,
             TableSchema tableSchema,
-            CatalogEnvironment catalogEnvironment) {
-        super(fileIO, path, tableSchema, catalogEnvironment);
+            CatalogEnvironment catalogEnvironment,
+            Path tableDataPath) {
+        super(fileIO, tableSchemaPath, tableSchema, catalogEnvironment, tableDataPath);
     }
 
     @Override
@@ -190,5 +191,10 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
         }
 
         return callbacks;
+    }
+
+    @Override
+    public Path tableSchemaPath() {
+        return tableSchemaPath;
     }
 }

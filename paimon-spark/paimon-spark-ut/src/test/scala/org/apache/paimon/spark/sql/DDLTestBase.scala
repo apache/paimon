@@ -564,7 +564,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
           sql("CREATE TABLE managed_tbl (id INT) USING paimon")
           val table = loadTable("managed_tbl")
           val fileIO = table.fileIO()
-          val tableLocation = table.location()
+          val tableLocation = table.tableDataPath()
 
           // drop managed table
           sql("DROP TABLE managed_tbl")

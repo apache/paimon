@@ -138,7 +138,7 @@ public class FileDeletionTest {
         // check all paths exist
         for (BinaryRow partition : partitions) {
             for (int bucket : Arrays.asList(0, 1)) {
-                assertPathExists(fileIO, pathFactory.bucketPath(partition, bucket));
+                assertPathExists(fileIO, pathFactory.externalBucketPath(partition, bucket));
             }
         }
 
@@ -210,14 +210,14 @@ public class FileDeletionTest {
         cleanBucket(store, partition, 0);
 
         // check before expiring
-        assertPathExists(fileIO, pathFactory.bucketPath(partition, 0));
-        assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
+        assertPathExists(fileIO, pathFactory.externalBucketPath(partition, 0));
+        assertPathExists(fileIO, pathFactory.externalBucketPath(partition, 1));
 
         // check after expiring
         store.newExpire(1, 1, Long.MAX_VALUE).expire();
 
-        assertPathNotExists(fileIO, pathFactory.bucketPath(partition, 0));
-        assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
+        assertPathNotExists(fileIO, pathFactory.externalBucketPath(partition, 0));
+        assertPathExists(fileIO, pathFactory.externalBucketPath(partition, 1));
     }
 
     /**
@@ -253,7 +253,7 @@ public class FileDeletionTest {
     @Test
     public void testExpireWithExistingTags() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 4);
-        tagManager = new TagManager(fileIO, store.options().path());
+        tagManager = new TagManager(fileIO, store.options().schemaPath());
         SnapshotManager snapshotManager = store.snapshotManager();
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
@@ -295,20 +295,20 @@ public class FileDeletionTest {
         // check before expiring
         FileStorePathFactory pathFactory = store.pathFactory();
         for (int i = 0; i < 4; i++) {
-            assertPathExists(fileIO, pathFactory.bucketPath(partition, i));
+            assertPathExists(fileIO, pathFactory.externalBucketPath(partition, i));
         }
 
         // check expiring results
         store.newExpire(1, 1, Long.MAX_VALUE).expire();
 
         // expiring snapshot 1 will delete file A
-        assertPathNotExists(fileIO, pathFactory.bucketPath(partition, 0));
+        assertPathNotExists(fileIO, pathFactory.externalBucketPath(partition, 0));
         // expiring snapshot 2 & 3 won't delete file B
-        assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
+        assertPathExists(fileIO, pathFactory.externalBucketPath(partition, 1));
         // expiring snapshot 4 & 5 will delete file D
-        assertPathNotExists(fileIO, pathFactory.bucketPath(partition, 3));
+        assertPathNotExists(fileIO, pathFactory.externalBucketPath(partition, 3));
         // file C survives
-        assertPathExists(fileIO, pathFactory.bucketPath(partition, 2));
+        assertPathExists(fileIO, pathFactory.externalBucketPath(partition, 2));
 
         // check manifests
         ManifestList manifestList = store.manifestListFactory().create();
@@ -331,7 +331,7 @@ public class FileDeletionTest {
     @Test
     public void testExpireWithUpgradeAndTags() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
-        tagManager = new TagManager(fileIO, store.options().path());
+        tagManager = new TagManager(fileIO, store.options().schemaPath());
         SnapshotManager snapshotManager = store.snapshotManager();
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
@@ -365,7 +365,7 @@ public class FileDeletionTest {
 
         // check data file and manifests
         FileStorePathFactory pathFactory = store.pathFactory();
-        assertPathExists(fileIO, pathFactory.bucketPath(partition, 0));
+        assertPathExists(fileIO, pathFactory.externalBucketPath(partition, 0));
 
         Snapshot tag1 = tagManager.taggedSnapshot("tag1");
         ManifestList manifestList = store.manifestListFactory().create();
@@ -385,7 +385,7 @@ public class FileDeletionTest {
     @Test
     public void testDeleteTagWithSnapshot() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 3);
-        tagManager = new TagManager(fileIO, store.options().path());
+        tagManager = new TagManager(fileIO, store.options().schemaPath());
         SnapshotManager snapshotManager = store.snapshotManager();
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
@@ -425,7 +425,7 @@ public class FileDeletionTest {
         // check before deleting tag1
         FileStorePathFactory pathFactory = store.pathFactory();
         for (int i = 0; i < 3; i++) {
-            assertPathExists(fileIO, pathFactory.bucketPath(partition, i));
+            assertPathExists(fileIO, pathFactory.externalBucketPath(partition, i));
         }
         for (ManifestFileMeta manifestFileMeta : snapshot1Data) {
             assertPathExists(fileIO, pathFactory.toManifestFilePath(manifestFileMeta.fileName()));
@@ -438,9 +438,9 @@ public class FileDeletionTest {
                 "tag1", store.newTagDeletion(), snapshotManager, Collections.emptyList());
 
         // check data files
-        assertPathNotExists(fileIO, pathFactory.bucketPath(partition, 0));
-        assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
-        assertPathExists(fileIO, pathFactory.bucketPath(partition, 2));
+        assertPathNotExists(fileIO, pathFactory.externalBucketPath(partition, 0));
+        assertPathExists(fileIO, pathFactory.externalBucketPath(partition, 1));
+        assertPathExists(fileIO, pathFactory.externalBucketPath(partition, 2));
 
         // check manifests
         for (ManifestFileMeta manifestFileMeta : snapshot1Data) {
@@ -459,7 +459,7 @@ public class FileDeletionTest {
     @Test
     public void testDeleteTagWithOtherTag() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 3);
-        tagManager = new TagManager(fileIO, store.options().path());
+        tagManager = new TagManager(fileIO, store.options().schemaPath());
         SnapshotManager snapshotManager = store.snapshotManager();
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
@@ -501,8 +501,8 @@ public class FileDeletionTest {
 
         // check before deleting tag2
         FileStorePathFactory pathFactory = store.pathFactory();
-        assertPathExists(fileIO, pathFactory.bucketPath(partition, 0));
-        assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
+        assertPathExists(fileIO, pathFactory.externalBucketPath(partition, 0));
+        assertPathExists(fileIO, pathFactory.externalBucketPath(partition, 1));
 
         for (ManifestFileMeta manifestFileMeta : snapshot2Data) {
             assertPathExists(fileIO, pathFactory.toManifestFilePath(manifestFileMeta.fileName()));
@@ -515,8 +515,8 @@ public class FileDeletionTest {
                 "tag2", store.newTagDeletion(), snapshotManager, Collections.emptyList());
 
         // check data files
-        assertPathExists(fileIO, pathFactory.bucketPath(partition, 0));
-        assertPathNotExists(fileIO, pathFactory.bucketPath(partition, 1));
+        assertPathExists(fileIO, pathFactory.externalBucketPath(partition, 0));
+        assertPathNotExists(fileIO, pathFactory.externalBucketPath(partition, 1));
 
         // check manifests
         Snapshot tag1 = tagManager.taggedSnapshot("tag1");
@@ -574,7 +574,7 @@ public class FileDeletionTest {
 
         // check that there are one data file and get its path
         FileStorePathFactory pathFactory = store.pathFactory();
-        Path bucket0 = pathFactory.bucketPath(partition, 0);
+        Path bucket0 = pathFactory.externalBucketPath(partition, 0);
         List<Path> datafiles =
                 Files.walk(Paths.get(bucket0.toString()))
                         .filter(Files::isRegularFile)
@@ -645,7 +645,7 @@ public class FileDeletionTest {
     @Test
     public void testExpireWithDeletingTags() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 2);
-        tagManager = new TagManager(fileIO, store.options().path());
+        tagManager = new TagManager(fileIO, store.options().schemaPath());
         SnapshotManager snapshotManager = store.snapshotManager();
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
@@ -696,8 +696,8 @@ public class FileDeletionTest {
 
         assertThat(snapshotManager.snapshotCount()).isEqualTo(2);
         FileStorePathFactory pathFactory = store.pathFactory();
-        assertPathExists(fileIO, pathFactory.bucketPath(partition, 0));
-        assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
+        assertPathExists(fileIO, pathFactory.externalBucketPath(partition, 0));
+        assertPathExists(fileIO, pathFactory.externalBucketPath(partition, 1));
     }
 
     private TestFileStore createStore(TestKeyValueGenerator.GeneratorMode mode) throws Exception {

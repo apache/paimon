@@ -161,7 +161,9 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
                     ((CommitMessageImpl) commitMessage).compactIncrement().compactAfter();
             for (DataFileMeta fileMeta : fileMetas) {
                 Assertions.assertThat(
-                                localFileIO.exists(dataFilePathFactory.toPath(fileMeta.fileName())))
+                                localFileIO.exists(
+                                        dataFilePathFactory.toPath(
+                                                fileMeta.fileName(), fileMeta.externalPath())))
                         .isTrue();
             }
             if (i++ > 2) {
@@ -190,7 +192,8 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
                 for (DataFileMeta fileMeta : fileMetas) {
                     Assertions.assertThat(
                                     localFileIO.exists(
-                                            dataFilePathFactory.toPath(fileMeta.fileName())))
+                                            dataFilePathFactory.toPath(
+                                                    fileMeta.fileName(), fileMeta.externalPath())))
                             .isFalse();
                 }
             } catch (Exception e) {

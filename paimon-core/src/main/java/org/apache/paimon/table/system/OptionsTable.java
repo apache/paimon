@@ -72,7 +72,7 @@ public class OptionsTable implements ReadonlyTable {
 
     public OptionsTable(FileStoreTable dataTable) {
         this.fileIO = dataTable.fileIO();
-        this.location = dataTable.location();
+        this.location = dataTable.tableDataPath();
         this.dataTable = dataTable;
     }
 

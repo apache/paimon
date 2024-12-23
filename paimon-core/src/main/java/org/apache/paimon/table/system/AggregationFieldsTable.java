@@ -81,7 +81,7 @@ public class AggregationFieldsTable implements ReadonlyTable {
 
     public AggregationFieldsTable(FileStoreTable dataTable) {
         this.fileIO = dataTable.fileIO();
-        this.location = dataTable.location();
+        this.location = dataTable.tableDataPath();
         this.dataTable = dataTable;
     }
 

@@ -82,7 +82,7 @@ class SparkSource
   }
 
   private def loadTable(options: JMap[String, String]): DataTable = {
-    val path = CoreOptions.path(options)
+    val path = CoreOptions.schemaPath(options)
     val catalogContext = CatalogContext.create(
       Options.fromMap(
         mergeSQLConfWithIdentifier(

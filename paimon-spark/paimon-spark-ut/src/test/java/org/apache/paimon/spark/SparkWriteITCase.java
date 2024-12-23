@@ -307,7 +307,7 @@ public class SparkWriteITCase {
                 "CREATE TABLE T (a INT, b INT, c STRING) TBLPROPERTIES ('primary-key'='a', 'bucket' = '1', 'changelog-producer' = 'lookup')");
 
         FileStoreTable table = getTable("T");
-        Path tabLocation = table.location();
+        Path tabLocation = table.tableDataPath();
         FileIO fileIO = table.fileIO();
 
         // default prefix "changelog-"
@@ -334,7 +334,7 @@ public class SparkWriteITCase {
 
         FileStoreTable table = getTable("T");
         FileIO fileIO = table.fileIO();
-        Path tabLocation = table.location();
+        Path tabLocation = table.tableDataPath();
 
         Assertions.assertTrue(fileIO.exists(new Path(tabLocation, "c=aa/_SUCCESS")));
     }
@@ -398,7 +398,7 @@ public class SparkWriteITCase {
                         + "'file.compression' = 'zstd')");
 
         FileStoreTable table = getTable("T");
-        Path tabLocation = table.location();
+        Path tabLocation = table.tableDataPath();
         FileIO fileIO = table.fileIO();
 
         spark.sql("INSERT INTO T VALUES (1, 1, 'aa')");

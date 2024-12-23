@@ -31,7 +31,7 @@ public class AppendOnlyTableStatisticsTest extends FileStoreTableStatisticsTestB
     @Override
     protected FileStoreTable createStoreTable() throws Exception {
         Options conf = new Options();
-        conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(CoreOptions.TABLE_SCHEMA_PATH, tablePath.toString());
         conf.set(CoreOptions.BUCKET, 1);
         TableSchema tableSchema =
                 new SchemaManager(LocalFileIO.create(), tablePath)

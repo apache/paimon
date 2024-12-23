@@ -57,7 +57,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
-import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.TABLE_SCHEMA_PATH;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.utils.FailingFileIO.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -111,11 +111,11 @@ public class FlinkBatchJobPartitionMarkdoneITCase extends CatalogITCaseBase {
 
     private void validateResult(FileStoreTable table) throws Exception {
         LocalFileIO fileIO = new LocalFileIO();
-        Path successPath1 = new Path(table.location(), "p=p1/_SUCCESS");
+        Path successPath1 = new Path(table.tableDataPath(), "p=p1/_SUCCESS");
         SuccessFile successFile1 = SuccessFile.safelyFromPath(fileIO, successPath1);
         assertThat(successFile1).isNotNull();
 
-        Path successPath2 = new Path(table.location(), "p=p2/_SUCCESS");
+        Path successPath2 = new Path(table.tableDataPath(), "p=p2/_SUCCESS");
         SuccessFile successFile2 = SuccessFile.safelyFromPath(fileIO, successPath2);
         assertThat(successFile2).isNotNull();
     }
@@ -159,11 +159,11 @@ public class FlinkBatchJobPartitionMarkdoneITCase extends CatalogITCaseBase {
             throws Exception {
         Options options = new Options();
         options.set(BUCKET, 3);
-        options.set(PATH, getTempDirPath());
+        options.set(TABLE_SCHEMA_PATH, getTempDirPath());
         options.set(FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         options.set(CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT.key(), "true");
 
-        Path tablePath = new CoreOptions(options.toMap()).path();
+        Path tablePath = new CoreOptions(options.toMap()).schemaPath();
         if (primaryKey.length == 0) {
             options.set(BUCKET_KEY, "_k");
         }

@@ -120,7 +120,7 @@ public class StatisticTable implements ReadonlyTable {
         public Plan innerPlan() {
             return () ->
                     Collections.singletonList(
-                            new StatisticTable.StatisticSplit(dataTable.location()));
+                            new StatisticTable.StatisticSplit(dataTable.tableDataPath()));
         }
     }
 

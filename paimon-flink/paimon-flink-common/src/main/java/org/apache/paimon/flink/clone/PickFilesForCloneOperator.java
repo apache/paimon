@@ -89,12 +89,13 @@ public class PickFilesForCloneOperator extends AbstractStreamOperator<CloneFileI
         List<CloneFileInfo> result =
                 toCloneFileInfos(
                         PickFilesUtil.getUsedFilesForLatestSnapshot(sourceTable),
-                        sourceTable.location(),
+                        sourceTable.tableDataPath(),
                         sourceIdentifierStr,
                         targetIdentifierStr);
 
         if (LOG.isDebugEnabled()) {
-            LOG.debug("The CloneFileInfo of table {} is {} : ", sourceTable.location(), result);
+            LOG.debug(
+                    "The CloneFileInfo of table {} is {} : ", sourceTable.tableDataPath(), result);
         }
 
         for (CloneFileInfo info : result) {
@@ -110,7 +111,10 @@ public class PickFilesForCloneOperator extends AbstractStreamOperator<CloneFileI
                 ImmutableMap.copyOf(
                         Iterables.filter(
                                 tableSchema.options().entrySet(),
-                                entry -> !Objects.equals(entry.getKey(), CoreOptions.PATH.key()))),
+                                entry ->
+                                        !Objects.equals(
+                                                entry.getKey(),
+                                                CoreOptions.TABLE_SCHEMA_PATH.key()))),
                 tableSchema.comment());
     }
 

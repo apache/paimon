@@ -45,7 +45,8 @@ public interface PartitionMarkDoneAction extends Closeable {
                             switch (action) {
                                 case "success-file":
                                     return new SuccessFileMarkDoneAction(
-                                            fileStoreTable.fileIO(), fileStoreTable.location());
+                                            fileStoreTable.fileIO(),
+                                            fileStoreTable.tableDataPath());
                                 case "done-partition":
                                     return new AddDonePartitionAction(
                                             createMetastoreClient(fileStoreTable, options));

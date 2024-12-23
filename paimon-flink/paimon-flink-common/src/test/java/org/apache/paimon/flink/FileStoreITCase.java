@@ -84,7 +84,7 @@ import static org.apache.paimon.CoreOptions.BRANCH;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
-import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.TABLE_SCHEMA_PATH;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.utils.FailingFileIO.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -486,7 +486,7 @@ public class FileStoreITCase extends AbstractTestBase {
             boolean noFail, String temporaryPath, int[] partitions, int[] primaryKey)
             throws Exception {
         Options options = buildConfiguration(noFail, temporaryPath);
-        Path tablePath = new CoreOptions(options.toMap()).path();
+        Path tablePath = new CoreOptions(options.toMap()).schemaPath();
         if (primaryKey.length == 0) {
             options.set(BUCKET_KEY, "_k");
         }
@@ -512,11 +512,12 @@ public class FileStoreITCase extends AbstractTestBase {
         Options options = new Options();
         options.set(BUCKET, NUM_BUCKET);
         if (noFail) {
-            options.set(PATH, temporaryPath);
+            options.set(TABLE_SCHEMA_PATH, temporaryPath);
         } else {
             String failingName = UUID.randomUUID().toString();
             FailingFileIO.reset(failingName, 3, 100);
-            options.set(PATH, FailingFileIO.getFailingPath(failingName, temporaryPath));
+            options.set(
+                    TABLE_SCHEMA_PATH, FailingFileIO.getFailingPath(failingName, temporaryPath));
         }
         options.set(FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         options.set(BRANCH, branch);

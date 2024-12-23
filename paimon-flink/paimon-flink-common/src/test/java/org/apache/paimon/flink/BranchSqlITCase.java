@@ -585,7 +585,8 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         sql("CALL sys.create_branch('default.T', 'test', 'tag1')");
 
         FileStoreTable table = paimonTable("T");
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location(), "test");
+        SchemaManager schemaManager =
+                new SchemaManager(table.fileIO(), table.tableDataPath(), "test");
         List<Long> schemaIds = schemaManager.listAllIds();
         assertThat(schemaIds.size()).isEqualTo(2);
 

@@ -145,8 +145,8 @@ class StoreMultiCommitterTest {
                 catalog,
                 Tuple2.of(firstTable, firstTableSchema),
                 Tuple2.of(secondTable, secondTableSchema));
-        firstTablePath = ((FileStoreTable) catalog.getTable(firstTable)).location();
-        secondTablePath = ((FileStoreTable) catalog.getTable(secondTable)).location();
+        firstTablePath = ((FileStoreTable) catalog.getTable(firstTable)).tableDataPath();
+        secondTablePath = ((FileStoreTable) catalog.getTable(secondTable)).tableDataPath();
     }
 
     @AfterEach

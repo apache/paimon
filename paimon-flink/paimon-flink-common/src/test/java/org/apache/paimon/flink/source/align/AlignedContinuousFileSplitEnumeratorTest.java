@@ -184,7 +184,8 @@ public class AlignedContinuousFileSplitEnumeratorTest extends FileSplitEnumerato
         }
         enumerator.addSplits(splits);
 
-        ConsumerManager consumerManager = new ConsumerManager(table.fileIO(), table.location());
+        ConsumerManager consumerManager =
+                new ConsumerManager(table.fileIO(), table.tableDataPath());
         assertThat(consumerManager.consumer(CONSUMER_ID)).isEmpty();
 
         enumerator.handleSplitRequest(0, "test-host");

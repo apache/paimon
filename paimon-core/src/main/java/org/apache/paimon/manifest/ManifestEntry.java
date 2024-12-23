@@ -93,6 +93,11 @@ public class ManifestEntry implements FileEntry {
     }
 
     @Override
+    public String externalPath() {
+        return file.externalPath();
+    }
+
+    @Override
     public BinaryRow minKey() {
         return file.minKey();
     }

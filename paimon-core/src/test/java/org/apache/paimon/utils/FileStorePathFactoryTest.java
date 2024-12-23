@@ -72,7 +72,7 @@ public class FileStorePathFactoryTest {
         FileStorePathFactory pathFactory = createNonPartFactory(new Path(tempDir.toString()));
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(new BinaryRow(0), 123);
-        assertThat(dataFilePathFactory.toPath("my-data-file-name"))
+        assertThat(dataFilePathFactory.toPath("my-data-file-name", null))
                 .isEqualTo(new Path(tempDir.toString() + "/bucket-123/my-data-file-name"));
     }
 
@@ -91,6 +91,7 @@ public class FileStorePathFactoryTest {
                         CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null,
                         null);
 
         assertPartition("20211224", 16, pathFactory, "/dt=20211224/hr=16");
@@ -116,7 +117,7 @@ public class FileStorePathFactoryTest {
         writer.complete();
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(partition, 123);
-        assertThat(dataFilePathFactory.toPath("my-data-file-name"))
+        assertThat(dataFilePathFactory.toPath("my-data-file-name", null))
                 .isEqualTo(
                         new Path(tempDir.toString() + expected + "/bucket-123/my-data-file-name"));
     }
@@ -132,6 +133,7 @@ public class FileStorePathFactoryTest {
                 CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
                 CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                 CoreOptions.FILE_COMPRESSION.defaultValue(),
+                null,
                 null);
     }
 }

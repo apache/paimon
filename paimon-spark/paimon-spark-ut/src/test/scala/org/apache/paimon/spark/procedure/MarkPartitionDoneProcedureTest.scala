@@ -48,11 +48,11 @@ class MarkPartitionDoneProcedureTest extends PaimonSparkTestBase {
 
     val table = loadTable("T")
 
-    val successPath1 = new Path(table.location, "day=2024-07-13/_SUCCESS")
+    val successPath1 = new Path(table.tableDataPath, "day=2024-07-13/_SUCCESS")
     val successFile1 = SuccessFile.safelyFromPath(table.fileIO, successPath1)
     assertThat(successFile1).isNotNull
 
-    val successPath2 = new Path(table.location, "day=2024-07-14/_SUCCESS")
+    val successPath2 = new Path(table.tableDataPath, "day=2024-07-14/_SUCCESS")
     val successFile2 = SuccessFile.safelyFromPath(table.fileIO, successPath2)
     assertThat(successFile2).isNotNull
 

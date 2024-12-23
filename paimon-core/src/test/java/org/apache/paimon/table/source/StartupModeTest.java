@@ -42,8 +42,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.StartupMode;
+import static org.apache.paimon.CoreOptions.TABLE_SCHEMA_PATH;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -366,7 +366,7 @@ public class StartupModeTest extends ScannerTestBase {
     private void initializeTable(
             CoreOptions.StartupMode startupMode, Map<String, String> properties) throws Exception {
         Options options = new Options();
-        options.set(PATH, tablePath.toString());
+        options.set(TABLE_SCHEMA_PATH, tablePath.toString());
         options.set(CoreOptions.SCAN_MODE, startupMode);
         for (Map.Entry<String, String> property : properties.entrySet()) {
             options.set(property.getKey(), property.getValue());

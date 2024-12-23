@@ -114,7 +114,7 @@ public abstract class MergeTreeTestBase {
         pathFactory = createNonPartFactory(path);
         comparator = Comparator.comparingInt(o -> o.getInt(0));
         recreateMergeTree(1024 * 1024);
-        Path bucketDir = writerFactory.pathFactory(0).toPath("ignore").getParent();
+        Path bucketDir = writerFactory.pathFactory(0).toPath("ignore", null).getParent();
         LocalFileIO.create().mkdirs(bucketDir);
     }
 
@@ -418,7 +418,7 @@ public abstract class MergeTreeTestBase {
 
         writer.close();
 
-        Path bucketDir = writerFactory.pathFactory(0).toPath("ignore").getParent();
+        Path bucketDir = writerFactory.pathFactory(0).toPath("ignore", null).getParent();
         Set<String> files =
                 Arrays.stream(LocalFileIO.create().listStatus(bucketDir))
                         .map(FileStatus::getPath)
@@ -475,7 +475,7 @@ public abstract class MergeTreeTestBase {
 
         writer.close();
 
-        Path bucketDir = writerFactory.pathFactory(0).toPath("ignore").getParent();
+        Path bucketDir = writerFactory.pathFactory(0).toPath("ignore", null).getParent();
         Set<String> files =
                 Arrays.stream(LocalFileIO.create().listStatus(bucketDir))
                         .map(FileStatus::getPath)
@@ -592,7 +592,7 @@ public abstract class MergeTreeTestBase {
             assertThat(remove).isTrue();
             // See MergeTreeWriter.updateCompactResult
             if (!newFileNames.contains(file.fileName()) && !afterFiles.contains(file.fileName())) {
-                compactWriterFactory.deleteFile(file.fileName(), file.level());
+                compactWriterFactory.deleteFile(file.fileName(), file.level(), file.externalPath());
             }
         }
         compactedFiles.addAll(increment.compactIncrement().compactAfter());

@@ -192,7 +192,7 @@ public class FilesTableTest extends TableTestBase {
                                     Arrays.toString(new String[] {partition1, partition2})),
                             fileEntry.bucket(),
                             BinaryString.fromString(
-                                    table.location()
+                                    table.tableDataPath()
                                             + "/pt1="
                                             + partition1
                                             + "/pt2="

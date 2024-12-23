@@ -112,7 +112,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                 table.store()
                         .pathFactory()
                         .createDataFilePathFactory(split.partition(), split.bucket())
-                        .toPath(split.dataFiles().get(0).fileName());
+                        .toPath(split.dataFiles().get(0).fileName(), null);
         table.fileIO().deleteQuietly(path);
 
         // read
@@ -1086,7 +1086,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     protected FileStoreTable createFileStoreTable(Consumer<Options> configure, RowType rowType)
             throws Exception {
         Options conf = new Options();
-        conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(CoreOptions.TABLE_SCHEMA_PATH, tablePath.toString());
         configure.accept(conf);
         if (!conf.contains(BUCKET_KEY) && conf.get(BUCKET) != -1) {
             conf.set(BUCKET_KEY, "a");
@@ -1107,7 +1107,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     protected FileStoreTable createFileStoreTable(String branch, Consumer<Options> configure)
             throws Exception {
         Options conf = new Options();
-        conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(CoreOptions.TABLE_SCHEMA_PATH, tablePath.toString());
         conf.set(CoreOptions.BRANCH, branch);
         configure.accept(conf);
         if (!conf.contains(BUCKET_KEY) && conf.get(BUCKET) != -1) {
@@ -1128,7 +1128,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     @Override
     protected FileStoreTable overwriteTestFileStoreTable() throws Exception {
         Options conf = new Options();
-        conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(CoreOptions.TABLE_SCHEMA_PATH, tablePath.toString());
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), tablePath),
@@ -1144,7 +1144,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     protected FileStoreTable createUnawareBucketFileStoreTable(Consumer<Options> configure)
             throws Exception {
         Options conf = new Options();
-        conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(CoreOptions.TABLE_SCHEMA_PATH, tablePath.toString());
         conf.set(CoreOptions.BUCKET, -1);
         configure.accept(conf);
         TableSchema tableSchema =
@@ -1162,7 +1162,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     protected FileStoreTable createUnawareBucketFileStoreTable(
             RowType rowType, Consumer<Options> configure) throws Exception {
         Options conf = new Options();
-        conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(CoreOptions.TABLE_SCHEMA_PATH, tablePath.toString());
         conf.set(CoreOptions.BUCKET, -1);
         configure.accept(conf);
         TableSchema tableSchema =

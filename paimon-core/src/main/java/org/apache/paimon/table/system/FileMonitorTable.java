@@ -123,8 +123,8 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public Path location() {
-        return wrapped.location();
+    public Path tableDataPath() {
+        return wrapped.tableDataPath();
     }
 
     @Override
@@ -153,8 +153,13 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public Path tableSchemaPath() {
+        return wrapped.tableSchemaPath();
+    }
+
+    @Override
     public String name() {
-        return "__internal_file_monitor_" + wrapped.location().getName();
+        return "__internal_file_monitor_" + wrapped.tableDataPath().getName();
     }
 
     @Override

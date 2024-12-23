@@ -135,7 +135,8 @@ public class DataFileMeta {
             List<String> extraFiles,
             @Nullable byte[] embeddedIndex,
             @Nullable FileSource fileSource,
-            @Nullable List<String> valueStatsCols) {
+            @Nullable List<String> valueStatsCols,
+            @Nullable String externalPath) {
         return new DataFileMeta(
                 fileName,
                 fileSize,
@@ -154,7 +155,7 @@ public class DataFileMeta {
                 embeddedIndex,
                 fileSource,
                 valueStatsCols,
-                null);
+                externalPath);
     }
 
     public DataFileMeta(
@@ -173,7 +174,8 @@ public class DataFileMeta {
             @Nullable Long deleteRowCount,
             @Nullable byte[] embeddedIndex,
             @Nullable FileSource fileSource,
-            @Nullable List<String> valueStatsCols) {
+            @Nullable List<String> valueStatsCols,
+            @Nullable String externalPath) {
         this(
                 fileName,
                 fileSize,
@@ -192,7 +194,7 @@ public class DataFileMeta {
                 embeddedIndex,
                 fileSource,
                 valueStatsCols,
-                null);
+                externalPath);
     }
 
     public DataFileMeta(
@@ -449,8 +451,8 @@ public class DataFileMeta {
 
     public List<Path> collectFiles(DataFilePathFactory pathFactory) {
         List<Path> paths = new ArrayList<>();
-        paths.add(pathFactory.toPath(fileName));
-        extraFiles.forEach(f -> paths.add(pathFactory.toPath(f)));
+        paths.add(pathFactory.toPath(fileName, externalPath));
+        extraFiles.forEach(f -> paths.add(pathFactory.toPath(f, externalPath)));
         return paths;
     }
 

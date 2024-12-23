@@ -38,7 +38,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                        |TBLPROPERTIES ('primary-key'='k,pt', 'bucket'='1')
                        | PARTITIONED BY (pt)
                        |""".stripMargin)
-          val location = loadTable("T").location().toString
+          val location = loadTable("T").tableDataPath().toString
 
           val inputData = MemoryStream[(String, String)]
           val stream = inputData
@@ -90,7 +90,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                        |TBLPROPERTIES ('primary-key'='k,pt,hm', 'bucket'='1')
                        | PARTITIONED BY (pt,hm)
                        |""".stripMargin)
-          val location = loadTable("T").location().toString
+          val location = loadTable("T").tableDataPath().toString
 
           val inputData = MemoryStream[(String, String, String)]
           val stream = inputData
@@ -159,7 +159,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                        |TBLPROPERTIES ('primary-key'='k,pt', 'bucket'='1')
                        | PARTITIONED BY (pt)
                        |""".stripMargin)
-          val location = loadTable("T").location().toString
+          val location = loadTable("T").tableDataPath().toString
 
           val inputData = MemoryStream[(String, String)]
           val stream = inputData
@@ -215,7 +215,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                        |TBLPROPERTIES ('primary-key'='k,pt', 'bucket'='1')
                        | PARTITIONED BY (pt)
                        |""".stripMargin)
-          val location = loadTable("T").location().toString
+          val location = loadTable("T").tableDataPath().toString
 
           val inputData = MemoryStream[(String, String)]
           val stream = inputData
@@ -283,7 +283,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                        |TBLPROPERTIES ('primary-key'='k,pt,hm', 'bucket'='1')
                        | PARTITIONED BY (pt,hm)
                        |""".stripMargin)
-          val location = loadTable("T").location().toString
+          val location = loadTable("T").tableDataPath().toString
 
           val inputData = MemoryStream[(String, String, String)]
           val stream = inputData
@@ -349,7 +349,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                        |TBLPROPERTIES ('primary-key'='k,pt', 'bucket'='1')
                        | PARTITIONED BY (pt)
                        |""".stripMargin)
-          val location = loadTable("T").location().toString
+          val location = loadTable("T").tableDataPath().toString
 
           val inputData = MemoryStream[(String, String)]
           val stream = inputData
@@ -414,7 +414,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                        |TBLPROPERTIES ('primary-key'='k,pt,hm', 'bucket'='1')
                        | PARTITIONED BY (hm, pt)
                        |""".stripMargin)
-          val location = loadTable("T").location().toString
+          val location = loadTable("T").tableDataPath().toString
 
           val inputData = MemoryStream[(String, String, String)]
           val stream = inputData
@@ -484,7 +484,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                        |TBLPROPERTIES ('primary-key'='k,pt,hm', 'bucket'='1')
                        | PARTITIONED BY (pt,hm)
                        |""".stripMargin)
-          val location = loadTable("T").location().toString
+          val location = loadTable("T").tableDataPath().toString
 
           val inputData = MemoryStream[(String, String, String)]
           val stream = inputData
@@ -562,7 +562,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                |TBLPROPERTIES ('primary-key'='k,pt', 'bucket'='1', 'partition.expiration-max-num'='2')
                |PARTITIONED BY (pt)
                |""".stripMargin)
-          val location = loadTable("T").location().toString
+          val location = loadTable("T").tableDataPath().toString
 
           val inputData = MemoryStream[(String, String)]
           val stream = inputData

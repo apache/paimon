@@ -97,7 +97,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                        |CREATE TABLE T (a INT, b INT)
                        |TBLPROPERTIES ('bucket'='-1')
                        |""".stripMargin)
-          val location = loadTable("T").location().toString
+          val location = loadTable("T").tableDataPath().toString
 
           val inputData = MemoryStream[(Int, Int)]
           val stream = inputData
@@ -193,7 +193,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                        |TBLPROPERTIES ('bucket'='-1')
                        |PARTITIONED BY (p)
                        |""".stripMargin)
-          val location = loadTable("T").location().toString
+          val location = loadTable("T").tableDataPath().toString
 
           val inputData = MemoryStream[(Int, Int, Int)]
           val stream = inputData
@@ -350,7 +350,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                        |CREATE TABLE T (a INT, b INT)
                        |TBLPROPERTIES ('primary-key'='a,b', 'bucket'='1')
                        |""".stripMargin)
-          val location = loadTable("T").location().toString
+          val location = loadTable("T").tableDataPath().toString
 
           val inputData = MemoryStream[(Int, Int)]
           val stream = inputData
@@ -559,19 +559,19 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
     Assertions
       .assertThat(
-        fileIO.listStatus(new Path(table.location(), "dt=2024-01-01/hh=0/bucket-0")).length)
+        fileIO.listStatus(new Path(table.tableDataPath(), "dt=2024-01-01/hh=0/bucket-0")).length)
       .isEqualTo(2)
     Assertions
       .assertThat(
-        fileIO.listStatus(new Path(table.location(), "dt=2024-01-01/hh=1/bucket-0")).length)
+        fileIO.listStatus(new Path(table.tableDataPath(), "dt=2024-01-01/hh=1/bucket-0")).length)
       .isEqualTo(3)
     Assertions
       .assertThat(
-        fileIO.listStatus(new Path(table.location(), "dt=2024-01-02/hh=0/bucket-0")).length)
+        fileIO.listStatus(new Path(table.tableDataPath(), "dt=2024-01-02/hh=0/bucket-0")).length)
       .isEqualTo(2)
     Assertions
       .assertThat(
-        fileIO.listStatus(new Path(table.location(), "dt=2024-01-02/hh=1/bucket-0")).length)
+        fileIO.listStatus(new Path(table.tableDataPath(), "dt=2024-01-02/hh=1/bucket-0")).length)
       .isEqualTo(2)
   }
 

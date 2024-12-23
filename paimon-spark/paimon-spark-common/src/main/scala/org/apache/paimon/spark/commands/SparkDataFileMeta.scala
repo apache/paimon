@@ -77,7 +77,7 @@ object SparkDataFileMeta {
             .withDataFiles(dataFiles.toList.asJava)
             .withDataDeletionFiles(deletionFiles.toList.asJava)
             .rawConvertible(rawConvertible)
-            .withBucketPath(pathFactory.bucketPath(partition, bucket).toString)
+            .withBucketPath(pathFactory.externalBucketPath(partition, bucket).toString)
             .build()
       }
       .toArray

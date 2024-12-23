@@ -2187,7 +2187,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     @Override
     protected FileStoreTable overwriteTestFileStoreTable() throws Exception {
         Options conf = new Options();
-        conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(CoreOptions.TABLE_SCHEMA_PATH, tablePath.toString());
         conf.set(BUCKET, 1);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
@@ -2205,7 +2205,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     protected FileStoreTable createFileStoreTable(Consumer<Options> configure, RowType rowType)
             throws Exception {
         Options options = new Options();
-        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(CoreOptions.TABLE_SCHEMA_PATH, tablePath.toString());
         options.set(BUCKET, 1);
         configure.accept(options);
         TableSchema tableSchema =
@@ -2229,7 +2229,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     private FileStoreTable createFileStoreTable(
             String branch, Consumer<Options> configure, RowType rowType) throws Exception {
         Options options = new Options();
-        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(CoreOptions.TABLE_SCHEMA_PATH, tablePath.toString());
         options.set(BUCKET, 1);
         options.set(BRANCH, branch);
         configure.accept(options);

@@ -243,7 +243,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 for (DataFileMeta dataMeta : dataMetas) {
                     DataFileMeta changelogMeta =
                             dataMeta.rename(writerFactory.newChangelogPath(0).getName());
-                    writerFactory.copyFile(dataMeta.fileName(), changelogMeta.fileName(), 0);
+                    writerFactory.copyFile(
+                            dataMeta.fileName(),
+                            changelogMeta.fileName(),
+                            0,
+                            dataMeta.externalPath());
                     changelogMetas.add(changelogMeta);
                 }
                 newFilesChangelog.addAll(changelogMetas);
@@ -341,7 +345,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 // 2. This file is not the input of upgraded.
                 if (!compactBefore.containsKey(file.fileName())
                         && !afterFiles.contains(file.fileName())) {
-                    writerFactory.deleteFile(file.fileName(), file.level());
+                    writerFactory.deleteFile(file.fileName(), file.level(), file.externalPath());
                 }
             } else {
                 compactBefore.put(file.fileName(), file);
@@ -375,7 +379,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         deletedFiles.clear();
 
         for (DataFileMeta file : newFilesChangelog) {
-            writerFactory.deleteFile(file.fileName(), file.level());
+            writerFactory.deleteFile(file.fileName(), file.level(), file.externalPath());
         }
         newFilesChangelog.clear();
 
@@ -390,12 +394,12 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         compactAfter.clear();
 
         for (DataFileMeta file : compactChangelog) {
-            writerFactory.deleteFile(file.fileName(), file.level());
+            writerFactory.deleteFile(file.fileName(), file.level(), file.externalPath());
         }
         compactChangelog.clear();
 
         for (DataFileMeta file : delete) {
-            writerFactory.deleteFile(file.fileName(), file.level());
+            writerFactory.deleteFile(file.fileName(), file.level(), file.externalPath());
         }
 
         if (compactDeletionFile != null) {

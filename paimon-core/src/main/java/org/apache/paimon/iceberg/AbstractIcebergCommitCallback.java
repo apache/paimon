@@ -108,7 +108,8 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                 table.coreOptions().toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
         switch (storageType) {
             case TABLE_LOCATION:
-                this.pathFactory = new IcebergPathFactory(new Path(table.location(), "metadata"));
+                this.pathFactory =
+                        new IcebergPathFactory(new Path(table.tableDataPath(), "metadata"));
                 break;
             case HADOOP_CATALOG:
             case HIVE_CATALOG:
@@ -139,11 +140,12 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
 
     public static Path catalogTableMetadataPath(FileStoreTable table) {
         Path icebergDBPath = catalogDatabasePath(table);
-        return new Path(icebergDBPath, String.format("%s/metadata", table.location().getName()));
+        return new Path(
+                icebergDBPath, String.format("%s/metadata", table.tableDataPath().getName()));
     }
 
     public static Path catalogDatabasePath(FileStoreTable table) {
-        Path dbPath = table.location().getParent();
+        Path dbPath = table.tableDataPath().getParent();
         final String dbSuffix = ".db";
         if (dbPath.getName().endsWith(dbSuffix)) {
             String dbName =
@@ -250,7 +252,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
         IcebergMetadata metadata =
                 new IcebergMetadata(
                         tableUuid,
-                        table.location().toString(),
+                        table.tableDataPath().toString(),
                         snapshotId,
                         icebergSchema.highestFieldId(),
                         Collections.singletonList(icebergSchema),
@@ -448,7 +450,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
         boolean isAddOnly = true;
         for (ManifestEntry entry : manifestEntries) {
             String path =
-                    fileStorePathFactory.bucketPath(entry.partition(), entry.bucket())
+                    fileStorePathFactory.externalBucketPath(entry.partition(), entry.bucket())
                             + "/"
                             + entry.fileName();
             switch (entry.kind()) {
@@ -753,7 +755,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
 
     private class SchemaCache {
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.tableDataPath());
         Map<Long, IcebergSchema> schemas = new HashMap<>();
 
         private IcebergSchema get(long schemaId) {

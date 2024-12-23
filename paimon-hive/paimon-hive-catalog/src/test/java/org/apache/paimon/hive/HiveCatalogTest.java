@@ -390,7 +390,7 @@ public class HiveCatalogTest extends CatalogTestBase {
 
         org.apache.paimon.table.Table table = externalWarehouseCatalog.getTable(identifier);
         assertThat(table.options())
-                .extracting(CoreOptions.PATH.key())
+                .extracting(CoreOptions.TABLE_SCHEMA_PATH.key())
                 .isEqualTo("file:" + externalTablePath);
 
         externalWarehouseCatalog.close();

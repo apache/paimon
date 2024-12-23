@@ -86,7 +86,8 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                                 changelogRow("+I", 2L, "Hello"),
                                 changelogRow("+I", 3L, "Paimon")));
 
-        ConsumerManager consumerManager = new ConsumerManager(table.fileIO(), table.location());
+        ConsumerManager consumerManager =
+                new ConsumerManager(table.fileIO(), table.tableDataPath());
         while (!consumerManager.consumer("myid").isPresent()) {
             Thread.sleep(1000);
         }
@@ -242,7 +243,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                                 changelogRow("+I", 3L, "Paimon")));
 
         ConsumerManager consumerManager =
-                new ConsumerManager(table.fileIO(), table.location(), branchName);
+                new ConsumerManager(table.fileIO(), table.tableDataPath(), branchName);
         while (!consumerManager.consumer("myid").isPresent()) {
             Thread.sleep(1000);
         }

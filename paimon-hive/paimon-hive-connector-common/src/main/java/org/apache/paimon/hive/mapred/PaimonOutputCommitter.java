@@ -96,7 +96,7 @@ public class PaimonOutputCommitter extends OutputCommitter {
                 createPreCommitFile(
                         commitTables,
                         generatePreCommitFileLocation(
-                                table.location(),
+                                table.tableDataPath(),
                                 attemptID.getJobID(),
                                 attemptID.getTaskID().getId()),
                         table.fileIO());
@@ -144,7 +144,7 @@ public class PaimonOutputCommitter extends OutputCommitter {
         if (table != null) {
             BatchWriteBuilder batchWriteBuilder = table.newBatchWriteBuilder();
             List<CommitMessage> commitMessagesList =
-                    getAllPreCommitMessage(table.location(), jobContext, table.fileIO());
+                    getAllPreCommitMessage(table.tableDataPath(), jobContext, table.fileIO());
             try (BatchTableCommit batchTableCommit = batchWriteBuilder.newCommit()) {
                 batchTableCommit.commit(commitMessagesList);
             } catch (Exception e) {
@@ -152,7 +152,7 @@ public class PaimonOutputCommitter extends OutputCommitter {
             }
             deleteTemporaryFile(
                     jobContext,
-                    generateJobLocation(table.location(), jobContext.getJobID()),
+                    generateJobLocation(table.tableDataPath(), jobContext.getJobID()),
                     table.fileIO());
         } else {
             LOG.info("CommitJob not found table, Skipping job commit.");
@@ -172,7 +172,7 @@ public class PaimonOutputCommitter extends OutputCommitter {
 
             LOG.info("AbortJob {} has started", jobContext.getJobID());
             List<CommitMessage> commitMessagesList =
-                    getAllPreCommitMessage(table.location(), jobContext, table.fileIO());
+                    getAllPreCommitMessage(table.tableDataPath(), jobContext, table.fileIO());
             BatchWriteBuilder batchWriteBuilder = table.newBatchWriteBuilder();
             try (BatchTableCommit batchTableCommit = batchWriteBuilder.newCommit()) {
                 batchTableCommit.abort(commitMessagesList);
@@ -181,7 +181,7 @@ public class PaimonOutputCommitter extends OutputCommitter {
             }
             deleteTemporaryFile(
                     jobContext,
-                    generateJobLocation(table.location(), jobContext.getJobID()),
+                    generateJobLocation(table.tableDataPath(), jobContext.getJobID()),
                     table.fileIO());
             LOG.info("Job {} is aborted. preCommit file has deleted", jobContext.getJobID());
         }

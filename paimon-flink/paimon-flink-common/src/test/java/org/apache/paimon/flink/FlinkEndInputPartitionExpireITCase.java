@@ -62,7 +62,7 @@ import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
 import static org.apache.paimon.CoreOptions.PARTITION_TIMESTAMP_FORMATTER;
-import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.TABLE_SCHEMA_PATH;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.utils.FailingFileIO.retryArtificialException;
 
@@ -134,14 +134,14 @@ public class FlinkEndInputPartitionExpireITCase extends CatalogITCaseBase {
             throws Exception {
         Options options = new Options();
         options.set(BUCKET, 3);
-        options.set(PATH, getTempDirPath());
+        options.set(TABLE_SCHEMA_PATH, getTempDirPath());
         options.set(FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         options.set(PARTITION_EXPIRATION_TIME, Duration.ofDays(2));
         options.set(PARTITION_EXPIRATION_CHECK_INTERVAL, Duration.ofHours(1));
         options.set(PARTITION_TIMESTAMP_FORMATTER, "yyyyMMdd");
         options.set(END_INPUT_CHECK_PARTITION_EXPIRE, true);
 
-        Path tablePath = new CoreOptions(options.toMap()).path();
+        Path tablePath = new CoreOptions(options.toMap()).schemaPath();
         if (primaryKey.length == 0) {
             options.set(BUCKET_KEY, "_k");
         }

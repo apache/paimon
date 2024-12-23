@@ -70,7 +70,7 @@ class BranchActionITCase extends ActionITCaseBase {
         writeData(rowData(2L, BinaryString.fromString("Hello")));
         writeData(rowData(3L, BinaryString.fromString("Paimon")));
 
-        TagManager tagManager = new TagManager(table.fileIO(), table.location());
+        TagManager tagManager = new TagManager(table.fileIO(), table.tableDataPath());
         executeSQL(
                 String.format(
                         "CALL sys.create_tag('%s.%s', 'tag2', 2, '5 d')", database, tableName));
@@ -236,7 +236,7 @@ class BranchActionITCase extends ActionITCaseBase {
         writeData(rowData(3L, BinaryString.fromString("Paimon")));
 
         // Create tag2
-        TagManager tagManager = new TagManager(table.fileIO(), table.location());
+        TagManager tagManager = new TagManager(table.fileIO(), table.tableDataPath());
         executeSQL(String.format("CALL sys.create_tag('%s.%s', 'tag2', 2)", database, tableName));
         assertThat(tagManager.tagExists("tag2")).isTrue();
         // Create tag3

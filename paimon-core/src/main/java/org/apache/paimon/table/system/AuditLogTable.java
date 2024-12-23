@@ -179,8 +179,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public Path location() {
-        return wrapped.location();
+    public Path tableDataPath() {
+        return wrapped.tableDataPath();
     }
 
     @Override
@@ -206,6 +206,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     @Override
     public DataTable switchToBranch(String branchName) {
         return new AuditLogTable(wrapped.switchToBranch(branchName));
+    }
+
+    @Override
+    public Path tableSchemaPath() {
+        return wrapped.tableSchemaPath();
     }
 
     @Override

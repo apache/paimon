@@ -465,11 +465,11 @@ public class CloneActionITCase extends ActionITCaseBase {
                                         Pair.of(
                                                 absolutePath,
                                                 getPathExcludeTableRoot(
-                                                        absolutePath, targetTable.location())))
+                                                        absolutePath, targetTable.tableDataPath())))
                         .collect(Collectors.toList());
 
         FileStoreTable sourceTable = getFileStoreTable(sourceWarehouse, sourceDb, sourceTableName);
-        Path tableLocation = sourceTable.location();
+        Path tableLocation = sourceTable.tableDataPath();
         for (Pair<Path, Path> filesPathInfo : filesPathInfoList) {
             Path sourceTableFile = new Path(tableLocation.toString() + filesPathInfo.getRight());
             assertThat(sourceTable.fileIO().exists(sourceTableFile)).isTrue();

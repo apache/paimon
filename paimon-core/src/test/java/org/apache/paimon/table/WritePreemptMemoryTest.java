@@ -93,7 +93,7 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
             throws Exception {
         Options options = new Options();
         options.set(CoreOptions.BUCKET, 1);
-        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(CoreOptions.TABLE_SCHEMA_PATH, tablePath.toString());
         // Run with minimal memory to ensure a more intense preempt
         // Currently a writer needs at least one page
         int pages = 10;
@@ -117,7 +117,7 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
             throws Exception {
         Options options = new Options();
         options.set(CoreOptions.BUCKET, 1);
-        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(CoreOptions.TABLE_SCHEMA_PATH, tablePath.toString());
         // Run with minimal memory to ensure a more intense preempt
         // Currently a writer needs at least one page
         int pages = 10;
@@ -140,7 +140,7 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
     @Override
     protected FileStoreTable overwriteTestFileStoreTable() throws Exception {
         Options conf = new Options();
-        conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(CoreOptions.TABLE_SCHEMA_PATH, tablePath.toString());
         conf.set(CoreOptions.BUCKET, 1);
         // Run with minimal memory to ensure a more intense preempt
         // Currently a writer needs at least one page

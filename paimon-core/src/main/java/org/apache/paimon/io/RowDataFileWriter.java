@@ -124,6 +124,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                         : Collections.singletonList(indexResult.independentIndexFile()),
                 indexResult.embeddedIndexBytes(),
                 fileSource,
-                statsPair.getKey());
+                statsPair.getKey(),
+                path.toString());
     }
 }

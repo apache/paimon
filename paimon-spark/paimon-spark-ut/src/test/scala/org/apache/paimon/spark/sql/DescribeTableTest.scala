@@ -73,7 +73,9 @@ class DescribeTableTest extends PaimonSparkTestBase {
       Assertions.assertEquals(information1("Namespace"), testDB)
       Assertions.assertEquals(information1("Table"), "s2")
       Assertions.assertEquals(information1("Provider"), "paimon")
-      Assertions.assertEquals(information1("Location"), loadTable(testDB, "s2").location().toString)
+      Assertions.assertEquals(
+        information1("Location"),
+        loadTable(testDB, "s2").tableDataPath().toString)
 
       // check table s2 partition info
       val error1 = intercept[Exception] {

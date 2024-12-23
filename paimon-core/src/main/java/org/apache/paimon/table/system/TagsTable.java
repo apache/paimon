@@ -99,7 +99,7 @@ public class TagsTable implements ReadonlyTable {
 
     public TagsTable(FileStoreTable dataTable) {
         this.fileIO = dataTable.fileIO();
-        this.location = dataTable.location();
+        this.location = dataTable.tableDataPath();
         this.branch = CoreOptions.branch(dataTable.schema().options());
         this.dataTable = dataTable;
     }

@@ -93,7 +93,7 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
     }
 
     private Path getOrphanFilePath(FileStoreTable table, String orphanFile) {
-        return new Path(table.location(), orphanFile);
+        return new Path(table.tableDataPath(), orphanFile);
     }
 
     @Test
@@ -201,14 +201,15 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
 
         // create first branch and write some data
         table.createBranch("br");
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location(), "br");
+        SchemaManager schemaManager =
+                new SchemaManager(table.fileIO(), table.tableDataPath(), "br");
         TableSchema branchSchema =
                 schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.INT()));
         Options branchOptions = new Options(branchSchema.options());
         branchOptions.set(CoreOptions.BRANCH, "br");
         branchSchema = branchSchema.copy(branchOptions.toMap());
         FileStoreTable branchTable =
-                FileStoreTableFactory.create(table.fileIO(), table.location(), branchSchema);
+                FileStoreTableFactory.create(table.fileIO(), table.tableDataPath(), branchSchema);
 
         String commitUser = UUID.randomUUID().toString();
         StreamTableWrite write = branchTable.newWrite(commitUser);
@@ -219,14 +220,16 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
         commit.close();
 
         // create orphan file in snapshot directory of first branch
-        Path orphanFile3 = new Path(table.location(), "branch/branch-br/snapshot/orphan_file3");
+        Path orphanFile3 =
+                new Path(table.tableDataPath(), "branch/branch-br/snapshot/orphan_file3");
         branchTable.fileIO().writeFile(orphanFile3, "x", true);
 
         // create second branch, which is empty
         table.createBranch("br2");
 
         // create orphan file in snapshot directory of second branch
-        Path orphanFile4 = new Path(table.location(), "branch/branch-br2/snapshot/orphan_file4");
+        Path orphanFile4 =
+                new Path(table.tableDataPath(), "branch/branch-br2/snapshot/orphan_file4");
         branchTable.fileIO().writeFile(orphanFile4, "y", true);
 
         if (ThreadLocalRandom.current().nextBoolean()) {

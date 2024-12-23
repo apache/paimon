@@ -42,7 +42,7 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
 
     val table = loadTable("T")
     val fileIO = table.fileIO()
-    val tablePath = table.location()
+    val tablePath = table.tableDataPath()
 
     val orphanFile1 = new Path(tablePath, ORPHAN_FILE_1)
     val orphanFile2 = new Path(tablePath, ORPHAN_FILE_2)
@@ -87,7 +87,7 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
 
     val table = loadTable("T")
     val fileIO = table.fileIO()
-    val tablePath = table.location()
+    val tablePath = table.tableDataPath()
 
     val orphanFile1 = new Path(tablePath, ORPHAN_FILE_1)
     val orphanFile2 = new Path(tablePath, ORPHAN_FILE_2)
@@ -131,8 +131,8 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
     val table2 = loadTable("T2")
     val fileIO1 = table1.fileIO()
     val fileIO2 = table2.fileIO()
-    val tablePath1 = table1.location()
-    val tablePath2 = table2.location()
+    val tablePath1 = table1.tableDataPath()
+    val tablePath2 = table2.tableDataPath()
 
     val orphanFile11 = new Path(tablePath1, ORPHAN_FILE_1)
     val orphanFile12 = new Path(tablePath1, ORPHAN_FILE_2)
@@ -183,7 +183,7 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
 
     val table = loadTable("T")
     val fileIO = table.fileIO()
-    val tablePath = table.location()
+    val tablePath = table.tableDataPath()
 
     val orphanFile1 = new Path(tablePath, ORPHAN_FILE_1)
     val orphanFile2 = new Path(tablePath, ORPHAN_FILE_2)

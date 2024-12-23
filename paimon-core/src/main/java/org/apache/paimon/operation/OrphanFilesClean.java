@@ -94,7 +94,7 @@ public abstract class OrphanFilesClean implements Serializable {
         this.table = table;
         this.fileIO = table.fileIO();
         this.partitionKeysNum = table.partitionKeys().size();
-        this.location = table.location();
+        this.location = table.tableDataPath();
         this.olderThanMillis = olderThanMillis;
         this.fileCleaner = fileCleaner;
     }

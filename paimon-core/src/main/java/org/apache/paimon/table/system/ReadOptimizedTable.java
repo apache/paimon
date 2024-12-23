@@ -157,8 +157,8 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public Path location() {
-        return wrapped.location();
+    public Path tableDataPath() {
+        return wrapped.tableDataPath();
     }
 
     @Override
@@ -184,6 +184,11 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     @Override
     public DataTable switchToBranch(String branchName) {
         return new ReadOptimizedTable(wrapped.switchToBranch(branchName));
+    }
+
+    @Override
+    public Path tableSchemaPath() {
+        return wrapped.tableSchemaPath();
     }
 
     @Override

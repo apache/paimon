@@ -44,7 +44,7 @@ class LookupCompactionTest extends PaimonSparkTestBase {
                |""".stripMargin)
 
           val table = loadTable("T")
-          val tabLocation = table.location()
+          val tabLocation = table.tableDataPath()
           val fileIO = table.fileIO()
 
           // First insert, file is upgraded to the max level when compaction, no need rewrite

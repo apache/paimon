@@ -21,6 +21,7 @@ package org.apache.paimon.privilege;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
@@ -285,6 +286,11 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     public PrivilegedFileStoreTable switchToBranch(String branchName) {
         return new PrivilegedFileStoreTable(
                 wrapped.switchToBranch(branchName), privilegeChecker, identifier);
+    }
+
+    @Override
+    public Path tableSchemaPath() {
+        return wrapped.tableSchemaPath();
     }
 
     public static PrivilegedFileStoreTable wrap(

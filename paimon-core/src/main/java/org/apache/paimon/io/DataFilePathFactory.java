@@ -32,7 +32,8 @@ public class DataFilePathFactory {
 
     public static final String INDEX_PATH_SUFFIX = ".index";
 
-    private final Path parent;
+    private final Path warehouseDataPath;
+    private final Path externalDataPath;
     private final String uuid;
 
     private final AtomicInteger pathCount;
@@ -43,13 +44,14 @@ public class DataFilePathFactory {
     private final String fileCompression;
 
     public DataFilePathFactory(
-            Path parent,
+            Path warehouseDataPath,
             String formatIdentifier,
             String dataFilePrefix,
             String changelogFilePrefix,
             boolean fileSuffixIncludeCompression,
-            String fileCompression) {
-        this.parent = parent;
+            String fileCompression,
+            Path externalDataPath) {
+        this.warehouseDataPath = warehouseDataPath;
         this.uuid = UUID.randomUUID().toString();
         this.pathCount = new AtomicInteger(0);
         this.formatIdentifier = formatIdentifier;
@@ -57,6 +59,11 @@ public class DataFilePathFactory {
         this.changelogFilePrefix = changelogFilePrefix;
         this.fileSuffixIncludeCompression = fileSuffixIncludeCompression;
         this.fileCompression = fileCompression;
+        if (externalDataPath == null) {
+            this.externalDataPath = warehouseDataPath;
+        } else {
+            this.externalDataPath = externalDataPath;
+        }
     }
 
     public Path newPath() {
@@ -75,11 +82,16 @@ public class DataFilePathFactory {
             extension = "." + formatIdentifier;
         }
         String name = prefix + uuid + "-" + pathCount.getAndIncrement() + extension;
-        return new Path(parent, name);
+        return new Path(externalDataPath, name);
     }
 
-    public Path toPath(String fileName) {
-        return new Path(parent + "/" + fileName);
+    public Path toPath(String fileName, String externalPath) {
+        if (externalPath == null) {
+            return new Path(warehouseDataPath + "/" + fileName);
+        } else {
+            Path parent = new Path(externalPath).getParent();
+            return new Path(parent, fileName);
+        }
     }
 
     @VisibleForTesting

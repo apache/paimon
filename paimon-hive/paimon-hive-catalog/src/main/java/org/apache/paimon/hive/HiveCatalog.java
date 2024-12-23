@@ -217,9 +217,9 @@ public class HiveCatalog extends AbstractCatalog {
             Map<String, String> tableOptions, Identifier identifier) {
         boolean externalTable;
         Path location;
-        if (tableOptions.containsKey(CoreOptions.PATH.key())) {
+        if (tableOptions.containsKey(CoreOptions.TABLE_SCHEMA_PATH.key())) {
             externalTable = true;
-            location = new Path(tableOptions.get(CoreOptions.PATH.key()));
+            location = new Path(tableOptions.get(CoreOptions.TABLE_SCHEMA_PATH.key()));
         } else {
             externalTable = usingExternalTable(tableOptions);
             location = getTableLocation(identifier, null);
@@ -379,7 +379,7 @@ public class HiveCatalog extends AbstractCatalog {
             }
 
             Optional<TableSchema> branchSchema =
-                    tableSchemaInFileSystem(mainTable.location(), branchName);
+                    tableSchemaInFileSystem(mainTable.tableDataPath(), branchName);
             if (!branchSchema.isPresent()) {
                 continue;
             }

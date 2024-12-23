@@ -44,7 +44,7 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
         spark.sql(s"INSERT INTO $tableName VALUES (2, 'v_2_new')")
 
         val table = loadTable(tableName)
-        val location = table.location().toString
+        val location = table.tableDataPath().toString
 
         val readStream = spark.readStream
           .format("paimon")
@@ -95,7 +95,7 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
         spark.sql(s"INSERT INTO $tableName VALUES (2, 'v_2_new')")
 
         val table = loadTable(tableName)
-        val location = table.location().toString
+        val location = table.tableDataPath().toString
 
         val readStream = spark.readStream
           .format("paimon")
@@ -147,7 +147,7 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
                      |""".stripMargin)
 
         val table = loadTable(tableName)
-        val location = table.location().toString
+        val location = table.tableDataPath().toString
 
         // streaming write
         val inputData = MemoryStream[(Int, String)]

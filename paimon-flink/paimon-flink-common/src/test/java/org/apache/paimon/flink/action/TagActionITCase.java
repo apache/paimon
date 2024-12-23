@@ -71,7 +71,7 @@ public class TagActionITCase extends ActionITCaseBase {
         writeData(rowData(2L, BinaryString.fromString("Hello")));
         writeData(rowData(3L, BinaryString.fromString("Paimon")));
 
-        TagManager tagManager = new TagManager(table.fileIO(), table.location());
+        TagManager tagManager = new TagManager(table.fileIO(), table.tableDataPath());
 
         switch (invoker) {
             case "action":
@@ -266,7 +266,7 @@ public class TagActionITCase extends ActionITCaseBase {
         writeData(rowData(2L, BinaryString.fromString("Hello")));
         writeData(rowData(3L, BinaryString.fromString("Paimon")));
 
-        TagManager tagManager = new TagManager(table.fileIO(), table.location());
+        TagManager tagManager = new TagManager(table.fileIO(), table.tableDataPath());
         switch (invoker) {
             case "action":
                 createAction(
@@ -361,7 +361,7 @@ public class TagActionITCase extends ActionITCaseBase {
         writeData(rowData(2L, BinaryString.fromString("Hello")));
         writeData(rowData(3L, BinaryString.fromString("Paimon")));
 
-        TagManager tagManager = new TagManager(table.fileIO(), table.location());
+        TagManager tagManager = new TagManager(table.fileIO(), table.tableDataPath());
 
         switch (invoker) {
             case "action":

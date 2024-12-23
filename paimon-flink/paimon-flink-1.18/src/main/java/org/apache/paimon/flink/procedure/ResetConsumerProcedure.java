@@ -53,7 +53,7 @@ public class ResetConsumerProcedure extends ProcedureBase {
         ConsumerManager consumerManager =
                 new ConsumerManager(
                         fileStoreTable.fileIO(),
-                        fileStoreTable.location(),
+                        fileStoreTable.tableDataPath(),
                         fileStoreTable.snapshotManager().branch());
         consumerManager.resetConsumer(consumerId, new Consumer(nextSnapshotId));
 
@@ -67,7 +67,7 @@ public class ResetConsumerProcedure extends ProcedureBase {
         ConsumerManager consumerManager =
                 new ConsumerManager(
                         fileStoreTable.fileIO(),
-                        fileStoreTable.location(),
+                        fileStoreTable.tableDataPath(),
                         fileStoreTable.snapshotManager().branch());
         consumerManager.deleteConsumer(consumerId);
 

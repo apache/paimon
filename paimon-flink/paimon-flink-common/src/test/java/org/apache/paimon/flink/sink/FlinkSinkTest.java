@@ -109,7 +109,7 @@ public class FlinkSinkTest {
     private FileStoreTable createFileStoreTable() throws Exception {
         org.apache.paimon.fs.Path tablePath = new org.apache.paimon.fs.Path(tempPath.toString());
         Options options = new Options();
-        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(CoreOptions.TABLE_SCHEMA_PATH, tablePath.toString());
         options.set(CoreOptions.BUCKET, 1);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(

@@ -368,7 +368,7 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
                  |""".stripMargin)
 
     val table = loadTable("T")
-    val tableLocation = table.location()
+    val tableLocation = table.tableDataPath()
     val fileIO = table.fileIO()
 
     spark.sql(s"INSERT INTO T VALUES ('1', 'a')")

@@ -183,7 +183,7 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
         FailingFileIO.reset(failingName, 0, 1);
         for (int i = 0; i < numTables; i++) {
             FileStoreTable table = fileStoreTables.get(i).copyWithLatestSchema();
-            SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+            SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.tableDataPath());
             TableSchema schema = schemaManager.latest().get();
 
             ReadBuilder readBuilder = table.newReadBuilder();

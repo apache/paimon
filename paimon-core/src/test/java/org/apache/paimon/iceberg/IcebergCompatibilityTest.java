@@ -208,7 +208,7 @@ public class IcebergCompatibilityTest {
         assertThat(table.latestSnapshotId()).hasValue(3L);
 
         IcebergPathFactory pathFactory =
-                new IcebergPathFactory(new Path(table.location(), "metadata"));
+                new IcebergPathFactory(new Path(table.tableDataPath(), "metadata"));
         Path metadata3Path = pathFactory.toMetadataPath(3);
         assertThat(table.fileIO().exists(metadata3Path)).isTrue();
 
@@ -241,7 +241,7 @@ public class IcebergCompatibilityTest {
         commit.commit(1, write.prepareCommit(false, 1));
         assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.tableDataPath());
         schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.STRING()));
         table = table.copyWithLatestSchema();
         write.close();
@@ -288,7 +288,7 @@ public class IcebergCompatibilityTest {
         FileIO fileIO = table.fileIO();
         IcebergMetadata metadata =
                 IcebergMetadata.fromPath(
-                        fileIO, new Path(table.location(), "metadata/v1.metadata.json"));
+                        fileIO, new Path(table.tableDataPath(), "metadata/v1.metadata.json"));
         assertThat(metadata.snapshots()).hasSize(1);
         assertThat(metadata.currentSnapshotId()).isEqualTo(1);
 
@@ -299,7 +299,7 @@ public class IcebergCompatibilityTest {
         assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(3L);
         metadata =
                 IcebergMetadata.fromPath(
-                        fileIO, new Path(table.location(), "metadata/v3.metadata.json"));
+                        fileIO, new Path(table.tableDataPath(), "metadata/v3.metadata.json"));
         assertThat(metadata.snapshots()).hasSize(3);
         assertThat(metadata.currentSnapshotId()).isEqualTo(3);
 
@@ -307,7 +307,7 @@ public class IcebergCompatibilityTest {
         // are kept. So the first 2 Iceberg snapshots will be expired.
 
         IcebergPathFactory pathFactory =
-                new IcebergPathFactory(new Path(table.location(), "metadata"));
+                new IcebergPathFactory(new Path(table.tableDataPath(), "metadata"));
         IcebergManifestList manifestList = IcebergManifestList.create(table, pathFactory);
         assertThat(manifestList.compression()).isEqualTo("snappy");
 
@@ -360,7 +360,7 @@ public class IcebergCompatibilityTest {
         assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(5L);
         metadata =
                 IcebergMetadata.fromPath(
-                        fileIO, new Path(table.location(), "metadata/v5.metadata.json"));
+                        fileIO, new Path(table.tableDataPath(), "metadata/v5.metadata.json"));
         assertThat(metadata.snapshots()).hasSize(3);
         assertThat(metadata.currentSnapshotId()).isEqualTo(5);
 

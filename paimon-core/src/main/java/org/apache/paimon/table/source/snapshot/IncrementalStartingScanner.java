@@ -133,7 +133,8 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
         for (Map.Entry<Pair<BinaryRow, Integer>, List<DataFileMeta>> entry : grouped.entrySet()) {
             BinaryRow partition = entry.getKey().getLeft();
             int bucket = entry.getKey().getRight();
-            String bucketPath = reader.pathFactory().bucketPath(partition, bucket).toString();
+            String bucketPath =
+                    reader.pathFactory().externalBucketPath(partition, bucket).toString();
             for (SplitGenerator.SplitGroup splitGroup :
                     reader.splitGenerator().splitForBatch(entry.getValue())) {
                 DataSplit.Builder dataSplitBuilder =

@@ -110,7 +110,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     protected FileStorePathFactory pathFactory(String format) {
         return new FileStorePathFactory(
-                options.path(),
+                options.schemaPath(),
                 partitionType,
                 options.partitionDefaultName(),
                 format,
@@ -119,12 +119,13 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.legacyPartitionName(),
                 options.fileSuffixIncludeCompression(),
                 options.fileCompression(),
-                options.dataFilePathDirectory());
+                options.dataFilePathDirectory(),
+                options.dataPath());
     }
 
     @Override
     public SnapshotManager snapshotManager() {
-        return new SnapshotManager(fileIO, options.path(), options.branch(), snapshotCache);
+        return new SnapshotManager(fileIO, options.schemaPath(), options.branch(), snapshotCache);
     }
 
     @Override
@@ -275,7 +276,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public TagManager newTagManager() {
-        return new TagManager(fileIO, options.path());
+        return new TagManager(fileIO, options.schemaPath());
     }
 
     @Override
@@ -344,7 +345,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public ServiceManager newServiceManager() {
-        return new ServiceManager(fileIO, options.path());
+        return new ServiceManager(fileIO, options.schemaPath());
     }
 
     @Override

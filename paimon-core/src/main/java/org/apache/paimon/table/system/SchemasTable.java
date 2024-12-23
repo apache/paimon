@@ -98,7 +98,7 @@ public class SchemasTable implements ReadonlyTable {
     private final FileStoreTable dataTable;
 
     public SchemasTable(FileStoreTable dataTable) {
-        this.location = dataTable.location();
+        this.location = dataTable.tableDataPath();
         this.dataTable = dataTable;
     }
 

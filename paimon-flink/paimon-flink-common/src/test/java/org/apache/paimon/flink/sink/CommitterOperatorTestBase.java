@@ -98,7 +98,7 @@ public abstract class CommitterOperatorTestBase {
     protected FileStoreTable createFileStoreTable(
             Consumer<Options> setOptions, List<String> partitionKeys) throws Exception {
         Options conf = new Options();
-        conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(CoreOptions.TABLE_SCHEMA_PATH, tablePath.toString());
         conf.setString("bucket", "1");
         conf.setString("bucket-key", "a");
         setOptions.accept(conf);

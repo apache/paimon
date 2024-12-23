@@ -135,7 +135,7 @@ public class CdcRecordStoreWriteOperatorTest {
         actual = runner.poll(1);
         assertThat(actual).isNull();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.tableDataPath());
         schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.INT()));
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
@@ -196,7 +196,7 @@ public class CdcRecordStoreWriteOperatorTest {
         actual = runner.poll(1);
         assertThat(actual).isNull();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.tableDataPath());
         schemaManager.commitChanges(SchemaChange.updateColumnType("v1", DataTypes.BIGINT()));
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);

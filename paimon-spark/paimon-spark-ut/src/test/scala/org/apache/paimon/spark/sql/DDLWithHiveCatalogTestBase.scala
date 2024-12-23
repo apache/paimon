@@ -336,11 +336,13 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
               assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 3)
               // check partitions in filesystem
               if (dataFilePathDir.isEmpty) {
-                assert(containsDir(table.location(), Array("pt=1", "pt=2", "pt=3")))
+                assert(containsDir(table.tableDataPath(), Array("pt=1", "pt=2", "pt=3")))
               } else {
-                assert(!containsDir(table.location(), Array("pt=1", "pt=2", "pt=3")))
+                assert(!containsDir(table.tableDataPath(), Array("pt=1", "pt=2", "pt=3")))
                 assert(
-                  containsDir(new Path(table.location(), "data"), Array("pt=1", "pt=2", "pt=3")))
+                  containsDir(
+                    new Path(table.tableDataPath(), "data"),
+                    Array("pt=1", "pt=2", "pt=3")))
               }
 
               spark.sql(s"INSERT INTO $tblName VALUES (4, 3), (5, 4)")
@@ -377,7 +379,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 checkAnswer(spark.sql("SELECT * FROM external_tbl"), Row(1))
                 val table = loadTable("paimon_db", "external_tbl")
                 val fileIO = table.fileIO()
-                val actualTbLocation = table.location()
+                val actualTbLocation = table.tableDataPath()
                 assert(actualTbLocation.toString.split(':').apply(1).equals(expertTbLocation))
 
                 // drop external table
@@ -392,7 +394,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
 
                 // create managed table
                 spark.sql(s"CREATE TABLE managed_tbl (id INT) USING paimon")
-                val managedTbLocation = loadTable("paimon_db", "managed_tbl").location()
+                val managedTbLocation = loadTable("paimon_db", "managed_tbl").tableDataPath()
 
                 // drop managed table
                 spark.sql("DROP TABLE managed_tbl")
@@ -422,7 +424,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 spark.sql(
                   s"CREATE TABLE external_tbl (id INT) USING paimon LOCATION '$expertTbLocation'")
                 spark.sql("INSERT INTO external_tbl VALUES (1)")
-                val actualTbLocation = loadTable("paimon_db", "external_tbl").location()
+                val actualTbLocation = loadTable("paimon_db", "external_tbl").tableDataPath()
                 assert(actualTbLocation.toString.split(':').apply(1).equals(expertTbLocation))
 
                 // rename external table, location should not change
@@ -435,7 +437,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 // create managed table
                 spark.sql(s"CREATE TABLE managed_tbl (id INT) USING paimon")
                 spark.sql("INSERT INTO managed_tbl VALUES (1)")
-                val managedTbLocation = loadTable("paimon_db", "managed_tbl").location()
+                val managedTbLocation = loadTable("paimon_db", "managed_tbl").tableDataPath()
 
                 // rename managed table, location should change
                 spark.sql("ALTER TABLE managed_tbl RENAME TO managed_tbl_renamed")
@@ -565,10 +567,11 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
             spark.sql("INSERT INTO managed_tbl VALUES (1)")
             checkAnswer(spark.sql("SELECT * FROM managed_tbl"), Row(1))
 
-            val tablePath = loadTable("paimon_db", "managed_tbl").location().toString
+            val tablePath = loadTable("paimon_db", "managed_tbl").tableDataPath().toString
             spark.sql(s"CREATE TABLE external_tbl (id INT) USING paimon LOCATION '$tablePath'")
             checkAnswer(spark.sql("SELECT * FROM external_tbl"), Row(1))
-            assert(loadTable("paimon_db", "external_tbl").location().toString.equals(tablePath))
+            assert(
+              loadTable("paimon_db", "external_tbl").tableDataPath().toString.equals(tablePath))
           }
         }
     }
@@ -667,6 +670,6 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
   }
 
   def getActualTableLocation(dbName: String, tblName: String): String = {
-    loadTable(dbName, tblName).location().toString.split(':').apply(1)
+    loadTable(dbName, tblName).tableDataPath().toString.split(':').apply(1)
   }
 }

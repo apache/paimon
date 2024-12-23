@@ -70,7 +70,7 @@ import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
 import static org.apache.paimon.CoreOptions.PARTITION_TIMESTAMP_FORMATTER;
-import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.TABLE_SCHEMA_PATH;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -92,8 +92,8 @@ public class PartitionExpireTest {
     private void newTable() {
         LocalFileIO fileIO = LocalFileIO.create();
         Options options = new Options();
-        options.set(PATH, path.toString());
-        Path tablePath = CoreOptions.path(options);
+        options.set(TABLE_SCHEMA_PATH, path.toString());
+        Path tablePath = CoreOptions.schemaPath(options);
         String branchName = CoreOptions.branch(options.toMap());
         TableSchema tableSchema = new SchemaManager(fileIO, tablePath, branchName).latest().get();
         deletedPartitions = new ArrayList<>();

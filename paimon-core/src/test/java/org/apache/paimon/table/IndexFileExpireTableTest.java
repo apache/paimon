@@ -106,7 +106,7 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
         assertThat(indexFileSize()).isEqualTo(5);
         assertThat(indexManifestSize()).isEqualTo(3);
 
-        TagManager tagManager = new TagManager(LocalFileIO.create(), table.location());
+        TagManager tagManager = new TagManager(LocalFileIO.create(), table.tableDataPath());
         checkIndexFiles(tagManager.taggedSnapshot("tag3"));
         checkIndexFiles(tagManager.taggedSnapshot("tag5"));
     }
@@ -133,7 +133,7 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
         expire.expireUntil(1, 7);
         table.deleteTag("tag3");
 
-        TagManager tagManager = new TagManager(LocalFileIO.create(), table.location());
+        TagManager tagManager = new TagManager(LocalFileIO.create(), table.tableDataPath());
         checkIndexFiles(7);
         checkIndexFiles(tagManager.taggedSnapshot("tag5"));
         assertThat(indexFileSize()).isEqualTo(4);
@@ -241,12 +241,13 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
     }
 
     private long indexFileSize() throws IOException {
-        return LocalFileIO.create().listStatus(new Path(table.location(), "index")).length;
+        return LocalFileIO.create().listStatus(new Path(table.tableDataPath(), "index")).length;
     }
 
     private long indexManifestSize() throws IOException {
         return Arrays.stream(
-                        LocalFileIO.create().listStatus(new Path(table.location(), "manifest")))
+                        LocalFileIO.create()
+                                .listStatus(new Path(table.tableDataPath(), "manifest")))
                 .filter(s -> s.getPath().getName().startsWith("index-"))
                 .count();
     }

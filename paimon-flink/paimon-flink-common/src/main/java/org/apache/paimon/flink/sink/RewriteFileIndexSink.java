@@ -172,7 +172,8 @@ public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
             this.pathFactory = table.store().pathFactory();
             this.dataFilePathFactoryMap = new HashMap<>();
             this.schemaInfoCache =
-                    new SchemaCache(fileIndexOptions, new SchemaManager(fileIO, table.location()));
+                    new SchemaCache(
+                            fileIndexOptions, new SchemaManager(fileIO, table.tableDataPath()));
             this.sizeInMeta = table.coreOptions().fileIndexInManifestThreshold();
         }
 
@@ -198,16 +199,21 @@ public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
                 String indexFile = indexFiles.get(0);
                 try (FileIndexFormat.Reader indexReader =
                         FileIndexFormat.createReader(
-                                fileIO.newInputStream(dataFilePathFactory.toPath(indexFile)),
+                                fileIO.newInputStream(
+                                        dataFilePathFactory.toPath(
+                                                indexFile, dataFileMeta.externalPath())),
                                 schemaInfo.fileSchema)) {
                     maintainers = indexReader.readAll();
                 }
-                newIndexPath = createNewFileIndexFilePath(dataFilePathFactory.toPath(indexFile));
+                newIndexPath =
+                        createNewFileIndexFilePath(
+                                dataFilePathFactory.toPath(indexFile, dataFileMeta.externalPath()));
             } else {
                 maintainers = new HashMap<>();
                 newIndexPath =
                         dataFileToFileIndexPath(
-                                dataFilePathFactory.toPath(dataFileMeta.fileName()));
+                                dataFilePathFactory.toPath(
+                                        dataFileMeta.fileName(), dataFileMeta.externalPath()));
             }
 
             // remove unnecessary
@@ -246,7 +252,8 @@ public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
                                                 .withBucket(bucket)
                                                 .withBucketPath(
                                                         pathFactory
-                                                                .bucketPath(partition, bucket)
+                                                                .externalBucketPath(
+                                                                        partition, bucket)
                                                                 .toString())
                                                 .withDataFiles(
                                                         Collections.singletonList(dataFileMeta))

@@ -186,7 +186,7 @@ public class ExpireSnapshotsTest {
 
         // write test files
         BinaryRow partition = gen.getPartition(gen.next());
-        Path bucketPath = store.pathFactory().bucketPath(partition, 0);
+        Path bucketPath = store.pathFactory().externalBucketPath(partition, 0);
         Path myDataFile = new Path(bucketPath, "myDataFile");
         new LocalFileIO().tryToWriteAtomic(myDataFile, "1");
         Path extra1 = new Path(bucketPath, "extra1");
@@ -429,7 +429,9 @@ public class ExpireSnapshotsTest {
         ManifestEntry entry = entries.get(0);
         assertThat(entry.file().level()).isEqualTo(0);
         Path dataFilePath1 =
-                new Path(store.pathFactory().bucketPath(partition, 0), entry.file().fileName());
+                new Path(
+                        store.pathFactory().externalBucketPath(partition, 0),
+                        entry.file().fileName());
         FileStoreTestUtils.assertPathExists(fileIO, dataFilePath1);
 
         // compact & commit
@@ -444,7 +446,9 @@ public class ExpireSnapshotsTest {
         // data file has been upgraded due to compact
         assertThat(entry.file().level()).isEqualTo(5);
         Path dataFilePath2 =
-                new Path(store.pathFactory().bucketPath(partition, 0), entry.file().fileName());
+                new Path(
+                        store.pathFactory().externalBucketPath(partition, 0),
+                        entry.file().fileName());
         assertThat(dataFilePath1).isEqualTo(dataFilePath2);
         FileStoreTestUtils.assertPathExists(fileIO, dataFilePath2);
 

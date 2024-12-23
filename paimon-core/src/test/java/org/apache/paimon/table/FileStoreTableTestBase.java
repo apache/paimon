@@ -665,7 +665,7 @@ public abstract class FileStoreTableTestBase {
         }
 
         SnapshotManager snapshotManager =
-                new SnapshotManager(FileIOFinder.find(tablePath), table.location());
+                new SnapshotManager(FileIOFinder.find(tablePath), table.tableDataPath());
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         assertThat(latestSnapshotId).isNotNull();
         for (int i = 1; i <= latestSnapshotId; i++) {
@@ -685,7 +685,7 @@ public abstract class FileStoreTableTestBase {
         write.write(rowData(1, 20, 200L));
         commit.commit(0, write.prepareCommit(true, 0));
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.tableDataPath());
         schemaManager.commitChanges(SchemaChange.addColumn("added", DataTypes.INT()));
         table = table.copyWithLatestSchema();
         assertThat(table.coreOptions().snapshotNumRetainMax()).isEqualTo(100);
@@ -1582,13 +1582,14 @@ public abstract class FileStoreTableTestBase {
     @Test
     public void testSchemaPathOption() throws Exception {
         String fakePath = "fake path";
-        FileStoreTable table = createFileStoreTable(conf -> conf.set(CoreOptions.PATH, fakePath));
-        String originSchemaPath = table.schema().options().get(CoreOptions.PATH.key());
+        FileStoreTable table =
+                createFileStoreTable(conf -> conf.set(CoreOptions.TABLE_SCHEMA_PATH, fakePath));
+        String originSchemaPath = table.schema().options().get(CoreOptions.TABLE_SCHEMA_PATH.key());
         assertThat(originSchemaPath).isEqualTo(fakePath);
         // reset PATH of schema option to table location
         table = table.copy(Collections.emptyMap());
-        String schemaPath = table.schema().options().get(CoreOptions.PATH.key());
-        String tablePath = table.location().toString();
+        String schemaPath = table.schema().options().get(CoreOptions.TABLE_SCHEMA_PATH.key());
+        String tablePath = table.tableDataPath().toString();
         assertThat(schemaPath).isEqualTo(tablePath);
     }
 

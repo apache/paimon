@@ -102,7 +102,7 @@ public class RewriteFileIndexActionITCase extends ActionITCaseBase {
                     table.store()
                             .pathFactory()
                             .createDataFilePathFactory(entry.partition(), entry.bucket())
-                            .toPath(file);
+                            .toPath(file, null);
             try (FileIndexFormat.Reader reader =
                     FileIndexFormat.createReader(
                             table.fileIO().newInputStream(indexFilePath), table.rowType())) {

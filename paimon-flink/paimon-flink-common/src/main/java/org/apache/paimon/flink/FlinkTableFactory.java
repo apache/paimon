@@ -75,7 +75,7 @@ public class FlinkTableFactory extends AbstractFlinkTableFactory {
         Options options = Options.fromMap(table.getOptions());
         if (options.get(AUTO_CREATE)) {
             try {
-                Path tablePath = CoreOptions.path(table.getOptions());
+                Path tablePath = CoreOptions.schemaPath(table.getOptions());
                 String branch = CoreOptions.branch(table.getOptions());
                 SchemaManager schemaManager =
                         new SchemaManager(

@@ -62,7 +62,7 @@ public class ConsumersTableTest extends TableTestBase {
                         .build();
         catalog.createTable(identifier, schema, true);
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-        manager = new ConsumerManager(table.fileIO(), table.location());
+        manager = new ConsumerManager(table.fileIO(), table.tableDataPath());
         manager.resetConsumer("id1", new Consumer(5));
         manager.resetConsumer("id2", new Consumer(6));
         consumersTable = (ConsumersTable) catalog.getTable(identifier(tableName + "$consumers"));

@@ -199,7 +199,7 @@ public class HiveSchema {
         }
         Path path = new Path(location);
         Options options = HiveUtils.extractCatalogConfig(configuration);
-        options.set(CoreOptions.PATH, location);
+        options.set(CoreOptions.TABLE_SCHEMA_PATH, location);
         CatalogContext context = CatalogContext.create(options, configuration);
         try {
             return new SchemaManager(FileIO.get(path, context), path).latest();

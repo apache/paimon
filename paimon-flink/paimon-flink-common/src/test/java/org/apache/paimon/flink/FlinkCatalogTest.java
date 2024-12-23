@@ -90,8 +90,8 @@ import java.util.UUID;
 import java.util.stream.Stream;
 
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
-import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
+import static org.apache.paimon.CoreOptions.TABLE_SCHEMA_PATH;
 import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
@@ -353,7 +353,7 @@ public class FlinkCatalogTest {
     public void testCreateFlinkTableWithPath() throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         Map<String, String> options = new HashMap<>();
-        options.put(PATH.key(), "/unknown/path");
+        options.put(TABLE_SCHEMA_PATH.key(), "/unknown/path");
         CatalogTable table1 = createTable(options);
         assertThatThrownBy(() -> catalog.createTable(this.path1, table1, false))
                 .hasMessageContaining(
@@ -899,7 +899,7 @@ public class FlinkCatalogTest {
                                     .catalog()
                                     .getTable(FlinkCatalog.toIdentifier(path))
                                     .options()
-                                    .get(PATH.key()));
+                                    .get(TABLE_SCHEMA_PATH.key()));
         } catch (org.apache.paimon.catalog.Catalog.TableNotExistException e) {
             throw new RuntimeException(e);
         }

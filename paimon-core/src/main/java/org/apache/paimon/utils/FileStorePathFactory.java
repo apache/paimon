@@ -38,7 +38,8 @@ public class FileStorePathFactory {
 
     public static final String BUCKET_PATH_PREFIX = "bucket-";
 
-    private final Path root;
+    private final Path schemaRoot;
+    private final Path dataRoot;
     private final String uuid;
     private final InternalRowPartitionComputer partitionComputer;
     private final String formatIdentifier;
@@ -56,7 +57,7 @@ public class FileStorePathFactory {
     private final AtomicInteger statsFileCount;
 
     public FileStorePathFactory(
-            Path root,
+            Path schemaRoot,
             RowType partitionType,
             String defaultPartValue,
             String formatIdentifier,
@@ -65,8 +66,9 @@ public class FileStorePathFactory {
             boolean legacyPartitionName,
             boolean fileSuffixIncludeCompression,
             String fileCompression,
-            @Nullable String dataFilePathDirectory) {
-        this.root = root;
+            @Nullable String dataFilePathDirectory,
+            Path dataRoot) {
+        this.schemaRoot = schemaRoot;
         this.dataFilePathDirectory = dataFilePathDirectory;
         this.uuid = UUID.randomUUID().toString();
 
@@ -83,10 +85,7 @@ public class FileStorePathFactory {
         this.indexManifestCount = new AtomicInteger(0);
         this.indexFileCount = new AtomicInteger(0);
         this.statsFileCount = new AtomicInteger(0);
-    }
-
-    public Path root() {
-        return root;
+        this.dataRoot = dataRoot;
     }
 
     @VisibleForTesting
@@ -99,12 +98,16 @@ public class FileStorePathFactory {
 
     public Path newManifestFile() {
         return new Path(
-                root + "/manifest/manifest-" + uuid + "-" + manifestFileCount.getAndIncrement());
+                schemaRoot
+                        + "/manifest/manifest-"
+                        + uuid
+                        + "-"
+                        + manifestFileCount.getAndIncrement());
     }
 
     public Path newManifestList() {
         return new Path(
-                root
+                schemaRoot
                         + "/manifest/manifest-list-"
                         + uuid
                         + "-"
@@ -112,25 +115,30 @@ public class FileStorePathFactory {
     }
 
     public Path toManifestFilePath(String manifestFileName) {
-        return new Path(root + "/manifest/" + manifestFileName);
+        return new Path(schemaRoot + "/manifest/" + manifestFileName);
     }
 
     public Path toManifestListPath(String manifestListName) {
-        return new Path(root + "/manifest/" + manifestListName);
+        return new Path(schemaRoot + "/manifest/" + manifestListName);
     }
 
     public DataFilePathFactory createDataFilePathFactory(BinaryRow partition, int bucket) {
         return new DataFilePathFactory(
-                bucketPath(partition, bucket),
+                externalBucketPath(partition, bucket),
                 formatIdentifier,
                 dataFilePrefix,
                 changelogFilePrefix,
                 fileSuffixIncludeCompression,
-                fileCompression);
+                fileCompression,
+                warehouseBucketPath(partition, bucket));
     }
 
-    public Path bucketPath(BinaryRow partition, int bucket) {
-        return new Path(root, relativeBucketPath(partition, bucket));
+    public Path externalBucketPath(BinaryRow partition, int bucket) {
+        return new Path(dataRoot, relativeBucketPath(partition, bucket));
+    }
+
+    public Path warehouseBucketPath(BinaryRow partition, int bucket) {
+        return new Path(schemaRoot, relativeBucketPath(partition, bucket));
     }
 
     public Path relativeBucketPath(BinaryRow partition, int bucket) {
@@ -160,7 +168,7 @@ public class FileStorePathFactory {
                                         partition,
                                         "Partition binary row is null. This is unexpected.")))
                 .stream()
-                .map(p -> new Path(root + "/" + p))
+                .map(p -> new Path(schemaRoot + "/" + p))
                 .collect(Collectors.toList());
     }
 
@@ -202,7 +210,7 @@ public class FileStorePathFactory {
             @Override
             public Path newPath() {
                 return new Path(
-                        root
+                        schemaRoot
                                 + "/manifest/index-manifest-"
                                 + uuid
                                 + "-"
@@ -211,7 +219,7 @@ public class FileStorePathFactory {
 
             @Override
             public Path toPath(String fileName) {
-                return new Path(root + "/manifest/" + fileName);
+                return new Path(schemaRoot + "/manifest/" + fileName);
             }
         };
     }
@@ -221,12 +229,16 @@ public class FileStorePathFactory {
             @Override
             public Path newPath() {
                 return new Path(
-                        root + "/index/index-" + uuid + "-" + indexFileCount.getAndIncrement());
+                        schemaRoot
+                                + "/index/index-"
+                                + uuid
+                                + "-"
+                                + indexFileCount.getAndIncrement());
             }
 
             @Override
             public Path toPath(String fileName) {
-                return new Path(root + "/index/" + fileName);
+                return new Path(schemaRoot + "/index/" + fileName);
             }
         };
     }
@@ -236,7 +248,7 @@ public class FileStorePathFactory {
             @Override
             public Path newPath() {
                 return new Path(
-                        root
+                        schemaRoot
                                 + "/statistics/stats-"
                                 + uuid
                                 + "-"
@@ -245,7 +257,7 @@ public class FileStorePathFactory {
 
             @Override
             public Path toPath(String fileName) {
-                return new Path(root + "/statistics/" + fileName);
+                return new Path(schemaRoot + "/statistics/" + fileName);
             }
         };
     }

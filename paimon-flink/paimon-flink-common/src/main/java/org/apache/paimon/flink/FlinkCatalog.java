@@ -135,7 +135,7 @@ import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_REFRESH_HANDLER_B
 import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_REFRESH_HANDLER_DESCRIPTION;
 import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_REFRESH_MODE;
 import static org.apache.paimon.CoreOptions.MATERIALIZED_TABLE_REFRESH_STATUS;
-import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.TABLE_SCHEMA_PATH;
 import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
 import static org.apache.paimon.catalog.Catalog.LAST_UPDATE_TIME_PROP;
 import static org.apache.paimon.catalog.Catalog.NUM_FILES_PROP;
@@ -845,7 +845,7 @@ public class FlinkCatalog extends AbstractCatalog {
                 continue;
             }
 
-            if (PATH.key().equalsIgnoreCase(key)) {
+            if (TABLE_SCHEMA_PATH.key().equalsIgnoreCase(key)) {
                 throw new IllegalArgumentException("Illegal table path in table options: " + value);
             }
 

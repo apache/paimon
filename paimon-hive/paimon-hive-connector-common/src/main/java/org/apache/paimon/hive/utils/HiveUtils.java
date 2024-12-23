@@ -54,7 +54,7 @@ public class HiveUtils {
 
     public static FileStoreTable createFileStoreTable(JobConf jobConf) {
         Options options = extractCatalogConfig(jobConf);
-        options.set(CoreOptions.PATH, LocationKeyExtractor.getPaimonLocation(jobConf));
+        options.set(CoreOptions.TABLE_SCHEMA_PATH, LocationKeyExtractor.getPaimonLocation(jobConf));
 
         CatalogContext catalogContext;
         if (options.get(HADOOP_LOAD_DEFAULT_CONFIG)) {

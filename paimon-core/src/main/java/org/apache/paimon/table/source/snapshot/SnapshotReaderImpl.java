@@ -346,7 +346,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 Pair.of(partition, bucket), Collections.emptyList());
                 for (SplitGenerator.SplitGroup splitGroup : splitGroups) {
                     List<DataFileMeta> dataFiles = splitGroup.files;
-                    String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
+                    String bucketPath =
+                            pathFactory.externalBucketPath(partition, bucket).toString();
                     builder.withDataFiles(dataFiles)
                             .rawConvertible(splitGroup.rawConvertible)
                             .withBucketPath(bucketPath);
@@ -447,7 +448,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 .withBeforeFiles(before)
                                 .withDataFiles(data)
                                 .isStreaming(isStreaming)
-                                .withBucketPath(pathFactory.bucketPath(part, bucket).toString());
+                                .withBucketPath(
+                                        pathFactory.externalBucketPath(part, bucket).toString());
                 if (deletionVectors) {
                     builder.withBeforeDeletionFiles(
                             getDeletionFiles(

@@ -96,7 +96,7 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
                 throw new UnsupportedOperationException(invoker);
         }
 
-        Path successPath = new Path(table.location(), "partKey0=0/_SUCCESS");
+        Path successPath = new Path(table.tableDataPath(), "partKey0=0/_SUCCESS");
         SuccessFile successFile = SuccessFile.safelyFromPath(table.fileIO(), successPath);
         assertThat(successFile).isNotNull();
     }
@@ -140,11 +140,11 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
                 throw new UnsupportedOperationException(invoker);
         }
 
-        Path successPath1 = new Path(table.location(), "partKey0=0/partKey1=1/_SUCCESS");
+        Path successPath1 = new Path(table.tableDataPath(), "partKey0=0/partKey1=1/_SUCCESS");
         SuccessFile successFile1 = SuccessFile.safelyFromPath(table.fileIO(), successPath1);
         assertThat(successFile1).isNotNull();
 
-        Path successPath2 = new Path(table.location(), "partKey0=1/partKey1=0/_SUCCESS");
+        Path successPath2 = new Path(table.tableDataPath(), "partKey0=1/partKey1=0/_SUCCESS");
         SuccessFile successFile2 = SuccessFile.safelyFromPath(table.fileIO(), successPath2);
         assertThat(successFile2).isNotNull();
     }

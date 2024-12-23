@@ -136,7 +136,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             List<Path> toDeleteEmptyDirectory = new ArrayList<>();
             // try to delete bucket directories
             for (Integer bucket : entry.getValue()) {
-                toDeleteEmptyDirectory.add(pathFactory.bucketPath(entry.getKey(), bucket));
+                toDeleteEmptyDirectory.add(pathFactory.externalBucketPath(entry.getKey(), bucket));
             }
             deleteFiles(toDeleteEmptyDirectory, this::tryDeleteEmptyDirectory);
 
@@ -217,7 +217,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         // we cannot delete a data file directly when we meet a DELETE entry, because that
         // file might be upgraded
         for (ExpireFileEntry entry : dataFileEntries) {
-            Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
+            Path bucketPath = pathFactory.externalBucketPath(entry.partition(), entry.bucket());
             Path dataFilePath = new Path(bucketPath, entry.fileName());
             switch (entry.kind()) {
                 case ADD:
@@ -263,7 +263,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             if (entry.kind() == FileKind.ADD) {
                 dataFileToDelete.add(
                         new Path(
-                                pathFactory.bucketPath(entry.partition(), entry.bucket()),
+                                pathFactory.externalBucketPath(entry.partition(), entry.bucket()),
                                 entry.fileName()));
                 recordDeletionBuckets(entry);
             }

@@ -37,7 +37,7 @@ class PaimonCommitTest extends PaimonSparkTestBase {
                   |""".stripMargin)
 
       val table = loadTable("tb")
-      val location = table.location().toString
+      val location = table.tableDataPath().toString
 
       val _spark = spark
       import _spark.implicits._

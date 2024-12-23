@@ -195,7 +195,8 @@ public abstract class KeyValueDataFileWriter
                 deleteRecordCount,
                 indexResult.embeddedIndexBytes(),
                 fileSource,
-                valueStatsPair.getKey());
+                valueStatsPair.getKey(),
+                path.toString());
     }
 
     abstract Pair<SimpleColStats[], SimpleColStats[]> fetchKeyValueStats(SimpleColStats[] rowStats);

@@ -53,7 +53,7 @@ public class PickFilesUtil {
         SnapshotManager snapshotManager = store.snapshotManager();
         Snapshot snapshot = snapshotManager.latestSnapshot();
         ManifestList manifestList = store.manifestListFactory().create();
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.tableDataPath());
         IndexFileHandler indexFileHandler = store.newIndexFileHandler();
 
         List<Path> files = new ArrayList<>();
@@ -108,7 +108,7 @@ public class PickFilesUtil {
                         pathFactory
                                 .createDataFilePathFactory(
                                         simpleFileEntry.partition(), simpleFileEntry.bucket())
-                                .toPath(simpleFileEntry.fileName());
+                                .toPath(simpleFileEntry.fileName(), simpleFileEntry.externalPath());
                 dataFiles.add(dataFilePath);
             }
 
