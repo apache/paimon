@@ -254,7 +254,7 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
         // Compute the number of values we want to read in this page.
         if (readState.valuesToReadInPage == 0) {
             int pageValueCount = readPage();
-            // 返回当前 page 的数据量
+            //  return value count in current page
             if (pageValueCount < 0) {
                 // we've read all the pages; this could happen when we're reading a repeated list
                 // and we
