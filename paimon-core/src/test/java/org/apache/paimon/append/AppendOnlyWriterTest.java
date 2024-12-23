@@ -680,6 +680,7 @@ public class AppendOnlyWriterTest {
                 Collections.emptyList(),
                 null,
                 FileSource.APPEND,
+                null,
                 null);
     }
 }

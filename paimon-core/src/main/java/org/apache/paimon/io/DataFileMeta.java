@@ -135,7 +135,8 @@ public class DataFileMeta {
             List<String> extraFiles,
             @Nullable byte[] embeddedIndex,
             @Nullable FileSource fileSource,
-            @Nullable List<String> valueStatsCols) {
+            @Nullable List<String> valueStatsCols,
+            @Nullable String externalPath) {
         return new DataFileMeta(
                 fileName,
                 fileSize,
@@ -154,7 +155,7 @@ public class DataFileMeta {
                 embeddedIndex,
                 fileSource,
                 valueStatsCols,
-                null);
+                externalPath);
     }
 
     public DataFileMeta(
@@ -173,7 +174,8 @@ public class DataFileMeta {
             @Nullable Long deleteRowCount,
             @Nullable byte[] embeddedIndex,
             @Nullable FileSource fileSource,
-            @Nullable List<String> valueStatsCols) {
+            @Nullable List<String> valueStatsCols,
+            @Nullable String externalPath) {
         this(
                 fileName,
                 fileSize,
@@ -192,7 +194,7 @@ public class DataFileMeta {
                 embeddedIndex,
                 fileSource,
                 valueStatsCols,
-                null);
+                externalPath);
     }
 
     public DataFileMeta(
@@ -493,6 +495,28 @@ public class DataFileMeta {
                 creationTime,
                 deleteRowCount,
                 newEmbeddedIndex,
+                fileSource,
+                valueStatsCols,
+                externalPath);
+    }
+
+    public DataFileMeta copy(String externalPath) {
+        return new DataFileMeta(
+                fileName,
+                fileSize,
+                rowCount,
+                minKey,
+                maxKey,
+                keyStats,
+                valueStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                level,
+                extraFiles,
+                creationTime,
+                deleteRowCount,
+                embeddedIndex,
                 fileSource,
                 valueStatsCols,
                 externalPath);

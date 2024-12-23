@@ -125,7 +125,8 @@ public class FileMetaUtils {
                     newPath,
                     simpleStatsExtractor,
                     fileIO,
-                    table);
+                    table,
+                    newPath.getParent().toString());
         } catch (IOException e) {
             throw new RuntimeException("error when construct file meta", e);
         }
@@ -150,7 +151,8 @@ public class FileMetaUtils {
             Path path,
             SimpleStatsExtractor simpleStatsExtractor,
             FileIO fileIO,
-            Table table)
+            Table table,
+            String externalPath)
             throws IOException {
         SimpleStatsConverter statsArraySerializer = new SimpleStatsConverter(table.rowType());
 
@@ -169,7 +171,8 @@ public class FileMetaUtils {
                 Collections.emptyList(),
                 null,
                 FileSource.APPEND,
-                null);
+                null,
+                externalPath);
     }
 
     public static BinaryRow writePartitionValue(
