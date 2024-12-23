@@ -165,6 +165,7 @@ public class ParquetReadWriteTest {
                                     new VarCharType(VarCharType.MAX_LENGTH))),
                     new ArrayType(true, RowType.builder().field("a", new IntType()).build()),
                     RowType.of(
+                            new IntType(),
                             new ArrayType(
                                     true,
                                     RowType.builder()
@@ -174,8 +175,7 @@ public class ParquetReadWriteTest {
                                                             true,
                                                             new ArrayType(true, new IntType())))
                                             .field("c", new IntType())
-                                            .build()),
-                            new IntType()),
+                                            .build())),
                     RowType.of(
                             new ArrayType(RowType.of(new VarCharType(255))),
                             RowType.of(new IntType()),
@@ -808,6 +808,7 @@ public class ParquetReadWriteTest {
                             new GenericArray(
                                     new GenericRow[] {GenericRow.of(i), GenericRow.of(i + 1)}),
                             GenericRow.of(
+                                    i,
                                     new GenericArray(
                                             new GenericRow[] {
                                                 GenericRow.of(
@@ -826,8 +827,7 @@ public class ParquetReadWriteTest {
                                                                     null
                                                                 }),
                                                         i)
-                                            }),
-                                    i),
+                                            })),
                             null));
         }
         return rows;
@@ -881,15 +881,15 @@ public class ParquetReadWriteTest {
                 row2.add(0, i + 1);
                 f4.addGroup(0);
 
-                // add ROW<`f0` ARRAY<ROW<`b` ARRAY<ARRAY<INT>>, `c` INT>>, `f1` INT>>
+                // add ROW<`f0` INT , `f1` INTARRAY<ROW<`b` ARRAY<ARRAY<INT>>, `c` INT>>>>
                 Group f5 = row.addGroup("f5");
-                Group arrayRow = f5.addGroup(0);
+                f5.add(0, i);
+                Group arrayRow = f5.addGroup(1);
                 Group insideRow = arrayRow.addGroup(0).addGroup(0);
                 Group insideArray = insideRow.addGroup(0);
                 createParquetDoubleNestedArray(insideArray, i);
                 insideRow.add(1, i);
                 arrayRow.addGroup(0);
-                f5.add(1, i);
                 writer.write(row);
             }
         } catch (Exception e) {
@@ -982,43 +982,43 @@ public class ParquetReadWriteTest {
                     origin.getArray(4).getRow(1, 1).getInt(0),
                     result.getArray(4).getRow(1, 1).getInt(0));
 
+            Assertions.assertEquals(origin.getRow(5, 2).getInt(0), result.getRow(5, 2).getInt(0));
             Assertions.assertEquals(
-                    origin.getRow(5, 2).getArray(0).getRow(0, 2).getArray(0).getArray(0).getInt(0),
-                    result.getRow(5, 2).getArray(0).getRow(0, 2).getArray(0).getArray(0).getInt(0));
+                    origin.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).getArray(0).getInt(0),
+                    result.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).getArray(0).getInt(0));
             Assertions.assertEquals(
-                    origin.getRow(5, 2).getArray(0).getRow(0, 2).getArray(0).getArray(0).getInt(1),
-                    result.getRow(5, 2).getArray(0).getRow(0, 2).getArray(0).getArray(0).getInt(1));
+                    origin.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).getArray(0).getInt(1),
+                    result.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).getArray(0).getInt(1));
             Assertions.assertTrue(
                     result.getRow(5, 2)
-                            .getArray(0)
+                            .getArray(1)
                             .getRow(0, 2)
                             .getArray(0)
                             .getArray(0)
                             .isNullAt(2));
 
             Assertions.assertEquals(
-                    origin.getRow(5, 2).getArray(0).getRow(0, 2).getArray(0).getArray(1).getInt(0),
-                    result.getRow(5, 2).getArray(0).getRow(0, 2).getArray(0).getArray(1).getInt(0));
+                    origin.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).getArray(1).getInt(0),
+                    result.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).getArray(1).getInt(0));
             Assertions.assertEquals(
-                    origin.getRow(5, 2).getArray(0).getRow(0, 2).getArray(0).getArray(1).getInt(1),
-                    result.getRow(5, 2).getArray(0).getRow(0, 2).getArray(0).getArray(1).getInt(1));
+                    origin.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).getArray(1).getInt(1),
+                    result.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).getArray(1).getInt(1));
             Assertions.assertTrue(
                     result.getRow(5, 2)
-                            .getArray(0)
+                            .getArray(1)
                             .getRow(0, 2)
                             .getArray(0)
                             .getArray(1)
                             .isNullAt(2));
 
             Assertions.assertEquals(
-                    0, result.getRow(5, 2).getArray(0).getRow(0, 2).getArray(0).getArray(2).size());
+                    0, result.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).getArray(2).size());
             Assertions.assertTrue(
-                    result.getRow(5, 2).getArray(0).getRow(0, 2).getArray(0).isNullAt(3));
+                    result.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).isNullAt(3));
 
             Assertions.assertEquals(
-                    origin.getRow(5, 2).getArray(0).getRow(0, 2).getInt(1),
-                    result.getRow(5, 2).getArray(0).getRow(0, 2).getInt(1));
-            Assertions.assertEquals(origin.getRow(5, 2).getInt(1), result.getRow(5, 2).getInt(1));
+                    origin.getRow(5, 2).getArray(1).getRow(0, 2).getInt(1),
+                    result.getRow(5, 2).getArray(1).getRow(0, 2).getInt(1));
             Assertions.assertTrue(result.isNullAt(6));
             Assertions.assertTrue(result.getRow(6, 2).isNullAt(0));
             Assertions.assertTrue(result.getRow(6, 2).isNullAt(1));
