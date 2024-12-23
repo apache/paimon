@@ -16,17 +16,6 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.data
+package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.AbstractSparkInternalRow
-import org.apache.paimon.types.RowType
-
-import org.apache.spark.unsafe.types.VariantVal
-
-class Spark4InternalRow(rowType: RowType) extends AbstractSparkInternalRow(rowType) {
-
-  override def getVariant(i: Int): VariantVal = {
-    val v = row.getVariant(i)
-    new VariantVal(v.value(), v.metadata())
-  }
-}
+class VariantTest extends VariantTestBase {}

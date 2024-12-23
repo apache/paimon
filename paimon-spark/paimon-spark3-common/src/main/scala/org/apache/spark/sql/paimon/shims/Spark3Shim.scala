@@ -18,6 +18,7 @@
 
 package org.apache.spark.sql.paimon.shims
 
+import org.apache.paimon.data.variant.Variant
 import org.apache.paimon.spark.catalyst.analysis.Spark3ResolutionRules
 import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark3SqlExtensionsParser
 import org.apache.paimon.spark.data.{Spark3ArrayData, Spark3InternalRow, SparkArrayData, SparkInternalRow}
@@ -71,4 +72,11 @@ class Spark3Shim extends SparkShim {
 
   override def convertToExpression(spark: SparkSession, column: Column): Expression = column.expr
 
+  override def toPaimonVariant(o: Object): Variant = throw new UnsupportedOperationException()
+
+  override def isSparkVariantType(dataType: org.apache.spark.sql.types.DataType): Boolean =
+    throw new UnsupportedOperationException()
+
+  override def SparkVariantType(): org.apache.spark.sql.types.DataType =
+    throw new UnsupportedOperationException()
 }
