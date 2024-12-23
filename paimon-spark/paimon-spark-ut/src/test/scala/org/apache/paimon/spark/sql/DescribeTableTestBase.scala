@@ -29,10 +29,9 @@ abstract class DescribeTableTestBase extends PaimonSparkTestBase {
 
   test("Paimon show: show table extended") {
     val testDB = "test_show"
-    withDatabase(testDB) {
-      withTable("s1") {
-        spark.sql("CREATE TABLE s1 (id INT)")
-
+    withTable(s"$dbName0.s1") {
+      spark.sql("CREATE TABLE s1 (id INT)")
+      withDatabase(testDB) {
         spark.sql(s"CREATE DATABASE $testDB")
         spark.sql(s"USE $testDB")
         withTable("s2", "s3") {
