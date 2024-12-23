@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.parquet;
 
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
@@ -206,6 +207,19 @@ public class ParquetSchemaConverter {
                 RowType rowType = (RowType) type;
                 return new GroupType(repetition, name, convertToParquetTypes(rowType))
                         .withId(fieldId);
+            case VARIANT:
+                return Types.buildGroup(repetition)
+                        .addField(
+                                Types.primitive(
+                                                PrimitiveType.PrimitiveTypeName.BINARY,
+                                                Type.Repetition.REQUIRED)
+                                        .named(Variant.VALUE))
+                        .addField(
+                                Types.primitive(
+                                                PrimitiveType.PrimitiveTypeName.BINARY,
+                                                Type.Repetition.REQUIRED)
+                                        .named(Variant.METADATA))
+                        .named(name);
             default:
                 throw new UnsupportedOperationException("Unsupported type: " + type);
         }

@@ -35,6 +35,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
@@ -94,7 +95,7 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
     private Pair<LevelDelegation, WritableColumnVector> readData(
             ParquetField field, int readNumber, ColumnVector vector, boolean inside)
             throws IOException {
-        if (field.getType() instanceof RowType) {
+        if (field.getType() instanceof RowType || field.getType() instanceof VariantType) {
             return readRow((ParquetGroupField) field, readNumber, vector, inside);
         } else if (field.getType() instanceof MapType || field.getType() instanceof MultisetType) {
             return readMap((ParquetGroupField) field, readNumber, vector, inside);

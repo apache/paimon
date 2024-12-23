@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.spark.util.shim.TypeUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
@@ -141,6 +142,11 @@ public class SparkRow implements InternalRow, Serializable {
     @Override
     public byte[] getBinary(int i) {
         return row.getAs(i);
+    }
+
+    @Override
+    public Variant getVariant(int pos) {
+        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -298,6 +304,11 @@ public class SparkRow implements InternalRow, Serializable {
         @Override
         public byte[] getBinary(int i) {
             return getAs(i);
+        }
+
+        @Override
+        public Variant getVariant(int pos) {
+            throw new UnsupportedOperationException();
         }
 
         @Override

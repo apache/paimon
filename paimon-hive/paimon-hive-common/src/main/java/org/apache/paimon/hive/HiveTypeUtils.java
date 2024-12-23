@@ -18,6 +18,7 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
@@ -42,6 +43,7 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 
 import org.apache.hadoop.hive.common.type.HiveChar;
 import org.apache.hadoop.hive.common.type.HiveVarchar;
@@ -56,6 +58,7 @@ import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
 import org.apache.hadoop.hive.serde2.typeinfo.VarcharTypeInfo;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -215,6 +218,14 @@ public class HiveTypeUtils {
                             .map(DataField::type)
                             .map(type -> type.accept(this))
                             .collect(Collectors.toList());
+            return TypeInfoFactory.getStructTypeInfo(fieldNames, typeInfos);
+        }
+
+        @Override
+        public TypeInfo visit(VariantType variantType) {
+            List<String> fieldNames = Arrays.asList(Variant.VALUE, Variant.METADATA);
+            List<TypeInfo> typeInfos =
+                    Arrays.asList(TypeInfoFactory.binaryTypeInfo, TypeInfoFactory.binaryTypeInfo);
             return TypeInfoFactory.getStructTypeInfo(fieldNames, typeInfos);
         }
 

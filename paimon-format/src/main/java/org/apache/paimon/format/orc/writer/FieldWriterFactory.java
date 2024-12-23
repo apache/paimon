@@ -43,6 +43,7 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 
 import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
@@ -191,6 +192,11 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
             TimestampColumnVector vector = (TimestampColumnVector) column;
             vector.set(rowId, timestamp);
         };
+    }
+
+    @Override
+    public FieldWriter visit(VariantType variantType) {
+        throw new UnsupportedOperationException("Unsupported type: " + variantType);
     }
 
     @Override

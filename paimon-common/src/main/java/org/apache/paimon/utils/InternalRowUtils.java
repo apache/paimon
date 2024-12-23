@@ -195,6 +195,8 @@ public class InternalRowUtils {
             case BINARY:
             case VARBINARY:
                 return dataGetters.getBinary(pos);
+            case VARIANT:
+                return dataGetters.getVariant(pos);
             default:
                 throw new UnsupportedOperationException("Unsupported type: " + fieldType);
         }

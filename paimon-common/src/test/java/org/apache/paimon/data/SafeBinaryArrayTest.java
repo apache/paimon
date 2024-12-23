@@ -20,6 +20,7 @@ package org.apache.paimon.data;
 
 import org.apache.paimon.data.safe.SafeBinaryArray;
 import org.apache.paimon.data.serializer.InternalArraySerializer;
+import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 
@@ -124,6 +125,15 @@ class SafeBinaryArrayTest {
                         null,
                         BinaryString.fromString("14611asdfadsaf").toBytes());
         converted = toBinaryArray(DataTypes.BYTES(), new SafeBinaryArray(expected.toBytes(), 0));
+        assertThat(converted).isEqualTo(expected);
+
+        expected =
+                toBinaryArray(
+                        DataTypes.VARIANT(),
+                        GenericVariant.fromJson("{\"age\":27,\"city\":\"Beijing\"}"),
+                        null,
+                        GenericVariant.fromJson("{\"age\":27,\"city\":\"Hangzhou\"}"));
+        converted = toBinaryArray(DataTypes.VARIANT(), new SafeBinaryArray(expected.toBytes(), 0));
         assertThat(converted).isEqualTo(expected);
     }
 

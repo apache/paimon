@@ -22,6 +22,8 @@ import org.apache.paimon.data.safe.SafeBinaryRow;
 import org.apache.paimon.data.serializer.InternalArraySerializer;
 import org.apache.paimon.data.serializer.InternalMapSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
@@ -47,6 +49,7 @@ public class RowDataTest {
     private byte[] bytes;
     private Timestamp timestamp1;
     private Timestamp timestamp2;
+    private Variant variant;
 
     @BeforeEach
     public void before() {
@@ -71,6 +74,7 @@ public class RowDataTest {
         bytes = new byte[] {1, 5, 6};
         timestamp1 = Timestamp.fromEpochMillis(123L);
         timestamp2 = Timestamp.fromLocalDateTime(LocalDateTime.of(1969, 1, 1, 0, 0, 0, 123456789));
+        variant = GenericVariant.fromJson("{\"age\":27,\"city\":\"Beijing\"}");
     }
 
     @Test
@@ -87,7 +91,7 @@ public class RowDataTest {
         writer.writeRow(0, getBinaryRow(), null);
         writer.complete();
 
-        InternalRow nestedRow = row.getRow(0, 18);
+        InternalRow nestedRow = row.getRow(0, 19);
         testGetters(nestedRow);
         testSetters(nestedRow);
     }
@@ -96,7 +100,7 @@ public class RowDataTest {
     public void testSafeBinaryRow() {
         BinaryRow binaryRow = getBinaryRow();
         SafeBinaryRow row = new SafeBinaryRow(binaryRow.getFieldCount(), binaryRow.toBytes(), 0);
-        assertThat(row.getFieldCount()).isEqualTo(18);
+        assertThat(row.getFieldCount()).isEqualTo(19);
 
         // test header
         assertThat(row.getRowKind()).isEqualTo(RowKind.INSERT);
@@ -128,6 +132,7 @@ public class RowDataTest {
         assertThat(row.getBinary(15)).isEqualTo(bytes);
         assertThat(row.getTimestamp(16, 3)).isEqualTo(timestamp1);
         assertThat(row.getTimestamp(17, 9)).isEqualTo(timestamp2);
+        assertThat(row.getVariant(18).toJson()).isEqualTo(variant.toJson());
 
         // test isNull
         binaryRow.setNullAt(10);
@@ -136,7 +141,7 @@ public class RowDataTest {
     }
 
     private BinaryRow getBinaryRow() {
-        BinaryRow row = new BinaryRow(18);
+        BinaryRow row = new BinaryRow(19);
         BinaryRowWriter writer = new BinaryRowWriter(row);
         writer.writeBoolean(0, true);
         writer.writeByte(1, (byte) 1);
@@ -156,12 +161,13 @@ public class RowDataTest {
         writer.writeBinary(15, bytes);
         writer.writeTimestamp(16, timestamp1, 3);
         writer.writeTimestamp(17, timestamp2, 9);
+        writer.writeVariant(18, variant);
         return row;
     }
 
     @Test
     public void testGenericRow() {
-        GenericRow row = new GenericRow(18);
+        GenericRow row = new GenericRow(19);
         row.setField(0, true);
         row.setField(1, (byte) 1);
         row.setField(2, (short) 2);
@@ -180,6 +186,7 @@ public class RowDataTest {
         row.setField(15, bytes);
         row.setField(16, timestamp1);
         row.setField(17, timestamp2);
+        row.setField(18, variant);
         testGetters(row);
     }
 
@@ -192,7 +199,7 @@ public class RowDataTest {
         row1.setField(3, 3);
         row1.setField(4, (long) 4);
 
-        GenericRow row2 = new GenericRow(13);
+        GenericRow row2 = new GenericRow(14);
         row2.setField(0, (float) 5);
         row2.setField(1, (double) 6);
         row2.setField(2, (char) 7);
@@ -206,11 +213,12 @@ public class RowDataTest {
         row2.setField(10, bytes);
         row2.setField(11, timestamp1);
         row2.setField(12, timestamp2);
+        row2.setField(13, variant);
         testGetters(new JoinedRow(row1, row2));
     }
 
     private void testGetters(InternalRow row) {
-        assertThat(row.getFieldCount()).isEqualTo(18);
+        assertThat(row.getFieldCount()).isEqualTo(19);
 
         // test header
         assertThat(row.getRowKind()).isEqualTo(RowKind.INSERT);
@@ -236,6 +244,7 @@ public class RowDataTest {
         assertThat(row.getBinary(15)).isEqualTo(bytes);
         assertThat(row.getTimestamp(16, 3)).isEqualTo(timestamp1);
         assertThat(row.getTimestamp(17, 9)).isEqualTo(timestamp2);
+        assertThat(row.getVariant(18).toJson()).isEqualTo(variant.toJson());
     }
 
     private void testSetters(InternalRow row) {

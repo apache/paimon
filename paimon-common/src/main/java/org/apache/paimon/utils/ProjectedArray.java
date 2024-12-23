@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.DataType;
 
 /**
@@ -123,6 +124,11 @@ public class ProjectedArray implements InternalArray {
     @Override
     public byte[] getBinary(int pos) {
         return array.getBinary(indexMapping[pos]);
+    }
+
+    @Override
+    public Variant getVariant(int pos) {
+        return array.getVariant(indexMapping[pos]);
     }
 
     @Override
