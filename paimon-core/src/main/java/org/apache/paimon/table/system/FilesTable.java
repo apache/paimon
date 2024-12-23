@@ -385,8 +385,12 @@ public class FilesTable implements ReadonlyTable {
                                                                 dataSplit.partition()))),
                         dataSplit::bucket,
                         () ->
-                                BinaryString.fromString(
-                                        dataSplit.bucketPath() + "/" + dataFileMeta.fileName()),
+                                dataFileMeta.externalPath() == null
+                                        ? BinaryString.fromString(
+                                                dataSplit.bucketPath()
+                                                        + "/"
+                                                        + dataFileMeta.fileName())
+                                        : BinaryString.fromString(dataFileMeta.externalPath()),
                         () ->
                                 BinaryString.fromString(
                                         DataFilePathFactory.formatIdentifier(
