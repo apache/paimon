@@ -160,7 +160,7 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
         }
 
         if (hasNull) {
-            setFieldNullFalg(isNull, heapRowVector);
+            setFieldNullFlag(isNull, heapRowVector);
         }
         return Pair.of(levelDelegation, heapRowVector);
     }
@@ -202,7 +202,7 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
         }
 
         if (collectionPosition.getIsNull() != null) {
-            setFieldNullFalg(collectionPosition.getIsNull(), mapVector);
+            setFieldNullFlag(collectionPosition.getIsNull(), mapVector);
         }
 
         mapVector.setLengths(collectionPosition.getLength());
@@ -240,7 +240,7 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
         }
 
         if (collectionPosition.getIsNull() != null) {
-            setFieldNullFalg(collectionPosition.getIsNull(), arrayVector);
+            setFieldNullFlag(collectionPosition.getIsNull(), arrayVector);
         }
         arrayVector.setLengths(collectionPosition.getLength());
         arrayVector.setOffsets(collectionPosition.getOffsets());
@@ -266,7 +266,7 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
         return Pair.of(reader.getLevelDelegation(), writableColumnVector);
     }
 
-    private static void setFieldNullFalg(boolean[] nullFlags, AbstractHeapVector vector) {
+    private static void setFieldNullFlag(boolean[] nullFlags, AbstractHeapVector vector) {
         for (int index = 0; index < vector.getLen() && index < nullFlags.length; index++) {
             if (nullFlags[index]) {
                 vector.setNullAt(index);
