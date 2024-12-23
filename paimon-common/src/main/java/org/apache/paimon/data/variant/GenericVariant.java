@@ -183,6 +183,17 @@ public final class GenericVariant implements Variant {
         }
     }
 
+    @Override
+    public long sizeInBytes() {
+        return metadata.length + value.length;
+    }
+
+    @Override
+    public Variant copy() {
+        return new GenericVariant(
+                Arrays.copyOf(value, value.length), Arrays.copyOf(metadata, metadata.length), pos);
+    }
+
     // Get a boolean value from the variant.
     public boolean getBoolean() {
         return GenericVariantUtil.getBoolean(value, pos);

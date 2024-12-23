@@ -62,6 +62,7 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 
 /**
  * This is a util about how to expand the {@link ColumnVector}s with the partition row and index
@@ -319,6 +320,11 @@ public class VectorMappingUtils {
                     return partition.isNullAt(index);
                 }
             };
+        }
+
+        @Override
+        public ColumnVector visit(VariantType variantType) {
+            throw new UnsupportedOperationException("VariantType is not supported.");
         }
 
         @Override

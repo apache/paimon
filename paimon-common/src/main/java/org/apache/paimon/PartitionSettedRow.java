@@ -26,6 +26,7 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.RowKind;
 
 /** An implementation of {@link InternalRow} which provides a row the fixed partition value. */
@@ -151,6 +152,13 @@ public class PartitionSettedRow implements InternalRow {
         return partitionInfo.inPartitionRow(pos)
                 ? partition.getBinary(partitionInfo.getRealIndex(pos))
                 : row.getBinary(partitionInfo.getRealIndex(pos));
+    }
+
+    @Override
+    public Variant getVariant(int pos) {
+        return partitionInfo.inPartitionRow(pos)
+                ? partition.getVariant(partitionInfo.getRealIndex(pos))
+                : row.getVariant(partitionInfo.getRealIndex(pos));
     }
 
     @Override

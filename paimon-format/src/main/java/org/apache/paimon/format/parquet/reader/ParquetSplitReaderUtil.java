@@ -31,6 +31,7 @@ import org.apache.paimon.data.columnar.heap.HeapRowVector;
 import org.apache.paimon.data.columnar.heap.HeapShortVector;
 import org.apache.paimon.data.columnar.heap.HeapTimestampVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.format.parquet.type.ParquetGroupField;
@@ -45,6 +46,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -134,6 +136,11 @@ public class ParquetSplitReaderUtil {
                                 pages,
                                 ((DecimalType) fieldType).getPrecision());
                 }
+            case VARIANT:
+                List<ColumnReader> fieldReaders = new ArrayList<>();
+                fieldReaders.add(new BytesColumnReader(descriptors.get(0), pages));
+                fieldReaders.add(new BytesColumnReader(descriptors.get(1), pages));
+                return new RowColumnReader(fieldReaders);
             case ARRAY:
             case MAP:
             case MULTISET:
@@ -343,6 +350,11 @@ public class ParquetSplitReaderUtil {
                                     depth + 1);
                 }
                 return new HeapRowVector(batchSize, columnVectors);
+            case VARIANT:
+                WritableColumnVector[] vectors = new WritableColumnVector[2];
+                vectors[0] = new HeapBytesVector(batchSize);
+                vectors[1] = new HeapBytesVector(batchSize);
+                return new HeapRowVector(batchSize, vectors);
             default:
                 throw new UnsupportedOperationException(fieldType + " is not supported now.");
         }
@@ -398,6 +410,29 @@ public class ParquetSplitReaderUtil {
                                 lookupColumnByName(groupColumnIO, fieldNames.get(i))));
             }
 
+            return new ParquetGroupField(
+                    type, repetitionLevel, definitionLevel, required, fieldsBuilder.build());
+        }
+
+        if (type instanceof VariantType) {
+            GroupColumnIO groupColumnIO = (GroupColumnIO) columnIO;
+            ImmutableList.Builder<ParquetField> fieldsBuilder = ImmutableList.builder();
+            PrimitiveColumnIO value =
+                    (PrimitiveColumnIO) lookupColumnByName(groupColumnIO, Variant.VALUE);
+            fieldsBuilder.add(
+                    new ParquetPrimitiveField(
+                            new BinaryType(),
+                            required,
+                            value.getColumnDescriptor(),
+                            value.getId()));
+            PrimitiveColumnIO metadata =
+                    (PrimitiveColumnIO) lookupColumnByName(groupColumnIO, Variant.METADATA);
+            fieldsBuilder.add(
+                    new ParquetPrimitiveField(
+                            new BinaryType(),
+                            required,
+                            metadata.getColumnDescriptor(),
+                            metadata.getId()));
             return new ParquetGroupField(
                     type, repetitionLevel, definitionLevel, required, fieldsBuilder.build());
         }

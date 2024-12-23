@@ -23,6 +23,7 @@ import org.apache.paimon.data.serializer.InternalMapSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.LocalZonedTimestampType;
@@ -66,6 +67,8 @@ public interface BinaryWriter {
     void writeDecimal(int pos, Decimal value, int precision);
 
     void writeTimestamp(int pos, Timestamp value, int precision);
+
+    void writeVariant(int pos, Variant variant);
 
     void writeArray(int pos, InternalArray value, InternalArraySerializer serializer);
 
@@ -139,6 +142,9 @@ public interface BinaryWriter {
             case VARBINARY:
                 writer.writeBinary(pos, (byte[]) o);
                 break;
+            case VARIANT:
+                writer.writeVariant(pos, (Variant) o);
+                break;
             default:
                 throw new UnsupportedOperationException("Not support type: " + type);
         }
@@ -208,6 +214,8 @@ public interface BinaryWriter {
                 return (writer, pos, value) ->
                         writer.writeRow(
                                 pos, (InternalRow) value, (InternalRowSerializer) rowSerializer);
+            case VARIANT:
+                return (writer, pos, value) -> writer.writeVariant(pos, (Variant) value);
             default:
                 String msg =
                         String.format(

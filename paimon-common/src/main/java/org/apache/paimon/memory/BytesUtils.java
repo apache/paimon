@@ -18,6 +18,9 @@
 
 package org.apache.paimon.memory;
 
+import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.data.variant.Variant;
+
 import static org.apache.paimon.data.BinarySection.HIGHEST_FIRST_BIT;
 import static org.apache.paimon.data.BinarySection.HIGHEST_SECOND_TO_EIGHTH_BIT;
 import static org.apache.paimon.memory.MemorySegment.LITTLE_ENDIAN;
@@ -66,5 +69,17 @@ public class BytesUtils {
             }
             return ret;
         }
+    }
+
+    public static Variant readVariant(byte[] bytes, int baseOffset, long offsetAndLen) {
+        int offset = baseOffset + (int) (offsetAndLen >> 32);
+        int totalSize = (int) offsetAndLen;
+        int valueSize = getInt(bytes, offset);
+        int metadataSize = totalSize - 4 - valueSize;
+        byte[] value = new byte[valueSize];
+        byte[] metadata = new byte[metadataSize];
+        System.arraycopy(bytes, offset + 4, value, 0, valueSize);
+        System.arraycopy(bytes, offset + 4 + valueSize, metadata, 0, metadataSize);
+        return new GenericVariant(value, metadata);
     }
 }

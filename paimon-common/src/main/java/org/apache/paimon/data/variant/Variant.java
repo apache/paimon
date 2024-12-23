@@ -32,6 +32,10 @@ package org.apache.paimon.data.variant;
  */
 public interface Variant {
 
+    String METADATA = "metadata";
+
+    String VALUE = "value";
+
     /** Returns the variant metadata. */
     byte[] metadata();
 
@@ -49,4 +53,10 @@ public interface Variant {
      * <p>access array's first elem: `$.array[0]`
      */
     Object variantGet(String path);
+
+    /** Returns the size of the variant in bytes. */
+    long sizeInBytes();
+
+    /** Returns a copy of the variant. */
+    Variant copy();
 }
