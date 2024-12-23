@@ -89,8 +89,7 @@ public class DataFilePathFactory {
         if (externalPath == null) {
             return new Path(warehouseDataPath + "/" + fileName);
         } else {
-            Path parent = new Path(externalPath).getParent();
-            return new Path(parent, fileName);
+            return new Path(externalPath, fileName);
         }
     }
 

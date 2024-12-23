@@ -122,7 +122,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             tableSchema = tableSchema.copy(newOptions);
         }
 
-        if (!tableSchema.options().containsKey(TABLE_DATA_PATH.key())) {
+        if (tableDataPath != null && !tableSchema.options().containsKey(TABLE_DATA_PATH.key())) {
             // set table external path
             Map<String, String> newOptions = new HashMap<>(tableSchema.options());
             newOptions.put(TABLE_DATA_PATH.key(), tableDataPath.toString());
@@ -198,7 +198,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         Identifier identifier = catalogEnvironment.identifier();
         return identifier == null
                 ? SchemaManager.identifierFromPath(
-                        tableDataPath().toUri().toString(), true, currentBranch())
+                        tableSchemaPath().toUri().toString(), true, currentBranch())
                 : identifier;
     }
 
@@ -427,7 +427,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public Path tableDataPath() {
-        return tableSchemaPath;
+        return tableDataPath;
     }
 
     @Override

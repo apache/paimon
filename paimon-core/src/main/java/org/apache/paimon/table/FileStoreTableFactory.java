@@ -85,7 +85,7 @@ public class FileStoreTableFactory {
         Path tableDataPath = null;
         if (coreOptions.getDataFileExternalPath() != null) {
             String dbAndTableName =
-                    tableSchemaPath.getParent().getParent() + "/" + tableSchemaPath.getParent();
+                    tableSchemaPath.getParent().getName() + "/" + tableSchemaPath.getName();
             tableDataPath = new Path(coreOptions.getDataFileExternalPath(), dbAndTableName);
         }
         FileStoreTable table =

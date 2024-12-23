@@ -646,7 +646,7 @@ public class TestFileStore extends KeyValueFileStore {
         for (ManifestEntry entry : entries) {
             result.add(
                     new Path(
-                            pathFactory.externalBucketPath(entry.partition(), entry.bucket()),
+                            pathFactory.dataBucketPath(entry.partition(), entry.bucket()),
                             entry.file().fileName()));
         }
 
@@ -668,8 +668,7 @@ public class TestFileStore extends KeyValueFileStore {
                                 == FileSource.APPEND) {
                     result.add(
                             new Path(
-                                    pathFactory.externalBucketPath(
-                                            entry.partition(), entry.bucket()),
+                                    pathFactory.dataBucketPath(entry.partition(), entry.bucket()),
                                     entry.file().fileName()));
                 }
             }
@@ -719,8 +718,7 @@ public class TestFileStore extends KeyValueFileStore {
                 if (entry.file().fileSource().orElse(FileSource.APPEND) == FileSource.APPEND) {
                     result.add(
                             new Path(
-                                    pathFactory.externalBucketPath(
-                                            entry.partition(), entry.bucket()),
+                                    pathFactory.dataBucketPath(entry.partition(), entry.bucket()),
                                     entry.file().fileName()));
                 }
             }
@@ -735,7 +733,7 @@ public class TestFileStore extends KeyValueFileStore {
             for (ManifestEntry entry : files) {
                 result.add(
                         new Path(
-                                pathFactory.externalBucketPath(entry.partition(), entry.bucket()),
+                                pathFactory.dataBucketPath(entry.partition(), entry.bucket()),
                                 entry.file().fileName()));
             }
         }

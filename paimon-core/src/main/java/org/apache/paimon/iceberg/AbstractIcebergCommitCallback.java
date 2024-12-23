@@ -450,7 +450,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
         boolean isAddOnly = true;
         for (ManifestEntry entry : manifestEntries) {
             String path =
-                    fileStorePathFactory.externalBucketPath(entry.partition(), entry.bucket())
+                    fileStorePathFactory.dataBucketPath(entry.partition(), entry.bucket())
                             + "/"
                             + entry.fileName();
             switch (entry.kind()) {
@@ -755,7 +755,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
 
     private class SchemaCache {
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.tableDataPath());
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.tableSchemaPath());
         Map<Long, IcebergSchema> schemas = new HashMap<>();
 
         private IcebergSchema get(long schemaId) {

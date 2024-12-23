@@ -53,7 +53,7 @@ public class PickFilesUtil {
         SnapshotManager snapshotManager = store.snapshotManager();
         Snapshot snapshot = snapshotManager.latestSnapshot();
         ManifestList manifestList = store.manifestListFactory().create();
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.tableDataPath());
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.tableSchemaPath());
         IndexFileHandler indexFileHandler = store.newIndexFileHandler();
 
         List<Path> files = new ArrayList<>();

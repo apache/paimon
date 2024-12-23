@@ -170,7 +170,7 @@ public class FileMetaUtils {
                 null,
                 FileSource.APPEND,
                 null,
-                null);
+                path.getParent().toString());
     }
 
     public static BinaryRow writePartitionValue(

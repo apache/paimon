@@ -200,7 +200,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                             .process(
                                     new UpdatedDataFieldsProcessFunction(
                                             new SchemaManager(
-                                                    table.fileIO(), table.tableDataPath()),
+                                                    table.fileIO(), table.tableSchemaPath()),
                                             Identifier.create(database, table.name()),
                                             catalogLoader))
                             .name("Schema Evolution");

@@ -108,7 +108,7 @@ public class CdcSinkBuilder<T> {
                         .process(
                                 new UpdatedDataFieldsProcessFunction(
                                         new SchemaManager(
-                                                dataTable.fileIO(), dataTable.tableDataPath()),
+                                                dataTable.fileIO(), dataTable.tableSchemaPath()),
                                         identifier,
                                         catalogLoader))
                         .name("Schema Evolution");

@@ -196,7 +196,7 @@ public abstract class KeyValueDataFileWriter
                 indexResult.embeddedIndexBytes(),
                 fileSource,
                 valueStatsPair.getKey(),
-                path.toString());
+                path.getParent().toString());
     }
 
     abstract Pair<SimpleColStats[], SimpleColStats[]> fetchKeyValueStats(SimpleColStats[] rowStats);

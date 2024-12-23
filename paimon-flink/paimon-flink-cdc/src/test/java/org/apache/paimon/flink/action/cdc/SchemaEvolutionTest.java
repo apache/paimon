@@ -208,7 +208,7 @@ public class SchemaEvolutionTest extends TableTestBase {
                 upDataFieldStream
                         .process(
                                 new UpdatedDataFieldsProcessFunction(
-                                        new SchemaManager(table.fileIO(), table.tableDataPath()),
+                                        new SchemaManager(table.fileIO(), table.tableSchemaPath()),
                                         identifier,
                                         catalogLoader))
                         .name("Schema Evolution");

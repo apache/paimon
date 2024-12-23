@@ -85,7 +85,11 @@ public class FileStorePathFactory {
         this.indexManifestCount = new AtomicInteger(0);
         this.indexFileCount = new AtomicInteger(0);
         this.statsFileCount = new AtomicInteger(0);
-        this.dataRoot = dataRoot;
+        if (dataRoot == null) {
+            this.dataRoot = schemaRoot;
+        } else {
+            this.dataRoot = dataRoot;
+        }
     }
 
     @VisibleForTesting
@@ -124,7 +128,7 @@ public class FileStorePathFactory {
 
     public DataFilePathFactory createDataFilePathFactory(BinaryRow partition, int bucket) {
         return new DataFilePathFactory(
-                externalBucketPath(partition, bucket),
+                dataBucketPath(partition, bucket),
                 formatIdentifier,
                 dataFilePrefix,
                 changelogFilePrefix,
@@ -133,7 +137,7 @@ public class FileStorePathFactory {
                 warehouseBucketPath(partition, bucket));
     }
 
-    public Path externalBucketPath(BinaryRow partition, int bucket) {
+    public Path dataBucketPath(BinaryRow partition, int bucket) {
         return new Path(dataRoot, relativeBucketPath(partition, bucket));
     }
 

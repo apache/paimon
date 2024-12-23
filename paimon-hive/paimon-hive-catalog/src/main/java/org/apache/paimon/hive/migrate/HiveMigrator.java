@@ -322,7 +322,7 @@ public class HiveMigrator implements Migrator {
                             values,
                             valueSetters,
                             coreOptions.partitionDefaultName());
-            Path path = paimonTable.store().pathFactory().externalBucketPath(partitionRow, 0);
+            Path path = paimonTable.store().pathFactory().dataBucketPath(partitionRow, 0);
 
             migrateTasks.add(
                     new MigrateTask(
@@ -338,7 +338,7 @@ public class HiveMigrator implements Migrator {
             Map<Path, Path> rollback) {
         String format = parseFormat(sourceTable.getSd().getSerdeInfo().toString());
         String location = sourceTable.getSd().getLocation();
-        Path path = paimonTable.store().pathFactory().externalBucketPath(BinaryRow.EMPTY_ROW, 0);
+        Path path = paimonTable.store().pathFactory().dataBucketPath(BinaryRow.EMPTY_ROW, 0);
         return new MigrateTask(
                 fileIO, format, location, paimonTable, BinaryRow.EMPTY_ROW, path, rollback);
     }

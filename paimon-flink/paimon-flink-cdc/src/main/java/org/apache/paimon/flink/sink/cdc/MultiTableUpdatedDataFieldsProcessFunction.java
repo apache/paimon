@@ -73,7 +73,7 @@ public class MultiTableUpdatedDataFieldsProcessFunction
                             } catch (Catalog.TableNotExistException e) {
                                 return null;
                             }
-                            return new SchemaManager(table.fileIO(), table.tableDataPath());
+                            return new SchemaManager(table.fileIO(), table.tableSchemaPath());
                         });
 
         if (Objects.isNull(schemaManager)) {

@@ -173,7 +173,7 @@ public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
             this.dataFilePathFactoryMap = new HashMap<>();
             this.schemaInfoCache =
                     new SchemaCache(
-                            fileIndexOptions, new SchemaManager(fileIO, table.tableDataPath()));
+                            fileIndexOptions, new SchemaManager(fileIO, table.tableSchemaPath()));
             this.sizeInMeta = table.coreOptions().fileIndexInManifestThreshold();
         }
 
@@ -252,8 +252,7 @@ public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
                                                 .withBucket(bucket)
                                                 .withBucketPath(
                                                         pathFactory
-                                                                .externalBucketPath(
-                                                                        partition, bucket)
+                                                                .dataBucketPath(partition, bucket)
                                                                 .toString())
                                                 .withDataFiles(
                                                         Collections.singletonList(dataFileMeta))
