@@ -36,6 +36,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -50,6 +51,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
+import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 
 import org.apache.hadoop.conf.Configuration;
@@ -61,6 +63,7 @@ import org.apache.parquet.hadoop.ParquetFileWriter;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.example.ExampleParquetWriter;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
+import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.schema.ConversionPatterns;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
@@ -554,6 +557,71 @@ public class ParquetReadWriteTest {
                                 .withId(2));
         Type actual = ParquetSchemaConverter.convertToParquetMessageType("table", rowType);
         assertThat(actual).isEqualTo(expected);
+    }
+
+    @Test
+    public void testReadBinaryWrittenByParquet() throws Exception {
+        Path path = new Path(folder.getPath(), UUID.randomUUID().toString());
+        Configuration conf = new Configuration();
+        MessageType schema =
+                new MessageType(
+                        "origin-parquet",
+                        Types.primitive(
+                                        PrimitiveType.PrimitiveTypeName.BINARY,
+                                        Type.Repetition.REQUIRED)
+                                .named("f0")
+                                .withId(0),
+                        Types.primitive(
+                                        PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY,
+                                        Type.Repetition.REQUIRED)
+                                .length(10)
+                                .named("f1")
+                                .withId(1));
+
+        List<InternalRow> targetRows = new ArrayList<>();
+        try (ParquetWriter<Group> writer =
+                ExampleParquetWriter.builder(
+                                HadoopOutputFile.fromPath(
+                                        new org.apache.hadoop.fs.Path(path.toString()), conf))
+                        .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
+                        .withConf(new Configuration())
+                        .withType(schema)
+                        .build()) {
+            SimpleGroupFactory simpleGroupFactory = new SimpleGroupFactory(schema);
+            for (int i = 0; i < 100; i++) {
+                Group row = simpleGroupFactory.newGroup();
+                byte[] randomLengthBytes = new byte[ThreadLocalRandom.current().nextInt(1, 100)];
+                byte[] fixedLengthBytes = new byte[10];
+                ThreadLocalRandom.current().nextBytes(randomLengthBytes);
+                ThreadLocalRandom.current().nextBytes(fixedLengthBytes);
+
+                targetRows.add(GenericRow.of(randomLengthBytes, fixedLengthBytes));
+
+                row.append("f0", Binary.fromConstantByteArray(randomLengthBytes));
+                row.append("f1", Binary.fromConstantByteArray(fixedLengthBytes));
+                writer.write(row);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Create data by parquet origin writer failed.");
+        }
+
+        RowType paimonRowType =
+                RowType.builder()
+                        .fields(new VarBinaryType(VarCharType.MAX_LENGTH), new BinaryType(10))
+                        .build();
+
+        ParquetReaderFactory format =
+                new ParquetReaderFactory(new Options(), paimonRowType, 500, FilterCompat.NOOP);
+
+        RecordReader<InternalRow> reader =
+                format.createReader(
+                        new FormatReaderContext(
+                                new LocalFileIO(), path, new LocalFileIO().getFileSize(path)));
+        reader.forEachRemaining(
+                row -> {
+                    Assertions.assertArrayEquals(row.getBinary(0), row.getBinary(0));
+                    Assertions.assertArrayEquals(row.getBinary(1), row.getBinary(1));
+                });
     }
 
     private void innerTestTypes(File folder, List<Integer> records, int rowGroupSize)
