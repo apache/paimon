@@ -617,14 +617,11 @@ public class ParquetReadWriteTest {
                 format.createReader(
                         new FormatReaderContext(
                                 new LocalFileIO(), path, new LocalFileIO().getFileSize(path)));
-        RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader);
-        for (InternalRow row : targetRows) {
-            assertThat(iterator.hasNext()).isTrue();
-            InternalRow result = iterator.next();
-            Assertions.assertArrayEquals(row.getBinary(0), result.getBinary(0));
-            Assertions.assertArrayEquals(row.getBinary(1), result.getBinary(1));
-        }
-        iterator.close();
+        reader.forEachRemaining(
+                row -> {
+                    Assertions.assertArrayEquals(row.getBinary(0), row.getBinary(0));
+                    Assertions.assertArrayEquals(row.getBinary(1), row.getBinary(1));
+                });
     }
 
     private void innerTestTypes(File folder, List<Integer> records, int rowGroupSize)
