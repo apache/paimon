@@ -18,10 +18,14 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.commons.io.IOUtils;
+
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.SeekableByteChannel;
@@ -80,6 +84,42 @@ public class FileIOUtils {
 
     public static void writeFileUtf8(File file, String contents) throws IOException {
         writeFile(file, contents, "UTF-8");
+    }
+
+    public static void writeByteArrayToFile(File file, byte[] data) throws IOException {
+        writeByteArrayToFile(file, data, false);
+    }
+
+    public static void writeByteArrayToFile(File file, byte[] data, boolean append)
+            throws IOException {
+        OutputStream out = null;
+
+        try {
+            out = openOutputStream(file, append);
+            out.write(data);
+            out.close();
+        } finally {
+            IOUtils.closeQuietly(out);
+        }
+    }
+
+    public static FileOutputStream openOutputStream(File file, boolean append) throws IOException {
+        if (file.exists()) {
+            if (file.isDirectory()) {
+                throw new IOException("File '" + file + "' exists but is a directory");
+            }
+
+            if (!file.canWrite()) {
+                throw new IOException("File '" + file + "' cannot be written to");
+            }
+        } else {
+            File parent = file.getParentFile();
+            if (parent != null && !parent.mkdirs() && !parent.isDirectory()) {
+                throw new IOException("Directory '" + parent + "' could not be created");
+            }
+        }
+
+        return new FileOutputStream(file, append);
     }
 
     /**
