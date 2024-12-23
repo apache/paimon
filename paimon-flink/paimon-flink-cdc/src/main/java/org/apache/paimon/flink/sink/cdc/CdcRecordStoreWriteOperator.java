@@ -48,15 +48,18 @@ public class CdcRecordStoreWriteOperator extends TableWriteOperator<CdcRecord> {
     private static final long serialVersionUID = 1L;
 
     public static final ConfigOption<Duration> RETRY_SLEEP_TIME =
-            ConfigOptions.key("cdc.retry-sleep-time")
+            ConfigOptions.key("cdc.schema-change-retry-interval")
                     .durationType()
-                    .defaultValue(Duration.ofMillis(500));
+                    .defaultValue(Duration.ofMillis(500))
+                    .withFallbackKeys("cdc.retry-sleep-time")
+                    .withDescription("The interval of retrying the schema change.");
 
     public static final ConfigOption<Integer> MAX_RETRY_NUM_TIMES =
-            ConfigOptions.key("cdc.max-retry-num-times")
+            ConfigOptions.key("cdc.schema-change-retry-max-num")
                     .intType()
                     .defaultValue(100)
-                    .withDescription("Max retry count for updating table before failing loudly");
+                    .withDescription(
+                            "Max retry count for retrying the schema change before failing loudly");
 
     public static final ConfigOption<Boolean> SKIP_CORRUPT_RECORD =
             ConfigOptions.key("cdc.skip-corrupt-record")
