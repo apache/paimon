@@ -197,7 +197,7 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @GetMapping("/v1/{prefix}/databases/{database}")
+    @GetMapping("/v1/{prefix}/databases/{database}/tables")
     public ListTablesResponse listTables(
             @PathVariable String prefix, @PathVariable String database) {
         return new ListTablesResponse(ImmutableList.of("user"));
