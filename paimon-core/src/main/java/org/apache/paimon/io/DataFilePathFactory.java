@@ -82,6 +82,20 @@ public class DataFilePathFactory {
         return new Path(parent + "/" + fileName);
     }
 
+    /**
+     * for read purpose.
+     *
+     * @param fileName the file name
+     * @param externalPath the external path, if null, it will use the parent path
+     * @return the file's path
+     */
+    public Path toPath(String fileName, String externalPath) {
+        if (externalPath == null) {
+            return new Path(parent + "/" + fileName);
+        }
+        return new Path(externalPath + "/" + fileName);
+    }
+
     @VisibleForTesting
     public String uuid() {
         return uuid;

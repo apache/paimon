@@ -56,6 +56,8 @@ public interface FileEntry {
 
     Identifier identifier();
 
+    String externalPath();
+
     BinaryRow minKey();
 
     BinaryRow maxKey();

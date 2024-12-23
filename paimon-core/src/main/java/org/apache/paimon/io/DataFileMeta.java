@@ -449,8 +449,8 @@ public class DataFileMeta {
 
     public List<Path> collectFiles(DataFilePathFactory pathFactory) {
         List<Path> paths = new ArrayList<>();
-        paths.add(pathFactory.toPath(fileName));
-        extraFiles.forEach(f -> paths.add(pathFactory.toPath(f)));
+        paths.add(pathFactory.toPath(fileName, externalPath));
+        extraFiles.forEach(f -> paths.add(pathFactory.toPath(f, externalPath)));
         return paths;
     }
 

@@ -211,7 +211,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(
                         fileIO,
-                        dataFilePathFactory.toPath(file.fileName()),
+                        dataFilePathFactory.toPath(file.fileName(), file.externalPath()),
                         file.fileSize(),
                         fileIndexResult);
         FileRecordReader<InternalRow> fileRecordReader =
