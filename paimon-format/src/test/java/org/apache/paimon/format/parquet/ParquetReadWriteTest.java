@@ -560,7 +560,7 @@ public class ParquetReadWriteTest {
     }
 
     @Test
-    public void testReadBinaryWrittenByParquet() throws IOException {
+    public void testReadBinaryWrittenByParquet() throws Exception {
         Path path = new Path(folder.getPath(), UUID.randomUUID().toString());
         Configuration conf = new Configuration();
         MessageType schema =
@@ -617,16 +617,14 @@ public class ParquetReadWriteTest {
                 format.createReader(
                         new FormatReaderContext(
                                 new LocalFileIO(), path, new LocalFileIO().getFileSize(path)));
-        try (RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
-            for (InternalRow row : targetRows) {
-                assertThat(iterator.hasNext()).isTrue();
-                InternalRow result = iterator.next();
-                Assertions.assertArrayEquals(row.getBinary(0), result.getBinary(0));
-                Assertions.assertArrayEquals(row.getBinary(1), result.getBinary(1));
-            }
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+        RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader);
+        for (InternalRow row : targetRows) {
+            assertThat(iterator.hasNext()).isTrue();
+            InternalRow result = iterator.next();
+            Assertions.assertArrayEquals(row.getBinary(0), result.getBinary(0));
+            Assertions.assertArrayEquals(row.getBinary(1), result.getBinary(1));
         }
+        iterator.close();
     }
 
     private void innerTestTypes(File folder, List<Integer> records, int rowGroupSize)
