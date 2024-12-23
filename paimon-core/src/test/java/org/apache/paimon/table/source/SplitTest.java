@@ -383,10 +383,10 @@ public class SplitTest {
                         new byte[] {1, 2, 4},
                         FileSource.COMPACT,
                         Arrays.asList("field1", "field2", "field3"),
-                        "hdfs:///path/to/warehouse");
+                        null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
-        DeletionFile deletionFile = new DeletionFile("deletion_file", 100, 22, null);
+        DeletionFile deletionFile = new DeletionFile("deletion_file", 100, 22, 33L);
         List<DeletionFile> deletionFiles = Collections.singletonList(deletionFile);
 
         BinaryRow partition = new BinaryRow(1);
@@ -404,7 +404,7 @@ public class SplitTest {
                         .withBucketPath("my path")
                         .build();
 
-        byte[] v2Bytes =
+        byte[] v4Bytes =
                 IOUtils.readFully(
                         SplitTest.class
                                 .getClassLoader()
@@ -412,7 +412,7 @@ public class SplitTest {
                         true);
 
         DataSplit actual =
-                InstantiationUtil.deserializeObject(v2Bytes, DataSplit.class.getClassLoader());
+                InstantiationUtil.deserializeObject(v4Bytes, DataSplit.class.getClassLoader());
         assertThat(actual).isEqualTo(split);
     }
 

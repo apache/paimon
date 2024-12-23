@@ -138,12 +138,12 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         new byte[] {1, 2, 4},
                         FileSource.COMPACT,
                         Arrays.asList("field1", "field2", "field3"),
-                        "hdfs://localhost:9000/path/to/file");
+                        null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
         LinkedHashMap<String, DeletionVectorMeta> dvMetas = new LinkedHashMap<>();
-        dvMetas.put("dv_key1", new DeletionVectorMeta("dv_key1", 1, 2, null));
-        dvMetas.put("dv_key2", new DeletionVectorMeta("dv_key2", 3, 4, null));
+        dvMetas.put("dv_key1", new DeletionVectorMeta("dv_key1", 1, 2, 3L));
+        dvMetas.put("dv_key2", new DeletionVectorMeta("dv_key2", 3, 4, 5L));
         IndexFileMeta indexFile =
                 new IndexFileMeta("my_index_type", "my_index_file", 1024 * 100, 1002, dvMetas);
         List<IndexFileMeta> indexFiles = Collections.singletonList(indexFile);
@@ -173,7 +173,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
                                 .getClassLoader()
                                 .getResourceAsStream("compatibility/manifest-committable-v5"),
                         true);
-        deserialized = serializer.deserialize(2, v2Bytes);
+        deserialized = serializer.deserialize(3, v2Bytes);
         assertThat(deserialized).isEqualTo(manifestCommittable);
     }
 
