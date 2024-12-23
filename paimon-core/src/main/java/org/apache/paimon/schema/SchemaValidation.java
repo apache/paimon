@@ -28,11 +28,15 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.StringUtils;
 
@@ -44,6 +48,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -173,6 +178,35 @@ public class SchemaValidation {
             if (schema.partitionKeys().isEmpty()) {
                 throw new IllegalArgumentException(
                         "Can not set 'partition.expiration-time' for non-partitioned table.");
+            }
+        }
+
+        if (schema.options().containsKey(CoreOptions.RECORD_LEVEL_TIME_FIELD.key())) {
+            String fieldName = options.recordLevelTimeField();
+            Optional<DataField> field =
+                    schema.fields().stream()
+                            .filter(dataField -> dataField.name().equals(fieldName))
+                            .findFirst();
+            if (!field.isPresent()) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Can not find time field %s for record level expire.", fieldName));
+            }
+            DataType dataType = field.get().type();
+            if (!(dataType instanceof IntType
+                    || dataType instanceof BigIntType
+                    || dataType instanceof TimestampType
+                    || dataType instanceof LocalZonedTimestampType)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "The record level time field type should be one of INT, BIGINT, or TIMESTAMP, but field type is %s.",
+                                dataType));
+            }
+            if (dataType.isNullable()) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Time field %s for record-level expire should be not null.",
+                                fieldName));
             }
         }
 
