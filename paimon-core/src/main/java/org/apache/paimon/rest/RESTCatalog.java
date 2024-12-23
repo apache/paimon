@@ -41,6 +41,7 @@ import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.SchemaChanges;
 import org.apache.paimon.rest.requests.UpdateTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -414,7 +415,8 @@ public class RESTCatalog implements Catalog {
 
     // todo: how know which exception to throw
     private void updateTable(Identifier fromTable, Identifier toTable, List<SchemaChange> changes) {
-        UpdateTableRequest request = new UpdateTableRequest(fromTable, toTable, changes);
+        UpdateTableRequest request =
+                new UpdateTableRequest(fromTable, toTable, new SchemaChanges(changes));
         client.post(
                 resourcePaths.table(fromTable.getDatabaseName(), fromTable.getTableName()),
                 request,

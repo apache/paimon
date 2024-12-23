@@ -21,6 +21,7 @@ package org.apache.paimon.rest;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.UpdateTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
@@ -135,9 +136,7 @@ public class RESTObjectMapperTest {
         CreateTableRequest request = MockRESTMessage.createTableRequest("t1");
         String requestStr = mapper.writeValueAsString(request);
         CreateTableRequest parseData = mapper.readValue(requestStr, CreateTableRequest.class);
-        assertEquals(request.getDatabaseName(), parseData.getDatabaseName());
-        assertEquals(request.getTableName(), parseData.getTableName());
-        assertEquals(request.getBranchName(), parseData.getBranchName());
+        assertEquals(request.getIdentifier(), parseData.getIdentifier());
         assertEquals(request.getSchema(), parseData.getSchema());
     }
 
@@ -157,5 +156,14 @@ public class RESTObjectMapperTest {
         assertEquals(name, parseData.name());
         assertEquals(type, parseData.type());
         assertEquals(descStr, parseData.description());
+    }
+
+    @Test
+    public void updateTableRequestParseTest() throws Exception {
+        UpdateTableRequest request = MockRESTMessage.updateTableRequest("t1", "t2");
+        String requestStr = mapper.writeValueAsString(request);
+        UpdateTableRequest parseData = mapper.readValue(requestStr, UpdateTableRequest.class);
+        assertEquals(request.getFromIdentifier(), parseData.getFromIdentifier());
+        assertEquals(request.getToIdentifier(), parseData.getToIdentifier());
     }
 }

@@ -20,52 +20,49 @@ package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.rest.RESTRequest;
-import org.apache.paimon.schema.SchemaChange;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.util.List;
-
 /** Request for updating table. */
 public class UpdateTableRequest implements RESTRequest {
 
-    private static final String FIELD_FROM_IDENTIFIER = "from";
-    private static final String FIELD_TO_IDENTIFIER = "to";
-    private static final String FIELD_SCHEMA_CHANGES = "changes";
+    private static final String FIELD_FROM_IDENTIFIER_NAME = "from";
+    private static final String FIELD_TO_IDENTIFIER_NAME = "to";
+    private static final String FIELD_SCHEMA_CHANGES_NAME = "changes";
 
-    @JsonProperty(FIELD_FROM_IDENTIFIER)
+    @JsonProperty(FIELD_FROM_IDENTIFIER_NAME)
     private Identifier fromIdentifier;
 
-    @JsonProperty(FIELD_TO_IDENTIFIER)
+    @JsonProperty(FIELD_TO_IDENTIFIER_NAME)
     private Identifier toIdentifier;
 
-    @JsonProperty(FIELD_SCHEMA_CHANGES)
-    private List<SchemaChange> changes;
+    @JsonProperty(FIELD_SCHEMA_CHANGES_NAME)
+    private SchemaChanges changes;
 
     @JsonCreator
     public UpdateTableRequest(
-            @JsonProperty(FIELD_FROM_IDENTIFIER) Identifier fromIdentifier,
-            @JsonProperty(FIELD_TO_IDENTIFIER) Identifier toIdentifier,
-            @JsonProperty(FIELD_SCHEMA_CHANGES) List<SchemaChange> changes) {
+            @JsonProperty(FIELD_FROM_IDENTIFIER_NAME) Identifier fromIdentifier,
+            @JsonProperty(FIELD_TO_IDENTIFIER_NAME) Identifier toIdentifier,
+            @JsonProperty(FIELD_SCHEMA_CHANGES_NAME) SchemaChanges changes) {
         this.fromIdentifier = fromIdentifier;
         this.toIdentifier = toIdentifier;
         this.changes = changes;
     }
 
-    @JsonGetter(FIELD_FROM_IDENTIFIER)
+    @JsonGetter(FIELD_FROM_IDENTIFIER_NAME)
     public Identifier getFromIdentifier() {
         return fromIdentifier;
     }
 
-    @JsonGetter(FIELD_TO_IDENTIFIER)
+    @JsonGetter(FIELD_TO_IDENTIFIER_NAME)
     public Identifier getToIdentifier() {
         return toIdentifier;
     }
 
-    @JsonGetter(FIELD_SCHEMA_CHANGES)
-    public List<SchemaChange> getChanges() {
+    @JsonGetter(FIELD_SCHEMA_CHANGES_NAME)
+    public SchemaChanges getChanges() {
         return changes;
     }
 }
