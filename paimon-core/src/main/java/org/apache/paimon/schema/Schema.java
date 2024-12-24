@@ -93,48 +93,28 @@ public class Schema {
         return new RowType(false, fields);
     }
 
+    @JsonGetter(FIELD_FIELDS)
     public List<DataField> fields() {
         return fields;
     }
 
+    @JsonGetter(FIELD_PARTITION_KEYS)
     public List<String> partitionKeys() {
         return partitionKeys;
     }
 
+    @JsonGetter(FIELD_PRIMARY_KEYS)
     public List<String> primaryKeys() {
         return primaryKeys;
     }
 
+    @JsonGetter(FIELD_OPTIONS)
     public Map<String, String> options() {
         return options;
     }
 
-    public String comment() {
-        return comment;
-    }
-
-    @JsonGetter(FIELD_FIELDS)
-    public List<DataField> getFields() {
-        return fields;
-    }
-
-    @JsonGetter(FIELD_PARTITION_KEYS)
-    public List<String> getPartitionKeys() {
-        return partitionKeys;
-    }
-
-    @JsonGetter(FIELD_PRIMARY_KEYS)
-    public List<String> getPrimaryKeys() {
-        return primaryKeys;
-    }
-
-    @JsonGetter(FIELD_OPTIONS)
-    public Map<String, String> getOptions() {
-        return options;
-    }
-
     @JsonGetter(FIELD_COMMENT)
-    public String getComment() {
+    public String comment() {
         return comment;
     }
 
