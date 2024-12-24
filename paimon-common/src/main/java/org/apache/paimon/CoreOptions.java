@@ -1597,10 +1597,6 @@ public class CoreOptions implements Serializable {
         return new Path(options.get(TABLE_DATA_PATH.key()));
     }
 
-    public static Path dataPath(Options options) {
-        return new Path(options.get(TABLE_DATA_PATH));
-    }
-
     public TableType type() {
         return options.get(TYPE);
     }
