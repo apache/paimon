@@ -43,6 +43,7 @@ public class CreateTableRequest implements RESTRequest {
             @JsonProperty(FIELD_IDENTIFIER) Identifier identifier,
             @JsonProperty(FIELD_SCHEMA) Schema schema) {
         this.schema = schema;
+        this.identifier = identifier;
     }
 
     @JsonGetter(FIELD_IDENTIFIER)

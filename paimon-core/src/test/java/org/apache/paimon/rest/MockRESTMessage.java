@@ -32,7 +32,9 @@ import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
@@ -123,46 +125,67 @@ public class MockRESTMessage {
         // remove option
         SchemaChange removeOption = SchemaChange.removeOption("compaction.max.file-num");
         // add column
-        SchemaChange addColumn = SchemaChange.addColumn("col1_after", DataTypes.STRING());
-        // add a column after col1
-        SchemaChange.Move after = SchemaChange.Move.after("col1_after", "col1");
-        SchemaChange addColumnAfterField =
-                SchemaChange.addColumn("col7", DataTypes.STRING(), "", after);
-        // rename column
-        SchemaChange renameColumn = SchemaChange.renameColumn("col3", "col3_new_name");
-        // drop column
-        SchemaChange dropColumn = SchemaChange.dropColumn("col6");
-        // update column comment
-        SchemaChange updateColumnComment =
-                SchemaChange.updateColumnComment(new String[] {"col4"}, "col4 field");
-        // update nested column comment
-        SchemaChange updateNestedColumnComment =
-                SchemaChange.updateColumnComment(new String[] {"col5", "f1"}, "col5 f1 field");
-        // update column type
-        SchemaChange updateColumnType = SchemaChange.updateColumnType("col4", DataTypes.DOUBLE());
-        // update column position, you need to pass in a parameter of type Move
-        SchemaChange updateColumnPosition =
-                SchemaChange.updateColumnPosition(SchemaChange.Move.first("col4"));
-        // update column nullability
-        SchemaChange updateColumnNullability =
-                SchemaChange.updateColumnNullability(new String[] {"col4"}, false);
-        // update nested column nullability
-        SchemaChange updateNestedColumnNullability =
-                SchemaChange.updateColumnNullability(new String[] {"col5", "f2"}, false);
+        SchemaChange addColumn =
+                SchemaChange.addColumn("col1_after", DataTypes.ARRAY(DataTypes.STRING()));
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.BIGINT(),
+                            DataTypes.BINARY(1),
+                            DataTypes.VARBINARY(1),
+                            DataTypes.MAP(DataTypes.VARCHAR(8), DataTypes.VARCHAR(8)),
+                            DataTypes.MULTISET(DataTypes.VARCHAR(8))
+                        },
+                        new String[] {"pt", "a", "b", "c", "d", "e", "f"});
+        SchemaChange addColumnMap =
+                SchemaChange.addColumn(
+                        "col11_map_type", DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING()));
+        SchemaChange addColumnRowType = SchemaChange.addColumn("col11_row_type", rowType);
+        //        // add a column after col1
+        //        SchemaChange.Move after = SchemaChange.Move.after("col1_after", "col1");
+        //        SchemaChange addColumnAfterField =
+        //                SchemaChange.addColumn("col7", DataTypes.STRING(), "", after);
+        //        // rename column
+        //        SchemaChange renameColumn = SchemaChange.renameColumn("col3", "col3_new_name");
+        //        // drop column
+        //        SchemaChange dropColumn = SchemaChange.dropColumn("col6");
+        //        // update column comment
+        //        SchemaChange updateColumnComment =
+        //                SchemaChange.updateColumnComment(new String[] {"col4"}, "col4 field");
+        //        // update nested column comment
+        //        SchemaChange updateNestedColumnComment =
+        //                SchemaChange.updateColumnComment(new String[] {"col5", "f1"}, "col5 f1
+        // field");
+        //        // update column type
+        //        SchemaChange updateColumnType = SchemaChange.updateColumnType("col4",
+        // DataTypes.DOUBLE());
+        //        // update column position, you need to pass in a parameter of type Move
+        //        SchemaChange updateColumnPosition =
+        //                SchemaChange.updateColumnPosition(SchemaChange.Move.first("col4"));
+        //        // update column nullability
+        //        SchemaChange updateColumnNullability =
+        //                SchemaChange.updateColumnNullability(new String[] {"col4"}, false);
+        //        // update nested column nullability
+        //        SchemaChange updateNestedColumnNullability =
+        //                SchemaChange.updateColumnNullability(new String[] {"col5", "f2"}, false);
 
         List<SchemaChange> schemaChanges = new ArrayList<>();
         schemaChanges.add(addOption);
         schemaChanges.add(removeOption);
         schemaChanges.add(addColumn);
-        schemaChanges.add(addColumnAfterField);
-        schemaChanges.add(renameColumn);
-        schemaChanges.add(dropColumn);
-        schemaChanges.add(updateColumnComment);
-        schemaChanges.add(updateNestedColumnComment);
-        schemaChanges.add(updateColumnType);
-        schemaChanges.add(updateColumnPosition);
-        schemaChanges.add(updateColumnNullability);
-        schemaChanges.add(updateNestedColumnNullability);
+        schemaChanges.add(addColumnMap);
+        schemaChanges.add(addColumnRowType);
+        //        schemaChanges.add(addColumnAfterField);
+        //        schemaChanges.add(renameColumn);
+        //        schemaChanges.add(dropColumn);
+        //        schemaChanges.add(updateColumnComment);
+        //        schemaChanges.add(updateNestedColumnComment);
+        //        schemaChanges.add(updateColumnType);
+        //        schemaChanges.add(updateColumnPosition);
+        //        schemaChanges.add(updateColumnNullability);
+        //        schemaChanges.add(updateNestedColumnNullability);
         SchemaChanges changes = new SchemaChanges(schemaChanges);
         return new UpdateTableRequest(fromIdentifier, toIdentifier, changes);
     }

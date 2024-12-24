@@ -209,7 +209,7 @@ public class RESTCatalogController {
     @ApiResponses({
         @ApiResponse(
                 responseCode = "200",
-                content = {@Content(schema = @Schema(implementation = ListTablesResponse.class))}),
+                content = {@Content(schema = @Schema(implementation = GetTableResponse.class))}),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
@@ -278,7 +278,7 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @PostMapping("/v1/{prefix}/databases/{database}/tables/table")
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}")
     public GetTableResponse updateTable(
             @PathVariable String prefix,
             @PathVariable String database,
@@ -299,7 +299,7 @@ public class RESTCatalogController {
     }
 
     @Operation(
-            summary = "Update table",
+            summary = "Drop table",
             tags = {"table"})
     @ApiResponses({
         @ApiResponse(

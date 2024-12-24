@@ -80,6 +80,159 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables:
+    get:
+      tags:
+        - table
+      summary: List tables
+      operationId: listTables
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTablesResponse'
+        "500":
+          description: Internal Server Error
+    post:
+      tags:
+        - table
+      summary: Create table
+      operationId: createTable
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTableRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTableResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}:
+    get:
+      tags:
+        - table
+      summary: Get table
+      operationId: getTable
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTablesResponse'
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+    post:
+      tags:
+        - table
+      summary: Update table
+      operationId: updateTable
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTableRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTableResponse'
+        "500":
+          description: Internal Server Error
+    delete:
+      tags:
+        - table
+      summary: Drop table
+      operationId: dropTable
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
   /v1/{prefix}/databases/{database}/properties:
     post:
       tags:
@@ -200,6 +353,15 @@ components:
           type: object
           additionalProperties:
             type: string
+    CreateDatabaseResponse:
+      type: object
+      properties:
+        name:
+          type: string
+        options:
+          type: object
+          additionalProperties:
+            type: string
     ErrorResponse:
       type: object
       properties:
@@ -212,15 +374,183 @@ components:
           type: array
           items:
             type: string
-    CreateDatabaseResponse:
+    CreateTableRequest:
       type: object
       properties:
+        identifier:
+          $ref: '#/components/schemas/Identifier'
+        schema:
+          $ref: '#/components/schemas/Schema'
+    DataField:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int32
         name:
           type: string
+        type:
+          $ref: '#/components/schemas/DataType'
+        description:
+          type: string
+    DataType:
+      anyOf:
+        - type: string
+        - type: object
+    Identifier:
+      type: object
+      properties:
+        database:
+          type: string
+        table:
+          type: string
+        branch:
+          type: string
+    Schema:
+      type: object
+      properties:
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataField'
+        partition-keys:
+          type: array
+          items:
+            type: string
+        primary-keys:
+          type: array
+          items:
+            type: string
         options:
           type: object
           additionalProperties:
             type: string
+        comment:
+          type: string
+    GetTableResponse:
+      type: object
+      properties:
+        location:
+          type: string
+        schema:
+          $ref: '#/components/schemas/TableSchema'
+    TableSchema:
+      type: object
+    AddColumn:
+      type: object
+      properties:
+        field-names:
+          type: array
+          items:
+            type: string
+        data-types:
+          $ref: '#/components/schemas/DataType'
+        comment:
+          type: string
+        move:
+          $ref: '#/components/schemas/Move'
+    Move:
+      type: object
+      properties:
+        field-name:
+          type: string
+        reference-field-name:
+          type: string
+        type:
+          type: string
+          enum:
+            - FIRST
+            - AFTER
+            - BEFORE
+            - LAST
+    RenameColumn:
+      type: object
+      properties:
+        field-names:
+          type: array
+          items:
+            type: string
+        new-name:
+          type: string
+    SchemaChanges:
+      type: object
+      properties:
+        set-options:
+          type: object
+          additionalProperties:
+            type: string
+        remove-options:
+          type: array
+          items:
+            type: string
+        comment:
+          type: string
+        add-columns:
+          type: array
+          items:
+            $ref: '#/components/schemas/AddColumn'
+        rename-columns:
+          type: array
+          items:
+            $ref: '#/components/schemas/RenameColumn'
+        drop-columns:
+          type: array
+          items:
+            type: string
+        update-column-types:
+          type: array
+          items:
+            $ref: '#/components/schemas/UpdateColumnType'
+        update-column-nullabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/UpdateColumnNullability'
+        update-column-comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/UpdateColumnComment'
+        update-column-positions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Move'
+    UpdateColumnComment:
+      type: object
+      properties:
+        field-names:
+          type: array
+          items:
+            type: string
+        new-comment:
+          type: string
+    UpdateColumnNullability:
+      type: object
+      properties:
+        field-names:
+          type: array
+          items:
+            type: string
+        new-nullability:
+          type: boolean
+    UpdateColumnType:
+      type: object
+      properties:
+        field-names:
+          type: array
+          items:
+            type: string
+        new-data-types:
+          $ref: '#/components/schemas/DataType'
+        keep-nullability:
+          type: boolean
+    UpdateTableRequest:
+      type: object
+      properties:
+        from:
+          $ref: '#/components/schemas/Identifier'
+        to:
+          $ref: '#/components/schemas/Identifier'
+        changes:
+          $ref: '#/components/schemas/SchemaChanges'
     AlterDatabaseRequest:
       type: object
       properties:
@@ -247,18 +577,13 @@ components:
           type: array
           items:
             type: string
-    DatabaseName:
-      type: object
-      properties:
-        name:
-          type: string
     ListDatabasesResponse:
       type: object
       properties:
         databases:
           type: array
           items:
-            $ref: '#/components/schemas/DatabaseName'
+            type: string
     GetDatabaseResponse:
       type: object
       properties:
@@ -267,6 +592,13 @@ components:
         options:
           type: object
           additionalProperties:
+            type: string
+    ListTablesResponse:
+      type: object
+      properties:
+        tables:
+          type: array
+          items:
             type: string
     ConfigResponse:
       type: object
@@ -279,3 +611,8 @@ components:
           type: object
           additionalProperties:
             type: string
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer

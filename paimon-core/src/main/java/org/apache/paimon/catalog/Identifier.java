@@ -28,6 +28,7 @@ import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -114,12 +115,12 @@ public class Identifier implements Serializable {
         return database;
     }
 
-    @JsonIgnoreProperties
+    @JsonIgnore
     public String getObjectName() {
         return object;
     }
 
-    @JsonIgnoreProperties
+    @JsonIgnore
     public String getFullName() {
         return UNKNOWN_DATABASE.equals(this.database)
                 ? object
@@ -138,19 +139,19 @@ public class Identifier implements Serializable {
         return branch;
     }
 
-    @JsonIgnoreProperties
+    @JsonIgnore
     public String getBranchNameOrDefault() {
         String branch = getBranchName();
         return branch == null ? BranchManager.DEFAULT_MAIN_BRANCH : branch;
     }
 
-    @JsonIgnoreProperties
+    @JsonIgnore
     public @Nullable String getSystemTableName() {
         splitObjectName();
         return systemTable;
     }
 
-    @JsonIgnoreProperties
+    @JsonIgnore
     public boolean isSystemTable() {
         return getSystemTableName() != null;
     }
@@ -186,12 +187,12 @@ public class Identifier implements Serializable {
         }
     }
 
-    @JsonIgnoreProperties
+    @JsonIgnore
     public String getEscapedFullName() {
         return getEscapedFullName('`');
     }
 
-    @JsonIgnoreProperties
+    @JsonIgnore
     public String getEscapedFullName(char escapeChar) {
         return String.format(
                 "%c%s%c.%c%s%c", escapeChar, database, escapeChar, escapeChar, object, escapeChar);

@@ -358,4 +358,49 @@ public class TableSchema implements Serializable {
             throw new UncheckedIOException(e);
         }
     }
+
+    public int getVersion() {
+        return version;
+    }
+
+    public long getId() {
+        return id;
+    }
+
+    public List<DataField> getFields() {
+        return fields;
+    }
+
+    public int getHighestFieldId() {
+        return highestFieldId;
+    }
+
+    public List<String> getPartitionKeys() {
+        return partitionKeys;
+    }
+
+    public List<String> getPrimaryKeys() {
+        return primaryKeys;
+    }
+
+    public List<String> getBucketKeys() {
+        return bucketKeys;
+    }
+
+    public int getNumBucket() {
+        return numBucket;
+    }
+
+    public Map<String, String> getOptions() {
+        return options;
+    }
+
+    @Nullable
+    public String getComment() {
+        return comment;
+    }
+
+    public long getTimeMillis() {
+        return timeMillis;
+    }
 }
