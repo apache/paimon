@@ -26,6 +26,12 @@ import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
@@ -40,9 +46,13 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * @since 0.4.0
  */
 @Public
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Identifier implements Serializable {
 
     private static final long serialVersionUID = 1L;
+
+    private static final String FIELD_DATABASE_NAME = "database";
+    private static final String FIELD_OBJECT_NAME = "object";
 
     public static final RowType SCHEMA =
             new RowType(
@@ -53,14 +63,22 @@ public class Identifier implements Serializable {
 
     public static final String UNKNOWN_DATABASE = "unknown";
 
+    @JsonProperty(FIELD_DATABASE_NAME)
     private final String database;
+
+    @JsonProperty(FIELD_OBJECT_NAME)
     private final String object;
 
     private transient String table;
+
     private transient String branch;
+
     private transient String systemTable;
 
-    public Identifier(String database, String object) {
+    @JsonCreator
+    public Identifier(
+            @JsonProperty(FIELD_DATABASE_NAME) String database,
+            @JsonProperty(FIELD_OBJECT_NAME) String object) {
         this.database = database;
         this.object = object;
     }
@@ -89,40 +107,48 @@ public class Identifier implements Serializable {
         this.systemTable = systemTable;
     }
 
+    @JsonGetter(FIELD_DATABASE_NAME)
     public String getDatabaseName() {
         return database;
     }
 
+    @JsonGetter(FIELD_OBJECT_NAME)
     public String getObjectName() {
         return object;
     }
 
+    @JsonIgnore
     public String getFullName() {
         return UNKNOWN_DATABASE.equals(this.database)
                 ? object
                 : String.format("%s.%s", database, object);
     }
 
+    @JsonIgnore
     public String getTableName() {
         splitObjectName();
         return table;
     }
 
+    @JsonIgnore
     public @Nullable String getBranchName() {
         splitObjectName();
         return branch;
     }
 
+    @JsonIgnore
     public String getBranchNameOrDefault() {
         String branch = getBranchName();
         return branch == null ? BranchManager.DEFAULT_MAIN_BRANCH : branch;
     }
 
+    @JsonIgnore
     public @Nullable String getSystemTableName() {
         splitObjectName();
         return systemTable;
     }
 
+    @JsonIgnore
     public boolean isSystemTable() {
         return getSystemTableName() != null;
     }
@@ -158,10 +184,12 @@ public class Identifier implements Serializable {
         }
     }
 
+    @JsonIgnore
     public String getEscapedFullName() {
         return getEscapedFullName('`');
     }
 
+    @JsonIgnore
     public String getEscapedFullName(char escapeChar) {
         return String.format(
                 "%c%s%c.%c%s%c", escapeChar, database, escapeChar, escapeChar, object, escapeChar);

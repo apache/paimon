@@ -18,27 +18,40 @@
 
 package org.apache.paimon.rest.responses;
 
-import org.apache.paimon.rest.RESTMessage;
+import org.apache.paimon.rest.RESTResponse;
+import org.apache.paimon.schema.TableSchema;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-/** Class for Database entity. */
-public class DatabaseName implements RESTMessage {
+/** Response for getting table. */
+public class GetTableResponse implements RESTResponse {
 
-    private static final String FIELD_NAME = "name";
+    private static final String FIELD_LOCATION = "location";
+    private static final String FIELD_SCHEMA = "schema";
 
-    @JsonProperty(FIELD_NAME)
-    private String name;
+    @JsonProperty(FIELD_LOCATION)
+    private final String location;
+
+    @JsonProperty(FIELD_SCHEMA)
+    private final TableSchema schema;
 
     @JsonCreator
-    public DatabaseName(@JsonProperty(FIELD_NAME) String name) {
-        this.name = name;
+    public GetTableResponse(
+            @JsonProperty(FIELD_LOCATION) String location,
+            @JsonProperty(FIELD_SCHEMA) TableSchema schema) {
+        this.location = location;
+        this.schema = schema;
     }
 
-    @JsonGetter(FIELD_NAME)
-    public String getName() {
-        return this.name;
+    @JsonGetter(FIELD_LOCATION)
+    public String getLocation() {
+        return this.location;
+    }
+
+    @JsonGetter(FIELD_SCHEMA)
+    public TableSchema getSchema() {
+        return this.schema;
     }
 }

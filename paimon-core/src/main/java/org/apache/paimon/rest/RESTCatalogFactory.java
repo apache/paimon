@@ -33,6 +33,6 @@ public class RESTCatalogFactory implements CatalogFactory {
 
     @Override
     public Catalog create(CatalogContext context) {
-        return new RESTCatalog(context.options());
+        return new RESTCatalog(context);
     }
 }
