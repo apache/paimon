@@ -52,8 +52,7 @@ public class Identifier implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private static final String FIELD_DATABASE_NAME = "database";
-    private static final String FIELD_TABLE_NAME = "table";
-    private static final String FIELD_BRANCH_NAME = "branch";
+    private static final String FIELD_OBJECT_NAME = "object";
 
     public static final RowType SCHEMA =
             new RowType(
@@ -67,26 +66,24 @@ public class Identifier implements Serializable {
     @JsonProperty(FIELD_DATABASE_NAME)
     private final String database;
 
+    @JsonProperty(FIELD_OBJECT_NAME)
     private final String object;
 
-    @JsonProperty(FIELD_TABLE_NAME)
     private transient String table;
 
-    @JsonProperty(FIELD_BRANCH_NAME)
     private transient String branch;
 
     private transient String systemTable;
 
-    public Identifier(String database, String object) {
+    @JsonCreator
+    public Identifier(
+            @JsonProperty(FIELD_DATABASE_NAME) String database,
+            @JsonProperty(FIELD_OBJECT_NAME) String object) {
         this.database = database;
         this.object = object;
     }
 
-    @JsonCreator
-    public Identifier(
-            @JsonProperty(FIELD_DATABASE_NAME) String database,
-            @JsonProperty(FIELD_TABLE_NAME) String table,
-            @JsonProperty(FIELD_BRANCH_NAME) @Nullable String branch) {
+    public Identifier(String database, String table, @Nullable String branch) {
         this(database, table, branch, null);
     }
 
@@ -115,7 +112,7 @@ public class Identifier implements Serializable {
         return database;
     }
 
-    @JsonIgnore
+    @JsonGetter(FIELD_OBJECT_NAME)
     public String getObjectName() {
         return object;
     }
@@ -127,13 +124,13 @@ public class Identifier implements Serializable {
                 : String.format("%s.%s", database, object);
     }
 
-    @JsonGetter(FIELD_TABLE_NAME)
+    @JsonIgnore
     public String getTableName() {
         splitObjectName();
         return table;
     }
 
-    @JsonGetter(FIELD_BRANCH_NAME)
+    @JsonIgnore
     public @Nullable String getBranchName() {
         splitObjectName();
         return branch;
