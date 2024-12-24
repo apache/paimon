@@ -24,6 +24,8 @@ import org.apache.spark.unsafe.types.VariantVal
 
 class Spark4ArrayData(override val elementType: DataType) extends AbstractSparkArrayData {
 
-  override def getVariant(ordinal: Int): VariantVal = throw new UnsupportedOperationException
-
+  override def getVariant(ordinal: Int): VariantVal = {
+    val v = paimonArray.getVariant(ordinal)
+    new VariantVal(v.value(), v.metadata())
+  }
 }
