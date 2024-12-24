@@ -22,16 +22,19 @@ import org.apache.paimon.rest.RESTResponse;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
 
 /** Response for listing databases. */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class ListDatabasesResponse implements RESTResponse {
+
     private static final String FIELD_DATABASES = "databases";
 
     @JsonProperty(FIELD_DATABASES)
-    private List<String> databases;
+    private final List<String> databases;
 
     @JsonCreator
     public ListDatabasesResponse(@JsonProperty(FIELD_DATABASES) List<String> databases) {

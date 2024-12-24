@@ -24,19 +24,21 @@ import org.apache.paimon.schema.Schema;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 /** Request for creating table. */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class CreateTableRequest implements RESTRequest {
 
     private static final String FIELD_IDENTIFIER = "identifier";
     private static final String FIELD_SCHEMA = "schema";
 
     @JsonProperty(FIELD_IDENTIFIER)
-    private Identifier identifier;
+    private final Identifier identifier;
 
     @JsonProperty(FIELD_SCHEMA)
-    private Schema schema;
+    private final Schema schema;
 
     @JsonCreator
     public CreateTableRequest(

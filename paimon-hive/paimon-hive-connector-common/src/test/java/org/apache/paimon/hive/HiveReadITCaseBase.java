@@ -19,7 +19,7 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.CatalogUtils;
+import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
@@ -975,7 +975,7 @@ public abstract class HiveReadITCaseBase extends HiveTestBase {
                         Maps.newHashMap(),
                         "");
         Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
-        Path tablePath = CatalogUtils.newTableLocation(path, identifier);
+        Path tablePath = AbstractCatalog.newTableLocation(path, identifier);
         new SchemaManager(LocalFileIO.create(), tablePath).createTable(schema);
 
         // Create hive external table
@@ -1057,7 +1057,7 @@ public abstract class HiveReadITCaseBase extends HiveTestBase {
         commit.close();
 
         // add column, do some ddl which will generate a new version schema-n file.
-        Path tablePath = CatalogUtils.newTableLocation(path, identifier);
+        Path tablePath = AbstractCatalog.newTableLocation(path, identifier);
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         schemaManager.commitChanges(SchemaChange.addColumn("N1", DataTypes.STRING()));
 

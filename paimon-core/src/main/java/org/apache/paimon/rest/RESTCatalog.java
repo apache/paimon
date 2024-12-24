@@ -41,8 +41,7 @@ import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
-import org.apache.paimon.rest.requests.SchemaChanges;
-import org.apache.paimon.rest.requests.UpdateTableRequest;
+import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
@@ -58,7 +57,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
-import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
@@ -69,21 +67,17 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.function.Supplier;
 
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
-import static org.apache.paimon.catalog.CatalogUtils.lockContext;
-import static org.apache.paimon.catalog.CatalogUtils.lockFactory;
-import static org.apache.paimon.catalog.CatalogUtils.newTableLocation;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
@@ -96,10 +90,9 @@ public class RESTCatalog implements Catalog {
 
     private final RESTClient client;
     private final ResourcePaths resourcePaths;
-    private final Map<String, String> baseHeader;
     private final AuthSession catalogAuth;
     private final CatalogContext context;
-    private final Optional<FileIO> fileIOOptional;
+    private final FileIO fileIO;
 
     private volatile ScheduledExecutorService refreshExecutor = null;
 
@@ -123,17 +116,17 @@ public class RESTCatalog implements Catalog {
                         threadPoolSize,
                         DefaultErrorHandler.getInstance());
         this.client = new HttpClient(httpClientOptions);
-        this.baseHeader = configHeaders(catalogOptions.toMap());
+        Map<String, String> baseHeader = configHeaders(catalogOptions.toMap());
         CredentialsProvider credentialsProvider =
                 CredentialsProviderFactory.createCredentialsProvider(
                         catalogOptions, RESTCatalog.class.getClassLoader());
         if (credentialsProvider.keepRefreshed()) {
             this.catalogAuth =
                     AuthSession.fromRefreshCredentialsProvider(
-                            tokenRefreshExecutor(), this.baseHeader, credentialsProvider);
+                            tokenRefreshExecutor(), baseHeader, credentialsProvider);
 
         } else {
-            this.catalogAuth = new AuthSession(this.baseHeader, credentialsProvider);
+            this.catalogAuth = new AuthSession(baseHeader, credentialsProvider);
         }
         Map<String, String> initHeaders =
                 RESTUtil.merge(
@@ -144,21 +137,21 @@ public class RESTCatalog implements Catalog {
                         options, catalogContext.preferIO(), catalogContext.fallbackIO());
         this.resourcePaths =
                 ResourcePaths.forCatalogProperties(options.get(RESTCatalogInternalOptions.PREFIX));
-        this.fileIOOptional = getFileIOFromOptions(context);
+        this.fileIO = getFileIOFromOptions(context);
     }
 
-    private static Optional<FileIO> getFileIOFromOptions(CatalogContext context) {
+    private static FileIO getFileIOFromOptions(CatalogContext context) {
         try {
             Options options = context.options();
             String warehouseStr = options.get(CatalogOptions.WAREHOUSE);
             Path warehousePath = new Path(warehouseStr);
             CatalogContext contextWithNewOptions =
                     CatalogContext.create(options, context.preferIO(), context.fallbackIO());
-            return Optional.of(FileIO.get(warehousePath, contextWithNewOptions));
-        } catch (Exception ignore) {
+            return FileIO.get(warehousePath, contextWithNewOptions);
+        } catch (IOException e) {
             LOG.warn("Can not get FileIO from options.");
+            throw new RuntimeException(e);
         }
-        return Optional.empty();
     }
 
     @Override
@@ -173,10 +166,7 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public FileIO fileIO() {
-        if (this.fileIOOptional.isPresent()) {
-            return this.fileIOOptional.get();
-        }
-        throw new RuntimeException("FileIO is not configured.");
+        return fileIO;
     }
 
     @Override
@@ -283,7 +273,7 @@ public class RESTCatalog implements Catalog {
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
         if (SYSTEM_DATABASE_NAME.equals(identifier.getDatabaseName())) {
-            return getAllInSystemDatabase(identifier);
+            throw new UnsupportedOperationException("TODO support global system tables.");
         } else if (identifier.isSystemTable()) {
             return getSystemTable(identifier);
         } else {
@@ -312,7 +302,7 @@ public class RESTCatalog implements Catalog {
     public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
             throws TableNotExistException, TableAlreadyExistException {
         try {
-            updateTable(fromTable, toTable, new ArrayList<>());
+            renameTable(fromTable, toTable);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 throw new TableNotExistException(fromTable);
@@ -328,15 +318,7 @@ public class RESTCatalog implements Catalog {
     public void alterTable(
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
-        try {
-            updateTable(identifier, identifier, changes);
-        } catch (NoSuchResourceException e) {
-            if (!ignoreIfNotExists) {
-                throw new TableNotExistException(identifier);
-            }
-        } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
-        }
+        throw new UnsupportedOperationException("TODO");
     }
 
     @Override
@@ -395,10 +377,8 @@ public class RESTCatalog implements Catalog {
     }
 
     @VisibleForTesting
-    void updateTable(
-            Identifier fromTable, Identifier newTableIdentifier, List<SchemaChange> changes) {
-        UpdateTableRequest request =
-                new UpdateTableRequest(newTableIdentifier, new SchemaChanges(changes));
+    void renameTable(Identifier fromTable, Identifier newIdentifier) {
+        RenameTableRequest request = new RenameTableRequest(newIdentifier);
         client.post(
                 resourcePaths.table(fromTable.getDatabaseName(), fromTable.getTableName()),
                 request,
@@ -409,19 +389,13 @@ public class RESTCatalog implements Catalog {
     @VisibleForTesting
     Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
         Preconditions.checkArgument(identifier.getSystemTableName() == null);
-        TableSchema tableSchema = getDataTableSchema(identifier);
-        Lock.Factory lockFactory =
-                Lock.factory(
-                        lockFactory(context.options(), fileIO(), Optional.empty()).orElse(null),
-                        lockContext(context.options()).orElse(null),
-                        identifier);
-        // MetastoreClient is not used in RESTCatalog so null is ok.
+        GetTableResponse response = getTableResponse(identifier);
         FileStoreTable table =
                 FileStoreTableFactory.create(
                         fileIO(),
-                        newTableLocation(warehouse(), identifier),
-                        tableSchema,
-                        new CatalogEnvironment(identifier, null, lockFactory, null));
+                        new Path(response.getPath()),
+                        TableSchema.create(response.getSchemaId(), response.getSchema()),
+                        new CatalogEnvironment(identifier, null, Lock.emptyFactory(), null));
         CoreOptions options = table.coreOptions();
         if (options.type() == TableType.OBJECT_TABLE) {
             String objectLocation = options.objectLocation();
@@ -436,15 +410,13 @@ public class RESTCatalog implements Catalog {
         return table;
     }
 
-    protected TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
+    protected GetTableResponse getTableResponse(Identifier identifier)
+            throws TableNotExistException {
         try {
-            GetTableResponse response =
-                    client.get(
-                            resourcePaths.table(
-                                    identifier.getDatabaseName(), identifier.getTableName()),
-                            GetTableResponse.class,
-                            headers());
-            return response.getSchema();
+            return client.get(
+                    resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),
+                    GetTableResponse.class,
+                    headers());
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
@@ -460,36 +432,6 @@ public class RESTCatalog implements Catalog {
         return catalogAuth.getHeaders();
     }
 
-    private Table getAllInSystemDatabase(Identifier identifier) throws TableNotExistException {
-        String tableName = identifier.getTableName();
-        Supplier<Map<String, Map<String, Path>>> getAllTablePathsFunction =
-                () -> {
-                    try {
-                        Map<String, Map<String, Path>> allPaths = new HashMap<>();
-                        for (String database : listDatabases()) {
-                            Map<String, Path> tableMap =
-                                    allPaths.computeIfAbsent(database, d -> new HashMap<>());
-                            for (String table : listTables(database)) {
-                                Path tableLocation =
-                                        newTableLocation(
-                                                warehouse(), Identifier.create(database, table));
-                                tableMap.put(table, tableLocation);
-                            }
-                        }
-                        return allPaths;
-                    } catch (DatabaseNotExistException e) {
-                        throw new RuntimeException("Database is deleted while listing", e);
-                    }
-                };
-        Table table =
-                SystemTableLoader.loadGlobal(
-                        tableName, fileIO(), getAllTablePathsFunction, context.options());
-        if (table == null) {
-            throw new TableNotExistException(identifier);
-        }
-        return table;
-    }
-
     private Table getSystemTable(Identifier identifier) throws TableNotExistException {
         Table originTable =
                 getDataOrFormatTable(
@@ -498,7 +440,7 @@ public class RESTCatalog implements Catalog {
                                 identifier.getTableName(),
                                 identifier.getBranchName(),
                                 null));
-        return CatalogUtils.getSystemTable(identifier, originTable);
+        return CatalogUtils.createSystemTable(identifier, originTable);
     }
 
     private ScheduledExecutorService tokenRefreshExecutor() {

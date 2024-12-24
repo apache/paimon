@@ -18,8 +18,6 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.schema.SchemaSerializer;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeJsonParser;
@@ -35,6 +33,7 @@ import static org.apache.paimon.utils.JsonSerdeUtil.registerJsonObjects;
 
 /** Object mapper for REST request and response. */
 public class RESTObjectMapper {
+
     public static ObjectMapper create() {
         ObjectMapper mapper = new ObjectMapper();
         mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -46,8 +45,6 @@ public class RESTObjectMapper {
 
     public static Module createPaimonRestJacksonModule() {
         SimpleModule module = new SimpleModule("Paimon_REST");
-        registerJsonObjects(
-                module, TableSchema.class, SchemaSerializer.INSTANCE, SchemaSerializer.INSTANCE);
         registerJsonObjects(
                 module,
                 DataField.class,

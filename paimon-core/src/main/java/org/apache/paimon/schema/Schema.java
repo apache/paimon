@@ -29,6 +29,7 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import javax.annotation.Nullable;
@@ -55,8 +56,8 @@ import java.util.stream.Collectors;
 public class Schema {
 
     private static final String FIELD_FIELDS = "fields";
-    private static final String FIELD_PARTITION_KEYS = "partition-keys";
-    private static final String FIELD_PRIMARY_KEYS = "primary-keys";
+    private static final String FIELD_PARTITION_KEYS = "partitionKeys";
+    private static final String FIELD_PRIMARY_KEYS = "primaryKeys";
     private static final String FIELD_OPTIONS = "options";
     private static final String FIELD_COMMENT = "comment";
 
@@ -72,7 +73,9 @@ public class Schema {
     @JsonProperty(FIELD_OPTIONS)
     private final Map<String, String> options;
 
+    @Nullable
     @JsonProperty(FIELD_COMMENT)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private final String comment;
 
     @JsonCreator
@@ -81,7 +84,7 @@ public class Schema {
             @JsonProperty(FIELD_PARTITION_KEYS) List<String> partitionKeys,
             @JsonProperty(FIELD_PRIMARY_KEYS) List<String> primaryKeys,
             @JsonProperty(FIELD_OPTIONS) Map<String, String> options,
-            @JsonProperty(FIELD_COMMENT) String comment) {
+            @Nullable @JsonProperty(FIELD_COMMENT) String comment) {
         this.options = new HashMap<>(options);
         this.partitionKeys = normalizePartitionKeys(partitionKeys);
         this.primaryKeys = normalizePrimaryKeys(primaryKeys);

@@ -18,8 +18,8 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -257,7 +257,7 @@ public class HiveLocationTest {
 
             Identifier identifier = Identifier.create(dbName, tableName);
             String location =
-                    CatalogUtils.newTableLocation(warehouse, identifier).toUri().toString();
+                    AbstractCatalog.newTableLocation(warehouse, identifier).toUri().toString();
 
             String createTableSqlStr =
                     getCreateTableSqlStr(tableName, location, locationInProperties);

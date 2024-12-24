@@ -19,8 +19,8 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -87,7 +87,7 @@ public class PaimonMetaHook implements HiveMetaHook {
             org.apache.hadoop.fs.Path hadoopPath =
                     getDnsPath(new org.apache.hadoop.fs.Path(warehouse), conf);
             warehouse = hadoopPath.toUri().toString();
-            location = CatalogUtils.newTableLocation(warehouse, identifier).toUri().toString();
+            location = AbstractCatalog.newTableLocation(warehouse, identifier).toUri().toString();
             table.getSd().setLocation(location);
         }
 
