@@ -16,30 +16,43 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.responses;
+package org.apache.paimon.rest.requests;
 
-import org.apache.paimon.rest.RESTResponse;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.rest.RESTRequest;
+import org.apache.paimon.schema.Schema;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.util.List;
+/** Request for creating table. */
+public class CreateTableRequest implements RESTRequest {
 
-/** Response for listing databases. */
-public class ListDatabasesResponse implements RESTResponse {
-    private static final String FIELD_DATABASES = "databases";
+    private static final String FIELD_IDENTIFIER = "identifier";
+    private static final String FIELD_SCHEMA = "schema";
 
-    @JsonProperty(FIELD_DATABASES)
-    private List<String> databases;
+    @JsonProperty(FIELD_IDENTIFIER)
+    private Identifier identifier;
+
+    @JsonProperty(FIELD_SCHEMA)
+    private Schema schema;
 
     @JsonCreator
-    public ListDatabasesResponse(@JsonProperty(FIELD_DATABASES) List<String> databases) {
-        this.databases = databases;
+    public CreateTableRequest(
+            @JsonProperty(FIELD_IDENTIFIER) Identifier identifier,
+            @JsonProperty(FIELD_SCHEMA) Schema schema) {
+        this.schema = schema;
+        this.identifier = identifier;
     }
 
-    @JsonGetter(FIELD_DATABASES)
-    public List<String> getDatabases() {
-        return this.databases;
+    @JsonGetter(FIELD_IDENTIFIER)
+    public Identifier getIdentifier() {
+        return identifier;
+    }
+
+    @JsonGetter(FIELD_SCHEMA)
+    public Schema getSchema() {
+        return schema;
     }
 }

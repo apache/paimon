@@ -22,6 +22,7 @@ import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.info.License;
 import io.swagger.v3.oas.models.responses.ApiResponses;
+import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.servers.Server;
 import org.springdoc.core.customizers.OpenApiCustomiser;
 import org.springframework.beans.factory.annotation.Value;
@@ -56,9 +57,11 @@ public class OpenAPIConfig {
                         .version("1.0")
                         .description("This API exposes endpoints to RESTCatalog.")
                         .license(mitLicense);
+        SecurityRequirement securityRequirement = new SecurityRequirement();
+        securityRequirement.addList("BearerAuth");
         List<Server> servers = new ArrayList<>();
         servers.add(server);
-        return new OpenAPI().info(info).servers(servers);
+        return new OpenAPI().info(info).servers(servers).addSecurityItem(securityRequirement);
     }
 
     /** Sort response alphabetically. So the api generate will in same order everytime. */

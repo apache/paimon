@@ -433,6 +433,22 @@ public interface Catalog extends AutoCloseable {
         }
     }
 
+    /** Exception for trying to operate on the database that doesn't have permission. */
+    class DatabaseNoPermissionException extends RuntimeException {
+        private static final String MSG = "Database %s has no permission.";
+
+        private final String database;
+
+        public DatabaseNoPermissionException(String database, Throwable cause) {
+            super(String.format(MSG, database), cause);
+            this.database = database;
+        }
+
+        public String database() {
+            return database;
+        }
+    }
+
     /** Exception for trying to create a table that already exists. */
     class TableAlreadyExistException extends Exception {
 
@@ -466,6 +482,23 @@ public interface Catalog extends AutoCloseable {
         }
 
         public TableNotExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+    }
+
+    /** Exception for trying to operate on the table that doesn't have permission. */
+    class TableNoPermissionException extends RuntimeException {
+
+        private static final String MSG = "Table %s has no permission.";
+
+        private final Identifier identifier;
+
+        public TableNoPermissionException(Identifier identifier, Throwable cause) {
             super(String.format(MSG, identifier.getFullName()), cause);
             this.identifier = identifier;
         }

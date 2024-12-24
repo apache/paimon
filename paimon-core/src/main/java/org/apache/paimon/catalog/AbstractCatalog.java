@@ -20,7 +20,6 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
-import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -59,8 +58,11 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.CoreOptions.createCommitUser;
-import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
-import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
+import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
+import static org.apache.paimon.catalog.CatalogUtils.lockFactory;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -94,31 +96,16 @@ public abstract class AbstractCatalog implements Catalog {
         return fileIO;
     }
 
-    public Optional<CatalogLockFactory> lockFactory() {
-        if (!lockEnabled()) {
-            return Optional.empty();
-        }
-
-        String lock = catalogOptions.get(LOCK_TYPE);
-        if (lock == null) {
-            return defaultLockFactory();
-        }
-
-        return Optional.of(
-                FactoryUtil.discoverFactory(
-                        AbstractCatalog.class.getClassLoader(), CatalogLockFactory.class, lock));
-    }
-
     public Optional<CatalogLockFactory> defaultLockFactory() {
         return Optional.empty();
     }
 
     public Optional<CatalogLockContext> lockContext() {
-        return Optional.of(CatalogLockContext.fromOptions(catalogOptions));
+        return CatalogUtils.lockContext(catalogOptions);
     }
 
     protected boolean lockEnabled() {
-        return catalogOptions.getOptional(LOCK_ENABLED).orElse(fileIO.isObjectStore());
+        return CatalogUtils.lockEnabled(catalogOptions, fileIO);
     }
 
     protected boolean allowCustomTablePath() {
@@ -397,20 +384,7 @@ public abstract class AbstractCatalog implements Catalog {
                                     identifier.getTableName(),
                                     identifier.getBranchName(),
                                     null));
-            if (!(originTable instanceof FileStoreTable)) {
-                throw new UnsupportedOperationException(
-                        String.format(
-                                "Only data table support system tables, but this table %s is %s.",
-                                identifier, originTable.getClass()));
-            }
-            Table table =
-                    SystemTableLoader.load(
-                            Preconditions.checkNotNull(identifier.getSystemTableName()),
-                            (FileStoreTable) originTable);
-            if (table == null) {
-                throw new TableNotExistException(identifier);
-            }
-            return table;
+            return CatalogUtils.getSystemTable(identifier, originTable);
         } else {
             return getDataOrFormatTable(identifier);
         }
@@ -428,7 +402,8 @@ public abstract class AbstractCatalog implements Catalog {
                                 identifier,
                                 tableMeta.uuid,
                                 Lock.factory(
-                                        lockFactory().orElse(null),
+                                        lockFactory(catalogOptions, fileIO(), defaultLockFactory())
+                                                .orElse(null),
                                         lockContext().orElse(null),
                                         identifier),
                                 metastoreClientFactory(identifier).orElse(null)));
@@ -472,7 +447,7 @@ public abstract class AbstractCatalog implements Catalog {
      * @return The warehouse path for the database
      */
     public Path newDatabasePath(String database) {
-        return newDatabasePath(warehouse(), database);
+        return CatalogUtils.newDatabasePath(warehouse(), database);
     }
 
     public Map<String, Map<String, Path>> allTablePaths() {
@@ -507,16 +482,6 @@ public abstract class AbstractCatalog implements Catalog {
         return new Path(newDatabasePath(identifier.getDatabaseName()), identifier.getTableName());
     }
 
-    protected static void checkNotBranch(Identifier identifier, String method) {
-        if (identifier.getBranchName() != null) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Cannot '%s' for branch table '%s', "
-                                    + "please modify the table with the default branch.",
-                            method, identifier));
-        }
-    }
-
     protected void assertMainBranch(Identifier identifier) {
         if (identifier.getBranchName() != null
                 && !DEFAULT_MAIN_BRANCH.equals(identifier.getBranchName())) {
@@ -525,44 +490,8 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
-    protected static boolean isTableInSystemDatabase(Identifier identifier) {
-        return isSystemDatabase(identifier.getDatabaseName()) || identifier.isSystemTable();
-    }
-
-    protected static void checkNotSystemTable(Identifier identifier, String method) {
-        if (isTableInSystemDatabase(identifier)) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Cannot '%s' for system table '%s', please use data table.",
-                            method, identifier));
-        }
-    }
-
     private void copyTableDefaultOptions(Map<String, String> options) {
         tableDefaultOptions.forEach(options::putIfAbsent);
-    }
-
-    public static Path newTableLocation(String warehouse, Identifier identifier) {
-        checkNotBranch(identifier, "newTableLocation");
-        checkNotSystemTable(identifier, "newTableLocation");
-        return new Path(
-                newDatabasePath(warehouse, identifier.getDatabaseName()),
-                identifier.getTableName());
-    }
-
-    public static Path newDatabasePath(String warehouse, String database) {
-        return new Path(warehouse, database + DB_SUFFIX);
-    }
-
-    public static boolean isSystemDatabase(String database) {
-        return SYSTEM_DATABASE_NAME.equals(database);
-    }
-
-    /** Validate database cannot be a system database. */
-    protected void checkNotSystemDatabase(String database) {
-        if (isSystemDatabase(database)) {
-            throw new ProcessSystemDatabaseException();
-        }
     }
 
     private void validateAutoCreateClose(Map<String, String> options) {

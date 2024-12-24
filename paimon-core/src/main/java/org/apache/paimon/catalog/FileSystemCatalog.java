@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 
+import static org.apache.paimon.catalog.CatalogUtils.lockFactory;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 
 /** A catalog implementation for {@link FileIO}. */
@@ -123,7 +124,9 @@ public class FileSystemCatalog extends AbstractCatalog {
     private SchemaManager schemaManager(Identifier identifier) {
         Path path = getTableLocation(identifier);
         CatalogLock catalogLock =
-                lockFactory().map(fac -> fac.createLock(assertGetLockContext())).orElse(null);
+                lockFactory(catalogOptions, fileIO(), defaultLockFactory())
+                        .map(fac -> fac.createLock(assertGetLockContext()))
+                        .orElse(null);
         return new SchemaManager(fileIO, path, identifier.getBranchNameOrDefault())
                 .withLock(catalogLock == null ? null : Lock.fromCatalog(catalogLock, identifier));
     }
