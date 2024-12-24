@@ -198,16 +198,17 @@ public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
                 String indexFile = indexFiles.get(0);
                 try (FileIndexFormat.Reader indexReader =
                         FileIndexFormat.createReader(
-                                fileIO.newInputStream(dataFilePathFactory.toPath(indexFile)),
+                                fileIO.newInputStream(
+                                        dataFilePathFactory.toIndexPath(dataFileMeta, indexFile)),
                                 schemaInfo.fileSchema)) {
                     maintainers = indexReader.readAll();
                 }
-                newIndexPath = createNewFileIndexFilePath(dataFilePathFactory.toPath(indexFile));
+                newIndexPath =
+                        createNewFileIndexFilePath(
+                                dataFilePathFactory.toIndexPath(dataFileMeta, indexFile));
             } else {
                 maintainers = new HashMap<>();
-                newIndexPath =
-                        dataFileToFileIndexPath(
-                                dataFilePathFactory.toPath(dataFileMeta.fileName()));
+                newIndexPath = dataFileToFileIndexPath(dataFilePathFactory.toPath(dataFileMeta));
             }
 
             // remove unnecessary

@@ -76,6 +76,7 @@ public abstract class KeyValueDataFileWriter
     private long minSeqNumber = Long.MAX_VALUE;
     private long maxSeqNumber = Long.MIN_VALUE;
     private long deleteRecordCount = 0;
+    private final boolean isExternalPath;
 
     public KeyValueDataFileWriter(
             FileIO fileIO,
@@ -116,6 +117,7 @@ public abstract class KeyValueDataFileWriter
         this.dataFileIndexWriter =
                 DataFileIndexWriter.create(
                         fileIO, dataFileToFileIndexPath(path), valueType, fileIndexOptions);
+        this.isExternalPath = false;
     }
 
     @Override
@@ -177,6 +179,7 @@ public abstract class KeyValueDataFileWriter
                         ? DataFileIndexWriter.EMPTY_RESULT
                         : dataFileIndexWriter.result();
 
+        String externalPath = isExternalPath ? path.getParent().toString() : null;
         return new DataFileMeta(
                 path.getName(),
                 fileIO.getFileSize(path),
@@ -196,7 +199,7 @@ public abstract class KeyValueDataFileWriter
                 indexResult.embeddedIndexBytes(),
                 fileSource,
                 valueStatsPair.getKey(),
-                path.getParent().toString());
+                externalPath);
     }
 
     abstract Pair<SimpleColStats[], SimpleColStats[]> fetchKeyValueStats(SimpleColStats[] rowStats);

@@ -383,11 +383,6 @@ public class KeyValueFileReadWriteTest {
         for (DataFileMeta meta : actual) {
             assertThat(meta.level()).isEqualTo(expected.level());
         }
-
-        // assert actual externalPath is not null
-        for (DataFileMeta meta : actual) {
-            assertThat(Objects.requireNonNull(meta.externalPath()));
-        }
     }
 
     @ParameterizedTest

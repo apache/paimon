@@ -125,7 +125,7 @@ public class AppendOnlyWriterTest {
         DataFileMeta meta = increment.newFilesIncrement().newFiles().get(0);
         assertThat(meta).isNotNull();
 
-        Path path = pathFactory.toPath(meta.fileName());
+        Path path = pathFactory.toPath(meta);
         assertThat(LocalFileIO.create().exists(path)).isTrue();
 
         assertThat(meta.rowCount()).isEqualTo(1L);
@@ -186,7 +186,7 @@ public class AppendOnlyWriterTest {
             assertThat(inc.newFilesIncrement().newFiles().size()).isEqualTo(1);
             DataFileMeta meta = inc.newFilesIncrement().newFiles().get(0);
 
-            Path path = pathFactory.toPath(meta.fileName());
+            Path path = pathFactory.toPath(meta);
             assertThat(LocalFileIO.create().exists(path)).isTrue();
 
             assertThat(meta.rowCount()).isEqualTo(100L);
@@ -227,7 +227,7 @@ public class AppendOnlyWriterTest {
 
         int id = 0;
         for (DataFileMeta meta : firstInc.newFilesIncrement().newFiles()) {
-            Path path = pathFactory.toPath(meta.fileName());
+            Path path = pathFactory.toPath(meta);
             assertThat(LocalFileIO.create().exists(path)).isTrue();
 
             assertThat(meta.rowCount()).isEqualTo(1000L);

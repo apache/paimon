@@ -593,7 +593,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             toDelete.addAll(commitMessage.compactIncrement().changelogFiles());
 
             for (DataFileMeta file : toDelete) {
-                fileIO.deleteQuietly(pathFactory.toPath(file.fileName(), file.externalPath()));
+                fileIO.deleteQuietly(pathFactory.toPath(file));
             }
         }
     }

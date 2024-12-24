@@ -118,6 +118,7 @@ public class FileMetaUtils {
                                             new RuntimeException(
                                                     "Can't get table stats extractor for format "
                                                             + format));
+
             Path newPath = renameFile(fileIO, fileStatus.getPath(), dir, format, rollback);
             return constructFileMeta(
                     newPath.getName(),
@@ -125,8 +126,7 @@ public class FileMetaUtils {
                     newPath,
                     simpleStatsExtractor,
                     fileIO,
-                    table,
-                    newPath.getParent().toString());
+                    table);
         } catch (IOException e) {
             throw new RuntimeException("error when construct file meta", e);
         }
@@ -151,8 +151,7 @@ public class FileMetaUtils {
             Path path,
             SimpleStatsExtractor simpleStatsExtractor,
             FileIO fileIO,
-            Table table,
-            String externalPath)
+            Table table)
             throws IOException {
         SimpleStatsConverter statsArraySerializer = new SimpleStatsConverter(table.rowType());
 
@@ -172,7 +171,7 @@ public class FileMetaUtils {
                 null,
                 FileSource.APPEND,
                 null,
-                externalPath);
+                null);
     }
 
     public static BinaryRow writePartitionValue(

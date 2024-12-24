@@ -345,7 +345,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 // 2. This file is not the input of upgraded.
                 if (!compactBefore.containsKey(file.fileName())
                         && !afterFiles.contains(file.fileName())) {
-                    writerFactory.deleteFile(file.fileName(), file.level(), file.externalPath());
+                    writerFactory.deleteFile(file, file.level());
                 }
             } else {
                 compactBefore.put(file.fileName(), file);
@@ -379,7 +379,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         deletedFiles.clear();
 
         for (DataFileMeta file : newFilesChangelog) {
-            writerFactory.deleteFile(file.fileName(), file.level(), file.externalPath());
+            writerFactory.deleteFile(file, file.level());
         }
         newFilesChangelog.clear();
 
@@ -394,12 +394,12 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         compactAfter.clear();
 
         for (DataFileMeta file : compactChangelog) {
-            writerFactory.deleteFile(file.fileName(), file.level(), file.externalPath());
+            writerFactory.deleteFile(file, file.level());
         }
         compactChangelog.clear();
 
         for (DataFileMeta file : delete) {
-            writerFactory.deleteFile(file.fileName(), file.level(), file.externalPath());
+            writerFactory.deleteFile(file, file.level());
         }
 
         if (compactDeletionFile != null) {

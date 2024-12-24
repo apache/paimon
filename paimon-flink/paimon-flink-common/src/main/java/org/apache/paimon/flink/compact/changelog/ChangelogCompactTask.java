@@ -96,7 +96,7 @@ public class ChangelogCompactTask implements Serializable {
                         outputStream,
                         results,
                         table,
-                        dataFilePathFactory.toPath(meta.fileName(), meta.externalPath()),
+                        dataFilePathFactory.toPath(meta),
                         bucket,
                         false,
                         meta);
@@ -111,7 +111,7 @@ public class ChangelogCompactTask implements Serializable {
                         outputStream,
                         results,
                         table,
-                        dataFilePathFactory.toPath(meta.fileName(), meta.externalPath()),
+                        dataFilePathFactory.toPath(meta),
                         bucket,
                         true,
                         meta);
@@ -168,6 +168,7 @@ public class ChangelogCompactTask implements Serializable {
                 .rename(
                         changelogTempPath,
                         dataFilePathFactory.toPath(
+                                baseResult.meta.externalPath(),
                                 realName
                                         + "."
                                         + CompactedChangelogReadOnlyFormat.getIdentifier(

@@ -52,6 +52,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
     private final SimpleStatsConverter statsArraySerializer;
     @Nullable private final DataFileIndexWriter dataFileIndexWriter;
     private final FileSource fileSource;
+    private final boolean isExternalPath;
 
     public RowDataFileWriter(
             FileIO fileIO,
@@ -84,6 +85,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 DataFileIndexWriter.create(
                         fileIO, dataFileToFileIndexPath(path), writeSchema, fileIndexOptions);
         this.fileSource = fileSource;
+        this.isExternalPath = false;
     }
 
     @Override
@@ -111,6 +113,9 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 dataFileIndexWriter == null
                         ? DataFileIndexWriter.EMPTY_RESULT
                         : dataFileIndexWriter.result();
+
+        String externalPath = isExternalPath ? path.getParent().toString() : null;
+
         return DataFileMeta.forAppend(
                 path.getName(),
                 fileIO.getFileSize(path),
@@ -125,6 +130,6 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 indexResult.embeddedIndexBytes(),
                 fileSource,
                 statsPair.getKey(),
-                path.getParent().toString());
+                externalPath);
     }
 }

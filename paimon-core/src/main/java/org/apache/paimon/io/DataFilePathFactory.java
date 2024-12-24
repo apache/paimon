@@ -78,6 +78,7 @@ public class DataFilePathFactory {
         return new Path(parent, name);
     }
 
+    @VisibleForTesting
     public Path toPath(String fileName) {
         return new Path(parent + "/" + fileName);
     }
@@ -94,6 +95,20 @@ public class DataFilePathFactory {
             return new Path(parent + "/" + fileName);
         }
         return new Path(externalPath + "/" + fileName);
+    }
+
+    public Path toPath(DataFileMeta dataFileMeta) {
+        if (dataFileMeta.externalPath() == null) {
+            return new Path(parent + "/" + dataFileMeta.fileName());
+        }
+        return new Path(dataFileMeta.externalPath() + "/" + dataFileMeta.fileName());
+    }
+
+    public Path toIndexPath(DataFileMeta dataFileMeta, String indexFileName) {
+        if (dataFileMeta.externalPath() == null) {
+            return new Path(parent + "/" + indexFileName);
+        }
+        return new Path(dataFileMeta.externalPath() + "/" + indexFileName);
     }
 
     @VisibleForTesting
