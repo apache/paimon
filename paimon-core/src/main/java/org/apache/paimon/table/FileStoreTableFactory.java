@@ -65,11 +65,30 @@ public class FileStoreTableFactory {
                                                 "Schema file not found in location "
                                                         + tablePath
                                                         + ". Please create table first."));
-        return create(fileIO, tablePath, tableSchema, options, CatalogEnvironment.empty());
+
+        Path tableDataPath = getTableDataPath(tableSchema, tablePath);
+        return create(
+                fileIO, tablePath, tableSchema, options, CatalogEnvironment.empty(), tableDataPath);
+    }
+
+    private static Path getTableDataPath(TableSchema tableSchema, Path tablePath) {
+        String externalPath = tableSchema.options().get(CoreOptions.DATA_FILE_EXTERNAL_PATH.key());
+        if (externalPath == null || externalPath.isEmpty()) {
+            return tablePath;
+        }
+        String dbAndTablePath = tablePath.getParent().getName() + "/" + tablePath.getName();
+        return new Path(externalPath, dbAndTablePath);
     }
 
     public static FileStoreTable create(FileIO fileIO, Path tablePath, TableSchema tableSchema) {
-        return create(fileIO, tablePath, tableSchema, new Options(), CatalogEnvironment.empty());
+        Path tableDataPath = getTableDataPath(tableSchema, tablePath);
+        return create(
+                fileIO,
+                tablePath,
+                tableSchema,
+                new Options(),
+                CatalogEnvironment.empty(),
+                tableDataPath);
     }
 
     public static FileStoreTable create(
@@ -77,7 +96,9 @@ public class FileStoreTableFactory {
             Path tablePath,
             TableSchema tableSchema,
             CatalogEnvironment catalogEnvironment) {
-        return create(fileIO, tablePath, tableSchema, new Options(), catalogEnvironment);
+        Path tableDataPath = getTableDataPath(tableSchema, tablePath);
+        return create(
+                fileIO, tablePath, tableSchema, new Options(), catalogEnvironment, tableDataPath);
     }
 
     public static FileStoreTable create(
@@ -85,10 +106,16 @@ public class FileStoreTableFactory {
             Path tablePath,
             TableSchema tableSchema,
             Options dynamicOptions,
-            CatalogEnvironment catalogEnvironment) {
+            CatalogEnvironment catalogEnvironment,
+            Path tableDataPath) {
         FileStoreTable table =
                 createWithoutFallbackBranch(
-                        fileIO, tablePath, tableSchema, dynamicOptions, catalogEnvironment);
+                        fileIO,
+                        tablePath,
+                        tableSchema,
+                        dynamicOptions,
+                        catalogEnvironment,
+                        tableDataPath);
 
         Options options = new Options(table.options());
         String fallbackBranch = options.get(CoreOptions.SCAN_FALLBACK_BRANCH);
@@ -105,7 +132,12 @@ public class FileStoreTableFactory {
                     fallbackBranch);
             FileStoreTable fallbackTable =
                     createWithoutFallbackBranch(
-                            fileIO, tablePath, schema.get(), branchOptions, catalogEnvironment);
+                            fileIO,
+                            tablePath,
+                            schema.get(),
+                            branchOptions,
+                            catalogEnvironment,
+                            tableDataPath);
             table = new FallbackReadFileStoreTable(table, fallbackTable);
         }
 
@@ -117,13 +149,14 @@ public class FileStoreTableFactory {
             Path tablePath,
             TableSchema tableSchema,
             Options dynamicOptions,
-            CatalogEnvironment catalogEnvironment) {
+            CatalogEnvironment catalogEnvironment,
+            Path tableDataPath) {
         FileStoreTable table =
                 tableSchema.primaryKeys().isEmpty()
                         ? new AppendOnlyFileStoreTable(
-                                fileIO, tablePath, tableSchema, catalogEnvironment)
+                                fileIO, tablePath, tableSchema, catalogEnvironment, tableDataPath)
                         : new PrimaryKeyFileStoreTable(
-                                fileIO, tablePath, tableSchema, catalogEnvironment);
+                                fileIO, tablePath, tableSchema, catalogEnvironment, tableDataPath);
         return table.copy(dynamicOptions.toMap());
     }
 }

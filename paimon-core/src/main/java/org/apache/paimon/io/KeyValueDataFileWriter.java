@@ -177,6 +177,7 @@ public abstract class KeyValueDataFileWriter
                         ? DataFileIndexWriter.EMPTY_RESULT
                         : dataFileIndexWriter.result();
 
+        String externalPath = path.isExternalPath() ? path.toString() : null;
         return new DataFileMeta(
                 path.getName(),
                 fileIO.getFileSize(path),
@@ -196,7 +197,7 @@ public abstract class KeyValueDataFileWriter
                 indexResult.embeddedIndexBytes(),
                 fileSource,
                 valueStatsPair.getKey(),
-                null);
+                externalPath);
     }
 
     abstract Pair<SimpleColStats[], SimpleColStats[]> fetchKeyValueStats(SimpleColStats[] rowStats);

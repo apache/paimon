@@ -116,6 +116,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public Path dataLocation() {
+        return wrapped.dataLocation();
+    }
+
+    @Override
     public FileIO fileIO() {
         return wrapped.fileIO();
     }

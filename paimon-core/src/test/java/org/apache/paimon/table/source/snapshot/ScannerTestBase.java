@@ -168,7 +168,7 @@ public abstract class ScannerTestBase {
                                 conf.toMap(),
                                 ""));
         return FileStoreTableFactory.create(
-                fileIO, tablePath, tableSchema, conf, CatalogEnvironment.empty());
+                fileIO, tablePath, tableSchema, conf, CatalogEnvironment.empty(), tablePath);
     }
 
     protected List<Split> toSplits(List<DataSplit> dataSplits) {

@@ -124,12 +124,30 @@ public class CoreOptions implements Serializable {
                                                     + "if there is no primary key, the full row will be used.")
                                     .build());
 
+    public static final ConfigOption<String> DATA_FILE_EXTERNAL_PATH =
+            key("data-file.external-path")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("The path where the data of this table is currently written.");
+
+    // todo, this path is the table schema path, the name will be changed in the later PR.
     @ExcludeFromDocumentation("Internal use only")
     public static final ConfigOption<String> PATH =
             key("path")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("The file path of this table in the filesystem.");
+
+    @ExcludeFromDocumentation("Internal use only")
+    public static final ConfigOption<String> TABLE_DATA_PATH =
+            key("table.data.path")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The data file path of this table in the filesystem. if "
+                                    + DATA_FILE_EXTERNAL_PATH.key()
+                                    + "is not set, it will be same with."
+                                    + PATH.key());
 
     public static final ConfigOption<String> BRANCH =
             key("branch").stringType().defaultValue("main").withDescription("Specify branch name.");
@@ -1552,6 +1570,10 @@ public class CoreOptions implements Serializable {
         return path(options.toMap());
     }
 
+    public Path dataPath() {
+        return dataPath(options.toMap());
+    }
+
     public String branch() {
         return branch(options.toMap());
     }
@@ -1569,6 +1591,14 @@ public class CoreOptions implements Serializable {
 
     public static Path path(Options options) {
         return new Path(options.get(PATH));
+    }
+
+    public static Path dataPath(Map<String, String> options) {
+        return new Path(options.get(TABLE_DATA_PATH.key()));
+    }
+
+    public static Path dataPath(Options options) {
+        return new Path(options.get(TABLE_DATA_PATH));
     }
 
     public TableType type() {
@@ -2362,6 +2392,10 @@ public class CoreOptions implements Serializable {
 
     public boolean statsDenseStore() {
         return options.get(METADATA_STATS_DENSE_STORE);
+    }
+
+    public String dataFileExternalPath() {
+        return options.get(DATA_FILE_EXTERNAL_PATH);
     }
 
     public boolean dataFileThinMode() {

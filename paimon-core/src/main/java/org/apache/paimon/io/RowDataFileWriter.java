@@ -111,6 +111,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 dataFileIndexWriter == null
                         ? DataFileIndexWriter.EMPTY_RESULT
                         : dataFileIndexWriter.result();
+        String externalPath = path.isExternalPath() ? path.toString() : null;
         return DataFileMeta.forAppend(
                 path.getName(),
                 fileIO.getFileSize(path),
@@ -125,6 +126,6 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 indexResult.embeddedIndexBytes(),
                 fileSource,
                 statsPair.getKey(),
-                null);
+                externalPath);
     }
 }

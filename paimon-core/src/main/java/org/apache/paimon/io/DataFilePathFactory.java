@@ -43,6 +43,7 @@ public class DataFilePathFactory {
     private final String changelogFilePrefix;
     private final boolean fileSuffixIncludeCompression;
     private final String fileCompression;
+    private final boolean isExternalPath;
 
     public DataFilePathFactory(
             Path parent,
@@ -50,7 +51,8 @@ public class DataFilePathFactory {
             String dataFilePrefix,
             String changelogFilePrefix,
             boolean fileSuffixIncludeCompression,
-            String fileCompression) {
+            String fileCompression,
+            boolean isExternalPath) {
         this.parent = parent;
         this.uuid = UUID.randomUUID().toString();
         this.pathCount = new AtomicInteger(0);
@@ -59,6 +61,7 @@ public class DataFilePathFactory {
         this.changelogFilePrefix = changelogFilePrefix;
         this.fileSuffixIncludeCompression = fileSuffixIncludeCompression;
         this.fileCompression = fileCompression;
+        this.isExternalPath = isExternalPath;
     }
 
     public Path newPath() {
@@ -74,7 +77,7 @@ public class DataFilePathFactory {
     }
 
     public Path newPath(String prefix) {
-        return new Path(parent, newFileName(prefix));
+        return new Path(parent, newFileName(prefix)).setExternalPath(isExternalPath);
     }
 
     private String newFileName(String prefix) {
@@ -88,21 +91,27 @@ public class DataFilePathFactory {
     }
 
     public Path toPath(DataFileMeta file) {
-        return file.externalPath().map(Path::new).orElse(new Path(parent, file.fileName()));
+        return file.externalPath()
+                .map(Path::new)
+                .orElse(new Path(parent, file.fileName()))
+                .setExternalPath(file.externalPath().isPresent());
     }
 
     public Path toPath(FileEntry file) {
         return Optional.ofNullable(file.externalPath())
                 .map(Path::new)
-                .orElse(new Path(parent, file.fileName()));
+                .orElse(new Path(parent, file.fileName()))
+                .setExternalPath(Optional.ofNullable(file.externalPath()).isPresent());
     }
 
     public Path toAlignedPath(String fileName, DataFileMeta aligned) {
-        return new Path(aligned.externalPathDir().map(Path::new).orElse(parent), fileName);
+        return new Path(aligned.externalPathDir().map(Path::new).orElse(parent), fileName)
+                .setExternalPath(aligned.externalPathDir().isPresent());
     }
 
     public static Path dataFileToFileIndexPath(Path dataFilePath) {
-        return new Path(dataFilePath.getParent(), dataFilePath.getName() + INDEX_PATH_SUFFIX);
+        return new Path(dataFilePath.getParent(), dataFilePath.getName() + INDEX_PATH_SUFFIX)
+                .setExternalPath(dataFilePath.isExternalPath());
     }
 
     public static Path createNewFileIndexFilePath(Path filePath) {
@@ -121,7 +130,9 @@ public class DataFilePathFactory {
             }
         }
         return new Path(
-                filePath.getParent(), fileName.substring(0, dot) + "-" + 1 + INDEX_PATH_SUFFIX);
+                        filePath.getParent(),
+                        fileName.substring(0, dot) + "-" + 1 + INDEX_PATH_SUFFIX)
+                .setExternalPath(filePath.isExternalPath());
     }
 
     public static String formatIdentifier(String fileName) {

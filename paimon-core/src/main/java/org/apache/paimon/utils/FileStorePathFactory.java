@@ -38,7 +38,10 @@ public class FileStorePathFactory {
 
     public static final String BUCKET_PATH_PREFIX = "bucket-";
 
+    // this is the table schema root path
     private final Path root;
+    // this is the table data root path
+    private final Path dataRoot;
     private final String uuid;
     private final InternalRowPartitionComputer partitionComputer;
     private final String formatIdentifier;
@@ -54,6 +57,7 @@ public class FileStorePathFactory {
     private final AtomicInteger indexManifestCount;
     private final AtomicInteger indexFileCount;
     private final AtomicInteger statsFileCount;
+    private final boolean isExternalPath;
 
     public FileStorePathFactory(
             Path root,
@@ -65,7 +69,8 @@ public class FileStorePathFactory {
             boolean legacyPartitionName,
             boolean fileSuffixIncludeCompression,
             String fileCompression,
-            @Nullable String dataFilePathDirectory) {
+            @Nullable String dataFilePathDirectory,
+            Path dataRoot) {
         this.root = root;
         this.dataFilePathDirectory = dataFilePathDirectory;
         this.uuid = UUID.randomUUID().toString();
@@ -83,6 +88,8 @@ public class FileStorePathFactory {
         this.indexManifestCount = new AtomicInteger(0);
         this.indexFileCount = new AtomicInteger(0);
         this.statsFileCount = new AtomicInteger(0);
+        this.dataRoot = dataRoot;
+        this.isExternalPath = !root.equals(dataRoot);
     }
 
     public Path root() {
@@ -126,12 +133,17 @@ public class FileStorePathFactory {
                 dataFilePrefix,
                 changelogFilePrefix,
                 fileSuffixIncludeCompression,
-                fileCompression);
+                fileCompression,
+                isExternalPath);
     }
 
     public Path bucketPath(BinaryRow partition, int bucket) {
-        return new Path(root, relativeBucketPath(partition, bucket));
+        return new Path(dataRoot, relativeBucketPath(partition, bucket));
     }
+
+    // public Path dataBucketPath(BinaryRow partition, int bucket) {
+    //     return new Path(dataRoot, relativeBucketPath(partition, bucket));
+    // }
 
     public Path relativeBucketPath(BinaryRow partition, int bucket) {
         Path relativeBucketPath = new Path(BUCKET_PATH_PREFIX + bucket);
@@ -160,7 +172,7 @@ public class FileStorePathFactory {
                                         partition,
                                         "Partition binary row is null. This is unexpected.")))
                 .stream()
-                .map(p -> new Path(root + "/" + p))
+                .map(p -> new Path(dataRoot + "/" + p))
                 .collect(Collectors.toList());
     }
 

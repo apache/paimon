@@ -54,5 +54,7 @@ public interface DataTable extends InnerTable {
 
     Path location();
 
+    Path dataLocation();
+
     FileIO fileIO();
 }
