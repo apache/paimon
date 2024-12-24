@@ -102,14 +102,14 @@ public class BinlogTable extends AuditLogTable {
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
             DataSplit dataSplit = (DataSplit) split;
+            InternalRow.FieldGetter[] fieldGetters = wrapped.rowType().fieldGetters();
+
             if (dataSplit.isStreaming()) {
                 return new PackChangelogReader(
                         dataRead.createReader(split),
                         (row1, row2) ->
                                 new AuditLogRow(
-                                        readProjection,
-                                        convertToArray(
-                                                row1, row2, wrapped.rowType().fieldGetters())),
+                                        readProjection, convertToArray(row1, row2, fieldGetters)),
                         wrapped.rowType());
             } else {
                 return dataRead.createReader(split)
@@ -117,10 +117,7 @@ public class BinlogTable extends AuditLogTable {
                                 (row) ->
                                         new AuditLogRow(
                                                 readProjection,
-                                                convertToArray(
-                                                        row,
-                                                        null,
-                                                        wrapped.rowType().fieldGetters())));
+                                                convertToArray(row, null, fieldGetters)));
             }
         }
 
