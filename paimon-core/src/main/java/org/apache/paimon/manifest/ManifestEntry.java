@@ -128,7 +128,8 @@ public class ManifestEntry implements FileEntry {
                 file.level(),
                 file.fileName(),
                 file.extraFiles(),
-                file.embeddedIndex());
+                file.embeddedIndex(),
+                file.externalPath());
     }
 
     public ManifestEntry copyWithoutStats() {

@@ -104,11 +104,11 @@ public class DataFilePathFactory {
         return new Path(dataFileMeta.externalPath() + "/" + dataFileMeta.fileName());
     }
 
-    public Path toIndexPath(DataFileMeta dataFileMeta, String indexFileName) {
+    public Path toExtraFilePath(DataFileMeta dataFileMeta, String extraFile) {
         if (dataFileMeta.externalPath() == null) {
-            return new Path(parent + "/" + indexFileName);
+            return new Path(parent + "/" + extraFile);
         }
-        return new Path(dataFileMeta.externalPath() + "/" + indexFileName);
+        return new Path(dataFileMeta.externalPath() + "/" + extraFile);
     }
 
     @VisibleForTesting

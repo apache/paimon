@@ -199,13 +199,14 @@ public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
                 try (FileIndexFormat.Reader indexReader =
                         FileIndexFormat.createReader(
                                 fileIO.newInputStream(
-                                        dataFilePathFactory.toIndexPath(dataFileMeta, indexFile)),
+                                        dataFilePathFactory.toExtraFilePath(
+                                                dataFileMeta, indexFile)),
                                 schemaInfo.fileSchema)) {
                     maintainers = indexReader.readAll();
                 }
                 newIndexPath =
                         createNewFileIndexFilePath(
-                                dataFilePathFactory.toIndexPath(dataFileMeta, indexFile));
+                                dataFilePathFactory.toExtraFilePath(dataFileMeta, indexFile));
             } else {
                 maintainers = new HashMap<>();
                 newIndexPath = dataFileToFileIndexPath(dataFilePathFactory.toPath(dataFileMeta));

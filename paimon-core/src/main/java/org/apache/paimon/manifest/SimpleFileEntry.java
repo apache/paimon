@@ -38,7 +38,7 @@ public class SimpleFileEntry implements FileEntry {
     @Nullable private final byte[] embeddedIndex;
     private final BinaryRow minKey;
     private final BinaryRow maxKey;
-    private final String externalPath;
+    @Nullable private final String externalPath;
 
     public SimpleFileEntry(
             FileKind kind,
@@ -50,7 +50,7 @@ public class SimpleFileEntry implements FileEntry {
             @Nullable byte[] embeddedIndex,
             BinaryRow minKey,
             BinaryRow maxKey,
-            String externalPath) {
+            @Nullable String externalPath) {
         this.kind = kind;
         this.partition = partition;
         this.bucket = bucket;
@@ -107,8 +107,14 @@ public class SimpleFileEntry implements FileEntry {
     }
 
     @Override
+    public String externalPath() {
+        return externalPath;
+    }
+
+    @Override
     public Identifier identifier() {
-        return new Identifier(partition, bucket, level, fileName, extraFiles, embeddedIndex);
+        return new Identifier(
+                partition, bucket, level, fileName, extraFiles, embeddedIndex, externalPath);
     }
 
     @Override
@@ -124,11 +130,6 @@ public class SimpleFileEntry implements FileEntry {
     @Override
     public List<String> extraFiles() {
         return extraFiles;
-    }
-
-    @Override
-    public String externalPath() {
-        return externalPath;
     }
 
     @Override

@@ -27,6 +27,7 @@ import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -241,13 +242,10 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             } else if (changelogProducer == ChangelogProducer.INPUT && isInsertOnly) {
                 List<DataFileMeta> changelogMetas = new ArrayList<>();
                 for (DataFileMeta dataMeta : dataMetas) {
+                    Path newPath = writerFactory.newChangelogPath(0);
                     DataFileMeta changelogMeta =
-                            dataMeta.rename(writerFactory.newChangelogPath(0).getName());
-                    writerFactory.copyFile(
-                            dataMeta.fileName(),
-                            changelogMeta.fileName(),
-                            0,
-                            dataMeta.externalPath());
+                            dataMeta.rename(newPath.getParent().getName(), newPath.getName());
+                    writerFactory.copyFile(dataMeta, changelogMeta, 0);
                     changelogMetas.add(changelogMeta);
                 }
                 newFilesChangelog.addAll(changelogMetas);

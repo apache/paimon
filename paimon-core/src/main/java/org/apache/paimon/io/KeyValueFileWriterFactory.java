@@ -146,11 +146,10 @@ public class KeyValueFileWriterFactory {
         fileIO.deleteQuietly(formatContext.pathFactory(level).toPath(meta));
     }
 
-    public void copyFile(
-            String sourceFileName, String targetFileName, int level, String externalPath)
+    public void copyFile(DataFileMeta sourceMeta, DataFileMeta targetMeta, int level)
             throws IOException {
-        Path sourcePath = formatContext.pathFactory(level).toPath(sourceFileName, externalPath);
-        Path targetPath = formatContext.pathFactory(level).toPath(targetFileName, externalPath);
+        Path sourcePath = formatContext.pathFactory(level).toPath(sourceMeta);
+        Path targetPath = formatContext.pathFactory(level).toPath(targetMeta);
         fileIO.copyFile(sourcePath, targetPath, true);
     }
 

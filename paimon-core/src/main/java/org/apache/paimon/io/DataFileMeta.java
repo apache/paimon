@@ -405,7 +405,7 @@ public class DataFileMeta {
                 externalPath);
     }
 
-    public DataFileMeta rename(String newFileName) {
+    public DataFileMeta rename(String newExternalPath, String newFileName) {
         return new DataFileMeta(
                 newFileName,
                 fileSize,
@@ -424,7 +424,7 @@ public class DataFileMeta {
                 embeddedIndex,
                 fileSource,
                 valueStatsCols,
-                externalPath);
+                newExternalPath);
     }
 
     public DataFileMeta copyWithoutStats() {
@@ -452,7 +452,7 @@ public class DataFileMeta {
     public List<Path> collectFiles(DataFilePathFactory pathFactory) {
         List<Path> paths = new ArrayList<>();
         paths.add(pathFactory.toPath(this));
-        extraFiles.forEach(f -> paths.add(pathFactory.toIndexPath(this, f)));
+        extraFiles.forEach(f -> paths.add(pathFactory.toExtraFilePath(this, f)));
         return paths;
     }
 

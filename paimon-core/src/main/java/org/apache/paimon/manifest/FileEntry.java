@@ -54,9 +54,9 @@ public interface FileEntry {
 
     String fileName();
 
-    Identifier identifier();
-
     String externalPath();
+
+    Identifier identifier();
 
     BinaryRow minKey();
 
@@ -75,6 +75,7 @@ public interface FileEntry {
         public final String fileName;
         public final List<String> extraFiles;
         @Nullable private final byte[] embeddedIndex;
+        @Nullable public final String externalPath;
 
         /* Cache the hash code for the string */
         private Integer hash;
@@ -85,13 +86,15 @@ public interface FileEntry {
                 int level,
                 String fileName,
                 List<String> extraFiles,
-                @Nullable byte[] embeddedIndex) {
+                @Nullable byte[] embeddedIndex,
+                @Nullable String externalPath) {
             this.partition = partition;
             this.bucket = bucket;
             this.level = level;
             this.fileName = fileName;
             this.extraFiles = extraFiles;
             this.embeddedIndex = embeddedIndex;
+            this.externalPath = externalPath;
         }
 
         @Override
@@ -108,7 +111,8 @@ public interface FileEntry {
                     && Objects.equals(partition, that.partition)
                     && Objects.equals(fileName, that.fileName)
                     && Objects.equals(extraFiles, that.extraFiles)
-                    && Objects.deepEquals(embeddedIndex, that.embeddedIndex);
+                    && Objects.deepEquals(embeddedIndex, that.embeddedIndex)
+                    && Objects.deepEquals(externalPath, that.externalPath);
         }
 
         @Override
@@ -121,7 +125,8 @@ public interface FileEntry {
                                 level,
                                 fileName,
                                 extraFiles,
-                                Arrays.hashCode(embeddedIndex));
+                                Arrays.hashCode(embeddedIndex),
+                                externalPath);
             }
             return hash;
         }
@@ -140,6 +145,8 @@ public interface FileEntry {
                     + extraFiles
                     + ", embeddedIndex="
                     + Arrays.toString(embeddedIndex)
+                    + ", externalPath="
+                    + externalPath
                     + '}';
         }
 
