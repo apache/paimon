@@ -53,7 +53,7 @@ class RecordLevelExpireWithMillisecondTest extends PrimaryKeyTableTestBase {
                 Schema.newBuilder()
                         .column("pt", DataTypes.INT())
                         .column("pk", DataTypes.INT())
-                        .column("col1", DataTypes.BIGINT())
+                        .column("col1", DataTypes.BIGINT().notNull())
                         .partitionKeys("pt")
                         .primaryKey("pk", "pt")
                         .options(tableOptions().toMap())

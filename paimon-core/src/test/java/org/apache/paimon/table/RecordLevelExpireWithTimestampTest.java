@@ -46,7 +46,7 @@ class RecordLevelExpireWithTimestampTest extends RecordLevelExpireWithTimestampB
                 Schema.newBuilder()
                         .column("pt", DataTypes.INT())
                         .column("pk", DataTypes.INT())
-                        .column("col1", DataTypes.TIMESTAMP())
+                        .column("col1", DataTypes.TIMESTAMP().notNull())
                         .partitionKeys("pt")
                         .primaryKey("pk", "pt")
                         .options(tableOptions().toMap())

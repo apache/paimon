@@ -46,7 +46,8 @@ class SchemaValidationTest {
                 Arrays.asList(
                         new DataField(0, "f0", DataTypes.INT()),
                         new DataField(1, "f1", DataTypes.INT()),
-                        new DataField(2, "f2", DataTypes.INT()));
+                        new DataField(2, "f2", DataTypes.INT()),
+                        new DataField(3, "f3", DataTypes.STRING()));
         List<String> partitionKeys = Collections.singletonList("f0");
         List<String> primaryKeys = Collections.singletonList("f1");
         options.put(BUCKET.key(), String.valueOf(-1));
@@ -102,5 +103,23 @@ class SchemaValidationTest {
         assertThatThrownBy(() -> validateTableSchemaExec(options))
                 .hasMessageContaining(
                         "[scan.snapshot-id] must be null when you set [scan.timestamp-millis,scan.timestamp]");
+    }
+
+    @Test
+    public void testRecordLevelTimeField() {
+        Map<String, String> options = new HashMap<>(2);
+        options.put(CoreOptions.RECORD_LEVEL_TIME_FIELD.key(), "f0");
+        options.put(CoreOptions.RECORD_LEVEL_EXPIRE_TIME.key(), "1 m");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining("Time field f0 for record-level expire should be not null");
+
+        options.put(CoreOptions.RECORD_LEVEL_TIME_FIELD.key(), "f10");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining("Can not find time field f10 for record level expire.");
+
+        options.put(CoreOptions.RECORD_LEVEL_TIME_FIELD.key(), "f3");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining(
+                        "The record level time field type should be one of INT, BIGINT, or TIMESTAMP, but field type is STRING.");
     }
 }
