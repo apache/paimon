@@ -40,7 +40,8 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
     public void testExpireSnapshotsProcedure() throws Exception {
         sql(
                 "CREATE TABLE word_count ( word STRING PRIMARY KEY NOT ENFORCED, cnt INT)"
-                        + " WITH ( 'num-sorted-run.compaction-trigger' = '9999' )");
+                        + " WITH ( 'num-sorted-run.compaction-trigger' = '9999',"
+                        + "'write-only' = 'true', 'snapshot.num-retained.min' = '1')");
         FileStoreTable table = paimonTable("word_count");
         SnapshotManager snapshotManager = table.snapshotManager();
 
@@ -81,7 +82,9 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
     public void testExpireSnapshotsAction() throws Exception {
         sql(
                 "CREATE TABLE word_count ( word STRING PRIMARY KEY NOT ENFORCED, cnt INT)"
-                        + " WITH ( 'num-sorted-run.compaction-trigger' = '9999' )");
+                        + " WITH ( 'num-sorted-run.compaction-trigger' = '9999',"
+                        + "'write-only' = 'true', 'snapshot.num-retained.min' = '1')");
+
         FileStoreTable table = paimonTable("word_count");
         StreamExecutionEnvironment env =
                 streamExecutionEnvironmentBuilder().streamingMode().build();
@@ -160,6 +163,35 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
                 .withStreamExecutionEnvironment(env)
                 .run();
         checkSnapshots(snapshotManager, 6, 6);
+    }
+
+    @Test
+    public void testLoadTablePropsFirstAndOptions() throws Exception {
+        sql(
+                "CREATE TABLE word_count ( word STRING PRIMARY KEY NOT ENFORCED, cnt INT)"
+                        + " WITH ( 'num-sorted-run.compaction-trigger' = '9999',"
+                        + "'write-only' = 'true', 'snapshot.num-retained.min' = '1', 'snapshot.num-retained.max' = '5')");
+        FileStoreTable table = paimonTable("word_count");
+        SnapshotManager snapshotManager = table.snapshotManager();
+
+        // initially prepare 6 snapshots, expected snapshots (1, 2, 3, 4, 5, 6)
+        for (int i = 0; i < 6; ++i) {
+            sql("INSERT INTO word_count VALUES ('" + String.valueOf(i) + "', " + i + ")");
+        }
+        checkSnapshots(snapshotManager, 1, 6);
+
+        // snapshot.num-retained.max is 5, expected snapshots (2, 3, 4, 5, 6)
+        sql("CALL sys.expire_snapshots(`table` => 'default.word_count')");
+        checkSnapshots(snapshotManager, 2, 6);
+
+        // older_than => timestamp of snapshot 6, snapshot.expire.limit => 1, expected snapshots (3,
+        // 4, 5, 6)
+        Timestamp ts6 = new Timestamp(snapshotManager.latestSnapshot().timeMillis());
+        sql(
+                "CALL sys.expire_snapshots(`table` => 'default.word_count', older_than => '"
+                        + ts6.toString()
+                        + "', options => 'snapshot.expire.limit=1')");
+        checkSnapshots(snapshotManager, 3, 6);
     }
 
     private void checkSnapshots(SnapshotManager sm, int earliest, int latest) throws IOException {

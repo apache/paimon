@@ -20,6 +20,8 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.ParameterUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
@@ -28,6 +30,9 @@ import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
@@ -41,7 +46,10 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
 public class CompactManifestProcedure extends BaseProcedure {
 
     private static final ProcedureParameter[] PARAMETERS =
-            new ProcedureParameter[] {ProcedureParameter.required("table", StringType)};
+            new ProcedureParameter[] {
+                ProcedureParameter.required("table", StringType),
+                ProcedureParameter.optional("options", StringType)
+            };
 
     private static final StructType OUTPUT_TYPE =
             new StructType(
@@ -67,7 +75,14 @@ public class CompactManifestProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
 
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
+        String options = args.isNullAt(1) ? null : args.getString(1);
+
         FileStoreTable table = (FileStoreTable) loadSparkTable(tableIdent).getTable();
+        Map<String, String> dynamicOptions = new HashMap<>();
+        if (!StringUtils.isNullOrWhitespaceOnly(options)) {
+            dynamicOptions.putAll(ParameterUtils.parseCommaSeparatedKeyValues(options));
+        }
+        table = table.copy(dynamicOptions);
 
         try (FileStoreCommit commit =
                 table.store()

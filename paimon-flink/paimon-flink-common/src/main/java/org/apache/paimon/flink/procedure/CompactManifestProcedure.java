@@ -21,13 +21,16 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.ParameterUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
-import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 /** Compact manifest file to reduce deleted manifest entries. */
 public class CompactManifestProcedure extends ProcedureBase {
@@ -39,15 +42,21 @@ public class CompactManifestProcedure extends ProcedureBase {
         return "compact_manifest";
     }
 
-    @ProcedureHint(argument = {@ArgumentHint(name = "table", type = @DataTypeHint("STRING"))})
-    public String[] call(ProcedureContext procedureContext, String tableId) throws Exception {
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true)
+            })
+    public String[] call(ProcedureContext procedureContext, String tableId, String options)
+            throws Exception {
 
-        FileStoreTable table =
-                (FileStoreTable)
-                        table(tableId)
-                                .copy(
-                                        Collections.singletonMap(
-                                                CoreOptions.COMMIT_USER_PREFIX.key(), COMMIT_USER));
+        FileStoreTable table = (FileStoreTable) table(tableId);
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.COMMIT_USER_PREFIX.key(), COMMIT_USER);
+        if (!StringUtils.isNullOrWhitespaceOnly(options)) {
+            dynamicOptions.putAll(ParameterUtils.parseCommaSeparatedKeyValues(options));
+        }
+        table = table.copy(dynamicOptions);
 
         try (FileStoreCommit commit =
                 table.store()
