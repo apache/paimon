@@ -19,10 +19,14 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.columnar.ArrayColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
+import org.apache.paimon.data.columnar.MapColumnVector;
+import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
+import org.apache.paimon.data.columnar.VectorizedRowIterator;
 import org.apache.paimon.data.columnar.heap.ElementCountable;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -383,13 +387,14 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
         /** Advances to the next batch of rows. Returns false if there are no more. */
         private boolean nextBatch(ParquetReaderBatch batch) throws IOException {
+            if (rowsReturned >= totalRowCount) {
+                return false;
+            }
+
             for (WritableColumnVector v : batch.writableVectors) {
                 v.reset();
             }
             batch.columnarBatch.setNumRows(0);
-            if (rowsReturned >= totalRowCount) {
-                return false;
-            }
             if (rowsReturned == totalCountLoadedSoFar) {
                 readNextRowGroup();
             } else {
@@ -524,7 +529,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     private static class ParquetReaderBatch {
 
         private final WritableColumnVector[] writableVectors;
-        protected final VectorizedColumnBatch columnarBatch;
+        private final boolean containsNestedColumn;
+        private final VectorizedColumnBatch columnarBatch;
         private final Pool.Recycler<ParquetReaderBatch> recycler;
 
         private final ColumnarRowIterator result;
@@ -535,11 +541,30 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 VectorizedColumnBatch columnarBatch,
                 Pool.Recycler<ParquetReaderBatch> recycler) {
             this.writableVectors = writableVectors;
+            this.containsNestedColumn =
+                    Arrays.stream(writableVectors)
+                            .anyMatch(
+                                    vector ->
+                                            vector instanceof MapColumnVector
+                                                    || vector instanceof RowColumnVector
+                                                    || vector instanceof ArrayColumnVector);
             this.columnarBatch = columnarBatch;
             this.recycler = recycler;
+
+            /*
+             * See <a href="https://github.com/apache/paimon/pull/3883">Reverted #3883</a>.
+             * If a FileRecordIterator contains a batch and the batch's nested vectors are not compactly,
+             * it's not safe to use VectorizedColumnBatch directly. Currently, we should use {@link #next()}
+             * to handle it row by row.
+             *
+             * <p>TODO: delete this after #3883 is fixed completely.
+             */
             this.result =
-                    new ColumnarRowIterator(
-                            filePath, new ColumnarRow(columnarBatch), this::recycle);
+                    containsNestedColumn
+                            ? new ColumnarRowIterator(
+                                    filePath, new ColumnarRow(columnarBatch), this::recycle)
+                            : new VectorizedRowIterator(
+                                    filePath, new ColumnarRow(columnarBatch), this::recycle);
         }
 
         public void recycle() {

@@ -19,6 +19,7 @@
 package org.apache.paimon.data;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
@@ -184,6 +185,11 @@ public final class GenericRow implements InternalRow, Serializable {
     @Override
     public byte[] getBinary(int pos) {
         return (byte[]) this.fields[pos];
+    }
+
+    @Override
+    public Variant getVariant(int pos) {
+        return (Variant) this.fields[pos];
     }
 
     @Override

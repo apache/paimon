@@ -553,6 +553,27 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
     }
   }
 
+  test("Paimon DDL with hive catalog: create external table on managed table location") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        spark.sql(s"USE $catalogName")
+        withDatabase("paimon_db") {
+          spark.sql(s"CREATE DATABASE IF NOT EXISTS paimon_db")
+          spark.sql(s"USE paimon_db")
+          withTable("external_tbl", "managed_tbl") {
+            spark.sql(s"CREATE TABLE managed_tbl (id INT) USING paimon")
+            spark.sql("INSERT INTO managed_tbl VALUES (1)")
+            checkAnswer(spark.sql("SELECT * FROM managed_tbl"), Row(1))
+
+            val tablePath = loadTable("paimon_db", "managed_tbl").location().toString
+            spark.sql(s"CREATE TABLE external_tbl (id INT) USING paimon LOCATION '$tablePath'")
+            checkAnswer(spark.sql("SELECT * FROM external_tbl"), Row(1))
+            assert(loadTable("paimon_db", "external_tbl").location().toString.equals(tablePath))
+          }
+        }
+    }
+  }
+
   test("Paimon DDL with hive catalog: case sensitive") {
     Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
       catalogName =>

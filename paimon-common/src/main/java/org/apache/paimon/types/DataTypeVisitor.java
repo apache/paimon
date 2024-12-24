@@ -62,6 +62,8 @@ public interface DataTypeVisitor<R> {
 
     R visit(LocalZonedTimestampType localZonedTimestampType);
 
+    R visit(VariantType variantType);
+
     R visit(ArrayType arrayType);
 
     R visit(MultisetType multisetType);

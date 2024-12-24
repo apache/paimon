@@ -50,7 +50,5 @@ case class Spark3ResolutionRules(session: SparkSession)
         .getOrElse {
           PaimonShowTablesExtendedCommand(catalog.asTableCatalog, ns, pattern, output)
         }
-
   }
-
 }

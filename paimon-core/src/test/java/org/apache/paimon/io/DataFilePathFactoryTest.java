@@ -55,8 +55,9 @@ public class DataFilePathFactoryTest {
                                             + "."
                                             + CoreOptions.FILE_FORMAT.defaultValue()));
         }
-        assertThat(pathFactory.toPath("my-data-file-name"))
-                .isEqualTo(new Path(tempDir.toString() + "/bucket-123/my-data-file-name"));
+        assertThat(pathFactory.newPath("my-data-file-name").toString())
+                .startsWith(
+                        new Path(tempDir.toString() + "/bucket-123/my-data-file-name").toString());
     }
 
     @Test
@@ -83,8 +84,9 @@ public class DataFilePathFactoryTest {
                                             + "."
                                             + CoreOptions.FILE_FORMAT.defaultValue()));
         }
-        assertThat(pathFactory.toPath("my-data-file-name"))
-                .isEqualTo(
-                        new Path(tempDir.toString() + "/dt=20211224/bucket-123/my-data-file-name"));
+        assertThat(pathFactory.newPath("my-data-file-name").toString())
+                .startsWith(
+                        new Path(tempDir.toString() + "/dt=20211224/bucket-123/my-data-file-name")
+                                .toString());
     }
 }

@@ -25,6 +25,8 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.BytesColumnVector.Bytes;
+import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.data.variant.Variant;
 
 import java.io.Serializable;
 
@@ -37,12 +39,6 @@ import java.io.Serializable;
 public class VectorizedColumnBatch implements Serializable {
 
     private static final long serialVersionUID = 8180323238728166155L;
-
-    /**
-     * This number is carefully chosen to minimize overhead and typically allows one
-     * VectorizedColumnBatch to fit in cache.
-     */
-    public static final int DEFAULT_SIZE = 2048;
 
     private int numRows;
 
@@ -130,6 +126,13 @@ public class VectorizedColumnBatch implements Serializable {
 
     public InternalRow getRow(int rowId, int colId) {
         return ((RowColumnVector) columns[colId]).getRow(rowId);
+    }
+
+    public Variant getVariant(int rowId, int colId) {
+        InternalRow row = getRow(rowId, colId);
+        byte[] value = row.getBinary(0);
+        byte[] metadata = row.getBinary(1);
+        return new GenericVariant(value, metadata);
     }
 
     public InternalMap getMap(int rowId, int colId) {

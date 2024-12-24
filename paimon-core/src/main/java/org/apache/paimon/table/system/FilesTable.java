@@ -370,9 +370,9 @@ public class FilesTable implements ReadonlyTable {
                 DataSplit dataSplit,
                 RowDataToObjectArrayConverter partitionConverter,
                 Function<Long, RowDataToObjectArrayConverter> keyConverters,
-                DataFileMeta dataFileMeta,
+                DataFileMeta file,
                 SimpleStatsEvolutions simpleStatsEvolutions) {
-            StatsLazyGetter statsGetter = new StatsLazyGetter(dataFileMeta, simpleStatsEvolutions);
+            StatsLazyGetter statsGetter = new StatsLazyGetter(file, simpleStatsEvolutions);
             @SuppressWarnings("unchecked")
             Supplier<Object>[] fields =
                     new Supplier[] {
@@ -386,43 +386,43 @@ public class FilesTable implements ReadonlyTable {
                         dataSplit::bucket,
                         () ->
                                 BinaryString.fromString(
-                                        dataSplit.bucketPath() + "/" + dataFileMeta.fileName()),
+                                        file.externalPath()
+                                                .orElse(
+                                                        dataSplit.bucketPath()
+                                                                + "/"
+                                                                + file.fileName())),
                         () ->
                                 BinaryString.fromString(
-                                        DataFilePathFactory.formatIdentifier(
-                                                dataFileMeta.fileName())),
-                        dataFileMeta::schemaId,
-                        dataFileMeta::level,
-                        dataFileMeta::rowCount,
-                        dataFileMeta::fileSize,
+                                        DataFilePathFactory.formatIdentifier(file.fileName())),
+                        file::schemaId,
+                        file::level,
+                        file::rowCount,
+                        file::fileSize,
                         () ->
-                                dataFileMeta.minKey().getFieldCount() <= 0
+                                file.minKey().getFieldCount() <= 0
                                         ? null
                                         : BinaryString.fromString(
                                                 Arrays.toString(
                                                         keyConverters
-                                                                .apply(dataFileMeta.schemaId())
-                                                                .convert(dataFileMeta.minKey()))),
+                                                                .apply(file.schemaId())
+                                                                .convert(file.minKey()))),
                         () ->
-                                dataFileMeta.maxKey().getFieldCount() <= 0
+                                file.maxKey().getFieldCount() <= 0
                                         ? null
                                         : BinaryString.fromString(
                                                 Arrays.toString(
                                                         keyConverters
-                                                                .apply(dataFileMeta.schemaId())
-                                                                .convert(dataFileMeta.maxKey()))),
+                                                                .apply(file.schemaId())
+                                                                .convert(file.maxKey()))),
                         () -> BinaryString.fromString(statsGetter.nullValueCounts().toString()),
                         () -> BinaryString.fromString(statsGetter.lowerValueBounds().toString()),
                         () -> BinaryString.fromString(statsGetter.upperValueBounds().toString()),
-                        dataFileMeta::minSequenceNumber,
-                        dataFileMeta::maxSequenceNumber,
-                        dataFileMeta::creationTime,
+                        file::minSequenceNumber,
+                        file::maxSequenceNumber,
+                        file::creationTime,
                         () ->
                                 BinaryString.fromString(
-                                        dataFileMeta
-                                                .fileSource()
-                                                .map(FileSource::toString)
-                                                .orElse(null))
+                                        file.fileSource().map(FileSource::toString).orElse(null))
                     };
 
             return new LazyGenericRow(fields);

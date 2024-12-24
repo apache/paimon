@@ -100,6 +100,8 @@ public enum DataTypeRoot {
             DataTypeFamily.TIMESTAMP,
             DataTypeFamily.EXTENSION),
 
+    VARIANT(DataTypeFamily.PREDEFINED),
+
     ARRAY(DataTypeFamily.CONSTRUCTED, DataTypeFamily.COLLECTION),
 
     MULTISET(DataTypeFamily.CONSTRUCTED, DataTypeFamily.COLLECTION),

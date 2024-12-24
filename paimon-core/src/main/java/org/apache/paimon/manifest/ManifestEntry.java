@@ -26,6 +26,8 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
@@ -92,6 +94,12 @@ public class ManifestEntry implements FileEntry {
         return file.fileName();
     }
 
+    @Nullable
+    @Override
+    public String externalPath() {
+        return file.externalPath().orElse(null);
+    }
+
     @Override
     public BinaryRow minKey() {
         return file.minKey();
@@ -123,7 +131,8 @@ public class ManifestEntry implements FileEntry {
                 file.level(),
                 file.fileName(),
                 file.extraFiles(),
-                file.embeddedIndex());
+                file.embeddedIndex(),
+                externalPath());
     }
 
     public ManifestEntry copyWithoutStats() {

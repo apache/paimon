@@ -169,6 +169,7 @@ public class FileMetaUtils {
                 Collections.emptyList(),
                 null,
                 FileSource.APPEND,
+                null,
                 null);
     }
 

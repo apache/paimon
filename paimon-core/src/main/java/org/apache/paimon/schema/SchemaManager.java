@@ -262,7 +262,9 @@ public class SchemaManager implements Serializable {
             Map<String, String> newOptions = newSchema.options();
             newOptions.forEach(
                     (key, value) -> {
+                        // ignore `owner` and `path`
                         if (!key.equals(Catalog.OWNER_PROP)
+                                && !key.equals(CoreOptions.PATH.key())
                                 && (!existsOptions.containsKey(key)
                                         || !existsOptions.get(key).equals(value))) {
                             throw new RuntimeException(

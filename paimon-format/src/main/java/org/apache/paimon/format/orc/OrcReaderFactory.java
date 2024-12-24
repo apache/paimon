@@ -23,6 +23,7 @@ import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
+import org.apache.paimon.data.columnar.VectorizedRowIterator;
 import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -158,7 +159,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
         private final Pool.Recycler<OrcReaderBatch> recycler;
 
         private final VectorizedColumnBatch paimonColumnBatch;
-        private final ColumnarRowIterator result;
+        private final VectorizedRowIterator result;
 
         protected OrcReaderBatch(
                 final Path filePath,
@@ -169,7 +170,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             this.recycler = checkNotNull(recycler);
             this.paimonColumnBatch = paimonColumnBatch;
             this.result =
-                    new ColumnarRowIterator(
+                    new VectorizedRowIterator(
                             filePath, new ColumnarRow(paimonColumnBatch), this::recycle);
         }
 

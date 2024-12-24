@@ -26,6 +26,7 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMeta08Serializer;
 import org.apache.paimon.io.DataFileMeta09Serializer;
+import org.apache.paimon.io.DataFileMeta10LegacySerializer;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.DataInputDeserializer;
@@ -47,11 +48,12 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 /** {@link VersionedSerializer} for {@link CommitMessage}. */
 public class CommitMessageSerializer implements VersionedSerializer<CommitMessage> {
 
-    private static final int CURRENT_VERSION = 5;
+    private static final int CURRENT_VERSION = 6;
 
     private final DataFileMetaSerializer dataFileSerializer;
     private final IndexFileMetaSerializer indexEntrySerializer;
 
+    private DataFileMeta10LegacySerializer dataFileMeta10LegacySerializer;
     private DataFileMeta09Serializer dataFile09Serializer;
     private DataFileMeta08Serializer dataFile08Serializer;
     private IndexFileMeta09Serializer indexEntry09Serializer;
@@ -129,8 +131,13 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
 
     private IOExceptionSupplier<List<DataFileMeta>> fileDeserializer(
             int version, DataInputView view) {
-        if (version >= 4) {
+        if (version >= 6) {
             return () -> dataFileSerializer.deserializeList(view);
+        } else if (version == 4 || version == 5) {
+            if (dataFileMeta10LegacySerializer == null) {
+                dataFileMeta10LegacySerializer = new DataFileMeta10LegacySerializer();
+            }
+            return () -> dataFileMeta10LegacySerializer.deserializeList(view);
         } else if (version == 3) {
             if (dataFile09Serializer == null) {
                 dataFile09Serializer = new DataFileMeta09Serializer();

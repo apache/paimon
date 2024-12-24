@@ -96,8 +96,7 @@ ALTER TABLE my_table RENAME c0 TO c1;
 
 ## Dropping Columns
 
-The following SQL drops two columns `c1` and `c2` from table `my_table`. In hive catalog, you need to ensure disable `hive.metastore.disallow.incompatible.col.type.changes` in your hive server,
-otherwise this operation may fail, throws an exception like `The following columns have types incompatible with the existing columns in their respective positions`.
+The following SQL drops two columns `c1` and `c2` from table `my_table`.
 
 ```sql
 ALTER TABLE my_table DROP (c1, c2);
@@ -106,6 +105,14 @@ ALTER TABLE my_table DROP (c1, c2);
 {{< hint info >}}
 To drop a column in a row type, see [Changing Column Type](#changing-column-type).
 {{< /hint >}}
+
+In hive catalog, you need to ensure:
+
+1. disable `hive.metastore.disallow.incompatible.col.type.changes` in your hive server
+2. or set `hadoop.hive.metastore.disallow.incompatible.col.type.changes=false` in your paimon catalog.
+
+Otherwise this operation may fail, throws an exception like `The following columns have types incompatible with the
+existing columns in their respective positions`.
 
 ## Dropping Partitions
 

@@ -167,7 +167,7 @@ public class ArrowBatchConverterTest {
             rows.add(GenericRow.of(randomRowValues));
         }
 
-        return getRecordIterator(PRIMITIVE_TYPE, rows, projection);
+        return getRecordIterator(PRIMITIVE_TYPE, rows, projection, true);
     }
 
     @TestTemplate
@@ -244,7 +244,7 @@ public class ArrowBatchConverterTest {
         }
 
         RecordReader.RecordIterator<InternalRow> iterator =
-                getRecordIterator(nestedArrayType, rows);
+                getRecordIterator(nestedArrayType, rows, null, testMode.equals("per_row"));
         try (RootAllocator allocator = new RootAllocator()) {
             VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(nestedArrayType, allocator);
             ArrowBatchConverter arrowWriter = createArrowWriter(iterator, nestedArrayType, vsr);
@@ -308,7 +308,8 @@ public class ArrowBatchConverterTest {
             expectedMaps.add(map1);
         }
 
-        RecordReader.RecordIterator<InternalRow> iterator = getRecordIterator(nestedMapType, rows);
+        RecordReader.RecordIterator<InternalRow> iterator =
+                getRecordIterator(nestedMapType, rows, null, testMode.equals("per_row"));
         try (RootAllocator allocator = new RootAllocator()) {
             VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(nestedMapType, allocator);
             ArrowBatchConverter arrowWriter = createArrowWriter(iterator, nestedMapType, vsr);
@@ -365,7 +366,11 @@ public class ArrowBatchConverterTest {
         InternalRow row3 = GenericRow.of(new GenericMap(map3));
 
         RecordReader.RecordIterator<InternalRow> iterator =
-                getRecordIterator(nestedMapRowType, Arrays.asList(row1, row2, row3));
+                getRecordIterator(
+                        nestedMapRowType,
+                        Arrays.asList(row1, row2, row3),
+                        null,
+                        testMode.equals("per_row"));
         try (RootAllocator allocator = new RootAllocator()) {
             VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(nestedMapRowType, allocator);
             ArrowBatchConverter arrowWriter = createArrowWriter(iterator, nestedMapRowType, vsr);
@@ -423,7 +428,8 @@ public class ArrowBatchConverterTest {
             rows.add(GenericRow.of(GenericRow.of(randomRowValues)));
         }
 
-        RecordReader.RecordIterator<InternalRow> iterator = getRecordIterator(nestedRowType, rows);
+        RecordReader.RecordIterator<InternalRow> iterator =
+                getRecordIterator(nestedRowType, rows, null, testMode.equals("per_row"));
         try (RootAllocator allocator = new RootAllocator()) {
             VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(nestedRowType, allocator);
             ArrowBatchConverter arrowWriter = createArrowWriter(iterator, nestedRowType, vsr);
@@ -464,7 +470,8 @@ public class ArrowBatchConverterTest {
             rows.add(GenericRow.of(i));
         }
 
-        RecordReader.RecordIterator<InternalRow> iterator = getRecordIterator(rowType, rows);
+        RecordReader.RecordIterator<InternalRow> iterator =
+                getRecordIterator(rowType, rows, null, true);
         try (RootAllocator allocator = new RootAllocator()) {
             VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(rowType, allocator);
             ArrowBatchConverter arrowWriter = createArrowWriter(iterator, rowType, vsr);
@@ -515,7 +522,7 @@ public class ArrowBatchConverterTest {
         int[] projection = readEmpty ? new int[0] : null;
         RecordReader.RecordIterator<InternalRow> iterator =
                 getApplyDeletionFileRecordIterator(
-                        rowType, rows, deleted, Collections.singletonList("pk"), projection);
+                        rowType, rows, deleted, Collections.singletonList("pk"), projection, true);
         if (readEmpty) {
             testReadEmpty(iterator, numRows - deleted.size());
         } else {
@@ -588,7 +595,12 @@ public class ArrowBatchConverterTest {
         Set<Integer> deleted = getDeletedPks(numRows);
         RecordReader.RecordIterator<InternalRow> iterator =
                 getApplyDeletionFileRecordIterator(
-                        nestedArrayType, rows, deleted, Collections.singletonList("pk"), null);
+                        nestedArrayType,
+                        rows,
+                        deleted,
+                        Collections.singletonList("pk"),
+                        null,
+                        testMode.equals("per_row"));
         try (RootAllocator allocator = new RootAllocator()) {
             Set<Integer> expectedPks = getExpectedPks(numRows, deleted);
             VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(nestedArrayType, allocator);
@@ -666,7 +678,12 @@ public class ArrowBatchConverterTest {
         Set<Integer> deleted = getDeletedPks(numRows);
         RecordReader.RecordIterator<InternalRow> iterator =
                 getApplyDeletionFileRecordIterator(
-                        nestedMapType, rows, deleted, Collections.singletonList("pk"), null);
+                        nestedMapType,
+                        rows,
+                        deleted,
+                        Collections.singletonList("pk"),
+                        null,
+                        testMode.equals("per_row"));
         try (RootAllocator allocator = new RootAllocator()) {
             Set<Integer> expectedPks = getExpectedPks(numRows, deleted);
             VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(nestedMapType, allocator);
@@ -735,7 +752,12 @@ public class ArrowBatchConverterTest {
         Set<Integer> deleted = getDeletedPks(numRows);
         RecordReader.RecordIterator<InternalRow> iterator =
                 getApplyDeletionFileRecordIterator(
-                        nestedRowType, rows, deleted, Collections.singletonList("pk"), null);
+                        nestedRowType,
+                        rows,
+                        deleted,
+                        Collections.singletonList("pk"),
+                        null,
+                        testMode.equals("per_row"));
         try (RootAllocator allocator = new RootAllocator()) {
             Set<Integer> expectedPks = getExpectedPks(numRows, deleted);
             VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(nestedRowType, allocator);
@@ -803,14 +825,15 @@ public class ArrowBatchConverterTest {
     }
 
     private RecordReader.RecordIterator<InternalRow> getRecordIterator(
-            RowType rowType, List<InternalRow> rows) throws Exception {
-        return getRecordIterator(rowType, rows, null);
-    }
-
-    private RecordReader.RecordIterator<InternalRow> getRecordIterator(
-            RowType rowType, List<InternalRow> rows, @Nullable int[] projection) throws Exception {
+            RowType rowType,
+            List<InternalRow> rows,
+            @Nullable int[] projection,
+            boolean canTestParquet)
+            throws Exception {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.FILE_FORMAT.key(), RND.nextBoolean() ? "orc" : "parquet");
+        options.put(
+                CoreOptions.FILE_FORMAT.key(),
+                canTestParquet && RND.nextBoolean() ? "parquet" : "orc");
         FileStoreTable table = createFileStoreTable(rowType, Collections.emptyList(), options);
 
         StreamTableWrite write = table.newStreamWriteBuilder().newWrite();
@@ -832,12 +855,15 @@ public class ArrowBatchConverterTest {
             List<GenericRow> rows,
             Set<Integer> deletedPks,
             List<String> primaryKeys,
-            @Nullable int[] projection)
+            @Nullable int[] projection,
+            boolean canTestParquet)
             throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         options.put(CoreOptions.BUCKET.key(), "1");
-        options.put(CoreOptions.FILE_FORMAT.key(), RND.nextBoolean() ? "orc" : "parquet");
+        options.put(
+                CoreOptions.FILE_FORMAT.key(),
+                canTestParquet && RND.nextBoolean() ? "parquet" : "orc");
         FileStoreTable table = createFileStoreTable(rowType, primaryKeys, options);
 
         StreamTableWrite write = table.newStreamWriteBuilder().newWrite();

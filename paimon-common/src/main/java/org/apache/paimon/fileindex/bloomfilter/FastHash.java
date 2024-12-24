@@ -42,6 +42,7 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 
 import net.openhft.hashing.LongHashFunction;
 
@@ -157,6 +158,11 @@ public interface FastHash {
 
                 return getLongHash(((Timestamp) o).toMicros());
             };
+        }
+
+        @Override
+        public FastHash visit(VariantType variantType) {
+            throw new UnsupportedOperationException("Does not support type variant");
         }
 
         @Override

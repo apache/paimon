@@ -195,10 +195,7 @@ public class ContainsLevelsTest {
                 comparator,
                 keyType,
                 new LookupLevels.ContainsValueProcessor(),
-                file ->
-                        createReaderFactory()
-                                .createRecordReader(
-                                        0, file.fileName(), file.fileSize(), file.level()),
+                file -> createReaderFactory().createRecordReader(file),
                 file -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
                 new HashLookupStoreFactory(
                         new CacheManager(MemorySize.ofMebiBytes(1)),

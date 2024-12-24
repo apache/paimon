@@ -167,25 +167,24 @@ trait ExpressionHelper extends PredicateHelper {
       condition: Expression,
       output: Seq[Attribute],
       rowType: RowType,
-      ignoreFailure: Boolean = false): Option[Predicate] = {
+      ignorePartialFailure: Boolean = false): Option[Predicate] = {
     val converter = new SparkFilterConverter(rowType)
     val filters = normalizeExprs(Seq(condition), output)
       .flatMap(splitConjunctivePredicates(_).flatMap {
         f =>
           val filter = translateFilter(f, supportNestedPredicatePushdown = true)
-          if (filter.isEmpty && !ignoreFailure) {
+          if (filter.isEmpty && !ignorePartialFailure) {
             throw new RuntimeException(
               "Exec update failed:" +
                 s" cannot translate expression to source filter: $f")
           }
           filter
       })
-      .toArray
 
-    if (filters.isEmpty) {
+    val predicates = filters.map(converter.convert(_, ignorePartialFailure)).filter(_ != null)
+    if (predicates.isEmpty) {
       None
     } else {
-      val predicates = filters.map(converter.convertIgnoreFailure)
       Some(PredicateBuilder.and(predicates: _*))
     }
   }

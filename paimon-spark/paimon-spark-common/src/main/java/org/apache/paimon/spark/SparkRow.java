@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.spark.util.shim.TypeUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
@@ -34,6 +35,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.spark.sql.Row;
+import org.apache.spark.sql.paimon.shims.SparkShimLoader;
 
 import java.io.Serializable;
 import java.sql.Date;
@@ -141,6 +143,11 @@ public class SparkRow implements InternalRow, Serializable {
     @Override
     public byte[] getBinary(int i) {
         return row.getAs(i);
+    }
+
+    @Override
+    public Variant getVariant(int i) {
+        return SparkShimLoader.getSparkShim().toPaimonVariant(row.getAs(i));
     }
 
     @Override
@@ -298,6 +305,11 @@ public class SparkRow implements InternalRow, Serializable {
         @Override
         public byte[] getBinary(int i) {
             return getAs(i);
+        }
+
+        @Override
+        public Variant getVariant(int i) {
+            return SparkShimLoader.getSparkShim().toPaimonVariant(getAs(i));
         }
 
         @Override

@@ -221,6 +221,9 @@ public interface InternalRow extends DataGetters {
                 final int rowFieldCount = DataTypeChecks.getFieldCount(fieldType);
                 fieldGetter = row -> row.getRow(fieldPos, rowFieldCount);
                 break;
+            case VARIANT:
+                fieldGetter = row -> row.getVariant(fieldPos);
+                break;
             default:
                 String msg =
                         String.format(

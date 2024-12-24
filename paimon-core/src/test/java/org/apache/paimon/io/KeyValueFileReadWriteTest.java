@@ -61,6 +61,7 @@ import java.util.function.Function;
 import static org.apache.paimon.TestKeyValueGenerator.DEFAULT_ROW_TYPE;
 import static org.apache.paimon.TestKeyValueGenerator.KEY_TYPE;
 import static org.apache.paimon.TestKeyValueGenerator.createTestSchemaManager;
+import static org.apache.paimon.io.DataFileTestUtils.newFile;
 import static org.apache.paimon.stats.StatsTestUtils.convertWithoutSchemaEvolution;
 import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -78,7 +79,10 @@ public class KeyValueFileReadWriteTest {
     public void testReadNonExistentFile() {
         KeyValueFileReaderFactory readerFactory =
                 createReaderFactory(tempDir.toString(), "avro", null, null);
-        assertThatThrownBy(() -> readerFactory.createRecordReader(0, "dummy_file.avro", 1, 0))
+        assertThatThrownBy(
+                        () ->
+                                readerFactory.createRecordReader(
+                                        newFile("non_avro_file.avro", 0, 0, 1, 0)))
                 .hasMessageContaining(
                         "you can configure 'snapshot.time-retained' option with a larger value.");
     }
@@ -307,12 +311,7 @@ public class KeyValueFileReadWriteTest {
         for (DataFileMeta meta : actualMetas) {
             // check the contents of data file
             CloseableIterator<KeyValue> actualKvsIterator =
-                    new RecordReaderIterator<>(
-                            readerFactory.createRecordReader(
-                                    meta.schemaId(),
-                                    meta.fileName(),
-                                    meta.fileSize(),
-                                    meta.level()));
+                    new RecordReaderIterator<>(readerFactory.createRecordReader(meta));
             while (actualKvsIterator.hasNext()) {
                 assertThat(expectedIterator.hasNext()).isTrue();
                 KeyValue actualKv = actualKvsIterator.next();

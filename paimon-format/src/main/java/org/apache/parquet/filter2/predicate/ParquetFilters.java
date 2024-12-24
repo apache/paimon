@@ -43,6 +43,7 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.io.api.Binary;
@@ -278,6 +279,11 @@ public class ParquetFilters {
 
         @Override
         public Operators.Column<?> visit(LocalZonedTimestampType localZonedTimestampType) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Operators.Column<?> visit(VariantType variantType) {
             throw new UnsupportedOperationException();
         }
 

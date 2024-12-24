@@ -185,7 +185,8 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                 try (FileIndexFormat.Reader reader =
                         FileIndexFormat.createReader(
                                 fileIO.newInputStream(
-                                        dataFilePathFactory.toPath(indexFiles.get(0))),
+                                        dataFilePathFactory.toAlignedPath(
+                                                indexFiles.get(0), dataFileMeta)),
                                 tableSchema.logicalRowType())) {
                     Optional<FileIndexReader> fileIndexReader =
                             reader.readColumnIndex("a").stream().findFirst();
