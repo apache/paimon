@@ -592,7 +592,7 @@ public abstract class MergeTreeTestBase {
             assertThat(remove).isTrue();
             // See MergeTreeWriter.updateCompactResult
             if (!newFileNames.contains(file.fileName()) && !afterFiles.contains(file.fileName())) {
-                compactWriterFactory.deleteFile(file.fileName(), file.level());
+                compactWriterFactory.deleteFile(file, file.level());
             }
         }
         compactedFiles.addAll(increment.compactIncrement().compactAfter());

@@ -46,7 +46,7 @@ import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
-/** Serializer for {@link DataFileMeta} with 0.9 version. */
+/** Serializer for {@link DataFileMeta} with 1.0 snapshot version. */
 public class DataFileMeta10LegacySerializer implements Serializable {
 
     private static final long serialVersionUID = 1L;

@@ -93,6 +93,11 @@ public class ManifestEntry implements FileEntry {
     }
 
     @Override
+    public String externalPath() {
+        return file.externalPath();
+    }
+
+    @Override
     public BinaryRow minKey() {
         return file.minKey();
     }
@@ -123,7 +128,8 @@ public class ManifestEntry implements FileEntry {
                 file.level(),
                 file.fileName(),
                 file.extraFiles(),
-                file.embeddedIndex());
+                file.embeddedIndex(),
+                file.externalPath());
     }
 
     public ManifestEntry copyWithoutStats() {
