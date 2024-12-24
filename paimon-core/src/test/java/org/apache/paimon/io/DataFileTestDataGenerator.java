@@ -176,7 +176,7 @@ public class DataFileTestDataGenerator {
         public final DataFileMeta meta;
         public final List<KeyValue> content;
 
-        public Data(BinaryRow partition, int bucket, DataFileMeta meta, List<KeyValue> content) {
+        private Data(BinaryRow partition, int bucket, DataFileMeta meta, List<KeyValue> content) {
             this.partition = partition;
             this.bucket = bucket;
             this.meta = meta;

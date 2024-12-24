@@ -500,28 +500,6 @@ public class DataFileMeta {
                 externalPath);
     }
 
-    public DataFileMeta copy(String externalPath) {
-        return new DataFileMeta(
-                fileName,
-                fileSize,
-                rowCount,
-                minKey,
-                maxKey,
-                keyStats,
-                valueStats,
-                minSequenceNumber,
-                maxSequenceNumber,
-                schemaId,
-                level,
-                extraFiles,
-                creationTime,
-                deleteRowCount,
-                embeddedIndex,
-                fileSource,
-                valueStatsCols,
-                externalPath);
-    }
-
     @Override
     public boolean equals(Object o) {
         if (o == this) {
