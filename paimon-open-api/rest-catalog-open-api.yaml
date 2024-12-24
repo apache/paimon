@@ -413,11 +413,11 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DataField'
-        partition-keys:
+        partitionKeys:
           type: array
           items:
             type: string
-        primary-keys:
+        primaryKeys:
           type: array
           items:
             type: string
@@ -476,79 +476,79 @@ components:
     SchemaChanges:
       type: object
       properties:
-        set-options:
+        setOptions:
           type: object
           additionalProperties:
             type: string
-        remove-options:
+        removeOptions:
           type: array
           items:
             type: string
         comment:
           type: string
-        add-columns:
+        addColumns:
           type: array
           items:
             $ref: '#/components/schemas/AddColumn'
-        rename-columns:
+        renameColumns:
           type: array
           items:
             $ref: '#/components/schemas/RenameColumn'
-        drop-columns:
+        dropColumns:
           type: array
           items:
             type: string
-        update-column-types:
+        updateColumnTypes:
           type: array
           items:
             $ref: '#/components/schemas/UpdateColumnType'
-        update-column-nullabilities:
+        updateColumnNullabilities:
           type: array
           items:
             $ref: '#/components/schemas/UpdateColumnNullability'
-        update-column-comments:
+        updateColumnComments:
           type: array
           items:
             $ref: '#/components/schemas/UpdateColumnComment'
-        update-column-positions:
+        updateColumnPositions:
           type: array
           items:
             $ref: '#/components/schemas/Move'
     UpdateColumnComment:
       type: object
       properties:
-        field-names:
+        fieldNames:
           type: array
           items:
             type: string
-        new-comment:
+        newComment:
           type: string
     UpdateColumnNullability:
       type: object
       properties:
-        field-names:
+        fieldNames:
           type: array
           items:
             type: string
-        new-nullability:
+        newNullability:
           type: boolean
     UpdateColumnType:
       type: object
       properties:
-        field-names:
+        fieldNames:
           type: array
           items:
             type: string
-        new-data-types:
+        newDataTypes:
           $ref: '#/components/schemas/DataType'
-        keep-nullability:
+        keepNullability:
           type: boolean
     UpdateTableRequest:
       type: object
       properties:
-        identifier-change:
+        identifierChange:
           $ref: '#/components/schemas/Identifier'
-        schema-changes:
+        schemaChanges:
           $ref: '#/components/schemas/SchemaChanges'
     AlterDatabaseRequest:
       type: object

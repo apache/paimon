@@ -36,16 +36,16 @@ import java.util.Objects;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class SchemaChanges {
 
-    private static final String FIELD_SET_OPTIONS = "set-options";
-    private static final String FIELD_REMOVE_OPTIONS = "remove-options";
+    private static final String FIELD_SET_OPTIONS = "setOptions";
+    private static final String FIELD_REMOVE_OPTIONS = "removeOptions";
     private static final String FIELD_COMMENT = "comment";
-    private static final String FIELD_ADD_COLUMNS = "add-columns";
-    private static final String FIELD_RENAME_COLUMNS = "rename-columns";
-    private static final String FIELD_DROP_COLUMNS = "drop-columns";
-    private static final String FIELD_UPDATE_COLUMN_TYPES = "update-column-types";
-    private static final String FIELD_UPDATE_COLUMN_NULLABILITIES = "update-column-nullabilities";
-    private static final String FIELD_UPDATE_COLUMN_COMMENTS = "update-column-comments";
-    private static final String FIELD_UPDATE_COLUMN_POSITIONS = "update-column-positions";
+    private static final String FIELD_ADD_COLUMNS = "addColumns";
+    private static final String FIELD_RENAME_COLUMNS = "renameColumns";
+    private static final String FIELD_DROP_COLUMNS = "dropColumns";
+    private static final String FIELD_UPDATE_COLUMN_TYPES = "updateColumnTypes";
+    private static final String FIELD_UPDATE_COLUMN_NULLABILITIES = "updateColumnNullabilities";
+    private static final String FIELD_UPDATE_COLUMN_COMMENTS = "updateColumnComments";
+    private static final String FIELD_UPDATE_COLUMN_POSITIONS = "updateColumnPositions";
 
     @JsonProperty(FIELD_SET_OPTIONS)
     private Map<String, String> setOptions;
