@@ -91,24 +91,18 @@ public class DataFilePathFactory {
      * @return the file's path
      */
     public Path toPath(String fileName, String externalPath) {
-        if (externalPath == null) {
-            return new Path(parent + "/" + fileName);
-        }
-        return new Path(externalPath + "/" + fileName);
+        return new Path((externalPath == null ? parent : externalPath) + "/" + fileName);
     }
 
     public Path toPath(DataFileMeta dataFileMeta) {
-        if (dataFileMeta.externalPath() == null) {
-            return new Path(parent + "/" + dataFileMeta.fileName());
-        }
-        return new Path(dataFileMeta.externalPath() + "/" + dataFileMeta.fileName());
+        String externalPath = dataFileMeta.externalPath();
+        String fileName = dataFileMeta.fileName();
+        return new Path((externalPath == null ? parent : externalPath) + "/" + fileName);
     }
 
     public Path toExtraFilePath(DataFileMeta dataFileMeta, String extraFile) {
-        if (dataFileMeta.externalPath() == null) {
-            return new Path(parent + "/" + extraFile);
-        }
-        return new Path(dataFileMeta.externalPath() + "/" + extraFile);
+        String externalPath = dataFileMeta.externalPath();
+        return new Path((externalPath == null ? parent : externalPath) + "/" + extraFile);
     }
 
     @VisibleForTesting

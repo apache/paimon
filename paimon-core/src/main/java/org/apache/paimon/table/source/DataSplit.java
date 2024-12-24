@@ -180,12 +180,8 @@ public class DataSplit implements Split {
     }
 
     private RawFile makeRawTableFile(String bucketPath, DataFileMeta file) {
-        String path = file.externalPath();
-        if (path == null) {
-            path = bucketPath + "/" + file.fileName();
-        } else {
-            path = path + "/" + file.fileName();
-        }
+        String path = file.externalPath() != null ? file.externalPath() : bucketPath;
+        path += "/" + file.fileName();
         return new RawFile(
                 path,
                 file.fileSize(),
