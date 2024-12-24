@@ -112,7 +112,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                 table.store()
                         .pathFactory()
                         .createDataFilePathFactory(split.partition(), split.bucket())
-                        .toPath(split.dataFiles().get(0).fileName());
+                        .toPath(split.dataFiles().get(0));
         table.fileIO().deleteQuietly(path);
 
         // read

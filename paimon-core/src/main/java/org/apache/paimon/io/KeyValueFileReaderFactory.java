@@ -20,6 +20,7 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
@@ -97,16 +98,25 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
 
     @Override
     public RecordReader<KeyValue> createRecordReader(DataFileMeta file) throws IOException {
-        return createRecordReader(file.schemaId(), file.fileName(), file.fileSize(), file.level());
+        return createRecordReader(
+                file.schemaId(),
+                file.fileName(),
+                file.fileSize(),
+                file.level(),
+                file.externalPath());
     }
 
+    @VisibleForTesting
     public RecordReader<KeyValue> createRecordReader(
-            long schemaId, String fileName, long fileSize, int level) throws IOException {
+            long schemaId, String fileName, long fileSize, int level, String externalPath)
+            throws IOException {
         if (fileSize >= asyncThreshold && fileName.endsWith(".orc")) {
             return new AsyncRecordReader<>(
-                    () -> createRecordReader(schemaId, fileName, level, false, 2, fileSize));
+                    () ->
+                            createRecordReader(
+                                    schemaId, fileName, level, false, 2, fileSize, externalPath));
         }
-        return createRecordReader(schemaId, fileName, level, true, null, fileSize);
+        return createRecordReader(schemaId, fileName, level, true, null, fileSize, externalPath);
     }
 
     private FileRecordReader<KeyValue> createRecordReader(
@@ -115,7 +125,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             int level,
             boolean reuseFormat,
             @Nullable Integer orcPoolSize,
-            long fileSize)
+            long fileSize,
+            String externalPath)
             throws IOException {
         String formatIdentifier = DataFilePathFactory.formatIdentifier(fileName);
 
@@ -132,7 +143,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                                 new FormatKey(schemaId, formatIdentifier),
                                 key -> formatSupplier.get())
                         : formatSupplier.get();
-        Path filePath = pathFactory.toPath(fileName);
+        Path filePath = pathFactory.toPath(fileName, externalPath);
 
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(

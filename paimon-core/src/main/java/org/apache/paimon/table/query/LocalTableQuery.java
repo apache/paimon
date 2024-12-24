@@ -161,12 +161,7 @@ public class LocalTableQuery implements TableQuery {
                         readerFactoryBuilder.keyType(),
                         new LookupLevels.KeyValueProcessor(readerFactoryBuilder.readValueType()),
                         file -> {
-                            RecordReader<KeyValue> reader =
-                                    factory.createRecordReader(
-                                            file.schemaId(),
-                                            file.fileName(),
-                                            file.fileSize(),
-                                            file.level());
+                            RecordReader<KeyValue> reader = factory.createRecordReader(file);
                             if (cacheRowFilter != null) {
                                 reader =
                                         reader.filter(

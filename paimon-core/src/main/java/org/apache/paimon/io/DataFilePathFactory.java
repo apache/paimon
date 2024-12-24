@@ -78,8 +78,31 @@ public class DataFilePathFactory {
         return new Path(parent, name);
     }
 
+    @VisibleForTesting
     public Path toPath(String fileName) {
         return new Path(parent + "/" + fileName);
+    }
+
+    /**
+     * for read purpose.
+     *
+     * @param fileName the file name
+     * @param externalPath the external path, if null, it will use the parent path
+     * @return the file's path
+     */
+    public Path toPath(String fileName, String externalPath) {
+        return new Path((externalPath == null ? parent : externalPath) + "/" + fileName);
+    }
+
+    public Path toPath(DataFileMeta dataFileMeta) {
+        String externalPath = dataFileMeta.externalPath();
+        String fileName = dataFileMeta.fileName();
+        return new Path((externalPath == null ? parent : externalPath) + "/" + fileName);
+    }
+
+    public Path toExtraFilePath(DataFileMeta dataFileMeta, String extraFile) {
+        String externalPath = dataFileMeta.externalPath();
+        return new Path((externalPath == null ? parent : externalPath) + "/" + extraFile);
     }
 
     @VisibleForTesting
