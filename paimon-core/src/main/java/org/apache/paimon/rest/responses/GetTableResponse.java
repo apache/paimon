@@ -29,7 +29,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 public class GetTableResponse implements RESTResponse {
 
     private static final String FIELD_PATH = "path";
-    private static final String FIELD_SCHEMA_ID = "schema-id";
+    private static final String FIELD_SCHEMA_ID = "schemaId";
     private static final String FIELD_SCHEMA = "schema";
 
     @JsonProperty(FIELD_PATH)

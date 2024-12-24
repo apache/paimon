@@ -432,7 +432,7 @@ components:
       properties:
         path:
           type: string
-        schema-id:
+        schemaId:
           type: integer
           format: int64
         schema:
