@@ -27,7 +27,9 @@ import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
@@ -160,10 +162,27 @@ public class RESTObjectMapperTest {
 
     @Test
     public void updateTableRequestParseTest() throws Exception {
-        UpdateTableRequest request = MockRESTMessage.updateTableRequest("t1", "t2");
+        UpdateTableRequest request = MockRESTMessage.updateTableRequest("t2");
         String requestStr = mapper.writeValueAsString(request);
         UpdateTableRequest parseData = mapper.readValue(requestStr, UpdateTableRequest.class);
-        assertEquals(request.getFromIdentifier(), parseData.getFromIdentifier());
-        assertEquals(request.getToIdentifier(), parseData.getToIdentifier());
+        assertEquals(request.getIdentifierChange(), parseData.getIdentifierChange());
+        assertEquals(request.getChanges(), parseData.getChanges());
+    }
+
+    @Test
+    public void getTableResponseParseTest() throws Exception {
+        GetTableResponse response = MockRESTMessage.getTableResponse();
+        String responseStr = mapper.writeValueAsString(response);
+        GetTableResponse parseData = mapper.readValue(responseStr, GetTableResponse.class);
+        assertEquals(response.getLocation(), parseData.getLocation());
+        assertEquals(response.getSchema(), parseData.getSchema());
+    }
+
+    @Test
+    public void listTablesResponseParseTest() throws Exception {
+        ListTablesResponse response = MockRESTMessage.listTablesResponse();
+        String responseStr = mapper.writeValueAsString(response);
+        ListTablesResponse parseData = mapper.readValue(responseStr, ListTablesResponse.class);
+        assertEquals(response.getTables(), parseData.getTables());
     }
 }

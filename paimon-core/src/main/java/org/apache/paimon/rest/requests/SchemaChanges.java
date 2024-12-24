@@ -30,6 +30,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /** Schema changes to serialize List of SchemaChange . */
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -200,5 +201,38 @@ public class SchemaChanges {
     @JsonGetter(FIELD_UPDATE_COLUMN_POSITIONS)
     public List<SchemaChange.Move> getUpdateColumnPositions() {
         return updateColumnPositions;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        SchemaChanges that = (SchemaChanges) o;
+        return Objects.equals(setOptions, that.setOptions)
+                && Objects.equals(removeOptions, that.removeOptions)
+                && Objects.equals(comment, that.comment)
+                && Objects.equals(addColumns, that.addColumns)
+                && Objects.equals(renameColumns, that.renameColumns)
+                && Objects.equals(dropColumns, that.dropColumns)
+                && Objects.equals(updateColumnTypes, that.updateColumnTypes)
+                && Objects.equals(updateColumnNullabilities, that.updateColumnNullabilities)
+                && Objects.equals(updateColumnComments, that.updateColumnComments)
+                && Objects.equals(updateColumnPositions, that.updateColumnPositions);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(
+                setOptions,
+                removeOptions,
+                comment,
+                addColumns,
+                renameColumns,
+                dropColumns,
+                updateColumnTypes,
+                updateColumnNullabilities,
+                updateColumnComments,
+                updateColumnPositions);
     }
 }

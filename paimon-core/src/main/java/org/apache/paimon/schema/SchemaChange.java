@@ -232,14 +232,14 @@ public interface SchemaChange extends Serializable {
         private static final long serialVersionUID = 1L;
 
         private static final String FIELD_FILED_NAMES = "field-names";
-        private static final String FIELD_DATA_TYPES = "data-types";
+        private static final String FIELD_DATA_TYPE = "data-type";
         private static final String FIELD_COMMENT = "comment";
         private static final String FIELD_MOVE = "move";
 
         @JsonProperty(FIELD_FILED_NAMES)
         private final String[] fieldNames;
 
-        @JsonProperty(FIELD_DATA_TYPES)
+        @JsonProperty(FIELD_DATA_TYPE)
         private final DataType dataType;
 
         @JsonProperty(FIELD_COMMENT)
@@ -251,7 +251,7 @@ public interface SchemaChange extends Serializable {
         @JsonCreator
         private AddColumn(
                 @JsonProperty(FIELD_FILED_NAMES) String[] fieldNames,
-                @JsonProperty(FIELD_DATA_TYPES) DataType dataType,
+                @JsonProperty(FIELD_DATA_TYPE) DataType dataType,
                 @JsonProperty(FIELD_COMMENT) String description,
                 @JsonProperty(FIELD_MOVE) Move move) {
             this.fieldNames = fieldNames;
@@ -283,7 +283,7 @@ public interface SchemaChange extends Serializable {
             return fieldNames;
         }
 
-        @JsonGetter(FIELD_DATA_TYPES)
+        @JsonGetter(FIELD_DATA_TYPE)
         public DataType getDataType() {
             return dataType;
         }
@@ -312,7 +312,7 @@ public interface SchemaChange extends Serializable {
             return Arrays.equals(fieldNames, addColumn.fieldNames)
                     && dataType.equals(addColumn.dataType)
                     && Objects.equals(description, addColumn.description)
-                    && move.equals(addColumn.move);
+                    && Objects.equals(move, addColumn.move);
         }
 
         @Override
@@ -435,7 +435,7 @@ public interface SchemaChange extends Serializable {
 
         private static final long serialVersionUID = 1L;
         private static final String FIELD_FILED_NAMES = "field-names";
-        private static final String FIELD_NEW_DATA_TYPE = "new-data-types";
+        private static final String FIELD_NEW_DATA_TYPE = "new-data-type";
         private static final String FIELD_KEEP_NULLABILITY = "keep-nullability";
 
         @JsonProperty(FIELD_FILED_NAMES)

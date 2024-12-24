@@ -28,37 +28,26 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 /** Request for updating table. */
 public class UpdateTableRequest implements RESTRequest {
 
-    private static final String FIELD_FROM_IDENTIFIER_NAME = "from";
-    private static final String FIELD_TO_IDENTIFIER_NAME = "to";
-    private static final String FIELD_SCHEMA_CHANGES_NAME = "changes";
+    private static final String FIELD_IDENTIFIER_NAME = "identifier-change";
+    private static final String FIELD_SCHEMA_CHANGES_NAME = "schema-changes";
 
-    @JsonProperty(FIELD_FROM_IDENTIFIER_NAME)
-    private Identifier fromIdentifier;
-
-    @JsonProperty(FIELD_TO_IDENTIFIER_NAME)
-    private Identifier toIdentifier;
+    @JsonProperty(FIELD_IDENTIFIER_NAME)
+    private Identifier identifierChange;
 
     @JsonProperty(FIELD_SCHEMA_CHANGES_NAME)
     private SchemaChanges changes;
 
     @JsonCreator
     public UpdateTableRequest(
-            @JsonProperty(FIELD_FROM_IDENTIFIER_NAME) Identifier fromIdentifier,
-            @JsonProperty(FIELD_TO_IDENTIFIER_NAME) Identifier toIdentifier,
+            @JsonProperty(FIELD_IDENTIFIER_NAME) Identifier identifierChange,
             @JsonProperty(FIELD_SCHEMA_CHANGES_NAME) SchemaChanges changes) {
-        this.fromIdentifier = fromIdentifier;
-        this.toIdentifier = toIdentifier;
+        this.identifierChange = identifierChange;
         this.changes = changes;
     }
 
-    @JsonGetter(FIELD_FROM_IDENTIFIER_NAME)
-    public Identifier getFromIdentifier() {
-        return fromIdentifier;
-    }
-
-    @JsonGetter(FIELD_TO_IDENTIFIER_NAME)
-    public Identifier getToIdentifier() {
-        return toIdentifier;
+    @JsonGetter(FIELD_IDENTIFIER_NAME)
+    public Identifier getIdentifierChange() {
+        return identifierChange;
     }
 
     @JsonGetter(FIELD_SCHEMA_CHANGES_NAME)

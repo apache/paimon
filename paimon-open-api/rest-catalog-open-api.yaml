@@ -164,7 +164,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListTablesResponse'
+                $ref: '#/components/schemas/GetTableResponse'
         "404":
           description: Resource not found
           content:
@@ -436,6 +436,33 @@ components:
           $ref: '#/components/schemas/TableSchema'
     TableSchema:
       type: object
+      properties:
+        version:
+          type: integer
+          format: int32
+        id:
+          type: integer
+          format: int64
+        highestFieldId:
+          type: integer
+          format: int32
+        partitionKeys:
+          type: array
+          items:
+            type: string
+        primaryKeys:
+          type: array
+          items:
+            type: string
+        options:
+          type: object
+          additionalProperties:
+            type: string
+        comment:
+          type: string
+        timeMillis:
+          type: integer
+          format: int64
     AddColumn:
       type: object
       properties:
@@ -545,11 +572,9 @@ components:
     UpdateTableRequest:
       type: object
       properties:
-        from:
+        identifier-change:
           $ref: '#/components/schemas/Identifier'
-        to:
-          $ref: '#/components/schemas/Identifier'
-        changes:
+        schema-changes:
           $ref: '#/components/schemas/SchemaChanges'
     AlterDatabaseRequest:
       type: object
