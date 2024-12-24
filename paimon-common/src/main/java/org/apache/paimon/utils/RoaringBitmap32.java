@@ -86,7 +86,7 @@ public class RoaringBitmap32 {
     }
 
     public void deserialize(DataInput in) throws IOException {
-        roaringBitmap.deserialize(in);
+        roaringBitmap.deserialize(in, null);
     }
 
     @Override
