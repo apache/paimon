@@ -245,13 +245,13 @@ public class BitSliceIndexRoaringBitmap {
 
         // deserialize ebm
         RoaringBitmap32 ebm = new RoaringBitmap32();
-        ebm.deserialize(in);
+        ebm.deserialize(in, null);
 
         // deserialize slices
         RoaringBitmap32[] slices = new RoaringBitmap32[in.readInt()];
         for (int i = 0; i < slices.length; i++) {
             RoaringBitmap32 rb = new RoaringBitmap32();
-            rb.deserialize(in);
+            rb.deserialize(in, null);
             slices[i] = rb;
         }
 
