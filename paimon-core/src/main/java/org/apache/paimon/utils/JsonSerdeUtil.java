@@ -18,8 +18,8 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.schema.SchemaSerializer;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.schema.TableSchemaSerializer;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeJsonParser;
@@ -181,10 +181,7 @@ public class JsonSerdeUtil {
     private static Module createPaimonJacksonModule() {
         SimpleModule module = new SimpleModule("Paimon");
         registerJsonObjects(
-                module,
-                TableSchema.class,
-                TableSchemaSerializer.INSTANCE,
-                TableSchemaSerializer.INSTANCE);
+                module, TableSchema.class, SchemaSerializer.INSTANCE, SchemaSerializer.INSTANCE);
         registerJsonObjects(
                 module,
                 DataField.class,

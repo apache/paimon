@@ -21,7 +21,6 @@ package org.apache.paimon.types;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
 import java.io.IOException;
@@ -55,7 +54,6 @@ public abstract class DataType implements Serializable {
     }
 
     /** Returns whether a value of this type can be {@code null}. */
-    @JsonIgnore
     public boolean isNullable() {
         return isNullable;
     }
@@ -63,7 +61,6 @@ public abstract class DataType implements Serializable {
     /**
      * Returns the root of this type. It is an essential description without additional parameters.
      */
-    @JsonIgnore
     public DataTypeRoot getTypeRoot() {
         return typeRoot;
     }

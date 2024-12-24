@@ -39,10 +39,10 @@ import static org.apache.paimon.schema.TableSchema.PAIMON_07_VERSION;
 import static org.apache.paimon.schema.TableSchema.PAIMON_08_VERSION;
 
 /** A {@link JsonSerializer} for {@link TableSchema}. */
-public class TableSchemaSerializer
+public class SchemaSerializer
         implements JsonSerializer<TableSchema>, JsonDeserializer<TableSchema> {
 
-    public static final TableSchemaSerializer INSTANCE = new TableSchemaSerializer();
+    public static final SchemaSerializer INSTANCE = new SchemaSerializer();
 
     @Override
     public void serialize(TableSchema tableSchema, JsonGenerator generator) throws IOException {
