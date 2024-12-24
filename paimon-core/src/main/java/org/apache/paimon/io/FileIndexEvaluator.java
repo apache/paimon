@@ -62,7 +62,7 @@ public class FileIndexEvaluator {
                 // go to file index check
                 try (FileIndexPredicate predicate =
                         new FileIndexPredicate(
-                                dataFilePathFactory.toExtraFilePath(file, indexFiles.get(0)),
+                                dataFilePathFactory.toAlignedPath(indexFiles.get(0), file),
                                 fileIO,
                                 dataSchema.logicalRowType())) {
                     return predicate.evaluate(

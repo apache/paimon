@@ -272,14 +272,7 @@ public class LookupLevelsTest {
                 comparator,
                 keyType,
                 new LookupLevels.KeyValueProcessor(rowType),
-                file ->
-                        createReaderFactory()
-                                .createRecordReader(
-                                        0,
-                                        file.fileName(),
-                                        file.fileSize(),
-                                        file.level(),
-                                        file.externalPath()),
+                file -> createReaderFactory().createRecordReader(file),
                 file -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
                 new HashLookupStoreFactory(
                         new CacheManager(MemorySize.ofMebiBytes(1)),

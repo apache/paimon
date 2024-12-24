@@ -20,9 +20,11 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.FileEntry;
 
 import javax.annotation.concurrent.ThreadSafe;
 
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -67,47 +69,36 @@ public class DataFilePathFactory {
         return newPath(changelogFilePrefix);
     }
 
-    private Path newPath(String prefix) {
+    public String newChangelogFileName() {
+        return newFileName(changelogFilePrefix);
+    }
+
+    public Path newPath(String prefix) {
+        return new Path(parent, newFileName(prefix));
+    }
+
+    private String newFileName(String prefix) {
         String extension;
         if (fileSuffixIncludeCompression) {
             extension = "." + fileCompression + "." + formatIdentifier;
         } else {
             extension = "." + formatIdentifier;
         }
-        String name = prefix + uuid + "-" + pathCount.getAndIncrement() + extension;
-        return new Path(parent, name);
+        return prefix + uuid + "-" + pathCount.getAndIncrement() + extension;
     }
 
-    @VisibleForTesting
-    public Path toPath(String fileName) {
-        return new Path(parent + "/" + fileName);
+    public Path toPath(DataFileMeta file) {
+        return file.externalPath().map(Path::new).orElse(new Path(parent, file.fileName()));
     }
 
-    /**
-     * for read purpose.
-     *
-     * @param fileName the file name
-     * @param externalPath the external path, if null, it will use the parent path
-     * @return the file's path
-     */
-    public Path toPath(String fileName, String externalPath) {
-        return new Path((externalPath == null ? parent : externalPath) + "/" + fileName);
+    public Path toPath(FileEntry file) {
+        return Optional.ofNullable(file.externalPath())
+                .map(Path::new)
+                .orElse(new Path(parent, file.fileName()));
     }
 
-    public Path toPath(DataFileMeta dataFileMeta) {
-        String externalPath = dataFileMeta.externalPath();
-        String fileName = dataFileMeta.fileName();
-        return new Path((externalPath == null ? parent : externalPath) + "/" + fileName);
-    }
-
-    public Path toExtraFilePath(DataFileMeta dataFileMeta, String extraFile) {
-        String externalPath = dataFileMeta.externalPath();
-        return new Path((externalPath == null ? parent : externalPath) + "/" + extraFile);
-    }
-
-    @VisibleForTesting
-    public String uuid() {
-        return uuid;
+    public Path toAlignedPath(String fileName, DataFileMeta aligned) {
+        return new Path(aligned.externalPathDir().map(Path::new).orElse(parent), fileName);
     }
 
     public static Path dataFileToFileIndexPath(Path dataFilePath) {
@@ -140,5 +131,10 @@ public class DataFilePathFactory {
         }
 
         return fileName.substring(index + 1);
+    }
+
+    @VisibleForTesting
+    String uuid() {
+        return uuid;
     }
 }

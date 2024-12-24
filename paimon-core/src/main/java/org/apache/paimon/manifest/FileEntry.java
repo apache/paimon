@@ -54,6 +54,7 @@ public interface FileEntry {
 
     String fileName();
 
+    @Nullable
     String externalPath();
 
     Identifier identifier();
@@ -161,7 +162,9 @@ public interface FileEntry {
                     + ", extraFiles "
                     + extraFiles
                     + ", embeddedIndex "
-                    + Arrays.toString(embeddedIndex);
+                    + Arrays.toString(embeddedIndex)
+                    + ", externalPath "
+                    + externalPath;
         }
     }
 

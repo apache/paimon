@@ -368,9 +368,14 @@ public class DataFileMeta {
         return split[split.length - 1];
     }
 
-    @Nullable
-    public String externalPath() {
-        return externalPath;
+    public Optional<String> externalPath() {
+        return Optional.ofNullable(externalPath);
+    }
+
+    public Optional<String> externalPathDir() {
+        return Optional.ofNullable(externalPath)
+                .map(Path::new)
+                .map(p -> p.getParent().toUri().toString());
     }
 
     public Optional<FileSource> fileSource() {
@@ -405,7 +410,8 @@ public class DataFileMeta {
                 externalPath);
     }
 
-    public DataFileMeta rename(String newExternalPath, String newFileName) {
+    public DataFileMeta rename(String newFileName) {
+        String newExternalPath = externalPathDir().map(dir -> dir + "/" + newFileName).orElse(null);
         return new DataFileMeta(
                 newFileName,
                 fileSize,
@@ -452,7 +458,7 @@ public class DataFileMeta {
     public List<Path> collectFiles(DataFilePathFactory pathFactory) {
         List<Path> paths = new ArrayList<>();
         paths.add(pathFactory.toPath(this));
-        extraFiles.forEach(f -> paths.add(pathFactory.toExtraFilePath(this, f)));
+        extraFiles.forEach(f -> paths.add(pathFactory.toAlignedPath(f, this)));
         return paths;
     }
 

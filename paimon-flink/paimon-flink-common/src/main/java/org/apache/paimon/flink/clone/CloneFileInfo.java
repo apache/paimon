@@ -21,15 +21,24 @@ package org.apache.paimon.flink.clone;
 /** The information of copy file. */
 public class CloneFileInfo {
 
+    private final String sourceFilePath;
     private final String filePathExcludeTableRoot;
     private final String sourceIdentifier;
     private final String targetIdentifier;
 
     public CloneFileInfo(
-            String filePathExcludeTableRoot, String sourceIdentifier, String targetIdentifier) {
+            String sourceFilePath,
+            String filePathExcludeTableRoot,
+            String sourceIdentifier,
+            String targetIdentifier) {
+        this.sourceFilePath = sourceFilePath;
         this.filePathExcludeTableRoot = filePathExcludeTableRoot;
         this.sourceIdentifier = sourceIdentifier;
         this.targetIdentifier = targetIdentifier;
+    }
+
+    public String getSourceFilePath() {
+        return sourceFilePath;
     }
 
     public String getFilePathExcludeTableRoot() {
@@ -47,7 +56,7 @@ public class CloneFileInfo {
     @Override
     public String toString() {
         return String.format(
-                "{ filePath: %s, sourceIdentifier: %s, targetIdentifier: %s }",
-                filePathExcludeTableRoot, sourceIdentifier, targetIdentifier);
+                "{ sourceFilePath: %s, filePathExcludeTableRoot: %s, sourceIdentifier: %s, targetIdentifier: %s }",
+                sourceFilePath, filePathExcludeTableRoot, sourceIdentifier, targetIdentifier);
     }
 }

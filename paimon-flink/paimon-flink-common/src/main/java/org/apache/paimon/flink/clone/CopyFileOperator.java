@@ -99,7 +99,7 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
                         });
 
         String filePathExcludeTableRoot = cloneFileInfo.getFilePathExcludeTableRoot();
-        Path sourcePath = new Path(sourceTableRootPath + filePathExcludeTableRoot);
+        Path sourcePath = new Path(cloneFileInfo.getSourceFilePath());
         Path targetPath = new Path(targetTableRootPath + filePathExcludeTableRoot);
 
         if (targetTableFileIO.exists(targetPath)
