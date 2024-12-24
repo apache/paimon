@@ -141,10 +141,6 @@ public class FileStorePathFactory {
         return new Path(dataRoot, relativeBucketPath(partition, bucket));
     }
 
-    // public Path dataBucketPath(BinaryRow partition, int bucket) {
-    //     return new Path(dataRoot, relativeBucketPath(partition, bucket));
-    // }
-
     public Path relativeBucketPath(BinaryRow partition, int bucket) {
         Path relativeBucketPath = new Path(BUCKET_PATH_PREFIX + bucket);
         String partitionPath = getPartitionString(partition);

@@ -125,6 +125,7 @@ public class FlinkSinkTest {
                 tablePath,
                 tableSchema,
                 options,
-                CatalogEnvironment.empty());
+                CatalogEnvironment.empty(),
+                tablePath);
     }
 }
