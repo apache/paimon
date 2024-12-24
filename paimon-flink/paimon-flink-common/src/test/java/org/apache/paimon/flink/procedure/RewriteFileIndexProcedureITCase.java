@@ -199,7 +199,7 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
                     table.store()
                             .pathFactory()
                             .createDataFilePathFactory(entry.partition(), entry.bucket())
-                            .toPath(file);
+                            .toAlignedPath(file, entry.file());
             try (FileIndexFormat.Reader reader =
                     FileIndexFormat.createReader(
                             table.fileIO().newInputStream(indexFilePath), table.rowType())) {

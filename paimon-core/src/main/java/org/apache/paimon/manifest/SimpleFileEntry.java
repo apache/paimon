@@ -106,6 +106,7 @@ public class SimpleFileEntry implements FileEntry {
         return fileName;
     }
 
+    @Nullable
     @Override
     public String externalPath() {
         return externalPath;

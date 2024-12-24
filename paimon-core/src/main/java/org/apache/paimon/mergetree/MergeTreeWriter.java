@@ -27,7 +27,6 @@ import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -242,10 +241,9 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             } else if (changelogProducer == ChangelogProducer.INPUT && isInsertOnly) {
                 List<DataFileMeta> changelogMetas = new ArrayList<>();
                 for (DataFileMeta dataMeta : dataMetas) {
-                    Path newPath = writerFactory.newChangelogPath(0);
-                    DataFileMeta changelogMeta =
-                            dataMeta.rename(newPath.getParent().getName(), newPath.getName());
-                    writerFactory.copyFile(dataMeta, changelogMeta, 0);
+                    String newFileName = writerFactory.newChangelogFileName(0);
+                    DataFileMeta changelogMeta = dataMeta.rename(newFileName);
+                    writerFactory.copyFile(dataMeta, changelogMeta);
                     changelogMetas.add(changelogMeta);
                 }
                 newFilesChangelog.addAll(changelogMetas);
@@ -343,7 +341,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 // 2. This file is not the input of upgraded.
                 if (!compactBefore.containsKey(file.fileName())
                         && !afterFiles.contains(file.fileName())) {
-                    writerFactory.deleteFile(file, file.level());
+                    writerFactory.deleteFile(file);
                 }
             } else {
                 compactBefore.put(file.fileName(), file);
@@ -377,7 +375,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         deletedFiles.clear();
 
         for (DataFileMeta file : newFilesChangelog) {
-            writerFactory.deleteFile(file, file.level());
+            writerFactory.deleteFile(file);
         }
         newFilesChangelog.clear();
 
@@ -392,12 +390,12 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         compactAfter.clear();
 
         for (DataFileMeta file : compactChangelog) {
-            writerFactory.deleteFile(file, file.level());
+            writerFactory.deleteFile(file);
         }
         compactChangelog.clear();
 
         for (DataFileMeta file : delete) {
-            writerFactory.deleteFile(file, file.level());
+            writerFactory.deleteFile(file);
         }
 
         if (compactDeletionFile != null) {

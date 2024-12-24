@@ -142,14 +142,13 @@ public class KeyValueFileWriterFactory {
                         fileIndexOptions);
     }
 
-    public void deleteFile(DataFileMeta meta, int level) {
-        fileIO.deleteQuietly(formatContext.pathFactory(level).toPath(meta));
+    public void deleteFile(DataFileMeta file) {
+        fileIO.deleteQuietly(formatContext.pathFactory(file.level()).toPath(file));
     }
 
-    public void copyFile(DataFileMeta sourceMeta, DataFileMeta targetMeta, int level)
-            throws IOException {
-        Path sourcePath = formatContext.pathFactory(level).toPath(sourceMeta);
-        Path targetPath = formatContext.pathFactory(level).toPath(targetMeta);
+    public void copyFile(DataFileMeta sourceFile, DataFileMeta targetFile) throws IOException {
+        Path sourcePath = formatContext.pathFactory(sourceFile.level()).toPath(sourceFile);
+        Path targetPath = formatContext.pathFactory(targetFile.level()).toPath(targetFile);
         fileIO.copyFile(sourcePath, targetPath, true);
     }
 
@@ -157,8 +156,8 @@ public class KeyValueFileWriterFactory {
         return fileIO;
     }
 
-    public Path newChangelogPath(int level) {
-        return formatContext.pathFactory(level).newChangelogPath();
+    public String newChangelogFileName(int level) {
+        return formatContext.pathFactory(level).newChangelogFileName();
     }
 
     public static Builder builder(
