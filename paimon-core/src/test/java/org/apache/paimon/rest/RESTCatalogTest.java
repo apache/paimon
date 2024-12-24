@@ -69,7 +69,6 @@ public class RESTCatalogTest {
     private MockWebServer mockWebServer;
     private RESTCatalog restCatalog;
     private RESTCatalog mockRestCatalog;
-    private CatalogContext context;
     private String warehouseStr;
     @Rule public TemporaryFolder folder = new TemporaryFolder();
 
@@ -92,8 +91,7 @@ public class RESTCatalogTest {
                         CatalogOptions.WAREHOUSE.key(),
                         warehouseStr);
         mockResponse(mockResponse, 200);
-        context = CatalogContext.create(options);
-        restCatalog = new RESTCatalog(context);
+        restCatalog = new RESTCatalog(CatalogContext.create(options));
         mockRestCatalog = spy(restCatalog);
     }
 
@@ -247,7 +245,8 @@ public class RESTCatalogTest {
         GetTableResponse response = MockRESTMessage.getTableResponse();
         mockResponse(mapper.writeValueAsString(response), 200);
         Table result = mockRestCatalog.getTable(Identifier.create(databaseName, "table"));
-        assertEquals(response.getSchema().options().size(), result.options().size());
+        // catalog will add path option
+        assertEquals(response.getSchema().options().size() + 1, result.options().size());
         verify(mockRestCatalog, times(1)).getDataOrFormatTable(any());
     }
 

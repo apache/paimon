@@ -358,4 +358,21 @@ public class TableSchema implements Serializable {
             throw new UncheckedIOException(e);
         }
     }
+
+    public static TableSchema create(long schemaId, Schema schema) {
+        List<DataField> fields = schema.fields();
+        List<String> partitionKeys = schema.partitionKeys();
+        List<String> primaryKeys = schema.primaryKeys();
+        Map<String, String> options = schema.options();
+        int highestFieldId = RowType.currentHighestFieldId(fields);
+
+        return new TableSchema(
+                schemaId,
+                fields,
+                highestFieldId,
+                partitionKeys,
+                primaryKeys,
+                options,
+                schema.comment());
+    }
 }

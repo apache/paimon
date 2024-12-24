@@ -222,21 +222,7 @@ public class SchemaManager implements Serializable {
                 }
             }
 
-            List<DataField> fields = schema.fields();
-            List<String> partitionKeys = schema.partitionKeys();
-            List<String> primaryKeys = schema.primaryKeys();
-            Map<String, String> options = schema.options();
-            int highestFieldId = RowType.currentHighestFieldId(fields);
-
-            TableSchema newSchema =
-                    new TableSchema(
-                            0,
-                            fields,
-                            highestFieldId,
-                            partitionKeys,
-                            primaryKeys,
-                            options,
-                            schema.comment());
+            TableSchema newSchema = TableSchema.create(0, schema);
 
             // validate table from creating table
             FileStoreTableFactory.create(fileIO, tableRoot, newSchema).store();

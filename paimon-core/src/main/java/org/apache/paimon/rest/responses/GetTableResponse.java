@@ -19,7 +19,7 @@
 package org.apache.paimon.rest.responses;
 
 import org.apache.paimon.rest.RESTResponse;
-import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.schema.Schema;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
@@ -28,30 +28,41 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 /** Response for getting table. */
 public class GetTableResponse implements RESTResponse {
 
-    private static final String FIELD_LOCATION = "location";
+    private static final String FIELD_PATH = "path";
+    private static final String FIELD_SCHEMA_ID = "schema-id";
     private static final String FIELD_SCHEMA = "schema";
 
-    @JsonProperty(FIELD_LOCATION)
-    private final String location;
+    @JsonProperty(FIELD_PATH)
+    private final String path;
+
+    @JsonProperty(FIELD_SCHEMA_ID)
+    private final long schemaId;
 
     @JsonProperty(FIELD_SCHEMA)
-    private final TableSchema schema;
+    private final Schema schema;
 
     @JsonCreator
     public GetTableResponse(
-            @JsonProperty(FIELD_LOCATION) String location,
-            @JsonProperty(FIELD_SCHEMA) TableSchema schema) {
-        this.location = location;
+            @JsonProperty(FIELD_PATH) String path,
+            @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
+            @JsonProperty(FIELD_SCHEMA) Schema schema) {
+        this.path = path;
+        this.schemaId = schemaId;
         this.schema = schema;
     }
 
-    @JsonGetter(FIELD_LOCATION)
-    public String getLocation() {
-        return this.location;
+    @JsonGetter(FIELD_PATH)
+    public String getPath() {
+        return this.path;
+    }
+
+    @JsonGetter(FIELD_SCHEMA_ID)
+    public long getSchemaId() {
+        return this.schemaId;
     }
 
     @JsonGetter(FIELD_SCHEMA)
-    public TableSchema getSchema() {
+    public Schema getSchema() {
         return this.schema;
     }
 }

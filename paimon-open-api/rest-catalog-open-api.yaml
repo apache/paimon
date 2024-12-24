@@ -430,39 +430,13 @@ components:
     GetTableResponse:
       type: object
       properties:
-        location:
+        path:
           type: string
+        schema-id:
+          type: integer
+          format: int64
         schema:
-          $ref: '#/components/schemas/TableSchema'
-    TableSchema:
-      type: object
-      properties:
-        version:
-          type: integer
-          format: int32
-        id:
-          type: integer
-          format: int64
-        highestFieldId:
-          type: integer
-          format: int32
-        partitionKeys:
-          type: array
-          items:
-            type: string
-        primaryKeys:
-          type: array
-          items:
-            type: string
-        options:
-          type: object
-          additionalProperties:
-            type: string
-        comment:
-          type: string
-        timeMillis:
-          type: integer
-          format: int64
+          $ref: '#/components/schemas/Schema'
     AddColumn:
       type: object
       properties:

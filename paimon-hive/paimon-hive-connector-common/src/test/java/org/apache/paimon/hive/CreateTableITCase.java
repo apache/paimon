@@ -21,7 +21,6 @@ package org.apache.paimon.hive;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
-import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -51,6 +50,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
+import static org.apache.paimon.catalog.AbstractCatalog.newTableLocation;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -94,7 +94,7 @@ public class CreateTableITCase extends HiveTestBase {
                         Maps.newHashMap(),
                         "");
         Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
-        Path tablePath = CatalogUtils.newTableLocation(path, identifier);
+        Path tablePath = newTableLocation(path, identifier);
         new SchemaManager(LocalFileIO.create(), tablePath).createTable(schema);
 
         // Create hive external table
@@ -189,7 +189,7 @@ public class CreateTableITCase extends HiveTestBase {
 
         // check the paimon table schema
         Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
-        Path tablePath = CatalogUtils.newTableLocation(path, identifier);
+        Path tablePath = newTableLocation(path, identifier);
         Optional<TableSchema> tableSchema =
                 new SchemaManager(LocalFileIO.create(), tablePath).latest();
         assertThat(tableSchema).isPresent();
@@ -245,7 +245,7 @@ public class CreateTableITCase extends HiveTestBase {
         }
         // check the paimon table name and schema
         Identifier identifier = Identifier.create(DATABASE_TEST, tableName.toLowerCase());
-        Path tablePath = CatalogUtils.newTableLocation(path, identifier);
+        Path tablePath = newTableLocation(path, identifier);
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, path);
         CatalogContext catalogContext = CatalogContext.create(conf);
@@ -310,7 +310,7 @@ public class CreateTableITCase extends HiveTestBase {
 
         // check the paimon db name、table name and schema
         Identifier identifier = Identifier.create(upperDB.toLowerCase(), tableName.toLowerCase());
-        Path tablePath = CatalogUtils.newTableLocation(path, identifier);
+        Path tablePath = newTableLocation(path, identifier);
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, path);
         CatalogContext catalogContext = CatalogContext.create(conf);
@@ -355,7 +355,7 @@ public class CreateTableITCase extends HiveTestBase {
 
         // check the paimon table schema
         Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
-        Path tablePath = CatalogUtils.newTableLocation(path, identifier);
+        Path tablePath = newTableLocation(path, identifier);
         Optional<TableSchema> tableSchema =
                 new SchemaManager(LocalFileIO.create(), tablePath).latest();
         assertThat(tableSchema).isPresent();
@@ -397,7 +397,7 @@ public class CreateTableITCase extends HiveTestBase {
 
         // check the paimon table schema
         Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
-        Path tablePath = CatalogUtils.newTableLocation(path, identifier);
+        Path tablePath = newTableLocation(path, identifier);
         Optional<TableSchema> tableSchema =
                 new SchemaManager(LocalFileIO.create(), tablePath).latest();
         assertThat(tableSchema).isPresent();
@@ -441,7 +441,7 @@ public class CreateTableITCase extends HiveTestBase {
 
         // check the paimon table schema
         Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
-        Path tablePath = CatalogUtils.newTableLocation(path, identifier);
+        Path tablePath = newTableLocation(path, identifier);
         Optional<TableSchema> tableSchema =
                 new SchemaManager(LocalFileIO.create(), tablePath).latest();
         assertThat(tableSchema).isPresent();
@@ -489,7 +489,7 @@ public class CreateTableITCase extends HiveTestBase {
                             Maps.newHashMap(),
                             "");
             Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
-            Path tablePath = CatalogUtils.newTableLocation(path, identifier);
+            Path tablePath = newTableLocation(path, identifier);
             new SchemaManager(LocalFileIO.create(), tablePath).createTable(schema);
 
             String hiveSql =
@@ -533,7 +533,7 @@ public class CreateTableITCase extends HiveTestBase {
             } catch (Exception ignore) {
             } finally {
                 Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
-                Path tablePath = CatalogUtils.newTableLocation(path, identifier);
+                Path tablePath = newTableLocation(path, identifier);
                 boolean isPresent =
                         new SchemaManager(LocalFileIO.create(), tablePath).latest().isPresent();
                 Assertions.assertThat(isPresent).isFalse();

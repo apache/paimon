@@ -174,7 +174,7 @@ public class RESTObjectMapperTest {
         GetTableResponse response = MockRESTMessage.getTableResponse();
         String responseStr = mapper.writeValueAsString(response);
         GetTableResponse parseData = mapper.readValue(responseStr, GetTableResponse.class);
-        assertEquals(response.getLocation(), parseData.getLocation());
+        assertEquals(response.getSchemaId(), parseData.getSchemaId());
         assertEquals(response.getSchema(), parseData.getSchema());
     }
 

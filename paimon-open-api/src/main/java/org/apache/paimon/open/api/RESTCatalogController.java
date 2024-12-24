@@ -31,7 +31,6 @@ import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
-import org.apache.paimon.schema.TableSchema;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -224,17 +223,14 @@ public class RESTCatalogController {
             @PathVariable String database,
             @PathVariable String table) {
         return new GetTableResponse(
-                "location",
-                new TableSchema(
-                        1,
-                        1,
+                "",
+                1,
+                new org.apache.paimon.schema.Schema(
                         ImmutableList.of(),
-                        1,
                         ImmutableList.of(),
                         ImmutableList.of(),
                         new HashMap<>(),
-                        "comment",
-                        1L));
+                        "comment"));
     }
 
     @Operation(
@@ -254,17 +250,14 @@ public class RESTCatalogController {
             @PathVariable String database,
             @RequestBody CreateTableRequest request) {
         return new GetTableResponse(
-                "location",
-                new TableSchema(
-                        1,
-                        1,
+                "",
+                1,
+                new org.apache.paimon.schema.Schema(
                         ImmutableList.of(),
-                        1,
                         ImmutableList.of(),
                         ImmutableList.of(),
                         new HashMap<>(),
-                        "comment",
-                        1L));
+                        "comment"));
     }
 
     @Operation(
@@ -285,17 +278,14 @@ public class RESTCatalogController {
             @PathVariable String table,
             @RequestBody UpdateTableRequest request) {
         return new GetTableResponse(
-                "location",
-                new TableSchema(
-                        1,
-                        1,
+                "",
+                1,
+                new org.apache.paimon.schema.Schema(
                         ImmutableList.of(),
-                        1,
                         ImmutableList.of(),
                         ImmutableList.of(),
                         new HashMap<>(),
-                        "comment",
-                        1L));
+                        "comment"));
     }
 
     @Operation(

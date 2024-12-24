@@ -18,9 +18,6 @@
 
 package org.apache.paimon.table.system;
 
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 
@@ -34,7 +31,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
-import java.util.function.Supplier;
 
 import static org.apache.paimon.table.system.AggregationFieldsTable.AGGREGATION_FIELDS;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
@@ -83,22 +79,6 @@ public class SystemTableLoader {
         return Optional.ofNullable(SYSTEM_TABLE_LOADERS.get(type.toLowerCase()))
                 .map(f -> f.apply(dataTable))
                 .orElse(null);
-    }
-
-    @Nullable
-    public static Table loadGlobal(
-            String tableName,
-            FileIO fileIO,
-            Supplier<Map<String, Map<String, Path>>> allTablePaths,
-            Options catalogOptions) {
-        switch (tableName.toLowerCase()) {
-            case ALL_TABLE_OPTIONS:
-                return new AllTableOptionsTable(fileIO, allTablePaths.get());
-            case CATALOG_OPTIONS:
-                return new CatalogOptionsTable(catalogOptions);
-            default:
-                return null;
-        }
     }
 
     public static List<String> loadGlobalTableNames() {
