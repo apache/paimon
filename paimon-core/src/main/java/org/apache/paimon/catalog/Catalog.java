@@ -364,31 +364,6 @@ public interface Catalog extends AutoCloseable {
         throw new UnsupportedOperationException();
     }
 
-    /**
-     * Exception for trying to operate on a resource that doesn't have permission. Define as a
-     * runtime exception: 1. Other engine has no this type exception. 2. It wouldn't bring api break
-     * change.
-     */
-    class NoPermissionException extends RuntimeException {
-        private static final String MSG = "No permission for %s %s.";
-        private static final String DATABASE_TYPE_NAME = "database";
-        private static final String TABLE_TYPE_NAME = "table";
-
-        public static NoPermissionException createDatabaseNoPermissionException(
-                String databaseName, Throwable cause) {
-            return new NoPermissionException(DATABASE_TYPE_NAME, databaseName, cause);
-        }
-
-        public static NoPermissionException createTableNoPermissionException(
-                Identifier identifier, Throwable cause) {
-            return new NoPermissionException(TABLE_TYPE_NAME, identifier.getFullName(), cause);
-        }
-
-        public NoPermissionException(String resourceType, String resourceName, Throwable cause) {
-            super(String.format(MSG, resourceType, resourceName), cause);
-        }
-    }
-
     /** Exception for trying to drop on a database that is not empty. */
     class DatabaseNotEmptyException extends Exception {
         private static final String MSG = "Database %s is not empty.";
@@ -458,6 +433,22 @@ public interface Catalog extends AutoCloseable {
         }
     }
 
+    /** Exception for trying to operate on the database that doesn't have permission. */
+    class DatabaseNoPermissionException extends RuntimeException {
+        private static final String MSG = "Database %s has no permission.";
+
+        private final String database;
+
+        public DatabaseNoPermissionException(String database, Throwable cause) {
+            super(String.format(MSG, database), cause);
+            this.database = database;
+        }
+
+        public String database() {
+            return database;
+        }
+    }
+
     /** Exception for trying to create a table that already exists. */
     class TableAlreadyExistException extends Exception {
 
@@ -491,6 +482,23 @@ public interface Catalog extends AutoCloseable {
         }
 
         public TableNotExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+    }
+
+    /** Exception for trying to operate on the table that doesn't have permission. */
+    class TableNoPermissionException extends RuntimeException {
+
+        private static final String MSG = "Table %s has no permission.";
+
+        private final Identifier identifier;
+
+        public TableNoPermissionException(Identifier identifier, Throwable cause) {
             super(String.format(MSG, identifier.getFullName()), cause);
             this.identifier = identifier;
         }

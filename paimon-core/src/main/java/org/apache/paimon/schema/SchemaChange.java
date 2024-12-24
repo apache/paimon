@@ -260,43 +260,25 @@ public interface SchemaChange extends Serializable {
             this.move = move;
         }
 
+        @JsonGetter(FIELD_FILED_NAMES)
         public String[] fieldNames() {
             return fieldNames;
         }
 
+        @JsonGetter(FIELD_DATA_TYPE)
         public DataType dataType() {
             return dataType;
         }
 
         @Nullable
+        @JsonGetter(FIELD_COMMENT)
         public String description() {
             return description;
         }
 
         @Nullable
-        public Move move() {
-            return move;
-        }
-
-        @JsonGetter(FIELD_FILED_NAMES)
-        public String[] getFieldNames() {
-            return fieldNames;
-        }
-
-        @JsonGetter(FIELD_DATA_TYPE)
-        public DataType getDataType() {
-            return dataType;
-        }
-
-        @JsonGetter(FIELD_COMMENT)
-        @Nullable
-        public String getDescription() {
-            return description;
-        }
-
         @JsonGetter(FIELD_MOVE)
-        @Nullable
-        public Move getMove() {
+        public Move move() {
             return move;
         }
 
@@ -347,21 +329,13 @@ public interface SchemaChange extends Serializable {
             this.newName = newName;
         }
 
+        @JsonGetter(FIELD_FILED_NAMES)
         public String[] fieldNames() {
             return fieldNames;
         }
 
-        public String newName() {
-            return newName;
-        }
-
-        @JsonGetter(FIELD_FILED_NAMES)
-        public String[] getFieldNames() {
-            return fieldNames;
-        }
-
         @JsonGetter(FIELD_NEW_NAME)
-        public String getNewName() {
+        public String newName() {
             return newName;
         }
 
@@ -402,12 +376,8 @@ public interface SchemaChange extends Serializable {
             this.fieldNames = fieldNames;
         }
 
-        public String[] fieldNames() {
-            return fieldNames;
-        }
-
         @JsonGetter(FIELD_FILED_NAMES)
-        public String[] getFieldNames() {
+        public String[] fieldNames() {
             return fieldNames;
         }
 
@@ -457,30 +427,18 @@ public interface SchemaChange extends Serializable {
             this.keepNullability = keepNullability;
         }
 
+        @JsonGetter(FIELD_FILED_NAMES)
         public String[] fieldNames() {
             return fieldNames;
         }
 
+        @JsonGetter(FIELD_NEW_DATA_TYPE)
         public DataType newDataType() {
             return newDataType;
         }
 
-        public boolean keepNullability() {
-            return keepNullability;
-        }
-
-        @JsonGetter(FIELD_FILED_NAMES)
-        public String[] getFieldNames() {
-            return fieldNames;
-        }
-
-        @JsonGetter(FIELD_NEW_DATA_TYPE)
-        public DataType getNewDataType() {
-            return newDataType;
-        }
-
         @JsonGetter(FIELD_KEEP_NULLABILITY)
-        public boolean isKeepNullability() {
+        public boolean keepNullability() {
             return keepNullability;
         }
 
@@ -590,30 +548,18 @@ public interface SchemaChange extends Serializable {
             this.type = type;
         }
 
+        @JsonGetter(FIELD_FILED_NAMES)
         public String fieldName() {
             return fieldName;
         }
 
+        @JsonGetter(FIELD_REFERENCE_FIELD_NAME)
         public String referenceFieldName() {
             return referenceFieldName;
         }
 
-        public MoveType type() {
-            return type;
-        }
-
-        @JsonGetter(FIELD_FILED_NAMES)
-        public String getFieldName() {
-            return fieldName;
-        }
-
-        @JsonGetter(FIELD_REFERENCE_FIELD_NAME)
-        public String getReferenceFieldName() {
-            return referenceFieldName;
-        }
-
         @JsonGetter(FIELD_TYPE)
-        public MoveType getType() {
+        public MoveType type() {
             return type;
         }
 
@@ -660,21 +606,13 @@ public interface SchemaChange extends Serializable {
             this.newNullability = newNullability;
         }
 
+        @JsonGetter(FIELD_FILED_NAMES)
         public String[] fieldNames() {
             return fieldNames;
         }
 
-        public boolean newNullability() {
-            return newNullability;
-        }
-
-        @JsonGetter(FIELD_FILED_NAMES)
-        public String[] getFieldNames() {
-            return fieldNames;
-        }
-
         @JsonGetter(FIELD_NEW_NULLABILITY)
-        public boolean isNewNullability() {
+        public boolean newNullability() {
             return newNullability;
         }
 
@@ -722,21 +660,13 @@ public interface SchemaChange extends Serializable {
             this.newDescription = newDescription;
         }
 
+        @JsonGetter(FIELD_FILED_NAMES)
         public String[] fieldNames() {
             return fieldNames;
         }
 
-        public String newDescription() {
-            return newDescription;
-        }
-
-        @JsonGetter(FIELD_FILED_NAMES)
-        public String[] getFieldNames() {
-            return fieldNames;
-        }
-
         @JsonGetter(FIELD_NEW_COMMENT)
-        public String getNewDescription() {
+        public String newDescription() {
             return newDescription;
         }
 
