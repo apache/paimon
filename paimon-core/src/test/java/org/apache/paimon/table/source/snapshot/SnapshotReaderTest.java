@@ -368,6 +368,6 @@ public class SnapshotReaderTest {
                                 options.toMap(),
                                 ""));
         return FileStoreTableFactory.create(
-                fileIO, tablePath, tableSchema, options, CatalogEnvironment.empty());
+                fileIO, tablePath, tableSchema, options, CatalogEnvironment.empty(), tablePath);
     }
 }

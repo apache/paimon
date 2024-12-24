@@ -161,7 +161,8 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                         CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
-                        null);
+                        null,
+                        tableRoot);
 
         Table table = fileSystemCatalog.getTable(Identifier.create("db", "T"));
         ReadBuilder readBuilder = table.newReadBuilder();

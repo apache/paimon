@@ -115,7 +115,8 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                 wrapped.location(),
                 branchSchema,
                 new Options(),
-                wrapped.catalogEnvironment());
+                wrapped.catalogEnvironment(),
+                wrapped.dataLocation());
     }
 
     private Map<String, String> rewriteFallbackOptions(Map<String, String> options) {

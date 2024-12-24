@@ -214,6 +214,7 @@ public class MockRESTMessage {
         options.put("option-2", "value-2");
         // set path for test as if not set system will add one
         options.put(CoreOptions.PATH.key(), "/a/b/c");
+        options.put(CoreOptions.TABLE_DATA_PATH.key(), "/a/b/c");
         return new TableSchema(1, fields, 1, partitionKeys, primaryKeys, options, "comment");
     }
 }

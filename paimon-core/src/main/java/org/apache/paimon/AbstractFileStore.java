@@ -119,7 +119,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.legacyPartitionName(),
                 options.fileSuffixIncludeCompression(),
                 options.fileCompression(),
-                options.dataFilePathDirectory());
+                options.dataFilePathDirectory(),
+                options.dataPath());
     }
 
     @Override

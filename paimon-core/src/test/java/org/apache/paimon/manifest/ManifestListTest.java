@@ -110,7 +110,8 @@ public class ManifestListTest {
                         CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
-                        null);
+                        null,
+                        path);
         return new ManifestList.Factory(FileIOFinder.find(path), avro, "zstd", pathFactory, null)
                 .create();
     }

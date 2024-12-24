@@ -128,6 +128,11 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public Path dataLocation() {
+        return wrapped.dataLocation();
+    }
+
+    @Override
     public SnapshotManager snapshotManager() {
         return wrapped.snapshotManager();
     }

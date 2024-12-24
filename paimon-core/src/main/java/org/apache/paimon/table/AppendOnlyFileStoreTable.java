@@ -58,15 +58,16 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     private transient AppendOnlyFileStore lazyStore;
 
     AppendOnlyFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
-        this(fileIO, path, tableSchema, CatalogEnvironment.empty());
+        this(fileIO, path, tableSchema, CatalogEnvironment.empty(), path);
     }
 
     AppendOnlyFileStoreTable(
             FileIO fileIO,
             Path path,
             TableSchema tableSchema,
-            CatalogEnvironment catalogEnvironment) {
-        super(fileIO, path, tableSchema, catalogEnvironment);
+            CatalogEnvironment catalogEnvironment,
+            Path tableDataPath) {
+        super(fileIO, path, tableSchema, catalogEnvironment, tableDataPath);
     }
 
     @Override
