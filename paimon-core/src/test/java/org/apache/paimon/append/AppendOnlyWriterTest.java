@@ -66,7 +66,6 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
@@ -646,10 +645,10 @@ public class AppendOnlyWriterTest {
         int size = toCompact.size();
         long minSeq = toCompact.get(0).minSequenceNumber();
         long maxSeq = toCompact.get(size - 1).maxSequenceNumber();
-        String fileName = "compact-" + UUID.randomUUID();
-        LocalFileIO.create().newOutputStream(pathFactory.toPath(fileName), false).close();
+        Path path = pathFactory.newPath("compact-");
+        LocalFileIO.create().newOutputStream(path, false).close();
         return DataFileMeta.forAppend(
-                fileName,
+                path.getName(),
                 toCompact.stream().mapToLong(DataFileMeta::fileSize).sum(),
                 toCompact.stream().mapToLong(DataFileMeta::rowCount).sum(),
                 STATS_SERIALIZER.toBinaryAllMode(

@@ -72,8 +72,9 @@ public class FileStorePathFactoryTest {
         FileStorePathFactory pathFactory = createNonPartFactory(new Path(tempDir.toString()));
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(new BinaryRow(0), 123);
-        assertThat(dataFilePathFactory.toPath("my-data-file-name"))
-                .isEqualTo(new Path(tempDir.toString() + "/bucket-123/my-data-file-name"));
+        assertThat(dataFilePathFactory.newPath("my-data-file-name").toString())
+                .startsWith(
+                        new Path(tempDir.toString() + "/bucket-123/my-data-file-name").toString());
     }
 
     @Test
@@ -116,9 +117,10 @@ public class FileStorePathFactoryTest {
         writer.complete();
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(partition, 123);
-        assertThat(dataFilePathFactory.toPath("my-data-file-name"))
-                .isEqualTo(
-                        new Path(tempDir.toString() + expected + "/bucket-123/my-data-file-name"));
+        assertThat(dataFilePathFactory.newPath("my-data-file-name").toString())
+                .startsWith(
+                        new Path(tempDir.toString() + expected + "/bucket-123/my-data-file-name")
+                                .toString());
     }
 
     public static FileStorePathFactory createNonPartFactory(Path root) {
