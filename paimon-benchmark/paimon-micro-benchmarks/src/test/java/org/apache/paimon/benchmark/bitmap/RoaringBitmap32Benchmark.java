@@ -35,7 +35,7 @@ import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Benchmark for measure the performance for {@link RoaringBitmap32}. */
+/** Benchmark for {@link RoaringBitmap32}. */
 public class RoaringBitmap32Benchmark {
 
     public static final int ROW_COUNT = 10000000;
