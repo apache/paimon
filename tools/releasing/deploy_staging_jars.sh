@@ -42,6 +42,6 @@ fi
 cd ${PROJECT_ROOT}
 
 echo "Deploying to repository.apache.org"
-${MVN} clean deploy -Papache-release,docs-and-source -DskipTests -DretryFailedDeploymentCount=10 $CUSTOM_OPTIONS
+${MVN} clean deploy -Papache-release,docs-and-source,spark3 -DskipTests -DretryFailedDeploymentCount=10 $CUSTOM_OPTIONS
 
 cd ${CURR_DIR}
