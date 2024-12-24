@@ -20,10 +20,10 @@ package org.apache.paimon.benchmark.bitmap;
 
 import org.apache.paimon.benchmark.Benchmark;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.roaringbitmap.RoaringBitmap;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -35,8 +35,8 @@ import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Benchmark for {@link RoaringBitmap32}. */
-public class RoaringBitmap32Benchmark {
+/** Benchmark for {@link RoaringBitmap}. */
+public class RoaringBitmapBenchmark {
 
     public static final int ROW_COUNT = 10000000;
 
@@ -45,7 +45,7 @@ public class RoaringBitmap32Benchmark {
     @Test
     public void testDeserialize() throws Exception {
         Random random = new Random();
-        RoaringBitmap32 bitmap = new RoaringBitmap32();
+        RoaringBitmap bitmap = new RoaringBitmap();
         for (int i = 0; i < ROW_COUNT; i++) {
             if (random.nextBoolean()) {
                 bitmap.add(i);
@@ -71,7 +71,7 @@ public class RoaringBitmap32Benchmark {
                     try (LocalFileIO.LocalSeekableInputStream seekableStream =
                                     new LocalFileIO.LocalSeekableInputStream(file);
                             DataInputStream input = new DataInputStream(seekableStream)) {
-                        new RoaringBitmap32().deserialize(input);
+                        new RoaringBitmap().deserialize(input);
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
@@ -84,7 +84,7 @@ public class RoaringBitmap32Benchmark {
                     try (LocalFileIO.LocalSeekableInputStream seekableStream =
                                     new LocalFileIO.LocalSeekableInputStream(file);
                             DataInputStream input = new DataInputStream(seekableStream)) {
-                        new RoaringBitmap32().deserialize(input, null);
+                        new RoaringBitmap().deserialize(input, null);
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }

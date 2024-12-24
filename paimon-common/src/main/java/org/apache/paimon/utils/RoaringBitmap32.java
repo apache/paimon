@@ -22,8 +22,6 @@ import org.apache.paimon.annotation.VisibleForTesting;
 
 import org.roaringbitmap.RoaringBitmap;
 
-import javax.annotation.Nullable;
-
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
@@ -88,11 +86,7 @@ public class RoaringBitmap32 {
     }
 
     public void deserialize(DataInput in) throws IOException {
-        roaringBitmap.deserialize(in);
-    }
-
-    public void deserialize(DataInput in, @Nullable byte[] buffer) throws IOException {
-        roaringBitmap.deserialize(in, buffer);
+        roaringBitmap.deserialize(in, null);
     }
 
     @Override
