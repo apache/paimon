@@ -22,8 +22,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
-import org.apache.paimon.rest.requests.SchemaChanges;
-import org.apache.paimon.rest.requests.UpdateTableRequest;
+import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
@@ -122,10 +121,9 @@ public class MockRESTMessage {
         return new CreateTableRequest(identifier, schema);
     }
 
-    public static UpdateTableRequest updateTableRequest(String toTableName) {
-        Identifier identifierChange = Identifier.create(databaseName(), toTableName);
-        SchemaChanges changes = new SchemaChanges(getChanges());
-        return new UpdateTableRequest(identifierChange, changes);
+    public static RenameTableRequest renameRequest(String toTableName) {
+        Identifier newIdentifier = Identifier.create(databaseName(), toTableName);
+        return new RenameTableRequest(newIdentifier);
     }
 
     public static List<SchemaChange> getChanges() {

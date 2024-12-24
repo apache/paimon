@@ -32,7 +32,6 @@ import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
-import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
@@ -56,7 +55,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
@@ -281,7 +279,7 @@ public class RESTCatalogTest {
                                 Identifier.create(databaseName, fromTableName),
                                 Identifier.create(databaseName, toTableName),
                                 true));
-        verify(mockRestCatalog, times(1)).updateTable(any(), any(), anyList());
+        verify(mockRestCatalog, times(1)).renameTable(any(), any());
     }
 
     @Test
@@ -312,31 +310,6 @@ public class RESTCatalogTest {
                                 Identifier.create(databaseName, fromTableName),
                                 Identifier.create(databaseName, toTableName),
                                 false));
-    }
-
-    @Test
-    public void testAlterTable() throws Exception {
-        String databaseName = MockRESTMessage.databaseName();
-        List<SchemaChange> changes = MockRESTMessage.getChanges();
-        GetTableResponse response = MockRESTMessage.getTableResponse();
-        mockResponse(mapper.writeValueAsString(response), 200);
-        assertDoesNotThrow(
-                () ->
-                        mockRestCatalog.alterTable(
-                                Identifier.create(databaseName, "t1"), changes, true));
-        verify(mockRestCatalog, times(1)).updateTable(any(), any(), anyList());
-    }
-
-    @Test
-    public void testAlterTableWhenTableNotExistAndIgnoreIfNotExistsIsFalse() throws Exception {
-        String databaseName = MockRESTMessage.databaseName();
-        List<SchemaChange> changes = MockRESTMessage.getChanges();
-        mockResponse("", 404);
-        assertThrows(
-                Catalog.TableNotExistException.class,
-                () ->
-                        mockRestCatalog.alterTable(
-                                Identifier.create(databaseName, "t1"), changes, false));
     }
 
     @Test

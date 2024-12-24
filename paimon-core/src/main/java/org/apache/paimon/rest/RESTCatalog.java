@@ -41,8 +41,7 @@ import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
-import org.apache.paimon.rest.requests.SchemaChanges;
-import org.apache.paimon.rest.requests.UpdateTableRequest;
+import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
@@ -303,7 +302,7 @@ public class RESTCatalog implements Catalog {
     public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
             throws TableNotExistException, TableAlreadyExistException {
         try {
-            updateTable(fromTable, toTable, new ArrayList<>());
+            renameTable(fromTable, toTable);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 throw new TableNotExistException(fromTable);
@@ -319,15 +318,7 @@ public class RESTCatalog implements Catalog {
     public void alterTable(
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
-        try {
-            updateTable(identifier, identifier, changes);
-        } catch (NoSuchResourceException e) {
-            if (!ignoreIfNotExists) {
-                throw new TableNotExistException(identifier);
-            }
-        } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
-        }
+        throw new UnsupportedOperationException("TODO");
     }
 
     @Override
@@ -386,10 +377,8 @@ public class RESTCatalog implements Catalog {
     }
 
     @VisibleForTesting
-    void updateTable(
-            Identifier fromTable, Identifier newTableIdentifier, List<SchemaChange> changes) {
-        UpdateTableRequest request =
-                new UpdateTableRequest(newTableIdentifier, new SchemaChanges(changes));
+    void renameTable(Identifier fromTable, Identifier newIdentifier) {
+        RenameTableRequest request = new RenameTableRequest(newIdentifier);
         client.post(
                 resourcePaths.table(fromTable.getDatabaseName(), fromTable.getTableName()),
                 request,

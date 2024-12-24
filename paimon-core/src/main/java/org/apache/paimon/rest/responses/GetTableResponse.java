@@ -23,9 +23,11 @@ import org.apache.paimon.schema.Schema;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 /** Response for getting table. */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class GetTableResponse implements RESTResponse {
 
     private static final String FIELD_PATH = "path";

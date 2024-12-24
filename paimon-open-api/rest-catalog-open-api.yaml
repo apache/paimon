@@ -176,8 +176,8 @@ paths:
     post:
       tags:
         - table
-      summary: Update table
-      operationId: updateTable
+      summary: Rename table
+      operationId: renameTable
       parameters:
         - name: prefix
           in: path
@@ -198,7 +198,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UpdateTableRequest'
+              $ref: '#/components/schemas/RenameTableRequest'
       responses:
         "200":
           description: OK
@@ -437,119 +437,11 @@ components:
           format: int64
         schema:
           $ref: '#/components/schemas/Schema'
-    AddColumn:
+    RenameTableRequest:
       type: object
       properties:
-        field-names:
-          type: array
-          items:
-            type: string
-        data-types:
-          $ref: '#/components/schemas/DataType'
-        comment:
-          type: string
-        move:
-          $ref: '#/components/schemas/Move'
-    Move:
-      type: object
-      properties:
-        field-name:
-          type: string
-        reference-field-name:
-          type: string
-        type:
-          type: string
-          enum:
-            - FIRST
-            - AFTER
-            - BEFORE
-            - LAST
-    RenameColumn:
-      type: object
-      properties:
-        field-names:
-          type: array
-          items:
-            type: string
-        new-name:
-          type: string
-    SchemaChanges:
-      type: object
-      properties:
-        setOptions:
-          type: object
-          additionalProperties:
-            type: string
-        removeOptions:
-          type: array
-          items:
-            type: string
-        comment:
-          type: string
-        addColumns:
-          type: array
-          items:
-            $ref: '#/components/schemas/AddColumn'
-        renameColumns:
-          type: array
-          items:
-            $ref: '#/components/schemas/RenameColumn'
-        dropColumns:
-          type: array
-          items:
-            type: string
-        updateColumnTypes:
-          type: array
-          items:
-            $ref: '#/components/schemas/UpdateColumnType'
-        updateColumnNullabilities:
-          type: array
-          items:
-            $ref: '#/components/schemas/UpdateColumnNullability'
-        updateColumnComments:
-          type: array
-          items:
-            $ref: '#/components/schemas/UpdateColumnComment'
-        updateColumnPositions:
-          type: array
-          items:
-            $ref: '#/components/schemas/Move'
-    UpdateColumnComment:
-      type: object
-      properties:
-        fieldNames:
-          type: array
-          items:
-            type: string
-        newComment:
-          type: string
-    UpdateColumnNullability:
-      type: object
-      properties:
-        fieldNames:
-          type: array
-          items:
-            type: string
-        newNullability:
-          type: boolean
-    UpdateColumnType:
-      type: object
-      properties:
-        fieldNames:
-          type: array
-          items:
-            type: string
-        newDataTypes:
-          $ref: '#/components/schemas/DataType'
-        keepNullability:
-          type: boolean
-    UpdateTableRequest:
-      type: object
-      properties:
-        identifierChange:
+        newIdentifier:
           $ref: '#/components/schemas/Identifier'
-        schemaChanges:
-          $ref: '#/components/schemas/SchemaChanges'
     AlterDatabaseRequest:
       type: object
       properties:

@@ -22,16 +22,19 @@ import org.apache.paimon.rest.RESTResponse;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
 
 /** Response for listing tables. */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class ListTablesResponse implements RESTResponse {
+
     private static final String FIELD_TABLES = "tables";
 
     @JsonProperty(FIELD_TABLES)
-    private List<String> tables;
+    private final List<String> tables;
 
     @JsonCreator
     public ListTablesResponse(@JsonProperty(FIELD_TABLES) List<String> tables) {

@@ -21,7 +21,7 @@ package org.apache.paimon.rest;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
-import org.apache.paimon.rest.requests.UpdateTableRequest;
+import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
@@ -161,12 +161,11 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void updateTableRequestParseTest() throws Exception {
-        UpdateTableRequest request = MockRESTMessage.updateTableRequest("t2");
+    public void renameTableRequestParseTest() throws Exception {
+        RenameTableRequest request = MockRESTMessage.renameRequest("t2");
         String requestStr = mapper.writeValueAsString(request);
-        UpdateTableRequest parseData = mapper.readValue(requestStr, UpdateTableRequest.class);
-        assertEquals(request.getIdentifierChange(), parseData.getIdentifierChange());
-        assertEquals(request.getChanges(), parseData.getChanges());
+        RenameTableRequest parseData = mapper.readValue(requestStr, RenameTableRequest.class);
+        assertEquals(request.getNewIdentifier(), parseData.getNewIdentifier());
     }
 
     @Test
