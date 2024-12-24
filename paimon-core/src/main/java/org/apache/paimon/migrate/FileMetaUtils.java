@@ -118,7 +118,6 @@ public class FileMetaUtils {
                                             new RuntimeException(
                                                     "Can't get table stats extractor for format "
                                                             + format));
-
             Path newPath = renameFile(fileIO, fileStatus.getPath(), dir, format, rollback);
             return constructFileMeta(
                     newPath.getName(),

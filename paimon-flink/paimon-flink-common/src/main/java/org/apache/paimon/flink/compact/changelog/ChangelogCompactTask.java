@@ -168,11 +168,11 @@ public class ChangelogCompactTask implements Serializable {
                 .rename(
                         changelogTempPath,
                         dataFilePathFactory.toPath(
-                                baseResult.meta.externalPath(),
                                 realName
                                         + "."
                                         + CompactedChangelogReadOnlyFormat.getIdentifier(
-                                                baseResult.meta.fileFormat())));
+                                                baseResult.meta.fileFormat()),
+                                baseResult.meta.externalPath()));
 
         List<Committable> newCommittables = new ArrayList<>();
 

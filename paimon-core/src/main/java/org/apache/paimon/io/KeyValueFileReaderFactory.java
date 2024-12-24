@@ -20,6 +20,7 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
@@ -105,6 +106,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                 file.externalPath());
     }
 
+    @VisibleForTesting
     public RecordReader<KeyValue> createRecordReader(
             long schemaId, String fileName, long fileSize, int level, String externalPath)
             throws IOException {

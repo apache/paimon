@@ -54,7 +54,6 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
@@ -97,7 +96,6 @@ public class KeyValueFileReadWriteTest {
     private void testWriteAndReadDataFileImpl(String format) throws Exception {
         DataFileTestDataGenerator.Data data = gen.next();
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
-
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
 
         RollingFileWriter<KeyValue, DataFileMeta> writer =
