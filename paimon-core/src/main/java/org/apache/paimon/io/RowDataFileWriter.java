@@ -111,7 +111,6 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 dataFileIndexWriter == null
                         ? DataFileIndexWriter.EMPTY_RESULT
                         : dataFileIndexWriter.result();
-
         return DataFileMeta.forAppend(
                 path.getName(),
                 fileIO.getFileSize(path),

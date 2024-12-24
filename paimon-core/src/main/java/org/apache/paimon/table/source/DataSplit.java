@@ -183,6 +183,8 @@ public class DataSplit implements Split {
         String path = file.externalPath();
         if (path == null) {
             path = bucketPath + "/" + file.fileName();
+        } else {
+            path = path + "/" + file.fileName();
         }
         return new RawFile(
                 path,

@@ -390,7 +390,10 @@ public class FilesTable implements ReadonlyTable {
                                                 dataSplit.bucketPath()
                                                         + "/"
                                                         + dataFileMeta.fileName())
-                                        : BinaryString.fromString(dataFileMeta.externalPath()),
+                                        : BinaryString.fromString(
+                                                dataFileMeta.externalPath()
+                                                        + "/"
+                                                        + dataFileMeta.fileName()),
                         () ->
                                 BinaryString.fromString(
                                         DataFilePathFactory.formatIdentifier(
