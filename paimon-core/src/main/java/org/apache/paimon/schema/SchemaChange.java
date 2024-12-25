@@ -231,8 +231,8 @@ public interface SchemaChange extends Serializable {
 
         private static final long serialVersionUID = 1L;
 
-        private static final String FIELD_FILED_NAMES = "field-names";
-        private static final String FIELD_DATA_TYPE = "data-type";
+        private static final String FIELD_FILED_NAMES = "fieldNames";
+        private static final String FIELD_DATA_TYPE = "dataType";
         private static final String FIELD_COMMENT = "comment";
         private static final String FIELD_MOVE = "move";
 
@@ -312,8 +312,8 @@ public interface SchemaChange extends Serializable {
 
         private static final long serialVersionUID = 1L;
 
-        private static final String FIELD_FILED_NAMES = "field-names";
-        private static final String FIELD_NEW_NAME = "new-name";
+        private static final String FIELD_FILED_NAMES = "fieldNames";
+        private static final String FIELD_NEW_NAME = "newName";
 
         @JsonProperty(FIELD_FILED_NAMES)
         private final String[] fieldNames;
@@ -366,7 +366,7 @@ public interface SchemaChange extends Serializable {
 
         private static final long serialVersionUID = 1L;
 
-        private static final String FIELD_FILED_NAMES = "field-names";
+        private static final String FIELD_FILED_NAMES = "fieldNames";
 
         @JsonProperty(FIELD_FILED_NAMES)
         private final String[] fieldNames;
@@ -404,9 +404,9 @@ public interface SchemaChange extends Serializable {
     final class UpdateColumnType implements SchemaChange {
 
         private static final long serialVersionUID = 1L;
-        private static final String FIELD_FILED_NAMES = "field-names";
-        private static final String FIELD_NEW_DATA_TYPE = "new-data-type";
-        private static final String FIELD_KEEP_NULLABILITY = "keep-nullability";
+        private static final String FIELD_FILED_NAMES = "fieldNames";
+        private static final String FIELD_NEW_DATA_TYPE = "newDataType";
+        private static final String FIELD_KEEP_NULLABILITY = "keepNullability";
 
         @JsonProperty(FIELD_FILED_NAMES)
         private final String[] fieldNames;
@@ -525,8 +525,8 @@ public interface SchemaChange extends Serializable {
 
         private static final long serialVersionUID = 1L;
 
-        private static final String FIELD_FILED_NAMES = "field-name";
-        private static final String FIELD_REFERENCE_FIELD_NAME = "reference-field-name";
+        private static final String FIELD_FILED_NAMES = "fieldName";
+        private static final String FIELD_REFERENCE_FIELD_NAME = "referenceFieldName";
         private static final String FIELD_TYPE = "type";
 
         @JsonProperty(FIELD_FILED_NAMES)
@@ -589,8 +589,8 @@ public interface SchemaChange extends Serializable {
 
         private static final long serialVersionUID = 1L;
 
-        private static final String FIELD_FILED_NAMES = "field-names";
-        private static final String FIELD_NEW_NULLABILITY = "new-nullability";
+        private static final String FIELD_FILED_NAMES = "fieldNames";
+        private static final String FIELD_NEW_NULLABILITY = "newNullability";
 
         @JsonProperty(FIELD_FILED_NAMES)
         private final String[] fieldNames;
@@ -643,8 +643,8 @@ public interface SchemaChange extends Serializable {
 
         private static final long serialVersionUID = 1L;
 
-        private static final String FIELD_FILED_NAMES = "field-names";
-        private static final String FIELD_NEW_COMMENT = "new-comment";
+        private static final String FIELD_FILED_NAMES = "fieldNames";
+        private static final String FIELD_NEW_COMMENT = "newComment";
 
         @JsonProperty(FIELD_FILED_NAMES)
         private final String[] fieldNames;

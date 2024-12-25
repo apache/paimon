@@ -22,6 +22,7 @@ import org.apache.paimon.rest.RESTResponse;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.io.PrintWriter;
@@ -31,6 +32,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /** Response for error. */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class ErrorResponse implements RESTResponse {
 
     private static final String FIELD_MESSAGE = "message";

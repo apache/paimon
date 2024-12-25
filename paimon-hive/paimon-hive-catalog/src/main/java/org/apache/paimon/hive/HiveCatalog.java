@@ -104,7 +104,6 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
-import static org.apache.paimon.catalog.CatalogUtils.lockFactory;
 import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
@@ -637,8 +636,7 @@ public class HiveCatalog extends AbstractCatalog {
                             identifier,
                             tableMeta.uuid(),
                             Lock.factory(
-                                    lockFactory(catalogOptions, fileIO(), defaultLockFactory())
-                                            .orElse(null),
+                                    lockFactory().orElse(null),
                                     lockContext().orElse(null),
                                     identifier),
                             metastoreClientFactory(identifier).orElse(null)));
