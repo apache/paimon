@@ -111,7 +111,7 @@ public class DynamicPartitionLoader implements Serializable {
                         .sorted(comparator.reversed())
                         .collect(Collectors.toList());
 
-        if (newPartitions.size() <= 1) {
+        if (newPartitions.size() <= maxPartitionNum) {
             return newPartitions;
         } else {
             return newPartitions.subList(0, maxPartitionNum);
