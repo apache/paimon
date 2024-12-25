@@ -176,8 +176,8 @@ paths:
     post:
       tags:
         - table
-      summary: Rename table
-      operationId: renameTable
+      summary: Alter table
+      operationId: alterTable
       parameters:
         - name: prefix
           in: path
@@ -198,7 +198,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RenameTableRequest'
+              $ref: '#/components/schemas/AlterTableRequest'
       responses:
         "200":
           description: OK
@@ -231,6 +231,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/rename:
+    post:
+      tags:
+        - table
+      summary: Rename table
+      operationId: renameTable
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenameTableRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTableResponse'
         "500":
           description: Internal Server Error
   /v1/{prefix}/databases/{database}/properties:
@@ -437,6 +473,142 @@ components:
           format: int64
         schema:
           $ref: '#/components/schemas/Schema'
+    AlterTableRequest:
+      type: object
+      properties:
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SchemaChange'
+    SchemaChange:
+      anyOf:
+        - $ref: '#/components/schemas/SetOption'
+        - $ref: '#/components/schemas/RemoveOption'
+        - $ref: '#/components/schemas/UpdateComment'
+        - $ref: '#/components/schemas/AddColumn'
+        - $ref: '#/components/schemas/RenameColumn'
+        - $ref: '#/components/schemas/DropColumn'
+        - $ref: '#/components/schemas/UpdateColumnComment'
+        - $ref: '#/components/schemas/UpdateColumnType'
+        - $ref: '#/components/schemas/UpdateColumnPosition'
+        - $ref: '#/components/schemas/UpdateColumnNullability'
+    SetOption:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: ["set_option"]
+        additionalProperties:
+          type: string
+    RemoveOption:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: ["remove_option"]
+        removeOptionKey:
+          type: string
+    UpdateComment:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: ["update_comment"]
+        comment:
+          type: string
+    AddColumn:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: ["add_column"]
+        fieldNames:
+          type: array
+          items:
+            type: string
+        dataType:
+          $ref: '#/components/schemas/DataType'
+        comment:
+          type: string
+        move:
+          $ref: '#/components/schemas/Move'
+    RenameColumn:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: ["rename_column"]
+        fieldNames:
+          type: array
+          items:
+            type: string
+        newName:
+          type: string
+    DropColumn:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: ["drop_column"]
+        fieldNames:
+          type: array
+          items:
+            type: string
+    UpdateColumnComment:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [ "update_column_comment" ]
+        fieldNames:
+          type: array
+          items:
+            type: string
+        comment:
+          type: string
+    UpdateColumnType:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [ "update_column_type" ]
+        fieldNames:
+          type: array
+          items:
+            type: string
+        dataType:
+          $ref: '#/components/schemas/DataType'
+        keepNullability:
+          type: boolean
+    UpdateColumnPosition:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [ "update_column_position" ]
+        move:
+          $ref: '#/components/schemas/Move'
+    UpdateColumnNullability:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [ "update_column_nullability" ]
+        fieldNames:
+          type: array
+          items:
+            type: string
+        newNullability:
+          type: boolean
+    Move:
+      type: object
+      properties:
+        fieldName:
+          type: string
+        referenceFieldName:
+          type: string
+        type:
+          type: string
     RenameTableRequest:
       type: object
       properties:
