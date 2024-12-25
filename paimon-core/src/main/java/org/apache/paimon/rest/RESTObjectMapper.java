@@ -67,6 +67,7 @@ public class RESTObjectMapper {
         return module;
     }
 
+    /** Serializer for SchemaChange. */
     public static class SchemaChangeSerializer
             implements JsonSerializer<SchemaChange>, JsonDeserializer<SchemaChange> {
 

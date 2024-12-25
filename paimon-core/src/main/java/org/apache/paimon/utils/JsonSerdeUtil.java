@@ -279,6 +279,11 @@ public class JsonSerdeUtil {
         return jsonNode == null || jsonNode.isNull();
     }
 
+    /**
+     * A functional interface for parsing JSON data into a specific object type.
+     *
+     * @param <T> The type of the object to be parsed from JSON.
+     */
     @FunctionalInterface
     public interface FromJson<T> {
         T parse(JsonNode node) throws JsonProcessingException;
