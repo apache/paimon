@@ -116,7 +116,12 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 suggestedFileSize);
     }
 
-    private class ManifestEntryWriter extends SingleFileWriter<ManifestEntry, ManifestFileMeta> {
+    public ManifestEntryWriter createManifestEntryWriter(Path manifestPath) {
+        return new ManifestEntryWriter(writerFactory, manifestPath, compression);
+    }
+
+    /** Writer for {@link ManifestEntry}. */
+    public class ManifestEntryWriter extends SingleFileWriter<ManifestEntry, ManifestFileMeta> {
 
         private final SimpleStatsCollector partitionStatsCollector;
         private final SimpleStatsConverter partitionStatsSerializer;
