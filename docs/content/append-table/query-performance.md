@@ -35,7 +35,7 @@ filtering, if the filtering effect is good, the query would have been minutes of
 milliseconds to complete the execution.
 
 Often the data distribution is not always effective filtering, so if we can sort the data by the field in `WHERE` condition?
-You can take a look to [Flink COMPACT Action]({{< ref "maintenance/dedicated-compaction#sort-compact" >}}) or
+You can take a look at [Flink COMPACT Action]({{< ref "maintenance/dedicated-compaction#sort-compact" >}}) or
 [Flink COMPACT Procedure]({{< ref "flink/procedures" >}}) or [Spark COMPACT Procedure]({{< ref "spark/procedures" >}}).
 
 ## Data Skipping By File Index
@@ -54,7 +54,7 @@ file is too small, it will be stored directly in the manifest, otherwise in the 
 corresponds to an index file, which has a separate file definition and can contain different types of indexes with
 multiple columns.
 
-Different file index may be efficient in different scenario. For example bloom filter may speed up query in point lookup
+Different file indexes may be efficient in different scenarios. For example bloom filter may speed up query in point lookup
 scenario. Using a bitmap may consume more space but can result in greater accuracy.
 
 `Bloom Filter`:
