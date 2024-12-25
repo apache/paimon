@@ -31,9 +31,10 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Objects;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_DYNAMIC_PARTITION;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -45,22 +46,27 @@ public class DynamicPartitionLoader implements Serializable {
 
     private static final String MAX_PT = "max_pt()";
 
+    private static final String MAX_TWO_PT = "max_two_pt()";
+
     private final Table table;
     private final Duration refreshInterval;
+    private final int maxPartitionNum;
 
     private Comparator<InternalRow> comparator;
 
     private LocalDateTime lastRefresh;
-    @Nullable private BinaryRow partition;
+    private List<BinaryRow> partitions;
 
-    private DynamicPartitionLoader(Table table, Duration refreshInterval) {
+    private DynamicPartitionLoader(Table table, Duration refreshInterval, int maxPartitionNum) {
         this.table = table;
         this.refreshInterval = refreshInterval;
+        this.maxPartitionNum = maxPartitionNum;
     }
 
     public void open() {
         RowType partitionType = table.rowType().project(table.partitionKeys());
         this.comparator = CodeGenUtils.newRecordComparator(partitionType.getFieldTypes());
+        this.partitions = Collections.emptyList();
     }
 
     public void addPartitionKeysTo(List<String> joinKeys, List<String> projectFields) {
@@ -71,9 +77,8 @@ public class DynamicPartitionLoader implements Serializable {
         partitionKeys.stream().filter(k -> !projectFields.contains(k)).forEach(projectFields::add);
     }
 
-    @Nullable
-    public BinaryRow partition() {
-        return partition;
+    public List<BinaryRow> partitions() {
+        return partitions;
     }
 
     /** @return true if partition changed. */
@@ -83,14 +88,34 @@ public class DynamicPartitionLoader implements Serializable {
             return false;
         }
 
-        BinaryRow previous = this.partition;
-        partition =
-                table.newReadBuilder().newScan().listPartitions().stream()
-                        .max(comparator)
-                        .orElse(null);
+        List<BinaryRow> newPartitions = getMaxPartitions();
         lastRefresh = LocalDateTime.now();
 
-        return !Objects.equals(previous, partition);
+        if (newPartitions.size() != partitions.size()) {
+            partitions = newPartitions;
+            return true;
+        } else {
+            for (int i = 0; i < newPartitions.size(); i++) {
+                if (comparator.compare(newPartitions.get(i), partitions.get(i)) != 0) {
+                    partitions = newPartitions;
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    private List<BinaryRow> getMaxPartitions() {
+        List<BinaryRow> newPartitions =
+                table.newReadBuilder().newScan().listPartitions().stream()
+                        .sorted(comparator.reversed())
+                        .collect(Collectors.toList());
+
+        if (newPartitions.size() <= maxPartitionNum) {
+            return newPartitions;
+        } else {
+            return newPartitions.subList(0, maxPartitionNum);
+        }
     }
 
     @Nullable
@@ -101,13 +126,21 @@ public class DynamicPartitionLoader implements Serializable {
             return null;
         }
 
-        if (!dynamicPartition.equalsIgnoreCase(MAX_PT)) {
-            throw new UnsupportedOperationException(
-                    "Unsupported dynamic partition pattern: " + dynamicPartition);
+        int maxPartitionNum;
+        switch (dynamicPartition.toLowerCase()) {
+            case MAX_PT:
+                maxPartitionNum = 1;
+                break;
+            case MAX_TWO_PT:
+                maxPartitionNum = 2;
+                break;
+            default:
+                throw new UnsupportedOperationException(
+                        "Unsupported dynamic partition pattern: " + dynamicPartition);
         }
 
         Duration refresh =
                 options.get(FlinkConnectorOptions.LOOKUP_DYNAMIC_PARTITION_REFRESH_INTERVAL);
-        return new DynamicPartitionLoader(table, refresh);
+        return new DynamicPartitionLoader(table, refresh, maxPartitionNum);
     }
 }
