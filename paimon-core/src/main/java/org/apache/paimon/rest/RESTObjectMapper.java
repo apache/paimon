@@ -18,16 +18,23 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeJsonParser;
+import org.apache.paimon.utils.JsonDeserializer;
+import org.apache.paimon.utils.JsonSerializer;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.Module;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.SerializationFeature;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.module.SimpleModule;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+
+import java.io.IOException;
 
 import static org.apache.paimon.utils.JsonSerdeUtil.registerJsonObjects;
 
@@ -52,6 +59,34 @@ public class RESTObjectMapper {
                 DataTypeJsonParser::parseDataField);
         registerJsonObjects(
                 module, DataType.class, DataType::serializeJson, DataTypeJsonParser::parseDataType);
+        registerJsonObjects(
+                module,
+                SchemaChange.class,
+                SchemaChangeSerializer.getInstance(),
+                SchemaChangeSerializer.getInstance());
         return module;
+    }
+
+    public static class SchemaChangeSerializer
+            implements JsonSerializer<SchemaChange>, JsonDeserializer<SchemaChange> {
+
+        public static final SchemaChangeSerializer INSTANCE = new SchemaChangeSerializer();
+
+        public static SchemaChangeSerializer getInstance() {
+            return INSTANCE;
+        }
+
+        @Override
+        public SchemaChange deserialize(JsonNode node) {
+            return SchemaChangeParser.fromJson(node);
+        }
+
+        @Override
+        public void serialize(SchemaChange schemaChange, JsonGenerator generator)
+                throws IOException {
+            SchemaChangeParser.toJson(schemaChange, generator);
+        }
+
+        private SchemaChangeSerializer() {}
     }
 }
