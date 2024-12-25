@@ -124,6 +124,55 @@ public class BatchWriteGeneratorTagOperatorTest extends CommitterOperatorTest {
         assertThat(tagManager.allTagNames()).containsOnly("many-tags-test2", tagName);
     }
 
+    @Test
+    public void testBatchWriteGeneratorCustomizedTag() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        String customizedTag = "customized-tag";
+        // set tag.automatic-creation = batch
+        HashMap<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put("tag.automatic-creation", "batch");
+        dynamicOptions.put("tag.batch.customized-name", customizedTag);
+        table = table.copy(dynamicOptions);
+
+        StreamTableWrite write =
+                table.newStreamWriteBuilder().withCommitUser(initialCommitUser).newWrite();
+
+        OneInputStreamOperatorFactory<Committable, Committable> committerOperatorFactory =
+                createCommitterOperatorFactory(
+                        table,
+                        initialCommitUser,
+                        new RestoreAndFailCommittableStateManager<>(
+                                ManifestCommittableSerializer::new));
+
+        OneInputStreamOperator<Committable, Committable> committerOperator =
+                committerOperatorFactory.createStreamOperator(
+                        new StreamOperatorParameters<>(
+                                new SourceOperatorStreamTask<Integer>(new DummyEnvironment()),
+                                new MockStreamConfig(new Configuration(), 1),
+                                new MockOutput<>(new ArrayList<>()),
+                                null,
+                                null,
+                                null));
+
+        committerOperator.open();
+
+        TableCommitImpl tableCommit = table.newCommit(initialCommitUser);
+
+        write.write(GenericRow.of(1, 10L));
+        tableCommit.commit(write.prepareCommit(false, 1));
+
+        TagManager tagManager = table.tagManager();
+
+        // No tag is generated before the finish method
+        assertThat(table.tagManager().tagCount()).isEqualTo(0);
+        committerOperator.finish();
+        // After the finish method, a tag is generated
+        assertThat(table.tagManager().tagCount()).isEqualTo(1);
+        // Get tagName from tagManager.
+        String tagName = tagManager.allTagNames().get(0);
+        assertThat(tagName).isEqualTo(customizedTag);
+    }
+
     @Override
     protected OneInputStreamOperatorFactory<Committable, Committable>
             createCommitterOperatorFactory(
