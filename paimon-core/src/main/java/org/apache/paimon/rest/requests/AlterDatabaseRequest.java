@@ -22,22 +22,24 @@ import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
 import java.util.Map;
 
 /** Request for altering database. */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class AlterDatabaseRequest implements RESTRequest {
 
     private static final String FIELD_REMOVALS = "removals";
     private static final String FIELD_UPDATES = "updates";
 
     @JsonProperty(FIELD_REMOVALS)
-    private List<String> removals;
+    private final List<String> removals;
 
     @JsonProperty(FIELD_UPDATES)
-    private Map<String, String> updates;
+    private final Map<String, String> updates;
 
     @JsonCreator
     public AlterDatabaseRequest(

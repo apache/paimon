@@ -18,10 +18,7 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.paimon.factories.FactoryUtil;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -29,13 +26,9 @@ import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Preconditions;
 
 import java.util.Map;
-import java.util.Optional;
 
-import static org.apache.paimon.catalog.Catalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
-import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
-import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 
 /** Utils for {@link Catalog}. */
@@ -97,18 +90,6 @@ public class CatalogUtils {
         }
     }
 
-    public static Path newDatabasePath(String warehouse, String database) {
-        return new Path(warehouse, database + DB_SUFFIX);
-    }
-
-    public static Path newTableLocation(String warehouse, Identifier identifier) {
-        checkNotBranch(identifier, "newTableLocation");
-        checkNotSystemTable(identifier, "newTableLocation");
-        return new Path(
-                newDatabasePath(warehouse, identifier.getDatabaseName()),
-                identifier.getTableName());
-    }
-
     public static void checkNotBranch(Identifier identifier, String method) {
         if (identifier.getBranchName() != null) {
             throw new IllegalArgumentException(
@@ -119,32 +100,7 @@ public class CatalogUtils {
         }
     }
 
-    public static Optional<CatalogLockFactory> lockFactory(
-            Options options, FileIO fileIO, Optional<CatalogLockFactory> defaultLockFactoryOpt) {
-        boolean lockEnabled = lockEnabled(options, fileIO);
-        if (!lockEnabled) {
-            return Optional.empty();
-        }
-
-        String lock = options.get(LOCK_TYPE);
-        if (lock == null) {
-            return defaultLockFactoryOpt;
-        }
-
-        return Optional.of(
-                FactoryUtil.discoverFactory(
-                        AbstractCatalog.class.getClassLoader(), CatalogLockFactory.class, lock));
-    }
-
-    public static Optional<CatalogLockContext> lockContext(Options options) {
-        return Optional.of(CatalogLockContext.fromOptions(options));
-    }
-
-    public static boolean lockEnabled(Options options, FileIO fileIO) {
-        return options.getOptional(LOCK_ENABLED).orElse(fileIO != null && fileIO.isObjectStore());
-    }
-
-    public static Table getSystemTable(Identifier identifier, Table originTable)
+    public static Table createSystemTable(Identifier identifier, Table originTable)
             throws Catalog.TableNotExistException {
         if (!(originTable instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(

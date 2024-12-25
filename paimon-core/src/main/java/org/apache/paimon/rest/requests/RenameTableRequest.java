@@ -23,35 +23,25 @@ import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-/** Request for updating table. */
-public class UpdateTableRequest implements RESTRequest {
+/** Request for renaming table. */
+@JsonIgnoreProperties(ignoreUnknown = true)
+public class RenameTableRequest implements RESTRequest {
 
-    private static final String FIELD_IDENTIFIER_NAME = "identifier-change";
-    private static final String FIELD_SCHEMA_CHANGES_NAME = "schema-changes";
+    private static final String FIELD_NEW_IDENTIFIER_NAME = "newIdentifier";
 
-    @JsonProperty(FIELD_IDENTIFIER_NAME)
-    private Identifier identifierChange;
-
-    @JsonProperty(FIELD_SCHEMA_CHANGES_NAME)
-    private SchemaChanges changes;
+    @JsonProperty(FIELD_NEW_IDENTIFIER_NAME)
+    private final Identifier newIdentifier;
 
     @JsonCreator
-    public UpdateTableRequest(
-            @JsonProperty(FIELD_IDENTIFIER_NAME) Identifier identifierChange,
-            @JsonProperty(FIELD_SCHEMA_CHANGES_NAME) SchemaChanges changes) {
-        this.identifierChange = identifierChange;
-        this.changes = changes;
+    public RenameTableRequest(@JsonProperty(FIELD_NEW_IDENTIFIER_NAME) Identifier newIdentifier) {
+        this.newIdentifier = newIdentifier;
     }
 
-    @JsonGetter(FIELD_IDENTIFIER_NAME)
-    public Identifier getIdentifierChange() {
-        return identifierChange;
-    }
-
-    @JsonGetter(FIELD_SCHEMA_CHANGES_NAME)
-    public SchemaChanges getChanges() {
-        return changes;
+    @JsonGetter(FIELD_NEW_IDENTIFIER_NAME)
+    public Identifier getNewIdentifier() {
+        return newIdentifier;
     }
 }

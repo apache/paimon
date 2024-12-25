@@ -20,6 +20,7 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
+import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -39,6 +40,8 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.system.AllTableOptionsTable;
+import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
@@ -62,7 +65,10 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
-import static org.apache.paimon.catalog.CatalogUtils.lockFactory;
+import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
+import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
+import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
+import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -96,16 +102,31 @@ public abstract class AbstractCatalog implements Catalog {
         return fileIO;
     }
 
+    public Optional<CatalogLockFactory> lockFactory() {
+        if (!lockEnabled()) {
+            return Optional.empty();
+        }
+
+        String lock = catalogOptions.get(LOCK_TYPE);
+        if (lock == null) {
+            return defaultLockFactory();
+        }
+
+        return Optional.of(
+                FactoryUtil.discoverFactory(
+                        AbstractCatalog.class.getClassLoader(), CatalogLockFactory.class, lock));
+    }
+
     public Optional<CatalogLockFactory> defaultLockFactory() {
         return Optional.empty();
     }
 
     public Optional<CatalogLockContext> lockContext() {
-        return CatalogUtils.lockContext(catalogOptions);
+        return Optional.of(CatalogLockContext.fromOptions(catalogOptions));
     }
 
     protected boolean lockEnabled() {
-        return CatalogUtils.lockEnabled(catalogOptions, fileIO);
+        return catalogOptions.getOptional(LOCK_ENABLED).orElse(fileIO.isObjectStore());
     }
 
     protected boolean allowCustomTablePath() {
@@ -369,13 +390,14 @@ public abstract class AbstractCatalog implements Catalog {
     public Table getTable(Identifier identifier) throws TableNotExistException {
         if (isSystemDatabase(identifier.getDatabaseName())) {
             String tableName = identifier.getTableName();
-            Table table =
-                    SystemTableLoader.loadGlobal(
-                            tableName, fileIO, this::allTablePaths, catalogOptions);
-            if (table == null) {
-                throw new TableNotExistException(identifier);
+            switch (tableName.toLowerCase()) {
+                case ALL_TABLE_OPTIONS:
+                    return new AllTableOptionsTable(fileIO, allTablePaths());
+                case CATALOG_OPTIONS:
+                    return new CatalogOptionsTable(catalogOptions);
+                default:
+                    throw new TableNotExistException(identifier);
             }
-            return table;
         } else if (identifier.isSystemTable()) {
             Table originTable =
                     getDataOrFormatTable(
@@ -384,7 +406,7 @@ public abstract class AbstractCatalog implements Catalog {
                                     identifier.getTableName(),
                                     identifier.getBranchName(),
                                     null));
-            return CatalogUtils.getSystemTable(identifier, originTable);
+            return CatalogUtils.createSystemTable(identifier, originTable);
         } else {
             return getDataOrFormatTable(identifier);
         }
@@ -402,8 +424,7 @@ public abstract class AbstractCatalog implements Catalog {
                                 identifier,
                                 tableMeta.uuid,
                                 Lock.factory(
-                                        lockFactory(catalogOptions, fileIO(), defaultLockFactory())
-                                                .orElse(null),
+                                        lockFactory().orElse(null),
                                         lockContext().orElse(null),
                                         identifier),
                                 metastoreClientFactory(identifier).orElse(null)));
@@ -447,7 +468,7 @@ public abstract class AbstractCatalog implements Catalog {
      * @return The warehouse path for the database
      */
     public Path newDatabasePath(String database) {
-        return CatalogUtils.newDatabasePath(warehouse(), database);
+        return newDatabasePath(warehouse(), database);
     }
 
     public Map<String, Map<String, Path>> allTablePaths() {
@@ -488,6 +509,18 @@ public abstract class AbstractCatalog implements Catalog {
             throw new UnsupportedOperationException(
                     this.getClass().getName() + " currently does not support table branches");
         }
+    }
+
+    public static Path newTableLocation(String warehouse, Identifier identifier) {
+        checkNotBranch(identifier, "newTableLocation");
+        checkNotSystemTable(identifier, "newTableLocation");
+        return new Path(
+                newDatabasePath(warehouse, identifier.getDatabaseName()),
+                identifier.getTableName());
+    }
+
+    public static Path newDatabasePath(String warehouse, String database) {
+        return new Path(warehouse, database + DB_SUFFIX);
     }
 
     private void copyTableDefaultOptions(Map<String, String> options) {

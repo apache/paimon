@@ -18,13 +18,11 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
-import org.apache.paimon.rest.requests.SchemaChanges;
-import org.apache.paimon.rest.requests.UpdateTableRequest;
+import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
@@ -34,7 +32,6 @@ import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -124,10 +121,9 @@ public class MockRESTMessage {
         return new CreateTableRequest(identifier, schema);
     }
 
-    public static UpdateTableRequest updateTableRequest(String toTableName) {
-        Identifier identifierChange = Identifier.create(databaseName(), toTableName);
-        SchemaChanges changes = new SchemaChanges(getChanges());
-        return new UpdateTableRequest(identifierChange, changes);
+    public static RenameTableRequest renameRequest(String toTableName) {
+        Identifier newIdentifier = Identifier.create(databaseName(), toTableName);
+        return new RenameTableRequest(newIdentifier);
     }
 
     public static List<SchemaChange> getChanges() {
@@ -199,10 +195,10 @@ public class MockRESTMessage {
     }
 
     public static GetTableResponse getTableResponse() {
-        return new GetTableResponse("location", tableSchema());
+        return new GetTableResponse("/tmp/1", 1, schema());
     }
 
-    private static TableSchema tableSchema() {
+    private static Schema schema() {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", new IntType()),
@@ -212,8 +208,6 @@ public class MockRESTMessage {
         Map<String, String> options = new HashMap<>();
         options.put("option-1", "value-1");
         options.put("option-2", "value-2");
-        // set path for test as if not set system will add one
-        options.put(CoreOptions.PATH.key(), "/a/b/c");
-        return new TableSchema(1, fields, 1, partitionKeys, primaryKeys, options, "comment");
+        return new Schema(fields, partitionKeys, primaryKeys, options, "comment");
     }
 }
