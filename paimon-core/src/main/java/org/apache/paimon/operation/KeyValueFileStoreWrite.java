@@ -32,6 +32,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.IndexMaintainer;
@@ -123,6 +124,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             Supplier<FieldsComparator> udsComparatorSupplier,
             Supplier<RecordEqualiser> logDedupEqualSupplier,
             MergeFunctionFactory<KeyValue> mfFactory,
+            FileFormat fileFormat,
             FileStorePathFactory pathFactory,
             Map<String, FileStorePathFactory> format2PathFactory,
             SnapshotManager snapshotManager,
@@ -165,7 +167,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         schema.id(),
                         keyType,
                         valueType,
-                        options.fileFormat(),
+                        fileFormat,
                         format2PathFactory,
                         options.targetFileSize(true));
         this.keyComparatorSupplier = keyComparatorSupplier;

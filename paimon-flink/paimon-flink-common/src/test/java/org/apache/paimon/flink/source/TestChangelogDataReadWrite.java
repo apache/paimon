@@ -186,6 +186,7 @@ public class TestChangelogDataReadWrite {
                                 () -> null,
                                 () -> EQUALISER,
                                 DeduplicateMergeFunction.factory(),
+                                options.fileFormat(),
                                 pathFactory,
                                 pathFactoryMap,
                                 snapshotManager,

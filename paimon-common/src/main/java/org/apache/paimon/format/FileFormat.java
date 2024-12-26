@@ -25,6 +25,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
+
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
@@ -40,6 +42,19 @@ import java.util.ServiceLoader;
  * <p>NOTE: This class must be thread safe.
  */
 public abstract class FileFormat {
+
+    private static final Map<String, FileFormatFactory> FORMAT_MAP;
+
+    static {
+        Map<String, FileFormatFactory> formatMap = new HashMap<>();
+        ServiceLoader<FileFormatFactory> serviceLoader =
+                ServiceLoader.load(FileFormatFactory.class, FileFormat.class.getClassLoader());
+        for (FileFormatFactory factory : serviceLoader) {
+            formatMap.put(factory.identifier().toLowerCase(), factory);
+        }
+
+        FORMAT_MAP = ImmutableMap.copyOf(formatMap);
+    }
 
     protected String formatIdentifier;
 
@@ -88,7 +103,7 @@ public abstract class FileFormat {
 
     /** Create a {@link FileFormat} from format identifier and format options. */
     public static FileFormat fromIdentifier(String identifier, FormatContext context) {
-        return fromIdentifier(identifier, context, FileFormat.class.getClassLoader())
+        return getFileFormatFromLoadedCache(identifier, context)
                 .orElseThrow(
                         () ->
                                 new RuntimeException(
@@ -97,14 +112,11 @@ public abstract class FileFormat {
                                                 identifier)));
     }
 
-    private static Optional<FileFormat> fromIdentifier(
-            String formatIdentifier, FormatContext context, ClassLoader classLoader) {
-        ServiceLoader<FileFormatFactory> serviceLoader =
-                ServiceLoader.load(FileFormatFactory.class, classLoader);
-        for (FileFormatFactory factory : serviceLoader) {
-            if (factory.identifier().equals(formatIdentifier.toLowerCase())) {
-                return Optional.of(factory.create(context));
-            }
+    private static Optional<FileFormat> getFileFormatFromLoadedCache(
+            String formatIdentifier, FormatContext context) {
+        FORMAT_MAP.get(formatIdentifier.toLowerCase());
+        if (FORMAT_MAP.containsKey(formatIdentifier.toLowerCase())) {
+            return Optional.of(FORMAT_MAP.get(formatIdentifier.toLowerCase()).create(context));
         }
 
         return Optional.empty();
