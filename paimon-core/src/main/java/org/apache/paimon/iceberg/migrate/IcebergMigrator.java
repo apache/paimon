@@ -242,7 +242,10 @@ public class IcebergMigrator implements Migrator {
     }
 
     @Override
-    public void renameTable(boolean ignoreIfNotExists) throws Exception {}
+    public void renameTable(boolean ignoreIfNotExists) throws Exception {
+        LOG.info("Last step: rename.");
+        LOG.info("Iceberg migrator do not rename table now.");
+    }
 
     public Schema icebergSchemaToPaimonSchema(IcebergMetadata icebergMetadata) {
         // get iceberg current schema
