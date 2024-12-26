@@ -63,4 +63,36 @@ public class SystemTableITCase extends CatalogTableITCase {
                         Row.of("+I", new Integer[] {1}, new Integer[] {3}),
                         Row.of("+I", new Integer[] {2}, new Integer[] {2}));
     }
+
+    @Test
+    public void testIndexesTable() {
+        sql(
+                "CREATE TABLE T (pt STRING, a INT, b STRING, PRIMARY KEY (pt, a) NOT ENFORCED)"
+                        + " PARTITIONED BY (pt) with ('deletion-vectors.enabled'='true')");
+        sql(
+                "INSERT INTO T VALUES ('2024-10-01', 1, 'aaaaaaaaaaaaaaaaaaa'), ('2024-10-01', 2, 'b'), ('2024-10-01', 3, 'c')");
+        sql("INSERT INTO T VALUES ('2024-10-01', 1, 'a_new1'), ('2024-10-01', 3, 'c_new1')");
+
+        List<Row> rows = sql("SELECT * FROM `T$indexes` WHERE index_type = 'HASH'");
+        assertThat(rows.size()).isEqualTo(1);
+        Row row = rows.get(0);
+        assertThat(row.getField(0)).isEqualTo("[2024-10-01]");
+        assertThat(row.getField(1)).isEqualTo(0);
+        assertThat(row.getField(2)).isEqualTo("HASH");
+        assertThat(row.getField(3).toString().startsWith("index-")).isTrue();
+        assertThat(row.getField(4)).isEqualTo(12L);
+        assertThat(row.getField(5)).isEqualTo(3L);
+        assertThat(row.getField(6)).isNull();
+
+        rows = sql("SELECT * FROM `T$indexes` WHERE index_type = 'DELETION_VECTORS'");
+        assertThat(rows.size()).isEqualTo(1);
+        row = rows.get(0);
+        assertThat(row.getField(0)).isEqualTo("[2024-10-01]");
+        assertThat(row.getField(1)).isEqualTo(0);
+        assertThat(row.getField(2)).isEqualTo("DELETION_VECTORS");
+        assertThat(row.getField(3).toString().startsWith("index-")).isTrue();
+        assertThat(row.getField(4)).isEqualTo(33L);
+        assertThat(row.getField(5)).isEqualTo(1L);
+        assertThat(row.getField(6)).isNotNull();
+    }
 }
