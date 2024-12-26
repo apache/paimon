@@ -752,7 +752,7 @@ public interface SchemaChange extends Serializable {
     }
 
     /** Actions for schema changes： identify for schema change. */
-    public static class Actions {
+    class Actions {
         public static final String FIELD_ACTION = "action";
         public static final String SET_OPTION_ACTION = "setOption";
         public static final String REMOVE_OPTION_ACTION = "removeOption";
@@ -764,5 +764,7 @@ public interface SchemaChange extends Serializable {
         public static final String UPDATE_COLUMN_NULLABILITY_ACTION = "updateColumnNullability";
         public static final String UPDATE_COLUMN_COMMENT_ACTION = "updateColumnComment";
         public static final String UPDATE_COLUMN_POSITION_ACTION = "updateColumnPosition";
+
+        private Actions() {}
     }
 }
