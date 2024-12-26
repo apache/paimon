@@ -26,8 +26,10 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caff
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.factories.FactoryUtil.discoverFactories;
+
 /** Utility for working with {@link FileFormatFactory}s. */
-public class FormatFactoryUtil extends BaseFactoryUtil {
+public class FormatFactoryUtil {
 
     private static final Cache<ClassLoader, List<FileFormatFactory>> FACTORIES =
             Caffeine.newBuilder().softValues().maximumSize(100).executor(Runnable::run).build();

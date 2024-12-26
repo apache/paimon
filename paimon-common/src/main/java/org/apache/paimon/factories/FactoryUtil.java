@@ -18,14 +18,24 @@
 
 package org.apache.paimon.factories;
 
+import org.apache.paimon.format.FileFormatFactory;
+
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
+import java.util.ServiceLoader;
 import java.util.stream.Collectors;
 
 /** Utility for working with {@link Factory}s. */
-public class FactoryUtil extends BaseFactoryUtil {
+public class FactoryUtil {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FactoryUtil.class);
 
     private static final Cache<ClassLoader, List<Factory>> FACTORIES =
             Caffeine.newBuilder().softValues().maximumSize(100).executor(Runnable::run).build();
@@ -94,5 +104,42 @@ public class FactoryUtil extends BaseFactoryUtil {
 
     private static List<Factory> getFactories(ClassLoader classLoader) {
         return FACTORIES.get(classLoader, s -> discoverFactories(classLoader, Factory.class));
+    }
+
+    /**
+     * Discover factories.
+     *
+     * @param classLoader the class loader
+     * @param klass the klass
+     * @param <T> the type of the factory
+     * @return the list of factories
+     */
+    public static <T> List<T> discoverFactories(ClassLoader classLoader, Class<T> klass) {
+        final Iterator<T> serviceLoaderIterator = ServiceLoader.load(klass, classLoader).iterator();
+
+        final List<T> loadResults = new ArrayList<>();
+        while (true) {
+            try {
+                // error handling should also be applied to the hasNext() call because service
+                // loading might cause problems here as well
+                if (!serviceLoaderIterator.hasNext()) {
+                    break;
+                }
+
+                loadResults.add(serviceLoaderIterator.next());
+            } catch (Throwable t) {
+                if (t instanceof NoClassDefFoundError) {
+                    LOG.debug(
+                            "NoClassDefFoundError when loading a {}. This is expected when trying to load factory but no implementation is loaded.",
+                            FileFormatFactory.class.getCanonicalName(),
+                            t);
+                } else {
+                    throw new RuntimeException(
+                            "Unexpected error when trying to load service provider.", t);
+                }
+            }
+        }
+
+        return loadResults;
     }
 }

@@ -81,7 +81,6 @@ public abstract class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<Inte
             long schemaId,
             RowType rowType,
             RowType partitionType,
-            FileFormat fileFormat,
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
@@ -93,7 +92,7 @@ public abstract class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<Inte
         this.read = read;
         this.schemaId = schemaId;
         this.rowType = rowType;
-        this.fileFormat = fileFormat;
+        this.fileFormat = options.fileFormat();
         this.pathFactory = pathFactory;
 
         this.statsCollectors =

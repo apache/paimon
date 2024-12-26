@@ -26,7 +26,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
-import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.types.RowType;
@@ -51,7 +50,6 @@ public class AppendOnlyFixedBucketFileStoreWrite extends AppendOnlyFileStoreWrit
             String commitUser,
             RowType rowType,
             RowType partitionType,
-            FileFormat fileFormat,
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
@@ -64,7 +62,6 @@ public class AppendOnlyFixedBucketFileStoreWrite extends AppendOnlyFileStoreWrit
                 schemaId,
                 rowType,
                 partitionType,
-                fileFormat,
                 pathFactory,
                 snapshotManager,
                 scan,
