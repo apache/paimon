@@ -179,7 +179,6 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 () -> UserDefinedSeqComparator.create(valueType, options),
                 logDedupEqualSupplier,
                 mfFactory,
-                options.fileFormat(),
                 pathFactory(),
                 format2PathFactory(),
                 snapshotManager(),
@@ -194,7 +193,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private Map<String, FileStorePathFactory> format2PathFactory() {
         Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
         Set<String> formats = new HashSet<>(options.fileFormatPerLevel().values());
-        formats.add(options.fileFormatString());
+        formats.add(options.fileFormat().getFormatIdentifier());
         formats.forEach(format -> pathFactoryMap.put(format, pathFactory(format)));
         return pathFactoryMap;
     }
