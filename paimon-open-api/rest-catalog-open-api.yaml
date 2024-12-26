@@ -454,9 +454,53 @@ components:
         description:
           type: string
     DataType:
-      anyOf:
-        - type: string
-        - type: object
+      oneOf:
+        - $ref: '#/components/schemas/PrimitiveType'
+        - $ref: '#/components/schemas/ArrayType'
+        - $ref: '#/components/schemas/MultisetType'
+        - $ref: '#/components/schemas/MapType'
+        - $ref: '#/components/schemas/RowType'
+    PrimitiveType:
+      type: string
+    ArrayType:
+      type: object
+      properties:
+        type:
+          type: string
+          pattern: ^ARRAY.*
+        element:
+          type:
+            $ref: '#/components/schemas/DataType'
+    MultisetType:
+      type: object
+      properties:
+        type:
+          type: string
+          pattern: ^MULTISET.*
+        element:
+          type:
+            $ref: '#/components/schemas/DataType'
+    MapType:
+      type: object
+      properties:
+        type:
+          type: string
+          pattern: ^MAP.*
+        key:
+          type:
+            $ref: '#/components/schemas/DataType'
+        value:
+          type:
+            $ref: '#/components/schemas/DataType'
+    RowType:
+      type: object
+      properties:
+        type:
+          type: string
+          pattern: ^ROW.*
+        fields:
+          type:
+            $ref: '#/components/schemas/DataField'
     Identifier:
       type: object
       properties:
