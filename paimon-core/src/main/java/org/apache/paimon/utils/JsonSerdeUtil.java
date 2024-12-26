@@ -138,22 +138,6 @@ public class JsonSerdeUtil {
         }
     }
 
-    /**
-     * Helper for parsing JSON from a String.
-     *
-     * @param json a JSON string
-     * @param parser a function that converts a JsonNode to a Java object
-     * @param <T> type of objects created by the parser
-     * @return the parsed Java object
-     */
-    public static <T> T fromJson(String json, FromJson<T> parser) {
-        try {
-            return parser.parse(OBJECT_MAPPER_INSTANCE.readValue(json, JsonNode.class));
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
     public static <T> String toJson(T t) {
         try {
             return OBJECT_MAPPER_INSTANCE.writerWithDefaultPrettyPrinter().writeValueAsString(t);
@@ -277,16 +261,6 @@ public class JsonSerdeUtil {
 
     public static boolean isNull(JsonNode jsonNode) {
         return jsonNode == null || jsonNode.isNull();
-    }
-
-    /**
-     * A functional interface for parsing JSON data into a specific object type.
-     *
-     * @param <T> The type of the object to be parsed from JSON.
-     */
-    @FunctionalInterface
-    public interface FromJson<T> {
-        T parse(JsonNode node) throws JsonProcessingException;
     }
 
     private JsonSerdeUtil() {}

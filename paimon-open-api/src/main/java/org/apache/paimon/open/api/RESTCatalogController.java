@@ -105,11 +105,7 @@ public class RESTCatalogController {
         @ApiResponse(
                 responseCode = "409",
                 description = "Resource has exist",
-                content = {
-                    @Content(
-                            schema = @Schema(implementation = ErrorResponse.class),
-                            mediaType = "application/json")
-                }),
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
@@ -172,6 +168,10 @@ public class RESTCatalogController {
                 description = "Resource not found",
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
+                responseCode = "409",
+                description = "Resource has exist",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
@@ -213,6 +213,10 @@ public class RESTCatalogController {
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "409",
+                description = "Resource has exist",
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
@@ -269,6 +273,10 @@ public class RESTCatalogController {
                 responseCode = "200",
                 content = {@Content(schema = @Schema(implementation = GetTableResponse.class))}),
         @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
@@ -314,6 +322,10 @@ public class RESTCatalogController {
         @ApiResponse(
                 responseCode = "200",
                 content = {@Content(schema = @Schema(implementation = GetTableResponse.class))}),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
