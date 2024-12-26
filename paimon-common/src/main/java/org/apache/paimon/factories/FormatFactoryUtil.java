@@ -32,7 +32,7 @@ public class FormatFactoryUtil extends BaseFactoryUtil {
     private static final Cache<ClassLoader, List<FileFormatFactory>> FACTORIES =
             Caffeine.newBuilder().softValues().maximumSize(100).executor(Runnable::run).build();
 
-    /** Discovers a factory using the given factory base class and identifier. */
+    /** Discovers a file format factory. */
     @SuppressWarnings("unchecked")
     public static <T extends FileFormatFactory> T discoverFactory(
             ClassLoader classLoader, String identifier) {
