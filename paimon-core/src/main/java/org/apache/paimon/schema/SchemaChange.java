@@ -19,7 +19,6 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.annotation.Public;
-import org.apache.paimon.rest.SchemaChangeActions;
 import org.apache.paimon.types.DataType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -44,38 +43,38 @@ import java.util.Objects;
 @JsonTypeInfo(
         use = JsonTypeInfo.Id.NAME,
         include = JsonTypeInfo.As.PROPERTY,
-        property = SchemaChangeActions.FIELD_ACTION)
+        property = SchemaChange.Actions.FIELD_ACTION)
 @JsonSubTypes({
     @JsonSubTypes.Type(
             value = SchemaChange.SetOption.class,
-            name = SchemaChangeActions.SET_OPTION_ACTION),
+            name = SchemaChange.Actions.SET_OPTION_ACTION),
     @JsonSubTypes.Type(
             value = SchemaChange.RemoveOption.class,
-            name = SchemaChangeActions.REMOVE_OPTION_ACTION),
+            name = SchemaChange.Actions.REMOVE_OPTION_ACTION),
     @JsonSubTypes.Type(
             value = SchemaChange.UpdateComment.class,
-            name = SchemaChangeActions.UPDATE_COMMENT_ACTION),
+            name = SchemaChange.Actions.UPDATE_COMMENT_ACTION),
     @JsonSubTypes.Type(
             value = SchemaChange.AddColumn.class,
-            name = SchemaChangeActions.ADD_COLUMN_ACTION),
+            name = SchemaChange.Actions.ADD_COLUMN_ACTION),
     @JsonSubTypes.Type(
             value = SchemaChange.RenameColumn.class,
-            name = SchemaChangeActions.RENAME_COLUMN_ACTION),
+            name = SchemaChange.Actions.RENAME_COLUMN_ACTION),
     @JsonSubTypes.Type(
             value = SchemaChange.DropColumn.class,
-            name = SchemaChangeActions.DROP_COLUMN_ACTION),
+            name = SchemaChange.Actions.DROP_COLUMN_ACTION),
     @JsonSubTypes.Type(
             value = SchemaChange.UpdateColumnType.class,
-            name = SchemaChangeActions.UPDATE_COLUMN_TYPE_ACTION),
+            name = SchemaChange.Actions.UPDATE_COLUMN_TYPE_ACTION),
     @JsonSubTypes.Type(
             value = SchemaChange.UpdateColumnNullability.class,
-            name = SchemaChangeActions.UPDATE_COLUMN_NULLABILITY_ACTION),
+            name = SchemaChange.Actions.UPDATE_COLUMN_NULLABILITY_ACTION),
     @JsonSubTypes.Type(
             value = SchemaChange.UpdateColumnComment.class,
-            name = SchemaChangeActions.UPDATE_COLUMN_COMMENT_ACTION),
+            name = SchemaChange.Actions.UPDATE_COLUMN_COMMENT_ACTION),
     @JsonSubTypes.Type(
             value = SchemaChange.UpdateColumnPosition.class,
-            name = SchemaChangeActions.UPDATE_COLUMN_POSITION_ACTION),
+            name = SchemaChange.Actions.UPDATE_COLUMN_POSITION_ACTION),
 })
 public interface SchemaChange extends Serializable {
 
@@ -750,5 +749,20 @@ public interface SchemaChange extends Serializable {
             result = 31 * result + Arrays.hashCode(fieldNames);
             return result;
         }
+    }
+
+    /** Actions for schema changes： identify for schema change. */
+    public static class Actions {
+        public static final String FIELD_ACTION = "action";
+        public static final String SET_OPTION_ACTION = "setOption";
+        public static final String REMOVE_OPTION_ACTION = "removeOption";
+        public static final String UPDATE_COMMENT_ACTION = "updateComment";
+        public static final String ADD_COLUMN_ACTION = "addColumn";
+        public static final String RENAME_COLUMN_ACTION = "renameColumn";
+        public static final String DROP_COLUMN_ACTION = "dropColumn";
+        public static final String UPDATE_COLUMN_TYPE_ACTION = "updateColumnType";
+        public static final String UPDATE_COLUMN_NULLABILITY_ACTION = "updateColumnNullability";
+        public static final String UPDATE_COLUMN_COMMENT_ACTION = "updateColumnComment";
+        public static final String UPDATE_COLUMN_POSITION_ACTION = "updateColumnPosition";
     }
 }
