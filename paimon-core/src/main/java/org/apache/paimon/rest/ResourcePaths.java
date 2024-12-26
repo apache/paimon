@@ -82,4 +82,15 @@ public class ResourcePaths {
                 .add("rename")
                 .toString();
     }
+
+    public String partitions(String databaseName, String tableName) {
+        return SLASH.add("v1")
+                .add(prefix)
+                .add("databases")
+                .add(databaseName)
+                .add("tables")
+                .add(tableName)
+                .add("partitions")
+                .toString();
+    }
 }
