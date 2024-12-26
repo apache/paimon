@@ -72,6 +72,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -269,6 +270,55 @@ public class IcebergMigrateTest {
                 .isInstanceOf(RuntimeException.class)
                 .hasMessage(
                         "IcebergMigrator don't support analyzing manifest file with 'DELETE' content.");
+    }
+
+    @ParameterizedTest(name = "isPartitioned = {0}")
+    @ValueSource(booleans = {true, false})
+    public void testMigrateWithRandomIcebergData(boolean isPartitioned) throws Exception {
+        Table icebergTable = createIcebergTable(isPartitioned);
+        String format = "parquet";
+
+        int numRounds = 100;
+        int numRecords = 50;
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        List<GenericRecord> expectRecords = new ArrayList<>();
+        for (int i = 0; i < numRounds; i++) {
+            List<GenericRecord> records = new ArrayList<>();
+            String dt = Integer.toString(random.nextInt(20240101, 20240104));
+            String hh = Integer.toString(random.nextInt(3));
+            for (int j = 0; j < numRecords; j++) {
+                records.add(toIcebergRecord(random.nextInt(100), random.nextInt(100), dt, hh));
+            }
+            expectRecords.addAll(records);
+            if (isPartitioned) {
+                writeRecordsToIceberg(icebergTable, format, records, dt, hh);
+            } else {
+                writeRecordsToIceberg(icebergTable, format, records);
+            }
+        }
+
+        IcebergMigrator icebergMigrator =
+                new IcebergMigrator(
+                        paiCatalog,
+                        paiDatabase,
+                        paiTable,
+                        iceDatabase,
+                        iceTable,
+                        new Options(icebergProperties),
+                        1);
+        icebergMigrator.executeMigrate();
+
+        FileStoreTable paimonTable =
+                (FileStoreTable) paiCatalog.getTable(Identifier.create(paiDatabase, paiTable));
+        List<String> paiResults = getPaimonResult(paimonTable);
+        assertThat(
+                        paiResults.stream()
+                                .map(row -> String.format("Record(%s)", row))
+                                .collect(Collectors.toList()))
+                .hasSameElementsAs(
+                        expectRecords.stream()
+                                .map(GenericRecord::toString)
+                                .collect(Collectors.toList()));
     }
 
     @ParameterizedTest(name = "isPartitioned = {0}")
