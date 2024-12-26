@@ -261,5 +261,5 @@ to avoid potential name conflict.
 ## FAQ
 
 1. Chinese characters in records ingested from MySQL are garbled.
-* Try to set `env.java.opts: -Dfile.encoding=UTF-8` in `flink-conf.yaml`
+* Try to set `env.java.opts: -Dfile.encoding=UTF-8` in `flink-conf.yaml`(Flink version < 1.19) or `config.yaml`(Flink version >= 1.19)
 (the option is changed to `env.java.opts.all` since Flink-1.17).
