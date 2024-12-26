@@ -19,13 +19,12 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import javax.annotation.Nullable;
 
@@ -34,7 +33,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.ServiceLoader;
 
 /**
  * Factory class which creates reader and writer factories for specific file format.
@@ -42,19 +40,6 @@ import java.util.ServiceLoader;
  * <p>NOTE: This class must be thread safe.
  */
 public abstract class FileFormat {
-
-    private static final Map<String, FileFormatFactory> FORMAT_MAP;
-
-    static {
-        Map<String, FileFormatFactory> formatMap = new HashMap<>();
-        ServiceLoader<FileFormatFactory> serviceLoader =
-                ServiceLoader.load(FileFormatFactory.class, FileFormat.class.getClassLoader());
-        for (FileFormatFactory factory : serviceLoader) {
-            formatMap.put(factory.identifier().toLowerCase(), factory);
-        }
-
-        FORMAT_MAP = ImmutableMap.copyOf(formatMap);
-    }
 
     protected String formatIdentifier;
 
@@ -103,23 +88,11 @@ public abstract class FileFormat {
 
     /** Create a {@link FileFormat} from format identifier and format options. */
     public static FileFormat fromIdentifier(String identifier, FormatContext context) {
-        return getFileFormatFromLoadedCache(identifier, context)
-                .orElseThrow(
-                        () ->
-                                new RuntimeException(
-                                        String.format(
-                                                "Could not find a FileFormatFactory implementation class for %s format",
-                                                identifier)));
-    }
-
-    private static Optional<FileFormat> getFileFormatFromLoadedCache(
-            String formatIdentifier, FormatContext context) {
-        FORMAT_MAP.get(formatIdentifier.toLowerCase());
-        if (FORMAT_MAP.containsKey(formatIdentifier.toLowerCase())) {
-            return Optional.of(FORMAT_MAP.get(formatIdentifier.toLowerCase()).create(context));
-        }
-
-        return Optional.empty();
+        return FactoryUtil.discoverFactory(
+                        FileFormat.class.getClassLoader(),
+                        FileFormatFactory.class,
+                        identifier.toLowerCase())
+                .create(context);
     }
 
     protected Options getIdentifierPrefixOptions(Options options) {

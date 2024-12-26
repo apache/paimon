@@ -19,15 +19,14 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.factories.Factory;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 
 import javax.annotation.Nullable;
 
 /** Factory to create {@link FileFormat}. */
-public interface FileFormatFactory {
-
-    String identifier();
+public interface FileFormatFactory extends Factory {
 
     FileFormat create(FormatContext formatContext);
 
