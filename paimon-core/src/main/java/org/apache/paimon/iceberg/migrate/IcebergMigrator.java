@@ -81,12 +81,15 @@ public class IcebergMigrator implements Migrator {
     private final String icebergTableName;
     private final Options icebergOptions;
 
+    private final IcebergMigrateMetadata icebergMigrateMetadata;
     // metadata path factory for iceberg metadata
     private final IcebergPathFactory icebergMetaPathFactory;
     // latest metadata file path
     private final String icebergLatestMetadataLocation;
     // metadata for newest iceberg snapshot
     private final IcebergMetadata icebergMetadata;
+
+    private Boolean deleteOriginTable = true;
 
     public IcebergMigrator(
             Catalog paimonCatalog,
@@ -121,7 +124,7 @@ public class IcebergMigrator implements Migrator {
             throw new RuntimeException("create IcebergMigrateMetadataFactory failed.", e);
         }
 
-        IcebergMigrateMetadata icebergMigrateMetadata =
+        icebergMigrateMetadata =
                 icebergMigrateMetadataFactory.create(
                         Identifier.create(icebergDatabaseName, icebergTableName),
                         paimonFileIO,
@@ -226,10 +229,17 @@ public class IcebergMigrator implements Migrator {
             paimonCatalog.dropTable(paimonIdentifier, true);
             throw new RuntimeException("Migrating failed", e);
         }
+
+        // if all success, drop the origin table according the delete field
+        if (deleteOriginTable) {
+            icebergMigrateMetadata.deleteOriginTable();
+        }
     }
 
     @Override
-    public void deleteOriginTable(boolean delete) throws Exception {}
+    public void deleteOriginTable(boolean delete) throws Exception {
+        this.deleteOriginTable = delete;
+    }
 
     @Override
     public void renameTable(boolean ignoreIfNotExists) throws Exception {}

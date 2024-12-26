@@ -127,6 +127,26 @@ public class IcebergMigrateHiveMetadata implements IcebergMigrateMetadata {
         return metadataLocation;
     }
 
+    @Override
+    public void deleteOriginTable() {
+        LOG.info("Iceberg table in hive to be deleted:{}", icebergIdentifier.toString());
+        try {
+            clients.run(
+                    client -> {
+                        client.dropTable(
+                                icebergIdentifier.getDatabaseName(),
+                                icebergIdentifier.getTableName(),
+                                true,
+                                true);
+                        return null;
+                    });
+        } catch (Exception e) {
+            LOG.warn(
+                    "exception occurred when deleting origin table, exception message:{}",
+                    e.getMessage());
+        }
+    }
+
     private boolean tableExists(Identifier identifier) throws Exception {
         return clients.run(
                 client ->

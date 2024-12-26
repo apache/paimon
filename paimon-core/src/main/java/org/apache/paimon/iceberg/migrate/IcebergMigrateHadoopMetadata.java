@@ -82,6 +82,21 @@ public class IcebergMigrateHadoopMetadata implements IcebergMigrateMetadata {
         return icebergLatestMetaVersionPath.toString();
     }
 
+    @Override
+    public void deleteOriginTable() {
+        Path tablePath = icebergMetaPathFactory.metadataDirectory().getParent();
+        LOG.info("Iceberg table path to be deleted:{}", tablePath);
+        try {
+            if (fileIO.isDir(tablePath)) {
+                fileIO.deleteDirectoryQuietly(tablePath);
+            }
+        } catch (IOException e) {
+            LOG.warn(
+                    "exception occurred when deleting origin table, exception message:{}",
+                    e.getMessage());
+        }
+    }
+
     private long getIcebergLatestMetaVersion() {
         Path versionHintPath =
                 new Path(icebergMetaPathFactory.metadataDirectory(), VERSION_HINT_FILENAME);

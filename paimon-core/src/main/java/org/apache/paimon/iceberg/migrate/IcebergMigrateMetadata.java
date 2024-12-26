@@ -29,4 +29,6 @@ public interface IcebergMigrateMetadata {
     IcebergMetadata icebergMetadata();
 
     String icebergLatestMetadataLocation();
+
+    void deleteOriginTable();
 }
