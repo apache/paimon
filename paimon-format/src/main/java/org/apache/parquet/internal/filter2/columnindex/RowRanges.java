@@ -41,8 +41,8 @@ import java.util.Set;
  * row-group, retrieve the count of the matching rows or check overlapping of a row index range.
  *
  * <p>Note: The class was copied over to support using {@link FileIndexResult} to filter {@link
- * RowRanges}. Added a new method {@link RowRanges#create(long, PrimitiveIterator.OfInt, OffsetIndex,
- * FileIndexResult)}
+ * RowRanges}. Added a new method {@link RowRanges#create(long, PrimitiveIterator.OfInt,
+ * OffsetIndex, FileIndexResult)}
  *
  * @see ColumnIndexFilter#calculateRowRanges(Filter, ColumnIndexStore, Set, long, FileIndexResult)
  */
