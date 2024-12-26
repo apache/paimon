@@ -1583,6 +1583,10 @@ public class CoreOptions implements Serializable {
         return createFileFormat(options, FILE_FORMAT);
     }
 
+    public String fileFormatString() {
+        return normalizeFileFormat(options.get(FILE_FORMAT));
+    }
+
     public FileFormat manifestFormat() {
         return createFileFormat(options, MANIFEST_FORMAT);
     }

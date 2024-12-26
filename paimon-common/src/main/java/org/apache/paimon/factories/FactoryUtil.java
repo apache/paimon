@@ -101,14 +101,21 @@ public class FactoryUtil {
     }
 
     private static List<Factory> getFactories(ClassLoader classLoader) {
-        return FACTORIES.get(classLoader, FactoryUtil::discoverFactories);
+        return FACTORIES.get(classLoader, s -> discoverFactories(classLoader, Factory.class));
     }
 
-    private static List<Factory> discoverFactories(ClassLoader classLoader) {
-        final Iterator<Factory> serviceLoaderIterator =
-                ServiceLoader.load(Factory.class, classLoader).iterator();
+    /**
+     * Discover factories.
+     *
+     * @param classLoader the class loader
+     * @param klass the klass
+     * @param <T> the type of the factory
+     * @return the list of factories
+     */
+    public static <T> List<T> discoverFactories(ClassLoader classLoader, Class<T> klass) {
+        final Iterator<T> serviceLoaderIterator = ServiceLoader.load(klass, classLoader).iterator();
 
-        final List<Factory> loadResults = new ArrayList<>();
+        final List<T> loadResults = new ArrayList<>();
         while (true) {
             try {
                 // error handling should also be applied to the hasNext() call because service

@@ -193,7 +193,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private Map<String, FileStorePathFactory> format2PathFactory() {
         Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
         Set<String> formats = new HashSet<>(options.fileFormatPerLevel().values());
-        formats.add(options.fileFormat().getFormatIdentifier());
+        formats.add(options.fileFormatString());
         formats.forEach(format -> pathFactoryMap.put(format, pathFactory(format)));
         return pathFactoryMap;
     }
