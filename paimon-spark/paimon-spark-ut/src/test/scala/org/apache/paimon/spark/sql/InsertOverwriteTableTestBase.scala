@@ -560,4 +560,26 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
     }
     checkAnswer(sql("SELECT * FROM T ORDER BY name"), Row("g", null, "Shanghai"))
   }
+
+  test("Paimon Insert: read and write struct with null") {
+    fileFormats {
+      format =>
+        withTable("t") {
+          sql(
+            s"CREATE TABLE t (i INT, s STRUCT<f1: INT, f2: INT>) TBLPROPERTIES ('file.format' = '$format')")
+          sql(
+            "INSERT INTO t VALUES (1, STRUCT(1, 1)), (2, null), (3, STRUCT(1, null)), (4, STRUCT(null, null))")
+          if (format.equals("parquet")) {
+            // todo: fix it, see https://github.com/apache/paimon/issues/4785
+            checkAnswer(
+              sql("SELECT * FROM t ORDER BY i"),
+              Seq(Row(1, Row(1, 1)), Row(2, null), Row(3, Row(1, null)), Row(4, null)))
+          } else {
+            checkAnswer(
+              sql("SELECT * FROM t ORDER BY i"),
+              Seq(Row(1, Row(1, 1)), Row(2, null), Row(3, Row(1, null)), Row(4, Row(null, null))))
+          }
+        }
+    }
+  }
 }
