@@ -19,6 +19,7 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
+import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -183,5 +184,13 @@ public class RESTObjectMapperTest {
         String responseStr = mapper.writeValueAsString(response);
         ListTablesResponse parseData = mapper.readValue(responseStr, ListTablesResponse.class);
         assertEquals(response.getTables(), parseData.getTables());
+    }
+
+    @Test
+    public void alterTableRequestParseTest() throws Exception {
+        AlterTableRequest request = MockRESTMessage.alterTableRequest();
+        String requestStr = mapper.writeValueAsString(request);
+        AlterTableRequest parseData = mapper.readValue(requestStr, AlterTableRequest.class);
+        assertEquals(parseData.getChanges().size(), parseData.getChanges().size());
     }
 }

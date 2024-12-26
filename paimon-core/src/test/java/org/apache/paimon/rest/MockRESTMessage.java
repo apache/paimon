@@ -20,6 +20,7 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
+import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -126,11 +127,17 @@ public class MockRESTMessage {
         return new RenameTableRequest(newIdentifier);
     }
 
+    public static AlterTableRequest alterTableRequest() {
+        return new AlterTableRequest(getChanges());
+    }
+
     public static List<SchemaChange> getChanges() {
         // add option
         SchemaChange addOption = SchemaChange.setOption("snapshot.time-retained", "2h");
         // remove option
         SchemaChange removeOption = SchemaChange.removeOption("compaction.max.file-num");
+        // update comment
+        SchemaChange updateComment = SchemaChange.updateComment(null);
         // add column
         SchemaChange addColumn =
                 SchemaChange.addColumn("col1_after", DataTypes.ARRAY(DataTypes.STRING()));
@@ -179,6 +186,7 @@ public class MockRESTMessage {
         List<SchemaChange> schemaChanges = new ArrayList<>();
         schemaChanges.add(addOption);
         schemaChanges.add(removeOption);
+        schemaChanges.add(updateComment);
         schemaChanges.add(addColumn);
         schemaChanges.add(addColumnMap);
         schemaChanges.add(addColumnRowType);

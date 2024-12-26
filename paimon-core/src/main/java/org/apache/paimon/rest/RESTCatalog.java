@@ -39,6 +39,7 @@ import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
+import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -302,7 +303,13 @@ public class RESTCatalog implements Catalog {
     public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
             throws TableNotExistException, TableAlreadyExistException {
         try {
-            renameTable(fromTable, toTable);
+            RenameTableRequest request = new RenameTableRequest(toTable);
+            client.post(
+                    resourcePaths.renameTable(
+                            fromTable.getDatabaseName(), fromTable.getTableName()),
+                    request,
+                    GetTableResponse.class,
+                    headers());
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 throw new TableNotExistException(fromTable);
@@ -318,7 +325,20 @@ public class RESTCatalog implements Catalog {
     public void alterTable(
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
-        throw new UnsupportedOperationException("TODO");
+        try {
+            AlterTableRequest request = new AlterTableRequest(changes);
+            client.post(
+                    resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),
+                    request,
+                    GetTableResponse.class,
+                    headers());
+        } catch (NoSuchResourceException e) {
+            if (!ignoreIfNotExists) {
+                throw new TableNotExistException(identifier);
+            }
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
     }
 
     @Override
@@ -374,16 +394,6 @@ public class RESTCatalog implements Catalog {
         ConfigResponse response =
                 client.get(ResourcePaths.V1_CONFIG, ConfigResponse.class, headers);
         return response.merge(clientProperties);
-    }
-
-    @VisibleForTesting
-    void renameTable(Identifier fromTable, Identifier newIdentifier) {
-        RenameTableRequest request = new RenameTableRequest(newIdentifier);
-        client.post(
-                resourcePaths.table(fromTable.getDatabaseName(), fromTable.getTableName()),
-                request,
-                GetTableResponse.class,
-                headers());
     }
 
     @VisibleForTesting

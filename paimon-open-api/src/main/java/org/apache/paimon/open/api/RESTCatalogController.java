@@ -20,6 +20,7 @@ package org.apache.paimon.open.api;
 
 import org.apache.paimon.rest.ResourcePaths;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
+import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -104,11 +105,7 @@ public class RESTCatalogController {
         @ApiResponse(
                 responseCode = "409",
                 description = "Resource has exist",
-                content = {
-                    @Content(
-                            schema = @Schema(implementation = ErrorResponse.class),
-                            mediaType = "application/json")
-                }),
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
@@ -171,6 +168,10 @@ public class RESTCatalogController {
                 description = "Resource not found",
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
+                responseCode = "409",
+                description = "Resource has exist",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
@@ -212,6 +213,10 @@ public class RESTCatalogController {
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "409",
+                description = "Resource has exist",
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
@@ -261,22 +266,26 @@ public class RESTCatalogController {
     }
 
     @Operation(
-            summary = "Update table",
+            summary = "Alter table",
             tags = {"table"})
     @ApiResponses({
         @ApiResponse(
                 responseCode = "200",
                 content = {@Content(schema = @Schema(implementation = GetTableResponse.class))}),
         @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
     @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}")
-    public GetTableResponse renameTable(
+    public GetTableResponse alterTable(
             @PathVariable String prefix,
             @PathVariable String database,
             @PathVariable String table,
-            @RequestBody RenameTableRequest request) {
+            @RequestBody AlterTableRequest request) {
         return new GetTableResponse(
                 "",
                 1,
@@ -305,4 +314,36 @@ public class RESTCatalogController {
             @PathVariable String prefix,
             @PathVariable String database,
             @PathVariable String table) {}
+
+    @Operation(
+            summary = "Rename table",
+            tags = {"table"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {@Content(schema = @Schema(implementation = GetTableResponse.class))}),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/rename")
+    public GetTableResponse renameTable(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table,
+            @RequestBody RenameTableRequest request) {
+        return new GetTableResponse(
+                "",
+                1,
+                new org.apache.paimon.schema.Schema(
+                        ImmutableList.of(),
+                        ImmutableList.of(),
+                        ImmutableList.of(),
+                        new HashMap<>(),
+                        "comment"));
+    }
 }
