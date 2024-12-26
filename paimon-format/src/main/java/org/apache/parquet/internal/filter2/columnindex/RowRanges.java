@@ -47,7 +47,8 @@ import java.util.Set;
  * @see ColumnIndexFilter#calculateRowRanges(Filter, ColumnIndexStore, Set, long, FileIndexResult)
  */
 public class RowRanges {
-    // Make it public because some uppler layer application need to access it
+
+    /** Make it public because some uppler layer application need to access it. */
     public static class Range {
 
         // Returns the union of the two ranges or null if there are elements between them.
@@ -138,7 +139,7 @@ public class RowRanges {
      * [firstRowIndex[n], lastRowIndex[n]]
      * </pre>
      *
-     * (See OffsetIndex.getFirstRowIndex and OffsetIndex.getLastRowIndex for details.)
+     * <p>(See OffsetIndex.getFirstRowIndex and OffsetIndex.getLastRowIndex for details.)
      *
      * <p>The union of the ranges are calculated so the result ranges always contain the disjunct
      * ranges. See union for details.
@@ -199,7 +200,7 @@ public class RowRanges {
      * [113, 230] ∪ [232, 340] = [113, 230], [232, 340]
      * </pre>
      *
-     * The result RowRanges object will contain all the row indexes that were contained in one of
+     * <p>The result RowRanges object will contain all the row indexes that were contained in one of
      * the specified objects.
      *
      * @param left left RowRanges
