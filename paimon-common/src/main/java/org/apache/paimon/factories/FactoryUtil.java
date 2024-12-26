@@ -18,8 +18,6 @@
 
 package org.apache.paimon.factories;
 
-import org.apache.paimon.format.FileFormatFactory;
-
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 
@@ -131,7 +129,7 @@ public class FactoryUtil {
                 if (t instanceof NoClassDefFoundError) {
                     LOG.debug(
                             "NoClassDefFoundError when loading a {}. This is expected when trying to load factory but no implementation is loaded.",
-                            FileFormatFactory.class.getCanonicalName(),
+                            Factory.class.getCanonicalName(),
                             t);
                 } else {
                     throw new RuntimeException(
