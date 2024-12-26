@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.factories.FactoryException;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.iceberg.IcebergPathFactory;
@@ -43,6 +44,7 @@ import org.apache.paimon.migrate.Migrator;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.DataField;
@@ -51,6 +53,7 @@ import org.apache.paimon.utils.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -259,21 +262,50 @@ public class IcebergMigrator implements Migrator {
             List<IcebergManifestFileMeta> icebergManifestFileMetas) {
 
         for (IcebergManifestFileMeta meta : icebergManifestFileMetas) {
-            if (meta.content() == IcebergManifestFileMeta.Content.DELETES) {
-                throw new RuntimeException(
-                        "IcebergMigrator don't support analyzing manifest file with 'DELETE' content.");
-            }
+            Preconditions.checkArgument(
+                    meta.content() != IcebergManifestFileMeta.Content.DELETES,
+                    "IcebergMigrator don't support analyzing manifest file with 'DELETE' content.");
         }
     }
 
     private void checkAndFilterDataFiles(List<IcebergDataFileMeta> icebergDataFileMetas) {
 
         for (IcebergDataFileMeta meta : icebergDataFileMetas) {
-            if (meta.content() != IcebergDataFileMeta.Content.DATA) {
-                throw new RuntimeException(
-                        "IcebergMigrator don't support analyzing iceberg delete file.");
-            }
+            Preconditions.checkArgument(
+                    meta.content() == IcebergDataFileMeta.Content.DATA,
+                    "IcebergMigrator don't support analyzing iceberg delete file.");
         }
+    }
+
+    private static List<DataFileMeta> construct(
+            List<IcebergDataFileMeta> icebergDataFileMetas,
+            FileIO fileIO,
+            Table paimonTable,
+            Path newDir,
+            Map<Path, Path> rollback) {
+        return icebergDataFileMetas.stream()
+                .map(
+                        icebergDataFileMeta ->
+                                constructFileMeta(
+                                        icebergDataFileMeta, fileIO, paimonTable, newDir, rollback))
+                .collect(Collectors.toList());
+    }
+
+    private static DataFileMeta constructFileMeta(
+            IcebergDataFileMeta icebergDataFileMeta,
+            FileIO fileIO,
+            Table table,
+            Path dir,
+            Map<Path, Path> rollback) {
+        FileStatus status;
+        try {
+            status = fileIO.getFileStatus(new Path(icebergDataFileMeta.filePath()));
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    "error when get file status. file path is " + icebergDataFileMeta.filePath());
+        }
+        String format = icebergDataFileMeta.fileFormat();
+        return FileMetaUtils.constructFileMeta(format, status, fileIO, table, dir, rollback);
     }
 
     private MigrateTask importUnPartitionedTable(
@@ -341,8 +373,7 @@ public class IcebergMigrator implements Migrator {
                 fileIO.mkdirs(newDir);
             }
             List<DataFileMeta> fileMetas =
-                    FileMetaUtils.construct(
-                            icebergDataFileMetas, fileIO, paimonTable, newDir, rollback);
+                    construct(icebergDataFileMetas, fileIO, paimonTable, newDir, rollback);
             return FileMetaUtils.commitFile(partitionRow, fileMetas);
         }
     }
