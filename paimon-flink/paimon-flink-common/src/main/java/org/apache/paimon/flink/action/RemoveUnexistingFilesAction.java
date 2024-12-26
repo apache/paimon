@@ -61,8 +61,8 @@ import java.util.stream.Collectors;
  *             before we can retry the commit (or W is stopped, creating Flink savepoint S).
  *         <li>C compacts F into a larger file, so F is now deleted from the manifest.
  *         <li>Before the compact snapshot expires, but after all snapshots created by W expires, W
- *             comes back to normal. As W cannot find its previous snapshot, it assumes that this
- *             snapshot has not been committed (see {@link
+ *             comes back to normal (or restarted from savepoint S). As W cannot find its previous
+ *             snapshot, it assumes that this snapshot has not been committed (see {@link
  *             org.apache.paimon.operation.FileStoreCommitImpl#filterCommitted} for more detail), so
  *             file F is committed to the manifest once again.
  *         <li>When the compact snapshot expires, file F will be deleted from the file system. Now F
