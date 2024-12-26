@@ -33,6 +33,14 @@ public class BaseFactoryUtil {
 
     private static final Logger LOG = LoggerFactory.getLogger(BaseFactoryUtil.class);
 
+    /**
+     * Discover factories.
+     *
+     * @param classLoader the class loader
+     * @param klass the klass
+     * @param <T> the type of the factory
+     * @return the list of factories
+     */
     public static <T> List<T> discoverFactories(ClassLoader classLoader, Class<T> klass) {
         final Iterator<T> serviceLoaderIterator = ServiceLoader.load(klass, classLoader).iterator();
 
