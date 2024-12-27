@@ -26,9 +26,9 @@ import org.apache.paimon.table.source.DeletionFile;
 
 import javax.annotation.Nullable;
 
-import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Optional;
 
@@ -99,11 +99,11 @@ public interface DeletionVector {
      * @return A DeletionVector instance that represents the deserialized data.
      */
     static DeletionVector deserializeFromBytes(byte[] bytes) {
-        try (ByteArrayInputStream bis = new ByteArrayInputStream(bytes);
-                DataInputStream dis = new DataInputStream(bis)) {
-            int magicNum = dis.readInt();
+        try {
+            ByteBuffer buffer = ByteBuffer.wrap(bytes);
+            int magicNum = buffer.getInt();
             if (magicNum == BitmapDeletionVector.MAGIC_NUMBER) {
-                return BitmapDeletionVector.deserializeFromDataInput(dis);
+                return BitmapDeletionVector.deserializeFromByteBuffer(buffer.slice());
             } else {
                 throw new RuntimeException("Invalid magic number: " + magicNum);
             }
@@ -117,22 +117,21 @@ public interface DeletionVector {
         try (SeekableInputStream input = fileIO.newInputStream(path)) {
             input.seek(deletionFile.offset());
             DataInputStream dis = new DataInputStream(input);
-            int actualLength = dis.readInt();
-            if (actualLength != deletionFile.length()) {
+            int actualSize = dis.readInt();
+            if (actualSize != deletionFile.length()) {
                 throw new RuntimeException(
                         "Size not match, actual size: "
-                                + actualLength
+                                + actualSize
                                 + ", expert size: "
                                 + deletionFile.length()
                                 + ", file path: "
                                 + path);
             }
-            int magicNum = dis.readInt();
-            if (magicNum == BitmapDeletionVector.MAGIC_NUMBER) {
-                return BitmapDeletionVector.deserializeFromDataInput(dis);
-            } else {
-                throw new RuntimeException("Invalid magic number: " + magicNum);
-            }
+
+            // read DeletionVector bytes
+            byte[] bytes = new byte[actualSize];
+            dis.readFully(bytes);
+            return deserializeFromBytes(bytes);
         }
     }
 
