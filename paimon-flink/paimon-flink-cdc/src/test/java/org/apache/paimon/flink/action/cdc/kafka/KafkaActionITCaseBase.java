@@ -227,7 +227,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
         }
     }
 
-    private void logTopicPartitionStatus(
+    private synchronized void logTopicPartitionStatus(
             Map<String, TopicDescription> topicDescriptions) {
         List<TopicPartition> partitions = new ArrayList<>();
         topicDescriptions.forEach(
@@ -239,19 +239,16 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
                                                 partitions.add(
                                                         new TopicPartition(
                                                                 topic, tpInfo.partition()))));
-        final Map<TopicPartition, Long> beginningOffsets;
-        final Map<TopicPartition, Long> endOffsets;
-        synchronized(kafkaConsumer) {
-            beginningOffsets = kafkaConsumer.beginningOffsets(partitions);
-            endOffsets = kafkaConsumer.endOffsets(partitions);
-            partitions.forEach(
-                    partition ->
-                            LOG.info(
-                                    "TopicPartition \"{}\": starting offset: {}, stopping offset: {}",
-                                    partition,
-                                    beginningOffsets.get(partition),
-                                    endOffsets.get(partition)));
-        }
+        final Map<TopicPartition, Long> beginningOffsets =
+                kafkaConsumer.beginningOffsets(partitions);
+        final Map<TopicPartition, Long> endOffsets = kafkaConsumer.endOffsets(partitions);
+        partitions.forEach(
+                partition ->
+                        LOG.info(
+                                "TopicPartition \"{}\": starting offset: {}, stopping offset: {}",
+                                partition,
+                                beginningOffsets.get(partition),
+                                endOffsets.get(partition)));
     }
 
     public static Properties getStandardProps() {
