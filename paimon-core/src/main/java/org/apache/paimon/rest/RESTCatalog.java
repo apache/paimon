@@ -26,6 +26,8 @@ import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
@@ -52,6 +54,7 @@ import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.SuccessResponse;
 import org.apache.paimon.schema.Schema;
@@ -89,6 +92,7 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.rest.RESTCatalogOptions.METASTORE_PARTITIONED;
+import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternalRow;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
@@ -385,28 +389,23 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    // todo: if table not exist how to drop partition
     public void dropPartition(Identifier identifier, Map<String, String> partitions)
             throws TableNotExistException, PartitionNotExistException {
         checkNotSystemTable(identifier, "dropPartition");
-        Table table = null;
-        try {
-            dropPartitionMetadata(identifier, partitions);
-            table = getTable(identifier);
-        } catch (Exception e) {
-            if (table != null) {
-                FileStoreTable fileStoreTable = (FileStoreTable) table;
-                try (FileStoreCommit commit =
-                        fileStoreTable
-                                .store()
-                                .newCommit(
-                                        createCommitUser(
-                                                fileStoreTable.coreOptions().toConfiguration()))) {
-                    commit.dropPartitions(
-                            Collections.singletonList(partitions),
-                            BatchWriteBuilder.COMMIT_IDENTIFIER);
-                }
+        dropPartitionMetadata(identifier, partitions);
+        Table table = getTable(identifier);
+        if (table != null) {
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+            try (FileStoreCommit commit =
+                    fileStoreTable
+                            .store()
+                            .newCommit(
+                                    createCommitUser(
+                                            fileStoreTable.coreOptions().toConfiguration()))) {
+                commit.dropPartitions(
+                        Collections.singletonList(partitions), BatchWriteBuilder.COMMIT_IDENTIFIER);
             }
-            throw e;
         }
     }
 
@@ -415,7 +414,7 @@ public class RESTCatalog implements Catalog {
             throws TableNotExistException {
         boolean whetherSupportListPartitions = context.options().get(METASTORE_PARTITIONED);
         if (whetherSupportListPartitions) {
-            return null;
+            return listPartitionsFromServer(identifier);
         } else {
             return getTable(identifier).newReadBuilder().newScan().listPartitionEntries();
         }
@@ -466,6 +465,39 @@ public class RESTCatalog implements Catalog {
                             .build();
         }
         return table;
+    }
+
+    @VisibleForTesting
+    public List<PartitionEntry> listPartitionsFromServer(Identifier identifier)
+            throws TableNotExistException {
+        try {
+            ListPartitionsResponse response =
+                    client.get(
+                            resourcePaths.partitions(
+                                    identifier.getDatabaseName(), identifier.getTableName()),
+                            ListPartitionsResponse.class,
+                            headers());
+            List<PartitionEntry> partitionEntries = new ArrayList<>();
+            for (ListPartitionsResponse.Partition partition : response.getPartitions()) {
+                InternalRowSerializer serializer =
+                        new InternalRowSerializer(partition.getPartitionType());
+                GenericRow row =
+                        convertSpecToInternalRow(partition.getSpec(), partition.getPartitionType());
+                PartitionEntry partitionEntry =
+                        new PartitionEntry(
+                                serializer.toBinaryRow(row).copy(),
+                                partition.getRecordCount(),
+                                partition.getFileSizeInBytes(),
+                                partition.getFileCount(),
+                                partition.getLastFileCreationTime());
+                partitionEntries.add(partitionEntry);
+            }
+            return partitionEntries;
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
     }
 
     protected GetTableResponse getTableResponse(Identifier identifier)

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
@@ -34,6 +35,8 @@ import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -41,6 +44,7 @@ import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
@@ -192,5 +196,17 @@ public class RESTObjectMapperTest {
         String requestStr = mapper.writeValueAsString(request);
         AlterTableRequest parseData = mapper.readValue(requestStr, AlterTableRequest.class);
         assertEquals(parseData.getChanges().size(), parseData.getChanges().size());
+    }
+
+    @Test
+    public void testPartitionSpecToInternalRow() {
+        Map<String, String> spec = new HashMap<>();
+        spec.put("a", "1");
+        spec.put("b", "2");
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "a", DataTypes.INT()));
+        fields.add(new DataField(1, "b", DataTypes.STRING()));
+        RowType partitionType = new RowType(false, fields);
+        GenericRow row = InternalRowPartitionComputer.convertSpecToInternalRow(spec, partitionType);
     }
 }

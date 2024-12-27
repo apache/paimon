@@ -22,7 +22,9 @@ import org.apache.paimon.rest.ResourcePaths;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreatePartitionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.DropPartitionRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -31,7 +33,12 @@ import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.SuccessResponse;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -49,7 +56,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /** RESTCatalog management APIs. */
@@ -345,5 +354,87 @@ public class RESTCatalogController {
                         ImmutableList.of(),
                         new HashMap<>(),
                         "comment"));
+    }
+
+    @Operation(
+            summary = "List partitions",
+            tags = {"partition"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {
+                    @Content(schema = @Schema(implementation = ListPartitionsResponse.class))
+                }),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @GetMapping("/v1/{prefix}/databases/{database}/tables/{table}/partitions")
+    public ListPartitionsResponse listPartitions(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table) {
+        Map<String, String> spec = new HashMap<>();
+        spec.put("a", "1");
+        spec.put("b", "2");
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "a", DataTypes.INT()));
+        fields.add(new DataField(1, "b", DataTypes.STRING()));
+        RowType partitionType = new RowType(false, fields);
+        ListPartitionsResponse.Partition partition =
+                new ListPartitionsResponse.Partition(spec, partitionType, 1, 2, 3, 4);
+        return new ListPartitionsResponse(ImmutableList.of(partition));
+    }
+
+    @Operation(
+            summary = "Create partition",
+            tags = {"partition"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {@Content(schema = @Schema(implementation = SuccessResponse.class))}),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/partitions")
+    public SuccessResponse createPartition(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table,
+            @RequestBody CreatePartitionRequest request) {
+        return new SuccessResponse();
+    }
+
+    @Operation(
+            summary = "Drop partition",
+            tags = {"partition"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {@Content(schema = @Schema(implementation = SuccessResponse.class))}),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @DeleteMapping("/v1/{prefix}/databases/{database}/tables/{table}/partitions")
+    public SuccessResponse dropPartition(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table,
+            @RequestBody DropPartitionRequest request) {
+        return new SuccessResponse();
     }
 }
