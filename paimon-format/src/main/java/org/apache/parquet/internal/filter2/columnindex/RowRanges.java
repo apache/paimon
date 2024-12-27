@@ -177,7 +177,8 @@ public class RowRanges {
             // using file index result to filter or narrow the row ranges
             if (fileIndexResult instanceof BitmapIndexResult) {
                 RoaringBitmap32 bitmap = ((BitmapIndexResult) fileIndexResult).get();
-                RoaringBitmap32 range = RoaringBitmap32.bitmapOfRange(firstRowIndex, lastRowIndex + 1);
+                RoaringBitmap32 range =
+                        RoaringBitmap32.bitmapOfRange(firstRowIndex, lastRowIndex + 1);
                 RoaringBitmap32 result = RoaringBitmap32.and(bitmap, range);
                 if (result.isEmpty()) {
                     continue;
