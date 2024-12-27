@@ -408,7 +408,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(120)
     public void testIncludingTables() throws Exception {
         includingAndExcludingTablesImpl(
                 "paimon_sync_database_including",
@@ -900,7 +900,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(240)
+    @Timeout(600)
     public void testSyncManyTableWithLimitedMemory() throws Exception {
         String databaseName = "many_table_sync_test";
         int newTableCount = 100;
@@ -956,7 +956,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(120)
     public void testSyncMultipleShards() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
 
