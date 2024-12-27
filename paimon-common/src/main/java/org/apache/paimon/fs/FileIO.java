@@ -22,11 +22,13 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.hadoop.HadoopFileIOLoader;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
 import java.io.BufferedReader;
@@ -39,6 +41,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -103,6 +106,71 @@ public interface FileIO extends Serializable {
      * @return the statuses of the files/directories in the given path
      */
     FileStatus[] listStatus(Path path) throws IOException;
+
+    /**
+     * List the statuses of the files in the given path if the path is a directory.
+     *
+     * @param path given path
+     * @param recursive if set to <code>true</code> will recursively list files in sub-directories,
+     *     otherwise only files in the current directory will be listed
+     * @return the statuses of the files in the given path
+     */
+    default FileStatus[] listFiles(Path path, boolean recursive) throws IOException {
+        List<FileStatus> statuses = new ArrayList<>();
+        FileStatus[] outer = listStatus(path);
+        if (outer != null) {
+            for (FileStatus f : outer) {
+                if (!f.isDir()) {
+                    statuses.add(f);
+                    continue;
+                }
+                if (!recursive) {
+                    continue;
+                }
+                FileStatus[] inner = listFiles(f.getPath(), true);
+                statuses.addAll(Arrays.asList(inner));
+            }
+        }
+        return statuses.toArray(new FileStatus[0]);
+    }
+
+    /**
+     * List the statuses of the files in the given path in non-overlapping pages, if the path is a
+     * directory.
+     *
+     * @param path given path
+     * @param recursive if set to <code>true</code> will recursively list files in subdirectories,
+     *     otherwise only files in the current directory will be listed
+     * @param pageSize maximum size of the page
+     * @param continuationToken If supplied will list files after this token, otherwise list from
+     *     the beginning. You may acquire this token from the return of this method.
+     * @return A page of statuses of the files in the given path and the continuation token of this
+     *     page. The continuation token will be <code>null</code> if the returned page is the last
+     *     page.
+     */
+    default Pair<FileStatus[], String> listFilesPaged(
+            Path path, boolean recursive, long pageSize, @Nullable String continuationToken)
+            throws IOException {
+        FileStatus[] all = listFiles(path, recursive);
+        FileStatus[] paged =
+                Arrays.stream(all)
+                        .sorted(Comparator.comparing(FileStatus::getPath))
+                        .filter(
+                                f ->
+                                        continuationToken == null
+                                                || f.getPath()
+                                                                .toUri()
+                                                                .toString()
+                                                                .compareTo(continuationToken)
+                                                        > 0)
+                        .limit(pageSize)
+                        .toArray(FileStatus[]::new);
+        String nextToken =
+                paged.length < pageSize
+                        ? null
+                        : paged[paged.length - 1].getPath().toUri().toString();
+        return Pair.of(paged, nextToken);
+    }
 
     /**
      * List the statuses of the directories in the given path if the path is a directory.

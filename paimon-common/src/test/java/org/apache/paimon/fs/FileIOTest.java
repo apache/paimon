@@ -21,6 +21,7 @@ package org.apache.paimon.fs;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -134,7 +135,88 @@ public class FileIOTest {
         assertThat(exception.get()).isNull();
     }
 
-    /** A {@link FileIO} on local filesystem to test the default copy implementation. */
+    @Test
+    public void testListFiles() throws Exception {
+        Path fileA = new Path(tempDir.resolve("a").toUri());
+        Path dirB = new Path(tempDir.resolve("b").toUri());
+        Path fileBC = new Path(tempDir.resolve("b/c").toUri());
+
+        FileIO fileIO = new LocalFileIO();
+        fileIO.writeFile(fileA, "fileA", false);
+        fileIO.mkdirs(dirB);
+        fileIO.writeFile(fileBC, "fileBC", false);
+
+        {
+            // if listing non-recursively, file "a" is the only file in the top level directory
+            FileStatus[] statuses = fileIO.listFiles(new Path(tempDir.toUri()), false);
+            assertThat(statuses.length).isEqualTo(1);
+            assertThat(statuses[0].getPath()).isEqualTo(fileA);
+        }
+
+        {
+            // if listing recursively, file "a" and "b/c" should be listed, directory "b" should be
+            // omitted
+            FileStatus[] statuses = fileIO.listFiles(new Path(tempDir.toUri()), true);
+            assertThat(statuses.length).isEqualTo(2);
+            assertThat(statuses[0].getPath()).isEqualTo(fileA);
+            assertThat(statuses[1].getPath()).isEqualTo(fileBC);
+        }
+    }
+
+    @Test
+    public void testListFilesPaged() throws Exception {
+        FileIO fileIO = new LocalFileIO();
+        // 10 files starting with "a"
+        for (int i = 0; i < 10; i++) {
+            Path p = new Path(tempDir.resolve(String.format("a-%02d", i)).toUri());
+            fileIO.writeFile(p, p.toString(), false);
+        }
+        // 10 files starting with "b"
+        for (int i = 0; i < 10; i++) {
+            Path p = new Path(tempDir.resolve(String.format("b-%02d", i)).toUri());
+            fileIO.writeFile(p, p.toString(), false);
+        }
+        // 10 files under directory "c"
+        fileIO.mkdirs(new Path(tempDir.resolve("c").toUri()));
+        for (int i = 0; i < 10; i++) {
+            Path p = new Path(tempDir.resolve(String.format("c/c-%02d", i)).toUri());
+            fileIO.writeFile(p, p.toString(), false);
+        }
+
+        {
+            // first 5 files should be "a-00" to "a-04"
+            Pair<FileStatus[], String> page =
+                    fileIO.listFilesPaged(new Path(tempDir.toUri()), true, 5, null);
+            assertThat(page.getLeft().length).isEqualTo(5);
+            assertThat(page.getLeft()[0].getPath().getName()).isEqualTo("a-00");
+            assertThat(page.getLeft()[4].getPath().getName()).isEqualTo("a-04");
+            assertThat(page.getRight()).isNotNull();
+            // the next 10 files should be "a-05" to "b-04"
+            page = fileIO.listFilesPaged(new Path(tempDir.toUri()), true, 10, page.getRight());
+            assertThat(page.getLeft().length).isEqualTo(10);
+            assertThat(page.getLeft()[0].getPath().getName()).isEqualTo("a-05");
+            assertThat(page.getLeft()[9].getPath().getName()).isEqualTo("b-04");
+            assertThat(page.getRight()).isNotNull();
+            // next 10 files should recurse to "c/c-04"
+            page = fileIO.listFilesPaged(new Path(tempDir.toUri()), true, 10, page.getRight());
+            assertThat(page.getLeft().length).isEqualTo(10);
+            assertThat(page.getLeft()[9].getPath().getParent().getName()).isEqualTo("c");
+            assertThat(page.getLeft()[9].getPath().getName()).isEqualTo("c-04");
+            assertThat(page.getRight()).isNotNull();
+        }
+
+        {
+            // list all files non-recursively should return "a-00" through "b-09" and no more
+            Pair<FileStatus[], String> page =
+                    fileIO.listFilesPaged(new Path(tempDir.toUri()), false, 9999, null);
+            assertThat(page.getLeft().length).isEqualTo(20);
+            assertThat(page.getLeft()[0].getPath().getName()).isEqualTo("a-00");
+            assertThat(page.getLeft()[19].getPath().getName()).isEqualTo("b-09");
+            assertThat(page.getRight()).isNull();
+        }
+    }
+
+    /** A {@link FileIO} on local filesystem to test various default implementations. */
     private static class DummyFileIO implements FileIO {
         private static final ReentrantLock RENAME_LOCK = new ReentrantLock();
 
@@ -169,13 +251,13 @@ public class FileIOTest {
         }
 
         @Override
-        public FileStatus getFileStatus(Path path) {
-            throw new UnsupportedOperationException();
+        public FileStatus getFileStatus(Path path) throws IOException {
+            return new LocalFileIO().getFileStatus(path);
         }
 
         @Override
-        public FileStatus[] listStatus(Path path) {
-            throw new UnsupportedOperationException();
+        public FileStatus[] listStatus(Path path) throws IOException {
+            return new LocalFileIO().listStatus(path);
         }
 
         @Override
