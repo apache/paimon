@@ -56,5 +56,24 @@ public class RemoveUnexistingFilesActionFactory implements ActionFactory {
     }
 
     @Override
-    public void printHelp() {}
+    public void printHelp() {
+        System.out.println(
+                "Action \"remove_unexisting_files\" removes unexisting data files from manifest entries.");
+        System.out.println(
+                "See Java docs in https://paimon.apache.org/docs/master/api/java/org/apache/paimon/flink/action/RemoveUnexistingFilesAction.html for detailed use cases.");
+        System.out.println(
+                "Note that user is on his own risk using this procedure, which may cause data loss when used outside from the use cases in Java docs.");
+        System.out.println();
+
+        System.out.println("Syntax:");
+        System.out.println(
+                "  remove_unexisting_files --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> [--partition <partition_name> [--partition <partition_name>]] "
+                        + "[--dry_run <false/true>] "
+                        + "[--parallelism <parallelism>]");
+        System.out.println(
+                "If partitions are not specified, this action will remove unexisting files from all partitions.");
+        System.out.println(
+                "When dry_run is set to true (default false), this action only checks what files will be removed, but not really remove them.");
+    }
 }
