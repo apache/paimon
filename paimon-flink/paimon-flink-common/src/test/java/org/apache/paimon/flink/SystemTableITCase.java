@@ -73,7 +73,7 @@ public class SystemTableITCase extends CatalogTableITCase {
                 "INSERT INTO T VALUES ('2024-10-01', 1, 'aaaaaaaaaaaaaaaaaaa'), ('2024-10-01', 2, 'b'), ('2024-10-01', 3, 'c')");
         sql("INSERT INTO T VALUES ('2024-10-01', 1, 'a_new1'), ('2024-10-01', 3, 'c_new1')");
 
-        List<Row> rows = sql("SELECT * FROM `T$indexes` WHERE index_type = 'HASH'");
+        List<Row> rows = sql("SELECT * FROM `T$table_indexes` WHERE index_type = 'HASH'");
         assertThat(rows.size()).isEqualTo(1);
         Row row = rows.get(0);
         assertThat(row.getField(0)).isEqualTo("[2024-10-01]");
@@ -84,7 +84,7 @@ public class SystemTableITCase extends CatalogTableITCase {
         assertThat(row.getField(5)).isEqualTo(3L);
         assertThat(row.getField(6)).isNull();
 
-        rows = sql("SELECT * FROM `T$indexes` WHERE index_type = 'DELETION_VECTORS'");
+        rows = sql("SELECT * FROM `T$table_indexes` WHERE index_type = 'DELETION_VECTORS'");
         assertThat(rows.size()).isEqualTo(1);
         row = rows.get(0);
         assertThat(row.getField(0)).isEqualTo("[2024-10-01]");

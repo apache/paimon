@@ -64,12 +64,12 @@ import java.util.Map;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
-/** A {@link Table} for showing committing snapshots of table. */
-public class IndexesTable implements ReadonlyTable {
+/** A {@link Table} for showing indexes. */
+public class TableIndexesTable implements ReadonlyTable {
 
-    private static final Logger LOG = LoggerFactory.getLogger(IndexesTable.class);
+    private static final Logger LOG = LoggerFactory.getLogger(TableIndexesTable.class);
 
-    public static final String INDEXES = "indexes";
+    public static final String TABLE_INDEXES = "table_indexes";
 
     public static final RowType TABLE_TYPE =
             new RowType(
@@ -87,7 +87,7 @@ public class IndexesTable implements ReadonlyTable {
 
     private final FileStoreTable dataTable;
 
-    public IndexesTable(FileStoreTable dataTable) {
+    public TableIndexesTable(FileStoreTable dataTable) {
         this.dataTable = dataTable;
     }
 
@@ -103,7 +103,7 @@ public class IndexesTable implements ReadonlyTable {
 
     @Override
     public String name() {
-        return dataTable.name() + SYSTEM_TABLE_SPLITTER + INDEXES;
+        return dataTable.name() + SYSTEM_TABLE_SPLITTER + TABLE_INDEXES;
     }
 
     @Override
@@ -118,7 +118,7 @@ public class IndexesTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new IndexesTable(dataTable.copy(dynamicOptions));
+        return new TableIndexesTable(dataTable.copy(dynamicOptions));
     }
 
     private static class IndexesScan extends ReadOnceTableScan {
@@ -194,7 +194,7 @@ public class IndexesTable implements ReadonlyTable {
                         Iterators.transform(
                                 rows,
                                 row ->
-                                        ProjectedRow.from(readType, IndexesTable.TABLE_TYPE)
+                                        ProjectedRow.from(readType, TableIndexesTable.TABLE_TYPE)
                                                 .replaceRow(row));
             }
             return new IteratorRecordReader<>(rows);

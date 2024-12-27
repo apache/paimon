@@ -41,7 +41,6 @@ import static org.apache.paimon.table.system.BucketsTable.BUCKETS;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
 import static org.apache.paimon.table.system.ConsumersTable.CONSUMERS;
 import static org.apache.paimon.table.system.FilesTable.FILES;
-import static org.apache.paimon.table.system.IndexesTable.INDEXES;
 import static org.apache.paimon.table.system.ManifestsTable.MANIFESTS;
 import static org.apache.paimon.table.system.OptionsTable.OPTIONS;
 import static org.apache.paimon.table.system.PartitionsTable.PARTITIONS;
@@ -49,6 +48,7 @@ import static org.apache.paimon.table.system.ReadOptimizedTable.READ_OPTIMIZED;
 import static org.apache.paimon.table.system.SchemasTable.SCHEMAS;
 import static org.apache.paimon.table.system.SnapshotsTable.SNAPSHOTS;
 import static org.apache.paimon.table.system.StatisticTable.STATISTICS;
+import static org.apache.paimon.table.system.TableIndexesTable.TABLE_INDEXES;
 import static org.apache.paimon.table.system.TagsTable.TAGS;
 
 /** Loader to load system {@link Table}s. */
@@ -71,7 +71,7 @@ public class SystemTableLoader {
                     .put(AGGREGATION_FIELDS, AggregationFieldsTable::new)
                     .put(STATISTICS, StatisticTable::new)
                     .put(BINLOG, BinlogTable::new)
-                    .put(INDEXES, IndexesTable::new)
+                    .put(TABLE_INDEXES, TableIndexesTable::new)
                     .build();
 
     public static final List<String> SYSTEM_TABLES = new ArrayList<>(SYSTEM_TABLE_LOADERS.keySet());

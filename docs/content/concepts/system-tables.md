@@ -389,13 +389,13 @@ SELECT * FROM T$statistics;
 */
 ```
 
-### Indexes Table
+### Table Indexes Table
 
 You can query the table's index files generated for dynamic bucket table (index_type = HASH) and deletion vectors
 (index_type = DELETION_VECTORS) through indexes table.
 
 ```sql
-SELECT * FROM my_table$indexes;
+SELECT * FROM my_table$table_indexes;
 
 /*
 +--------------------------------+-------------+--------------------------------+--------------------------------+----------------------+----------------------+--------------------------------+
