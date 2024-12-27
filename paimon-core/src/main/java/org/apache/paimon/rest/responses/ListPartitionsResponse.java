@@ -32,6 +32,7 @@ import java.util.Map;
 /** Response for listing partitions. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ListPartitionsResponse implements RESTResponse {
+
     public static final String FIELD_PARTITIONS = "partitions";
 
     @JsonProperty(FIELD_PARTITIONS)

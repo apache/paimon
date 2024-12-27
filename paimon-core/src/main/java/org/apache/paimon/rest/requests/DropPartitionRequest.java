@@ -30,6 +30,7 @@ import java.util.Map;
 /** Request for deleting partition. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class DropPartitionRequest implements RESTRequest {
+
     private static final String FIELD_PARTITION_SPEC = "partitionSpec";
 
     @JsonProperty(FIELD_PARTITION_SPEC)
