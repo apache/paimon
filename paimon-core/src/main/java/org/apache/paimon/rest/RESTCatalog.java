@@ -88,6 +88,7 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
+import static org.apache.paimon.rest.RESTCatalogOptions.METASTORE_PARTITIONED;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
@@ -412,7 +413,12 @@ public class RESTCatalog implements Catalog {
     @Override
     public List<PartitionEntry> listPartitions(Identifier identifier)
             throws TableNotExistException {
-        throw new UnsupportedOperationException();
+        boolean whetherSupportListPartitions = context.options().get(METASTORE_PARTITIONED);
+        if (whetherSupportListPartitions) {
+            return null;
+        } else {
+            return getTable(identifier).newReadBuilder().newScan().listPartitionEntries();
+        }
     }
 
     @Override
