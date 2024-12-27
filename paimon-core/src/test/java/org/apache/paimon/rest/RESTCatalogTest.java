@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.requests.CreateTableRequest;
@@ -31,7 +32,9 @@ import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.SuccessResponse;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 
@@ -71,27 +74,17 @@ public class RESTCatalogTest {
     private RESTCatalog restCatalog;
     private RESTCatalog mockRestCatalog;
     private String warehouseStr;
+    private String serverUrl;
     @Rule public TemporaryFolder folder = new TemporaryFolder();
 
     @Before
     public void setUp() throws IOException {
         mockWebServer = new MockWebServer();
         mockWebServer.start();
-        String baseUrl = mockWebServer.url("").toString();
-        Options options = new Options();
-        options.set(RESTCatalogOptions.URI, baseUrl);
-        String initToken = "init_token";
-        options.set(RESTCatalogOptions.TOKEN, initToken);
-        options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
+        serverUrl = mockWebServer.url("").toString();
+        Options options = mockInitOptions();
         warehouseStr = folder.getRoot().getPath();
-        String mockResponse =
-                String.format(
-                        "{\"defaults\": {\"%s\": \"%s\", \"%s\": \"%s\"}}",
-                        RESTCatalogInternalOptions.PREFIX.key(),
-                        "prefix",
-                        CatalogOptions.WAREHOUSE.key(),
-                        warehouseStr);
-        mockResponse(mockResponse, 200);
+        mockConfig(warehouseStr);
         restCatalog = new RESTCatalog(CatalogContext.create(options));
         mockRestCatalog = spy(restCatalog);
     }
@@ -359,6 +352,70 @@ public class RESTCatalogTest {
                 () -> restCatalog.dropTable(Identifier.create(databaseName, tableName), false));
     }
 
+    @Test
+    public void testCreatePartition() throws Exception {
+        String databaseName = MockRESTMessage.databaseName();
+        Map<String, String> partitionSpec = new HashMap<>();
+        partitionSpec.put("p1", "v1");
+        mockResponse(mapper.writeValueAsString(new SuccessResponse()), 200);
+        assertDoesNotThrow(
+                () ->
+                        mockRestCatalog.createPartition(
+                                Identifier.create(databaseName, "table"), partitionSpec));
+    }
+
+    @Test
+    public void testCreatePartitionWhenTableNotExist() throws Exception {
+        String databaseName = MockRESTMessage.databaseName();
+        Map<String, String> partitionSpec = new HashMap<>();
+        partitionSpec.put("p1", "v1");
+        mockResponse("", 404);
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () ->
+                        mockRestCatalog.createPartition(
+                                Identifier.create(databaseName, "table"), partitionSpec));
+    }
+
+    @Test
+    public void testCreatePartitionWhenTableNoPermissionException() throws Exception {
+        String databaseName = MockRESTMessage.databaseName();
+        Map<String, String> partitionSpec = new HashMap<>();
+        partitionSpec.put("p1", "v1");
+        mockResponse("", 403);
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () ->
+                        mockRestCatalog.createPartition(
+                                Identifier.create(databaseName, "table"), partitionSpec));
+    }
+
+    @Test
+    public void testListPartitionsWhenMetastorePartitionedIsTrue() throws Exception {
+        Options options = mockInitOptions();
+        options = options.set(RESTCatalogOptions.METASTORE_PARTITIONED, true);
+        mockConfig(warehouseStr);
+        RESTCatalog restCatalog = new RESTCatalog(CatalogContext.create(options));
+        RESTCatalog mockRestCatalog = spy(restCatalog);
+        String databaseName = MockRESTMessage.databaseName();
+        ListPartitionsResponse response = MockRESTMessage.listPartitionsResponse();
+        mockResponse(mapper.writeValueAsString(response), 200);
+        List<PartitionEntry> result =
+                mockRestCatalog.listPartitions(Identifier.create(databaseName, "table"));
+        verify(mockRestCatalog, times(1)).listPartitionsFromServer(any());
+        assertEquals(response.getPartitions().size(), result.size());
+    }
+
+    @Test
+    public void testListPartitionsFromFile() throws Exception {
+        String databaseName = MockRESTMessage.databaseName();
+        GetTableResponse response = MockRESTMessage.getTableResponse();
+        mockResponse(mapper.writeValueAsString(response), 200);
+        mockRestCatalog.listPartitions(Identifier.create(databaseName, "table"));
+        verify(mockRestCatalog, times(1)).getTable(any());
+        verify(mockRestCatalog, times(0)).listPartitionsFromServer(any());
+    }
+
     private void mockResponse(String mockResponse, int httpCode) {
         MockResponse mockResponseObj =
                 new MockResponse()
@@ -366,5 +423,25 @@ public class RESTCatalogTest {
                         .setBody(mockResponse)
                         .addHeader("Content-Type", "application/json");
         mockWebServer.enqueue(mockResponseObj);
+    }
+
+    private void mockConfig(String warehouseStr) {
+        String mockResponse =
+                String.format(
+                        "{\"defaults\": {\"%s\": \"%s\", \"%s\": \"%s\"}}",
+                        RESTCatalogInternalOptions.PREFIX.key(),
+                        "prefix",
+                        CatalogOptions.WAREHOUSE.key(),
+                        warehouseStr);
+        mockResponse(mockResponse, 200);
+    }
+
+    public Options mockInitOptions() {
+        Options options = new Options();
+        options.set(RESTCatalogOptions.URI, serverUrl);
+        String initToken = "init_token";
+        options.set(RESTCatalogOptions.TOKEN, initToken);
+        options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
+        return options;
     }
 }

@@ -24,6 +24,9 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
 import java.io.IOException;
@@ -52,9 +55,13 @@ public final class RowType extends DataType {
 
     private static final long serialVersionUID = 1L;
 
+    public static final String FILED_FIELDS = "fields";
+
     public static final String FORMAT = "ROW<%s>";
 
+    @JsonProperty(FILED_FIELDS)
     private final List<DataField> fields;
+
     private InternalRow.FieldGetter[] fieldGetters;
 
     public RowType(boolean isNullable, List<DataField> fields) {
@@ -67,7 +74,8 @@ public final class RowType extends DataType {
         validateFields(fields);
     }
 
-    public RowType(List<DataField> fields) {
+    @JsonCreator
+    public RowType(@JsonProperty(FILED_FIELDS) List<DataField> fields) {
         this(true, fields);
     }
 
@@ -75,6 +83,7 @@ public final class RowType extends DataType {
         return new RowType(isNullable(), newFields);
     }
 
+    @JsonGetter(FILED_FIELDS)
     public List<DataField> getFields() {
         return fields;
     }

@@ -111,22 +111,10 @@ public class InternalRowPartitionComputer {
         List<String> fieldNames = partType.getFieldNames();
         for (Map.Entry<String, String> entry : spec.entrySet()) {
             Object value =
-                    defaultPartValue.equals(entry.getValue())
+                    defaultPartValue != null && defaultPartValue.equals(entry.getValue())
                             ? null
                             : castFromString(
                                     entry.getValue(), partType.getField(entry.getKey()).type());
-            partRow.setField(fieldNames.indexOf(entry.getKey()), value);
-        }
-        return partRow;
-    }
-
-    public static GenericRow convertSpecToInternalRow(Map<String, String> spec, RowType partType) {
-        checkArgument(spec.size() == partType.getFieldCount());
-        GenericRow partRow = new GenericRow(spec.size());
-        List<String> fieldNames = partType.getFieldNames();
-        for (Map.Entry<String, String> entry : spec.entrySet()) {
-            Object value =
-                    castFromString(entry.getValue(), partType.getField(entry.getKey()).type());
             partRow.setField(fieldNames.indexOf(entry.getKey()), value);
         }
         return partRow;

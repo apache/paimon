@@ -145,7 +145,8 @@ public class RESTCatalog implements Catalog {
         Map<String, String> initHeaders =
                 RESTUtil.merge(
                         configHeaders(catalogOptions.toMap()), this.catalogAuth.getHeaders());
-        Options options = new Options(fetchOptionsFromServer(initHeaders, initHeaders));
+        Options options =
+                new Options(fetchOptionsFromServer(initHeaders, catalogContext.options().toMap()));
         this.context =
                 CatalogContext.create(
                         options, catalogContext.preferIO(), catalogContext.fallbackIO());
@@ -482,7 +483,8 @@ public class RESTCatalog implements Catalog {
                 InternalRowSerializer serializer =
                         new InternalRowSerializer(partition.getPartitionType());
                 GenericRow row =
-                        convertSpecToInternalRow(partition.getSpec(), partition.getPartitionType());
+                        convertSpecToInternalRow(
+                                partition.getSpec(), partition.getPartitionType(), null);
                 PartitionEntry partitionEntry =
                         new PartitionEntry(
                                 serializer.toBinaryRow(row).copy(),

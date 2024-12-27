@@ -22,7 +22,9 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreatePartitionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.DropPartitionRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
@@ -30,6 +32,7 @@ import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -39,6 +42,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import java.util.ArrayList;
@@ -129,6 +133,28 @@ public class MockRESTMessage {
 
     public static AlterTableRequest alterTableRequest() {
         return new AlterTableRequest(getChanges());
+    }
+
+    public static CreatePartitionRequest createPartitionRequest(String tableName) {
+        Identifier identifier = Identifier.create(databaseName(), tableName);
+        return new CreatePartitionRequest(identifier, Collections.singletonMap("pt", "1"));
+    }
+
+    public static DropPartitionRequest dropPartitionRequest() {
+        return new DropPartitionRequest(Collections.singletonMap("pt", "1"));
+    }
+
+    public static ListPartitionsResponse listPartitionsResponse() {
+        Map<String, String> spec = new HashMap<>();
+        spec.put("a", "1");
+        spec.put("b", "2");
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "a", DataTypes.INT()));
+        fields.add(new DataField(1, "b", DataTypes.STRING()));
+        RowType partitionType = new RowType(false, fields);
+        ListPartitionsResponse.Partition partition =
+                new ListPartitionsResponse.Partition(spec, partitionType, 1, 1, 1, 1);
+        return new ListPartitionsResponse(ImmutableList.of(partition));
     }
 
     public static List<SchemaChange> getChanges() {
