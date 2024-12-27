@@ -29,6 +29,7 @@ import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -43,6 +44,7 @@ import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.DropPartitionRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -50,8 +52,8 @@ import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
-import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.SuccessResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
@@ -60,6 +62,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
@@ -73,13 +76,16 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 
+import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -368,7 +374,7 @@ public class RESTCatalog implements Catalog {
                     resourcePaths.partitions(
                             identifier.getDatabaseName(), identifier.getTableName()),
                     request,
-                    ListPartitionsResponse.class,
+                    SuccessResponse.class,
                     headers());
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
@@ -379,7 +385,29 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public void dropPartition(Identifier identifier, Map<String, String> partitions)
-            throws TableNotExistException, PartitionNotExistException {}
+            throws TableNotExistException, PartitionNotExistException {
+        checkNotSystemTable(identifier, "dropPartition");
+        Table table = null;
+        try {
+            dropPartitionMetadata(identifier, partitions);
+            table = getTable(identifier);
+        } catch (Exception e) {
+            if (table != null) {
+                FileStoreTable fileStoreTable = (FileStoreTable) table;
+                try (FileStoreCommit commit =
+                        fileStoreTable
+                                .store()
+                                .newCommit(
+                                        createCommitUser(
+                                                fileStoreTable.coreOptions().toConfiguration()))) {
+                    commit.dropPartitions(
+                            Collections.singletonList(partitions),
+                            BatchWriteBuilder.COMMIT_IDENTIFIER);
+                }
+            }
+            throw e;
+        }
+    }
 
     @Override
     public List<PartitionEntry> listPartitions(Identifier identifier)
@@ -440,6 +468,22 @@ public class RESTCatalog implements Catalog {
             return client.get(
                     resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),
                     GetTableResponse.class,
+                    headers());
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    protected SuccessResponse dropPartitionMetadata(
+            Identifier identifier, Map<String, String> partitions) throws TableNotExistException {
+        try {
+            DropPartitionRequest request = new DropPartitionRequest(partitions);
+            return client.delete(
+                    resourcePaths.partitions(
+                            identifier.getDatabaseName(), identifier.getTableName()),
+                    request,
                     headers());
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
