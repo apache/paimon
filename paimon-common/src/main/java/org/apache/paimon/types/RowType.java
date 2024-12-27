@@ -26,6 +26,7 @@ import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
@@ -51,6 +52,7 @@ import java.util.stream.IntStream;
  * @since 0.4.0
  */
 @Public
+@JsonIgnoreProperties(ignoreUnknown = true)
 public final class RowType extends DataType {
 
     private static final long serialVersionUID = 1L;

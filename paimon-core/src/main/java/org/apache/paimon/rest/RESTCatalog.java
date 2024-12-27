@@ -20,6 +20,7 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogUtils;
@@ -69,7 +70,6 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.paimon.shade.guava30.com.google.common.annotations.VisibleForTesting;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -85,6 +85,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
@@ -400,19 +401,6 @@ public class RESTCatalog implements Catalog {
         }
     }
 
-    @VisibleForTesting
-    void cleanPartitionsInFileSystem(Table table, Map<String, String> partitions) {
-        FileStoreTable fileStoreTable = (FileStoreTable) table;
-        try (FileStoreCommit commit =
-                fileStoreTable
-                        .store()
-                        .newCommit(
-                                createCommitUser(fileStoreTable.coreOptions().toConfiguration()))) {
-            commit.dropPartitions(
-                    Collections.singletonList(partitions), BatchWriteBuilder.COMMIT_IDENTIFIER);
-        }
-    }
-
     @Override
     public List<PartitionEntry> listPartitions(Identifier identifier)
             throws TableNotExistException {
@@ -481,27 +469,43 @@ public class RESTCatalog implements Catalog {
                                     identifier.getDatabaseName(), identifier.getTableName()),
                             ListPartitionsResponse.class,
                             headers());
-            List<PartitionEntry> partitionEntries = new ArrayList<>();
-            for (ListPartitionsResponse.Partition partition : response.getPartitions()) {
-                InternalRowSerializer serializer =
-                        new InternalRowSerializer(partition.getPartitionType());
-                GenericRow row =
-                        convertSpecToInternalRow(
-                                partition.getSpec(), partition.getPartitionType(), null);
-                PartitionEntry partitionEntry =
-                        new PartitionEntry(
-                                serializer.toBinaryRow(row).copy(),
-                                partition.getRecordCount(),
-                                partition.getFileSizeInBytes(),
-                                partition.getFileCount(),
-                                partition.getLastFileCreationTime());
-                partitionEntries.add(partitionEntry);
+            if (response != null && response.getPartitions() != null) {
+                return response.getPartitions().stream()
+                        .map(this::convertToPartitionEntry)
+                        .collect(Collectors.toList());
+            } else {
+                return Collections.emptyList();
             }
-            return partitionEntries;
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    @VisibleForTesting
+    PartitionEntry convertToPartitionEntry(ListPartitionsResponse.Partition partition) {
+        InternalRowSerializer serializer = new InternalRowSerializer(partition.getPartitionType());
+        GenericRow row =
+                convertSpecToInternalRow(partition.getSpec(), partition.getPartitionType(), null);
+        return new PartitionEntry(
+                serializer.toBinaryRow(row).copy(),
+                partition.getRecordCount(),
+                partition.getFileSizeInBytes(),
+                partition.getFileCount(),
+                partition.getLastFileCreationTime());
+    }
+
+    @VisibleForTesting
+    void cleanPartitionsInFileSystem(Table table, Map<String, String> partitions) {
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        try (FileStoreCommit commit =
+                fileStoreTable
+                        .store()
+                        .newCommit(
+                                createCommitUser(fileStoreTable.coreOptions().toConfiguration()))) {
+            commit.dropPartitions(
+                    Collections.singletonList(partitions), BatchWriteBuilder.COMMIT_IDENTIFIER);
         }
     }
 
