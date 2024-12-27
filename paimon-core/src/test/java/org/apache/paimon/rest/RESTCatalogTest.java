@@ -62,6 +62,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -388,6 +389,79 @@ public class RESTCatalogTest {
                 () ->
                         mockRestCatalog.createPartition(
                                 Identifier.create(databaseName, "table"), partitionSpec));
+    }
+
+    @Test
+    public void testDropPartition() throws Exception {
+        String databaseName = MockRESTMessage.databaseName();
+        Map<String, String> partitionSpec = new HashMap<>();
+        GetTableResponse response = MockRESTMessage.getTableResponse();
+        partitionSpec.put(response.getSchema().primaryKeys().get(0), "1");
+        mockResponse(mapper.writeValueAsString(new SuccessResponse()), 200);
+        mockResponse(mapper.writeValueAsString(response), 200);
+        doNothing().when(mockRestCatalog).cleanPartitionsInFileSystem(any(), any());
+        assertDoesNotThrow(
+                () ->
+                        mockRestCatalog.dropPartition(
+                                Identifier.create(databaseName, "table"), partitionSpec));
+        verify(mockRestCatalog, times(1)).dropPartitionMetadata(any(), any());
+        verify(mockRestCatalog, times(1)).getTable(any());
+        verify(mockRestCatalog, times(1)).cleanPartitionsInFileSystem(any(), any());
+    }
+
+    @Test
+    public void testDropPartitionWhenPartitionNoExist() throws Exception {
+        String databaseName = MockRESTMessage.databaseName();
+        Map<String, String> partitionSpec = new HashMap<>();
+        GetTableResponse response = MockRESTMessage.getTableResponse();
+        partitionSpec.put(response.getSchema().primaryKeys().get(0), "1");
+        mockResponse(mapper.writeValueAsString(new SuccessResponse()), 404);
+        mockResponse(mapper.writeValueAsString(response), 200);
+        doNothing().when(mockRestCatalog).cleanPartitionsInFileSystem(any(), any());
+        assertDoesNotThrow(
+                () ->
+                        mockRestCatalog.dropPartition(
+                                Identifier.create(databaseName, "table"), partitionSpec));
+        verify(mockRestCatalog, times(1)).dropPartitionMetadata(any(), any());
+        verify(mockRestCatalog, times(1)).getTable(any());
+        verify(mockRestCatalog, times(1)).cleanPartitionsInFileSystem(any(), any());
+    }
+
+    @Test
+    public void testDropPartitionWhenTableNoPermission() throws Exception {
+        String databaseName = MockRESTMessage.databaseName();
+        Map<String, String> partitionSpec = new HashMap<>();
+        GetTableResponse response = MockRESTMessage.getTableResponse();
+        partitionSpec.put(response.getSchema().primaryKeys().get(0), "1");
+        mockResponse(mapper.writeValueAsString(new SuccessResponse()), 403);
+        doNothing().when(mockRestCatalog).cleanPartitionsInFileSystem(any(), any());
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () ->
+                        mockRestCatalog.dropPartition(
+                                Identifier.create(databaseName, "table"), partitionSpec));
+        verify(mockRestCatalog, times(1)).dropPartitionMetadata(any(), any());
+        verify(mockRestCatalog, times(0)).getTable(any());
+        verify(mockRestCatalog, times(0)).cleanPartitionsInFileSystem(any(), any());
+    }
+
+    @Test
+    public void testDropPartitionWhenTableNoExist() throws Exception {
+        String databaseName = MockRESTMessage.databaseName();
+        Map<String, String> partitionSpec = new HashMap<>();
+        GetTableResponse response = MockRESTMessage.getTableResponse();
+        partitionSpec.put(response.getSchema().primaryKeys().get(0), "1");
+        mockResponse(mapper.writeValueAsString(new SuccessResponse()), 200);
+        mockResponse("", 404);
+        doNothing().when(mockRestCatalog).cleanPartitionsInFileSystem(any(), any());
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () ->
+                        mockRestCatalog.dropPartition(
+                                Identifier.create(databaseName, "table"), partitionSpec));
+        verify(mockRestCatalog, times(1)).dropPartitionMetadata(any(), any());
+        verify(mockRestCatalog, times(1)).getTable(any());
+        verify(mockRestCatalog, times(0)).cleanPartitionsInFileSystem(any(), any());
     }
 
     @Test

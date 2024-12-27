@@ -390,23 +390,26 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    // todo: if table not exist how to drop partition
     public void dropPartition(Identifier identifier, Map<String, String> partitions)
             throws TableNotExistException, PartitionNotExistException {
         checkNotSystemTable(identifier, "dropPartition");
         dropPartitionMetadata(identifier, partitions);
         Table table = getTable(identifier);
         if (table != null) {
-            FileStoreTable fileStoreTable = (FileStoreTable) table;
-            try (FileStoreCommit commit =
-                    fileStoreTable
-                            .store()
-                            .newCommit(
-                                    createCommitUser(
-                                            fileStoreTable.coreOptions().toConfiguration()))) {
-                commit.dropPartitions(
-                        Collections.singletonList(partitions), BatchWriteBuilder.COMMIT_IDENTIFIER);
-            }
+            cleanPartitionsInFileSystem(table, partitions);
+        }
+    }
+
+    @VisibleForTesting
+    void cleanPartitionsInFileSystem(Table table, Map<String, String> partitions) {
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        try (FileStoreCommit commit =
+                fileStoreTable
+                        .store()
+                        .newCommit(
+                                createCommitUser(fileStoreTable.coreOptions().toConfiguration()))) {
+            commit.dropPartitions(
+                    Collections.singletonList(partitions), BatchWriteBuilder.COMMIT_IDENTIFIER);
         }
     }
 
@@ -517,7 +520,8 @@ public class RESTCatalog implements Catalog {
     }
 
     protected SuccessResponse dropPartitionMetadata(
-            Identifier identifier, Map<String, String> partitions) throws TableNotExistException {
+            Identifier identifier, Map<String, String> partitions)
+            throws TableNoPermissionException {
         try {
             DropPartitionRequest request = new DropPartitionRequest(partitions);
             return client.delete(
@@ -525,8 +529,8 @@ public class RESTCatalog implements Catalog {
                             identifier.getDatabaseName(), identifier.getTableName()),
                     request,
                     headers());
-        } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
+        } catch (NoSuchResourceException ignore) {
+            return new SuccessResponse();
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         }
