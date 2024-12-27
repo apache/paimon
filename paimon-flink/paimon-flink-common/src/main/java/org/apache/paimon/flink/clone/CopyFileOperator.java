@@ -154,7 +154,6 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
 
         // clone job will clone the source path to target warehouse path, so the target external
         // path is null
-        String newExternalPath = null;
         for (ManifestEntry manifestEntry : manifestEntries) {
             ManifestEntry newManifestEntry =
                     new ManifestEntry(
@@ -162,7 +161,7 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
                             manifestEntry.partition(),
                             manifestEntry.bucket(),
                             manifestEntry.totalBuckets(),
-                            manifestEntry.file().copy(newExternalPath));
+                            manifestEntry.file().copy((String) null));
             targetManifestEntries.add(newManifestEntry);
         }
 
