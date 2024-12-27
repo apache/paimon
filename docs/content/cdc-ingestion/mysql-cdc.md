@@ -39,6 +39,39 @@ Download `CDC Bundled Jar` and put them under <FLINK_HOME>/lib/.
 | 3.0.x   | <br/>Only supported in versions below 0.8.2<li> flink-sql-connector-mysql-cdc-3.0.x.jar <li> flink-cdc-common-3.0.x.jar |
 | 3.1.x   | <li> flink-sql-connector-mysql-cdc-3.1.x.jar <li> mysql-connector-java-8.0.27.jar                                       |
 
+{{< hint danger >}}
+If you are using versions below 3.0.1 (including 3.0.1), download the dependencies for [`com.ververica.flink-connector-mysql-cdc`](https://repo.maven.apache.org/maven2/com/ververica/flink-connector-mysql-cdc/).
+Here's an example of how it's used.
+
+```xml
+<dependency>
+    <groupId>com.ververica</groupId>
+    <artifactId>flink-cdc-common</artifactId>
+    <version>3.0.1</version>
+</dependency>
+
+<dependency>
+    <groupId>com.ververica</groupId>
+    <artifactId>flink-connector-mysql-cdc</artifactId>
+    <version>3.0.1</version>
+</dependency>
+```
+
+If you are using version 3.1.1+, download the `org.apache.flink` [flink-connector-mysql-cdc](https://repo.maven.apache.org/maven2/org/apache/flink/flink-connector-mysql-cdc/).
+Examples are given below:
+
+```xml
+<dependency>
+    <groupId>org.apache.flink</groupId>
+    <artifactId>flink-connector-mysql-cdc</artifactId>
+    <version>3.1.1</version>
+</dependency>
+```
+
+For more detailed information on this matter,please see this [PR](https://github.com/apache/paimon/pull/3764).
+
+{{< /hint >}}
+
 ## Synchronizing Tables
 
 By using [MySqlSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncTableAction) in a Flink DataStream job or directly through `flink run`, users can synchronize one or multiple tables from MySQL into one Paimon table.
