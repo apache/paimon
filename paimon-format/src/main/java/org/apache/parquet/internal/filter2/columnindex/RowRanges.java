@@ -174,12 +174,16 @@ public class RowRanges {
             long firstRowIndex = offsetIndex.getFirstRowIndex(pageIndex);
             long lastRowIndex = offsetIndex.getLastRowIndex(pageIndex, rowCount);
 
-            // using file index result to filter the row ranges
+            // using file index result to filter or narrow the row ranges
             if (fileIndexResult instanceof BitmapIndexResult) {
                 RoaringBitmap32 bitmap = ((BitmapIndexResult) fileIndexResult).get();
-                if (bitmap.rangeCardinality(firstRowIndex, lastRowIndex + 1) <= 0) {
+                RoaringBitmap32 range = RoaringBitmap32.bitmapOfRange(firstRowIndex, lastRowIndex + 1);
+                RoaringBitmap32 result = RoaringBitmap32.and(bitmap, range);
+                if (result.isEmpty()) {
                     continue;
                 }
+                firstRowIndex = result.first();
+                lastRowIndex = result.last();
             }
 
             ranges.add(new Range(firstRowIndex, lastRowIndex));
