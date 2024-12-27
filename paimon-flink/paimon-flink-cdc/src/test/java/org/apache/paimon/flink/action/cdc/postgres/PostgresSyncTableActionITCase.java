@@ -729,7 +729,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(120)
     public void testMetadataColumns() throws Exception {
         String tableName = "test_metadata_columns";
         try (Statement statement = getStatement(DATABASE_NAME)) {

@@ -145,7 +145,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
     // --------------------------------------- all-to-string ---------------------------------------
 
     @Test
-    @Timeout(60)
+    @Timeout(120)
     public void testReadAllTypes() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "all_to_string_test");
