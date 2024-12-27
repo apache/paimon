@@ -103,7 +103,7 @@ public interface DeletionVector {
             ByteBuffer buffer = ByteBuffer.wrap(bytes);
             int magicNum = buffer.getInt();
             if (magicNum == BitmapDeletionVector.MAGIC_NUMBER) {
-                return BitmapDeletionVector.deserializeFromByteBuffer(buffer.slice());
+                return BitmapDeletionVector.deserializeFromByteBuffer(buffer);
             } else {
                 throw new RuntimeException("Invalid magic number: " + magicNum);
             }
