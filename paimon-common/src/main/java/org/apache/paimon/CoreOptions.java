@@ -2390,10 +2390,6 @@ public class CoreOptions implements Serializable {
         return options.get(METADATA_STATS_DENSE_STORE);
     }
 
-    public String dataFileExternalPath() {
-        return options.get(DATA_FILE_EXTERNAL_PATH);
-    }
-
     public boolean dataFileThinMode() {
         return options.get(DATA_FILE_THIN_MODE);
     }
