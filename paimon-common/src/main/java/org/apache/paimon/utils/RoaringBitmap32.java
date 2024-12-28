@@ -85,8 +85,19 @@ public class RoaringBitmap32 {
         roaringBitmap.serialize(out);
     }
 
+    public byte[] serialize() {
+        roaringBitmap.runOptimize();
+        ByteBuffer buffer = ByteBuffer.allocate(roaringBitmap.serializedSizeInBytes());
+        roaringBitmap.serialize(buffer);
+        return buffer.array();
+    }
+
     public void deserialize(DataInput in) throws IOException {
-        roaringBitmap.deserialize(in);
+        roaringBitmap.deserialize(in, null);
+    }
+
+    public void deserialize(ByteBuffer buffer) throws IOException {
+        roaringBitmap.deserialize(buffer);
     }
 
     @Override
@@ -103,17 +114,6 @@ public class RoaringBitmap32 {
 
     public void clear() {
         roaringBitmap.clear();
-    }
-
-    public byte[] serialize() {
-        roaringBitmap.runOptimize();
-        ByteBuffer buffer = ByteBuffer.allocate(roaringBitmap.serializedSizeInBytes());
-        roaringBitmap.serialize(buffer);
-        return buffer.array();
-    }
-
-    public void deserialize(byte[] rbmBytes) throws IOException {
-        roaringBitmap.deserialize(ByteBuffer.wrap(rbmBytes));
     }
 
     public void flip(final long rangeStart, final long rangeEnd) {
