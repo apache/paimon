@@ -55,6 +55,23 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
       Assertions.assertTrue(schema("name").nullable)
     }
   }
+
+  test("Paimon DDL: set properties with empty key test") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id STRING, name STRING)
+                 |USING PAIMON
+                 |TBLPROPERTIES ('primary-key'='id')
+                 |""".stripMargin)
+
+    spark.sql(s"""
+                 |alter table T
+                 |SET TBLPROPERTIES ('' = 'b')
+                 |""".stripMargin)
+
+    assert(!spark.sql(s"show create table T").head().getString(0).contains("'' = 'b'"))
+    assert(spark.sql(s"show create table T").head().getString(0).contains("'primary-key' = 'id'"))
+  }
+
   test("Paimon DDL: create primary-key table with not null") {
     withTable("T") {
       sql("""

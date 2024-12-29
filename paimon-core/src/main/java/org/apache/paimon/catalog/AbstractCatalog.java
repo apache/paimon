@@ -45,6 +45,7 @@ import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
@@ -370,6 +371,7 @@ public abstract class AbstractCatalog implements Catalog {
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         checkNotSystemTable(identifier, "alterTable");
+        validateEmptyKeyInSchemaChange(changes);
 
         try {
             getTable(identifier);
@@ -545,6 +547,14 @@ public abstract class AbstractCatalog implements Catalog {
                             "The current catalog %s does not support specifying the table path when creating a table.",
                             this.getClass().getSimpleName()));
         }
+    }
+
+    private void validateEmptyKeyInSchemaChange(List<SchemaChange> changes) {
+        changes.removeIf(
+                schemaChange ->
+                        schemaChange instanceof SchemaChange.SetOption
+                                && StringUtils.isEmpty(
+                                        ((SchemaChange.SetOption) schemaChange).key()));
     }
 
     // =============================== Meta in File System =====================================

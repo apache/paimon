@@ -54,6 +54,18 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testAlterOptionsWithEmptyKey() {
+        batchSql("ALTER TABLE T SET ('write-manifest-cache' = '1 mb')");
+        batchSql("ALTER TABLE T SET ('' = '2 mb')");
+        assertThat(
+                        batchSql("SHOW CREATE TABLE T")
+                                .toString()
+                                .contains("'write-manifest-cache' = '1 mb'"))
+                .isTrue();
+        assertThat(batchSql("SHOW CREATE TABLE T").toString().contains("'' = '2 mb'")).isFalse();
+    }
+
+    @Test
     public void testAQEWithWriteManifest() {
         batchSql("ALTER TABLE T SET ('write-manifest-cache' = '1 mb')");
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
