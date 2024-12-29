@@ -219,7 +219,8 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
         }
 
         boolean allowTypeChange =
-                !this.typeMapping.containsMode(TypeMapping.TypeMappingMode.NO_CHANGE);
+                this.typeMapping == null
+                        || !this.typeMapping.containsMode(TypeMapping.TypeMappingMode.NO_CHANGE);
 
         List<SchemaChange> result = new ArrayList<>();
         for (DataField newField : updatedDataFields) {
