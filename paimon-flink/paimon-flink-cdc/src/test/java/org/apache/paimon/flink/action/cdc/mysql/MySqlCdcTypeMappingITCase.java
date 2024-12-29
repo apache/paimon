@@ -765,7 +765,8 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
                         .withMode(COMBINED.configString())
-                        .withTypeMappingModes(CHAR_TO_STRING.configString(),NO_CHANGE.configString())
+                        .withTypeMappingModes(
+                                CHAR_TO_STRING.configString(), NO_CHANGE.configString())
                         .withTableConfig(getBasicTableConfig())
                         .build();
         runActionWithDefaultEnv(action);
