@@ -757,15 +757,15 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
     // -------------------------------------- no-change --------------------------------------
 
     @Test
-    @Timeout(120)
+    @Timeout(60)
     public void testNoChange() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", "char_to_string_test");
+        mySqlConfig.put("database-name", "char_no_change_test");
 
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
                         .withMode(COMBINED.configString())
-                        .withTypeMappingModes(NO_CHANGE.configString())
+                        .withTypeMappingModes(CHAR_TO_STRING.configString(),NO_CHANGE.configString())
                         .withTableConfig(getBasicTableConfig())
                         .build();
         runActionWithDefaultEnv(action);
@@ -773,7 +773,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
         FileStoreTable table = getFileStoreTable("t1");
 
         try (Statement statement = getStatement()) {
-            statement.executeUpdate("USE char_to_string_test");
+            statement.executeUpdate("USE char_no_change_test");
 
             // test schema evolution
             RowType rowType =

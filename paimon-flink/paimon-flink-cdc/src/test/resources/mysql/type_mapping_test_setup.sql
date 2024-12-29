@@ -330,3 +330,18 @@ CREATE TABLE t1 (
 );
 
 INSERT INTO t1 VALUES (1, 1.23);
+
+-- ################################################################################
+--  testNoChange
+-- ################################################################################
+
+CREATE DATABASE char_no_change_test;
+USE char_no_change_test;
+
+CREATE TABLE t1 (
+    pk INT,
+    v1 VARCHAR(10) NOT NULL,
+    PRIMARY KEY (pk)
+);
+
+INSERT INTO t1 VALUES (1, '1');
