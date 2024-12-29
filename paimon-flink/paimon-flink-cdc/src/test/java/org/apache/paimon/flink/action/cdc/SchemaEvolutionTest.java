@@ -210,7 +210,8 @@ public class SchemaEvolutionTest extends TableTestBase {
                                 new UpdatedDataFieldsProcessFunction(
                                         new SchemaManager(table.fileIO(), table.location()),
                                         identifier,
-                                        catalogLoader))
+                                        catalogLoader,
+                                        TypeMapping.defaultMapping()))
                         .name("Schema Evolution");
         schemaChangeProcessFunction.getTransformation().setParallelism(1);
         schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);

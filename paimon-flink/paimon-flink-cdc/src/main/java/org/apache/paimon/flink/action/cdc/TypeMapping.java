@@ -68,6 +68,8 @@ public class TypeMapping implements Serializable {
      *   <li>BIGINT_UNSIGNED_TO_BIGINT: maps MySQL BIGINT UNSIGNED types to Paimon BIGINT. Notice
      *       that there is potential overflow risk, and users should ensure the overflow won't
      *       occur.
+     *   <li>DECIMAL_NO_CHANGE: Ignore DECIMAL type change.
+     *   <li>NO_CHANGE: Ignore any type change
      * </ul>
      */
     public enum TypeMappingMode {
@@ -76,7 +78,9 @@ public class TypeMapping implements Serializable {
         TO_STRING,
         CHAR_TO_STRING,
         LONGTEXT_TO_BYTES,
-        BIGINT_UNSIGNED_TO_BIGINT;
+        BIGINT_UNSIGNED_TO_BIGINT,
+        DECIMAL_NO_CHANGE,
+        NO_CHANGE;
 
         private static final Map<String, TypeMappingMode> TYPE_MAPPING_OPTIONS =
                 Arrays.stream(TypeMappingMode.values())

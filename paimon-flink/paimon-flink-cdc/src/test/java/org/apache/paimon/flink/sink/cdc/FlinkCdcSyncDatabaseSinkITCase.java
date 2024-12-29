@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkCatalogFactory;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -173,6 +174,7 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
                 .withTableOptions(Collections.singletonMap(SINK_PARALLELISM.key(), "2"))
                 .withDatabase(DATABASE_NAME)
                 .withCatalogLoader(catalogLoader)
+                .withTypeMapping(TypeMapping.defaultMapping())
                 .build();
 
         // enable failure when running jobs if needed

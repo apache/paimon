@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -52,6 +53,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     protected final CatalogLoader catalogLoader;
     protected Catalog catalog;
     private boolean caseSensitive;
+    private TypeMapping typeMapping;
 
     private static final List<DataTypeRoot> STRING_TYPES =
             Arrays.asList(DataTypeRoot.CHAR, DataTypeRoot.VARCHAR);
@@ -71,8 +73,10 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     private static final List<DataTypeRoot> TIMESTAMP_TYPES =
             Arrays.asList(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE);
 
-    protected UpdatedDataFieldsProcessFunctionBase(CatalogLoader catalogLoader) {
+    protected UpdatedDataFieldsProcessFunctionBase(
+            CatalogLoader catalogLoader, TypeMapping typeMapping) {
         this.catalogLoader = catalogLoader;
+        this.typeMapping = typeMapping;
     }
 
     /**
@@ -214,6 +218,9 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
             oldFields.put(oldField.name(), oldField);
         }
 
+        boolean allowTypeChange =
+                !this.typeMapping.containsMode(TypeMapping.TypeMappingMode.NO_CHANGE);
+
         List<SchemaChange> result = new ArrayList<>();
         for (DataField newField : updatedDataFields) {
             String newFieldName = StringUtils.toLowerCaseIfNeed(newField.name(), caseSensitive);
@@ -231,7 +238,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                                 SchemaChange.updateColumnComment(
                                         new String[] {newFieldName}, newField.description()));
                     }
-                } else {
+                } else if (allowTypeChange) {
                     // update column type
                     result.add(SchemaChange.updateColumnType(newFieldName, newField.type()));
                     // update column comment

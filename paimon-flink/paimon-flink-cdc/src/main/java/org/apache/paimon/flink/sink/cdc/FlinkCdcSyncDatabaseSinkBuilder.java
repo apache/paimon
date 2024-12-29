@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.sink.FlinkWriteSink;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.options.MemorySize;
@@ -73,6 +74,9 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     //     Paimon tables. 2) in multiplex sink where it is used to
     //     initialize different writers to multiple tables.
     private CatalogLoader catalogLoader;
+
+    private TypeMapping typeMapping;
+
     // database to sync, currently only support single database
     private String database;
     private MultiTablesSinkMode mode;
@@ -116,6 +120,11 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         return this;
     }
 
+    public FlinkCdcSyncDatabaseSinkBuilder<T> withTypeMapping(TypeMapping typeMapping) {
+        this.typeMapping = typeMapping;
+        return this;
+    }
+
     public FlinkCdcSyncDatabaseSinkBuilder<T> withMode(MultiTablesSinkMode mode) {
         this.mode = mode;
         return this;
@@ -153,7 +162,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                         parsed,
                         CdcDynamicTableParsingProcessFunction.DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG)
                 .keyBy(t -> t.f0)
-                .process(new MultiTableUpdatedDataFieldsProcessFunction(catalogLoader))
+                .process(new MultiTableUpdatedDataFieldsProcessFunction(catalogLoader, typeMapping))
                 .name("Schema Evolution");
 
         DataStream<CdcMultiplexRecord> converted =
@@ -201,7 +210,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                                     new UpdatedDataFieldsProcessFunction(
                                             new SchemaManager(table.fileIO(), table.location()),
                                             Identifier.create(database, table.name()),
-                                            catalogLoader))
+                                            catalogLoader,
+                                            typeMapping))
                             .name("Schema Evolution");
             schemaChangeProcessFunction.getTransformation().setParallelism(1);
             schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);

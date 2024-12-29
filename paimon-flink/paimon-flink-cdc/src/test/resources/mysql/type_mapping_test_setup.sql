@@ -314,3 +314,19 @@ CREATE TABLE t1 (
 );
 
 INSERT INTO t1 VALUES (1, 12345, 56789, 123456789);
+
+
+-- ################################################################################
+--  testDecimalNoChange
+-- ################################################################################
+
+CREATE DATABASE decimal_no_change_test;
+USE decimal_no_change_test;
+
+CREATE TABLE t1 (
+    pk INT,
+    v1 DECIMAL(10,2),
+    PRIMARY KEY (pk)
+);
+
+INSERT INTO t1 VALUES (1, 1.23);
