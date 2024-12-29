@@ -371,7 +371,7 @@ public abstract class AbstractCatalog implements Catalog {
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         checkNotSystemTable(identifier, "alterTable");
-        validateEmptyKeyInSchemaChange(changes);
+        changes = filterNonEmptyKeyInSchemaChange(changes);
 
         try {
             getTable(identifier);
@@ -549,12 +549,16 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
-    private void validateEmptyKeyInSchemaChange(List<SchemaChange> changes) {
-        changes.removeIf(
-                schemaChange ->
-                        schemaChange instanceof SchemaChange.SetOption
-                                && StringUtils.isEmpty(
-                                        ((SchemaChange.SetOption) schemaChange).key()));
+    private List<SchemaChange> filterNonEmptyKeyInSchemaChange(List<SchemaChange> changes) {
+        List<SchemaChange> schemaChanges = new ArrayList<>();
+        for (SchemaChange schemaChange : changes) {
+            if (schemaChange instanceof SchemaChange.SetOption
+                    && StringUtils.isEmpty(((SchemaChange.SetOption) schemaChange).key())) {
+                continue;
+            }
+            schemaChanges.add(schemaChange);
+        }
+        return schemaChanges;
     }
 
     // =============================== Meta in File System =====================================
