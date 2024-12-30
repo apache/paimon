@@ -144,6 +144,8 @@ paths:
           schema:
             type: string
       responses:
+        "200":
+          description: Success, no content
         "404":
           description: Resource not found
           content:
@@ -346,6 +348,8 @@ paths:
           schema:
             type: string
       responses:
+        "200":
+          description: Success, no content
         "404":
           description: Resource not found
           content:

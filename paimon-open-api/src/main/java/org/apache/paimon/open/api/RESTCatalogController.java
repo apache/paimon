@@ -385,7 +385,9 @@ public class RESTCatalogController {
             summary = "Create partition",
             tags = {"partition"})
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Success, no content"),
+        @ApiResponse(
+                responseCode = "200",
+                content = {@Content(schema = @Schema(implementation = PartitionResponse.class))}),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
@@ -409,6 +411,7 @@ public class RESTCatalogController {
             summary = "Drop partition",
             tags = {"partition"})
     @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",

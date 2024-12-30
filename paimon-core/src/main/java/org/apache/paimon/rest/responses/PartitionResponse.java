@@ -30,6 +30,7 @@ import java.util.Map;
 /** Partition for rest api. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class PartitionResponse implements RESTResponse {
+
     public static final String FIELD_SPEC = "spec";
     public static final String FIELD_RECORD_COUNT = "recordCount";
     public static final String FIELD_FILE_SIZE_IN_BYTES = "fileSizeInBytes";
