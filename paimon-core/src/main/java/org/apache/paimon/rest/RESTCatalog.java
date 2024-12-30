@@ -31,7 +31,6 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
-import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -65,7 +64,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
-import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
@@ -85,9 +84,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.createCommitUser;
+import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
+import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
@@ -360,6 +359,12 @@ public class RESTCatalog implements Catalog {
     @Override
     public void createPartition(Identifier identifier, Map<String, String> partitionSpec)
             throws TableNotExistException {
+        Table table = getTable(identifier);
+        Options options = Options.fromMap(table.options());
+        if (!options.get(METASTORE_PARTITIONED_TABLE)) {
+            return;
+        }
+
         try {
             CreatePartitionRequest request = new CreatePartitionRequest(identifier, partitionSpec);
             client.post(
@@ -376,27 +381,77 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void dropPartition(Identifier identifier, Map<String, String> partitions)
+    public void dropPartition(Identifier identifier, Map<String, String> partition)
             throws TableNotExistException, PartitionNotExistException {
         checkNotSystemTable(identifier, "dropPartition");
-        dropPartitionMetadata(identifier, partitions);
+
         Table table = getTable(identifier);
-        cleanPartitionsInFileSystem(table, partitions);
+        Options options = Options.fromMap(table.options());
+        if (options.get(METASTORE_PARTITIONED_TABLE)) {
+            try {
+                client.delete(
+                        resourcePaths.partitions(
+                                identifier.getDatabaseName(), identifier.getTableName()),
+                        new DropPartitionRequest(partition),
+                        headers());
+            } catch (NoSuchResourceException ignore) {
+                throw new PartitionNotExistException(identifier, partition);
+            } catch (ForbiddenException e) {
+                throw new TableNoPermissionException(identifier, e);
+            }
+        }
+
+        try (BatchTableCommit commit =
+                table.newBatchWriteBuilder().withOverwrite(partition).newCommit()) {
+            commit.commit(Collections.emptyList());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
     public List<PartitionEntry> listPartitions(Identifier identifier)
             throws TableNotExistException {
-        FileStoreTable table = (FileStoreTable) getTable(identifier);
-        boolean whetherSupportListPartitions =
-                Boolean.parseBoolean(
-                        table.options().get(CoreOptions.METASTORE_PARTITIONED_TABLE.key()));
-        if (whetherSupportListPartitions) {
-            RowType rowType = table.schema().logicalPartitionType();
-            return listPartitionsFromServer(identifier, rowType);
-        } else {
-            return getTable(identifier).newReadBuilder().newScan().listPartitionEntries();
+        Table table = getTable(identifier);
+        Options options = Options.fromMap(table.options());
+        if (!options.get(METASTORE_PARTITIONED_TABLE)) {
+            return table.newReadBuilder().newScan().listPartitionEntries();
         }
+
+        ListPartitionsResponse response;
+        try {
+            response =
+                    client.get(
+                            resourcePaths.partitions(
+                                    identifier.getDatabaseName(), identifier.getTableName()),
+                            ListPartitionsResponse.class,
+                            headers());
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+
+        if (response == null || response.getPartitions() == null) {
+            return Collections.emptyList();
+        }
+
+        RowType partitionType = table.rowType().project(table.partitionKeys());
+        InternalRowSerializer serializer = new InternalRowSerializer(partitionType);
+        String defaultName = options.get(PARTITION_DEFAULT_NAME);
+        List<PartitionEntry> result = new ArrayList<>();
+        for (PartitionResponse partition : response.getPartitions()) {
+            GenericRow row =
+                    convertSpecToInternalRow(partition.getSpec(), partitionType, defaultName);
+            result.add(
+                    new PartitionEntry(
+                            serializer.toBinaryRow(row).copy(),
+                            partition.getRecordCount(),
+                            partition.getFileSizeInBytes(),
+                            partition.getFileCount(),
+                            partition.getLastFileCreationTime()));
+        }
+        return result;
     }
 
     @Override
@@ -444,41 +499,6 @@ public class RESTCatalog implements Catalog {
         return table;
     }
 
-    private List<PartitionEntry> listPartitionsFromServer(Identifier identifier, RowType rowType)
-            throws TableNotExistException {
-        try {
-            ListPartitionsResponse response =
-                    client.get(
-                            resourcePaths.partitions(
-                                    identifier.getDatabaseName(), identifier.getTableName()),
-                            ListPartitionsResponse.class,
-                            headers());
-            if (response != null && response.getPartitions() != null) {
-                return response.getPartitions().stream()
-                        .map(p -> convertToPartitionEntry(p, rowType))
-                        .collect(Collectors.toList());
-            } else {
-                return Collections.emptyList();
-            }
-        } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
-        } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
-        }
-    }
-
-    private void cleanPartitionsInFileSystem(Table table, Map<String, String> partitions) {
-        FileStoreTable fileStoreTable = (FileStoreTable) table;
-        try (FileStoreCommit commit =
-                fileStoreTable
-                        .store()
-                        .newCommit(
-                                createCommitUser(fileStoreTable.coreOptions().toConfiguration()))) {
-            commit.dropPartitions(
-                    Collections.singletonList(partitions), BatchWriteBuilder.COMMIT_IDENTIFIER);
-        }
-    }
-
     private GetTableResponse getTableResponse(Identifier identifier) throws TableNotExistException {
         try {
             return client.get(
@@ -487,23 +507,6 @@ public class RESTCatalog implements Catalog {
                     headers());
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
-        } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
-        }
-    }
-
-    private boolean dropPartitionMetadata(Identifier identifier, Map<String, String> partitions)
-            throws TableNoPermissionException, PartitionNotExistException {
-        try {
-            DropPartitionRequest request = new DropPartitionRequest(partitions);
-            client.delete(
-                    resourcePaths.partitions(
-                            identifier.getDatabaseName(), identifier.getTableName()),
-                    request,
-                    headers());
-            return true;
-        } catch (NoSuchResourceException ignore) {
-            throw new PartitionNotExistException(identifier, partitions);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         }
@@ -538,17 +541,6 @@ public class RESTCatalog implements Catalog {
         }
 
         return refreshExecutor;
-    }
-
-    private PartitionEntry convertToPartitionEntry(PartitionResponse partition, RowType rowType) {
-        InternalRowSerializer serializer = new InternalRowSerializer(rowType);
-        GenericRow row = convertSpecToInternalRow(partition.getSpec(), rowType, null);
-        return new PartitionEntry(
-                serializer.toBinaryRow(row).copy(),
-                partition.getRecordCount(),
-                partition.getFileSizeInBytes(),
-                partition.getFileCount(),
-                partition.getLastFileCreationTime());
     }
 
     private static FileIO getFileIOFromOptions(CatalogContext context) {

@@ -247,11 +247,11 @@ public interface Catalog extends AutoCloseable {
      * Drop the partition of the specify table.
      *
      * @param identifier path of the table to drop partition
-     * @param partitions the partition to be deleted
+     * @param partition the partition to be deleted
      * @throws TableNotExistException if the table does not exist
      * @throws PartitionNotExistException if the partition does not exist
      */
-    void dropPartition(Identifier identifier, Map<String, String> partitions)
+    void dropPartition(Identifier identifier, Map<String, String> partition)
             throws TableNotExistException, PartitionNotExistException;
 
     /**

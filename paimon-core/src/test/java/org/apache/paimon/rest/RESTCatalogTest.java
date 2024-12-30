@@ -34,7 +34,6 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
-import org.apache.paimon.rest.responses.PartitionResponse;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 
@@ -332,10 +331,12 @@ public class RESTCatalogTest {
     @Test
     public void testCreatePartition() throws Exception {
         String databaseName = MockRESTMessage.databaseName();
+        GetTableResponse response = MockRESTMessage.getTableResponse();
+        mockResponse(mapper.writeValueAsString(response), 200);
+
         Map<String, String> partitionSpec = new HashMap<>();
         partitionSpec.put("p1", "v1");
-        PartitionResponse response = MockRESTMessage.partitionResponse();
-        mockResponse(mapper.writeValueAsString(response), 200);
+        mockResponse(mapper.writeValueAsString(MockRESTMessage.partitionResponse()), 200);
         assertDoesNotThrow(
                 () ->
                         restCatalog.createPartition(
@@ -386,11 +387,12 @@ public class RESTCatalogTest {
     @Test
     public void testDropPartitionWhenPartitionNoExist() throws Exception {
         String databaseName = MockRESTMessage.databaseName();
+        GetTableResponse response = MockRESTMessage.getTableResponseEnablePartition();
+        mockResponse(mapper.writeValueAsString(response), 200);
+
         Map<String, String> partitionSpec = new HashMap<>();
-        GetTableResponse response = MockRESTMessage.getTableResponse();
         partitionSpec.put(response.getSchema().primaryKeys().get(0), "1");
         mockResponse(mapper.writeValueAsString(""), 404);
-        mockResponse(mapper.writeValueAsString(response), 200);
         assertThrows(
                 Catalog.PartitionNotExistException.class,
                 () ->
@@ -418,7 +420,6 @@ public class RESTCatalogTest {
         Map<String, String> partitionSpec = new HashMap<>();
         GetTableResponse response = MockRESTMessage.getTableResponse();
         partitionSpec.put(response.getSchema().primaryKeys().get(0), "1");
-        mockResponse(mapper.writeValueAsString(""), 200);
         mockResponse("", 404);
         assertThrows(
                 Catalog.TableNotExistException.class,
@@ -442,7 +443,7 @@ public class RESTCatalogTest {
     @Test
     public void testListPartitionsFromFile() throws Exception {
         String databaseName = MockRESTMessage.databaseName();
-        GetTableResponse response = MockRESTMessage.getTableResponse();
+        GetTableResponse response = MockRESTMessage.getTableResponseEnablePartition();
         mockResponse(mapper.writeValueAsString(response), 200);
         mockResponse(mapper.writeValueAsString(response), 200);
         List<PartitionEntry> partitionEntries =

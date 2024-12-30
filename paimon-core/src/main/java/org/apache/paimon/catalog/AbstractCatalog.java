@@ -166,8 +166,7 @@ public abstract class AbstractCatalog implements Catalog {
         FileStoreTable table = (FileStoreTable) getTable(tableIdentifier);
 
         if (table.partitionKeys().isEmpty() || !table.coreOptions().partitionedTableInMetastore()) {
-            throw new UnsupportedOperationException(
-                    "The table is not partitioned table in metastore.");
+            return;
         }
 
         MetastoreClient.Factory metastoreFactory =
