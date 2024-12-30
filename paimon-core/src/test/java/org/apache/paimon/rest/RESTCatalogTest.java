@@ -94,17 +94,6 @@ public class RESTCatalogTest {
     }
 
     @Test
-    public void testGetConfig() {
-        String key = "a";
-        String value = "b";
-        String mockResponse = String.format("{\"defaults\": {\"%s\": \"%s\"}}", key, value);
-        mockResponse(mockResponse, 200);
-        Map<String, String> header = new HashMap<>();
-        Map<String, String> response = restCatalog.fetchOptionsFromServer(header, new HashMap<>());
-        assertEquals(value, response.get(key));
-    }
-
-    @Test
     public void testListDatabases() throws JsonProcessingException {
         String name = MockRESTMessage.databaseName();
         ListDatabasesResponse response = MockRESTMessage.listDatabasesResponse(name);
