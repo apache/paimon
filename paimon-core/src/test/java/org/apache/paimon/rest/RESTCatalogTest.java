@@ -18,7 +18,6 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
@@ -473,13 +472,8 @@ public class RESTCatalogTest {
 
     @Test
     public void testListPartitionsWhenMetastorePartitionedIsTrue() throws Exception {
-        Options options = mockInitOptions();
-        options = options.set(CoreOptions.METASTORE_PARTITIONED_TABLE, true);
-        mockConfig(warehouseStr);
-        RESTCatalog restCatalog = new RESTCatalog(CatalogContext.create(options));
-        RESTCatalog mockRestCatalog = spy(restCatalog);
         String databaseName = MockRESTMessage.databaseName();
-        GetTableResponse getTableResponse = MockRESTMessage.getTableResponse();
+        GetTableResponse getTableResponse = MockRESTMessage.getTableResponseEnablePartition();
         mockResponse(mapper.writeValueAsString(getTableResponse), 200);
         ListPartitionsResponse response = MockRESTMessage.listPartitionsResponse();
         mockResponse(mapper.writeValueAsString(response), 200);
@@ -494,8 +488,9 @@ public class RESTCatalogTest {
         String databaseName = MockRESTMessage.databaseName();
         GetTableResponse response = MockRESTMessage.getTableResponse();
         mockResponse(mapper.writeValueAsString(response), 200);
+        mockResponse(mapper.writeValueAsString(response), 200);
         mockRestCatalog.listPartitions(Identifier.create(databaseName, "table"));
-        verify(mockRestCatalog, times(1)).getTable(any());
+        verify(mockRestCatalog, times(2)).getTable(any());
         verify(mockRestCatalog, times(0)).listPartitionsFromServer(any(), any());
     }
 

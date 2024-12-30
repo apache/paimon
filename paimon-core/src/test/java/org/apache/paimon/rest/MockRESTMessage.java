@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
@@ -227,20 +228,27 @@ public class MockRESTMessage {
         return schemaChanges;
     }
 
-    public static GetTableResponse getTableResponse() {
-        return new GetTableResponse("/tmp/1", 1, schema());
+    public static GetTableResponse getTableResponseEnablePartition() {
+        Map<String, String> options = new HashMap<>();
+        options.put("option-1", "value-1");
+        options.put(CoreOptions.METASTORE_PARTITIONED_TABLE.key(), "true");
+        return new GetTableResponse("/tmp/2", 1, schema(options));
     }
 
-    private static Schema schema() {
+    public static GetTableResponse getTableResponse() {
+        Map<String, String> options = new HashMap<>();
+        options.put("option-1", "value-1");
+        options.put("option-2", "value-2");
+        return new GetTableResponse("/tmp/1", 1, schema(options));
+    }
+
+    private static Schema schema(Map<String, String> options) {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", new IntType()),
                         new DataField(1, "f1", new IntType()));
         List<String> partitionKeys = Collections.singletonList("f0");
         List<String> primaryKeys = Arrays.asList("f0", "f1");
-        Map<String, String> options = new HashMap<>();
-        options.put("option-1", "value-1");
-        options.put("option-2", "value-2");
         return new Schema(fields, partitionKeys, primaryKeys, options, "comment");
     }
 }

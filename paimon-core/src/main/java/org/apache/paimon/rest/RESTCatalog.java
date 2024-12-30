@@ -402,10 +402,11 @@ public class RESTCatalog implements Catalog {
     @Override
     public List<PartitionEntry> listPartitions(Identifier identifier)
             throws TableNotExistException {
+        FileStoreTable table = (FileStoreTable) getTable(identifier);
         boolean whetherSupportListPartitions =
-                context.options().get(CoreOptions.METASTORE_PARTITIONED_TABLE);
+                Boolean.parseBoolean(
+                        table.options().get(CoreOptions.METASTORE_PARTITIONED_TABLE.key()));
         if (whetherSupportListPartitions) {
-            FileStoreTable table = (FileStoreTable) getTable(identifier);
             RowType rowType = table.schema().logicalPartitionType();
             return listPartitionsFromServer(identifier, rowType);
         } else {
