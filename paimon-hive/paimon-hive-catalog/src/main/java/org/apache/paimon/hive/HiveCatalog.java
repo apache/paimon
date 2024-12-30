@@ -54,6 +54,7 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.apache.flink.table.hive.LegacyHiveClasses;
@@ -143,7 +144,7 @@ public class HiveCatalog extends AbstractCatalog {
     private static final String HIVE_PREFIX = "hive.";
     public static final String HIVE_SITE_FILE = "hive-site.xml";
     private static final String HIVE_EXTERNAL_TABLE_PROP = "EXTERNAL";
-
+    private static final int DEFAULT_TABLE_BATCH_SIZE = 300;
     private final HiveConf hiveConf;
     private final String clientClassName;
     private final Options options;
@@ -442,8 +443,34 @@ public class HiveCatalog extends AbstractCatalog {
     protected List<String> listTablesImpl(String databaseName) {
         try {
             List<String> tableNames = clients.run(client -> client.getAllTables(databaseName));
+            int batchSize = getBatchGetTableSize();
             List<Table> hmsTables =
-                    clients.run(client -> client.getTableObjectsByName(databaseName, tableNames));
+                    Lists.partition(tableNames, batchSize).stream()
+                            .flatMap(
+                                    batchTableNames -> {
+                                        try {
+                                            return clients
+                                                    .run(
+                                                            client ->
+                                                                    client.getTableObjectsByName(
+                                                                            databaseName,
+                                                                            batchTableNames))
+                                                    .stream();
+                                        } catch (TException e) {
+                                            throw new RuntimeException(
+                                                    "Failed to getTableObjectsByName in database "
+                                                            + databaseName,
+                                                    e);
+                                        } catch (InterruptedException e) {
+                                            Thread.currentThread().interrupt();
+                                            throw new RuntimeException(
+                                                    "Interrupted in call to getTableObjectsByName "
+                                                            + databaseName,
+                                                    e);
+                                        }
+                                    })
+                            .collect(Collectors.toList());
+
             List<String> result = new ArrayList<>(hmsTables.size());
             for (Table table : hmsTables) {
                 if (isPaimonTable(table) || (!formatTableDisabled() && isFormatTable(table))) {
@@ -1413,5 +1440,28 @@ public class HiveCatalog extends AbstractCatalog {
 
     public static String possibleHiveConfPath() {
         return System.getenv("HIVE_CONF_DIR");
+    }
+
+    public int getBatchGetTableSize() {
+        try {
+            int size =
+                    Integer.parseInt(
+                            this.hiveConf.get(
+                                    HiveConf.ConfVars.METASTORE_BATCH_RETRIEVE_MAX.varname,
+                                    String.valueOf(
+                                            HiveConf.ConfVars.METASTORE_BATCH_RETRIEVE_MAX
+                                                    .getDefaultValue())));
+            if (size < 1) {
+                return DEFAULT_TABLE_BATCH_SIZE;
+            } else {
+                return size;
+            }
+        } catch (Exception e) {
+            LOG.warn(
+                    "parse batch size failed {}, use default batch size",
+                    this.hiveConf.get(HiveConf.ConfVars.METASTORE_BATCH_RETRIEVE_MAX.varname),
+                    e);
+            return DEFAULT_TABLE_BATCH_SIZE;
+        }
     }
 }
