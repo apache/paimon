@@ -37,11 +37,6 @@ import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.PartitionResponse;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.InternalRowPartitionComputer;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
@@ -424,13 +419,13 @@ public class RESTCatalogTest {
         mockResponse(mapper.writeValueAsString(""), 404);
         mockResponse(mapper.writeValueAsString(response), 200);
         doNothing().when(mockRestCatalog).cleanPartitionsInFileSystem(any(), any());
-        assertDoesNotThrow(
+        assertThrows(
+                Catalog.PartitionNotExistException.class,
                 () ->
                         mockRestCatalog.dropPartition(
                                 Identifier.create(databaseName, "table"), partitionSpec));
         verify(mockRestCatalog, times(1)).dropPartitionMetadata(any(), any());
-        verify(mockRestCatalog, times(1)).getTable(any());
-        verify(mockRestCatalog, times(1)).cleanPartitionsInFileSystem(any(), any());
+        verify(mockRestCatalog, times(0)).cleanPartitionsInFileSystem(any(), any());
     }
 
     @Test
@@ -492,31 +487,6 @@ public class RESTCatalogTest {
         mockRestCatalog.listPartitions(Identifier.create(databaseName, "table"));
         verify(mockRestCatalog, times(2)).getTable(any());
         verify(mockRestCatalog, times(0)).listPartitionsFromServer(any(), any());
-    }
-
-    @Test
-    public void convertToPartitionEntryTest() {
-        Map<String, String> spec = new HashMap<>();
-        spec.put("a", "1");
-        spec.put("b", "2");
-        List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, "a", DataTypes.INT()));
-        fields.add(new DataField(1, "b", DataTypes.STRING()));
-        RowType partitionRowType = new RowType(false, fields);
-        PartitionResponse partition = new PartitionResponse(spec, 1, 1, 1, 1);
-        PartitionEntry partitionEntry =
-                mockRestCatalog.convertToPartitionEntry(partition, partitionRowType);
-        InternalRowPartitionComputer partitionComputer =
-                FileStorePathFactory.getPartitionComputer(partitionRowType, null, false);
-        Map<String, String> partValues =
-                partitionComputer.generatePartValues(partitionEntry.partition());
-        for (Map.Entry<String, String> entry : spec.entrySet()) {
-            assertEquals(entry.getValue(), partValues.get(entry.getKey()));
-        }
-        assertEquals(partitionEntry.recordCount(), partition.getRecordCount());
-        assertEquals(partitionEntry.fileSizeInBytes(), partition.getFileSizeInBytes());
-        assertEquals(partitionEntry.fileCount(), partition.getFileCount());
-        assertEquals(partitionEntry.lastFileCreationTime(), partition.getLastFileCreationTime());
     }
 
     private void mockResponse(String mockResponse, int httpCode) {

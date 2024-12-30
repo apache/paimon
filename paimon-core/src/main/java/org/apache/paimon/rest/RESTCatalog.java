@@ -20,7 +20,6 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogUtils;
@@ -429,16 +428,14 @@ public class RESTCatalog implements Catalog {
         }
     }
 
-    @VisibleForTesting
-    Map<String, String> fetchOptionsFromServer(
+    protected Map<String, String> fetchOptionsFromServer(
             Map<String, String> headers, Map<String, String> clientProperties) {
         ConfigResponse response =
                 client.get(ResourcePaths.V1_CONFIG, ConfigResponse.class, headers);
         return response.merge(clientProperties);
     }
 
-    @VisibleForTesting
-    Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
+    protected Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
         Preconditions.checkArgument(identifier.getSystemTableName() == null);
         GetTableResponse response = getTableResponse(identifier);
         FileStoreTable table =
@@ -461,8 +458,7 @@ public class RESTCatalog implements Catalog {
         return table;
     }
 
-    @VisibleForTesting
-    public List<PartitionEntry> listPartitionsFromServer(Identifier identifier, RowType rowType)
+    protected List<PartitionEntry> listPartitionsFromServer(Identifier identifier, RowType rowType)
             throws TableNotExistException {
         try {
             ListPartitionsResponse response =
@@ -485,20 +481,7 @@ public class RESTCatalog implements Catalog {
         }
     }
 
-    @VisibleForTesting
-    PartitionEntry convertToPartitionEntry(PartitionResponse partition, RowType rowType) {
-        InternalRowSerializer serializer = new InternalRowSerializer(rowType);
-        GenericRow row = convertSpecToInternalRow(partition.getSpec(), rowType, null);
-        return new PartitionEntry(
-                serializer.toBinaryRow(row).copy(),
-                partition.getRecordCount(),
-                partition.getFileSizeInBytes(),
-                partition.getFileCount(),
-                partition.getLastFileCreationTime());
-    }
-
-    @VisibleForTesting
-    void cleanPartitionsInFileSystem(Table table, Map<String, String> partitions) {
+    protected void cleanPartitionsInFileSystem(Table table, Map<String, String> partitions) {
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         try (FileStoreCommit commit =
                 fileStoreTable
@@ -525,7 +508,7 @@ public class RESTCatalog implements Catalog {
     }
 
     protected boolean dropPartitionMetadata(Identifier identifier, Map<String, String> partitions)
-            throws TableNoPermissionException {
+            throws TableNoPermissionException, PartitionNotExistException {
         try {
             DropPartitionRequest request = new DropPartitionRequest(partitions);
             client.delete(
@@ -535,7 +518,7 @@ public class RESTCatalog implements Catalog {
                     headers());
             return true;
         } catch (NoSuchResourceException ignore) {
-            return true;
+            throw new PartitionNotExistException(identifier, partitions);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         }
@@ -570,5 +553,16 @@ public class RESTCatalog implements Catalog {
         }
 
         return refreshExecutor;
+    }
+
+    private PartitionEntry convertToPartitionEntry(PartitionResponse partition, RowType rowType) {
+        InternalRowSerializer serializer = new InternalRowSerializer(rowType);
+        GenericRow row = convertSpecToInternalRow(partition.getSpec(), rowType, null);
+        return new PartitionEntry(
+                serializer.toBinaryRow(row).copy(),
+                partition.getRecordCount(),
+                partition.getFileSizeInBytes(),
+                partition.getFileCount(),
+                partition.getLastFileCreationTime());
     }
 }
