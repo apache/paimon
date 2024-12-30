@@ -33,7 +33,7 @@ import java.util.Map;
 public class CreatePartitionRequest implements RESTRequest {
 
     private static final String FIELD_IDENTIFIER = "identifier";
-    private static final String FIELD_PARTITION_SPEC = "partitionSpec";
+    private static final String FIELD_PARTITION_SPEC = "spec";
 
     @JsonProperty(FIELD_IDENTIFIER)
     private final Identifier identifier;

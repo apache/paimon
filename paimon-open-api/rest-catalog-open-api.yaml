@@ -537,12 +537,12 @@ components:
       properties:
         identifier:
           $ref: '#/components/schemas/Identifier'
-        partitionSpec:
+        spec:
           type: object
     DropPartitionRequest:
       type: object
       properties:
-        partitionSpec:
+        spec:
           type: object
     CreateDatabaseResponse:
       type: object

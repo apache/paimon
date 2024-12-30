@@ -31,7 +31,7 @@ import java.util.Map;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class DropPartitionRequest implements RESTRequest {
 
-    private static final String FIELD_PARTITION_SPEC = "partitionSpec";
+    private static final String FIELD_PARTITION_SPEC = "spec";
 
     @JsonProperty(FIELD_PARTITION_SPEC)
     private final Map<String, String> partitionSpec;
