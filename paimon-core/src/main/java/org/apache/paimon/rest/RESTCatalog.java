@@ -155,20 +155,6 @@ public class RESTCatalog implements Catalog {
         this.fileIO = getFileIOFromOptions(context);
     }
 
-    private static FileIO getFileIOFromOptions(CatalogContext context) {
-        try {
-            Options options = context.options();
-            String warehouseStr = options.get(CatalogOptions.WAREHOUSE);
-            Path warehousePath = new Path(warehouseStr);
-            CatalogContext contextWithNewOptions =
-                    CatalogContext.create(options, context.preferIO(), context.fallbackIO());
-            return FileIO.get(warehousePath, contextWithNewOptions);
-        } catch (IOException e) {
-            LOG.warn("Can not get FileIO from options.");
-            throw new RuntimeException(e);
-        }
-    }
-
     @Override
     public String warehouse() {
         return context.options().get(CatalogOptions.WAREHOUSE);
@@ -435,7 +421,7 @@ public class RESTCatalog implements Catalog {
         return response.merge(clientProperties);
     }
 
-    protected Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
+    private Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
         Preconditions.checkArgument(identifier.getSystemTableName() == null);
         GetTableResponse response = getTableResponse(identifier);
         FileStoreTable table =
@@ -458,7 +444,7 @@ public class RESTCatalog implements Catalog {
         return table;
     }
 
-    protected List<PartitionEntry> listPartitionsFromServer(Identifier identifier, RowType rowType)
+    private List<PartitionEntry> listPartitionsFromServer(Identifier identifier, RowType rowType)
             throws TableNotExistException {
         try {
             ListPartitionsResponse response =
@@ -481,7 +467,7 @@ public class RESTCatalog implements Catalog {
         }
     }
 
-    protected void cleanPartitionsInFileSystem(Table table, Map<String, String> partitions) {
+    private void cleanPartitionsInFileSystem(Table table, Map<String, String> partitions) {
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         try (FileStoreCommit commit =
                 fileStoreTable
@@ -493,8 +479,7 @@ public class RESTCatalog implements Catalog {
         }
     }
 
-    protected GetTableResponse getTableResponse(Identifier identifier)
-            throws TableNotExistException {
+    private GetTableResponse getTableResponse(Identifier identifier) throws TableNotExistException {
         try {
             return client.get(
                     resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),
@@ -507,7 +492,7 @@ public class RESTCatalog implements Catalog {
         }
     }
 
-    protected boolean dropPartitionMetadata(Identifier identifier, Map<String, String> partitions)
+    private boolean dropPartitionMetadata(Identifier identifier, Map<String, String> partitions)
             throws TableNoPermissionException, PartitionNotExistException {
         try {
             DropPartitionRequest request = new DropPartitionRequest(partitions);
@@ -564,5 +549,19 @@ public class RESTCatalog implements Catalog {
                 partition.getFileSizeInBytes(),
                 partition.getFileCount(),
                 partition.getLastFileCreationTime());
+    }
+
+    private static FileIO getFileIOFromOptions(CatalogContext context) {
+        try {
+            Options options = context.options();
+            String warehouseStr = options.get(CatalogOptions.WAREHOUSE);
+            Path warehousePath = new Path(warehouseStr);
+            CatalogContext contextWithNewOptions =
+                    CatalogContext.create(options, context.preferIO(), context.fallbackIO());
+            return FileIO.get(warehousePath, contextWithNewOptions);
+        } catch (IOException e) {
+            LOG.warn("Can not get FileIO from options.");
+            throw new RuntimeException(e);
+        }
     }
 }

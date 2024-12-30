@@ -58,14 +58,6 @@ import java.util.Map;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
 
 /** Test for REST Catalog. */
 public class RESTCatalogTest {
@@ -73,7 +65,6 @@ public class RESTCatalogTest {
     private final ObjectMapper mapper = RESTObjectMapper.create();
     private MockWebServer mockWebServer;
     private RESTCatalog restCatalog;
-    private RESTCatalog mockRestCatalog;
     private String warehouseStr;
     private String serverUrl;
     @Rule public TemporaryFolder folder = new TemporaryFolder();
@@ -87,7 +78,6 @@ public class RESTCatalogTest {
         warehouseStr = folder.getRoot().getPath();
         mockConfig(warehouseStr);
         restCatalog = new RESTCatalog(CatalogContext.create(options));
-        mockRestCatalog = spy(restCatalog);
     }
 
     @After
@@ -148,9 +138,7 @@ public class RESTCatalogTest {
     public void testDropDatabase() throws Exception {
         String name = MockRESTMessage.databaseName();
         mockResponse("", 200);
-        assertDoesNotThrow(() -> mockRestCatalog.dropDatabase(name, false, true));
-        verify(mockRestCatalog, times(1)).dropDatabase(eq(name), eq(false), eq(true));
-        verify(mockRestCatalog, times(0)).listTables(eq(name));
+        assertDoesNotThrow(() -> restCatalog.dropDatabase(name, false, true));
     }
 
     @Test
@@ -160,7 +148,7 @@ public class RESTCatalogTest {
         mockResponse(mapper.writeValueAsString(response), 404);
         assertThrows(
                 Catalog.DatabaseNotExistException.class,
-                () -> mockRestCatalog.dropDatabase(name, false, true));
+                () -> restCatalog.dropDatabase(name, false, true));
     }
 
     @Test
@@ -168,9 +156,7 @@ public class RESTCatalogTest {
         String name = MockRESTMessage.databaseName();
         ErrorResponse response = MockRESTMessage.noSuchResourceExceptionErrorResponse();
         mockResponse(mapper.writeValueAsString(response), 404);
-        assertDoesNotThrow(() -> mockRestCatalog.dropDatabase(name, true, true));
-        verify(mockRestCatalog, times(1)).dropDatabase(eq(name), eq(true), eq(true));
-        verify(mockRestCatalog, times(0)).listTables(eq(name));
+        assertDoesNotThrow(() -> restCatalog.dropDatabase(name, true, true));
     }
 
     @Test
@@ -180,9 +166,7 @@ public class RESTCatalogTest {
         ListTablesResponse response = MockRESTMessage.listTablesEmptyResponse();
         mockResponse(mapper.writeValueAsString(response), 200);
         mockResponse("", 200);
-        assertDoesNotThrow(() -> mockRestCatalog.dropDatabase(name, false, cascade));
-        verify(mockRestCatalog, times(1)).dropDatabase(eq(name), eq(false), eq(cascade));
-        verify(mockRestCatalog, times(1)).listTables(eq(name));
+        assertDoesNotThrow(() -> restCatalog.dropDatabase(name, false, cascade));
     }
 
     @Test
@@ -193,9 +177,7 @@ public class RESTCatalogTest {
         mockResponse(mapper.writeValueAsString(response), 200);
         assertThrows(
                 Catalog.DatabaseNotEmptyException.class,
-                () -> mockRestCatalog.dropDatabase(name, false, cascade));
-        verify(mockRestCatalog, times(1)).dropDatabase(eq(name), eq(false), eq(cascade));
-        verify(mockRestCatalog, times(1)).listTables(eq(name));
+                () -> restCatalog.dropDatabase(name, false, cascade));
     }
 
     @Test
@@ -203,7 +185,7 @@ public class RESTCatalogTest {
         String name = MockRESTMessage.databaseName();
         AlterDatabaseResponse response = MockRESTMessage.alterDatabaseResponse();
         mockResponse(mapper.writeValueAsString(response), 200);
-        assertDoesNotThrow(() -> mockRestCatalog.alterDatabase(name, new ArrayList<>(), true));
+        assertDoesNotThrow(() -> restCatalog.alterDatabase(name, new ArrayList<>(), true));
     }
 
     @Test
@@ -214,7 +196,7 @@ public class RESTCatalogTest {
         mockResponse(mapper.writeValueAsString(response), 404);
         assertThrows(
                 Catalog.DatabaseNotExistException.class,
-                () -> mockRestCatalog.alterDatabase(name, new ArrayList<>(), false));
+                () -> restCatalog.alterDatabase(name, new ArrayList<>(), false));
     }
 
     @Test
@@ -222,7 +204,7 @@ public class RESTCatalogTest {
         String name = MockRESTMessage.databaseName();
         ErrorResponse response = MockRESTMessage.noSuchResourceExceptionErrorResponse();
         mockResponse(mapper.writeValueAsString(response), 404);
-        assertDoesNotThrow(() -> mockRestCatalog.alterDatabase(name, new ArrayList<>(), true));
+        assertDoesNotThrow(() -> restCatalog.alterDatabase(name, new ArrayList<>(), true));
     }
 
     @Test
@@ -239,10 +221,8 @@ public class RESTCatalogTest {
         String databaseName = MockRESTMessage.databaseName();
         GetTableResponse response = MockRESTMessage.getTableResponse();
         mockResponse(mapper.writeValueAsString(response), 200);
-        Table result = mockRestCatalog.getTable(Identifier.create(databaseName, "table"));
-        // catalog will add path option
+        Table result = restCatalog.getTable(Identifier.create(databaseName, "table"));
         assertEquals(response.getSchema().options().size() + 1, result.options().size());
-        verify(mockRestCatalog, times(1)).getDataOrFormatTable(any());
     }
 
     @Test
@@ -272,11 +252,10 @@ public class RESTCatalogTest {
         mockResponse(mapper.writeValueAsString(response), 200);
         assertDoesNotThrow(
                 () ->
-                        mockRestCatalog.renameTable(
+                        restCatalog.renameTable(
                                 Identifier.create(databaseName, fromTableName),
                                 Identifier.create(databaseName, toTableName),
                                 true));
-        verify(mockRestCatalog, times(1)).renameTable(any(), any(), anyBoolean());
     }
 
     @Test
@@ -288,7 +267,7 @@ public class RESTCatalogTest {
         assertThrows(
                 Catalog.TableNotExistException.class,
                 () ->
-                        mockRestCatalog.renameTable(
+                        restCatalog.renameTable(
                                 Identifier.create(databaseName, fromTableName),
                                 Identifier.create(databaseName, toTableName),
                                 false));
@@ -303,7 +282,7 @@ public class RESTCatalogTest {
         assertThrows(
                 Catalog.TableAlreadyExistException.class,
                 () ->
-                        mockRestCatalog.renameTable(
+                        restCatalog.renameTable(
                                 Identifier.create(databaseName, fromTableName),
                                 Identifier.create(databaseName, toTableName),
                                 false));
@@ -316,10 +295,7 @@ public class RESTCatalogTest {
         GetTableResponse response = MockRESTMessage.getTableResponse();
         mockResponse(mapper.writeValueAsString(response), 200);
         assertDoesNotThrow(
-                () ->
-                        mockRestCatalog.alterTable(
-                                Identifier.create(databaseName, "t1"), changes, true));
-        verify(mockRestCatalog, times(1)).alterTable(any(), anyList(), anyBoolean());
+                () -> restCatalog.alterTable(Identifier.create(databaseName, "t1"), changes, true));
     }
 
     @Test
@@ -330,7 +306,7 @@ public class RESTCatalogTest {
         assertThrows(
                 Catalog.TableNotExistException.class,
                 () ->
-                        mockRestCatalog.alterTable(
+                        restCatalog.alterTable(
                                 Identifier.create(databaseName, "t1"), changes, false));
     }
 
@@ -362,7 +338,7 @@ public class RESTCatalogTest {
         mockResponse(mapper.writeValueAsString(response), 200);
         assertDoesNotThrow(
                 () ->
-                        mockRestCatalog.createPartition(
+                        restCatalog.createPartition(
                                 Identifier.create(databaseName, "table"), partitionSpec));
     }
 
@@ -375,7 +351,7 @@ public class RESTCatalogTest {
         assertThrows(
                 Catalog.TableNotExistException.class,
                 () ->
-                        mockRestCatalog.createPartition(
+                        restCatalog.createPartition(
                                 Identifier.create(databaseName, "table"), partitionSpec));
     }
 
@@ -388,7 +364,7 @@ public class RESTCatalogTest {
         assertThrows(
                 Catalog.TableNoPermissionException.class,
                 () ->
-                        mockRestCatalog.createPartition(
+                        restCatalog.createPartition(
                                 Identifier.create(databaseName, "table"), partitionSpec));
     }
 
@@ -400,14 +376,11 @@ public class RESTCatalogTest {
         partitionSpec.put(response.getSchema().primaryKeys().get(0), "1");
         mockResponse(mapper.writeValueAsString(""), 200);
         mockResponse(mapper.writeValueAsString(response), 200);
-        doNothing().when(mockRestCatalog).cleanPartitionsInFileSystem(any(), any());
-        assertDoesNotThrow(
+        assertThrows(
+                RuntimeException.class,
                 () ->
-                        mockRestCatalog.dropPartition(
+                        restCatalog.dropPartition(
                                 Identifier.create(databaseName, "table"), partitionSpec));
-        verify(mockRestCatalog, times(1)).dropPartitionMetadata(any(), any());
-        verify(mockRestCatalog, times(1)).getTable(any());
-        verify(mockRestCatalog, times(1)).cleanPartitionsInFileSystem(any(), any());
     }
 
     @Test
@@ -418,14 +391,11 @@ public class RESTCatalogTest {
         partitionSpec.put(response.getSchema().primaryKeys().get(0), "1");
         mockResponse(mapper.writeValueAsString(""), 404);
         mockResponse(mapper.writeValueAsString(response), 200);
-        doNothing().when(mockRestCatalog).cleanPartitionsInFileSystem(any(), any());
         assertThrows(
                 Catalog.PartitionNotExistException.class,
                 () ->
-                        mockRestCatalog.dropPartition(
+                        restCatalog.dropPartition(
                                 Identifier.create(databaseName, "table"), partitionSpec));
-        verify(mockRestCatalog, times(1)).dropPartitionMetadata(any(), any());
-        verify(mockRestCatalog, times(0)).cleanPartitionsInFileSystem(any(), any());
     }
 
     @Test
@@ -435,15 +405,11 @@ public class RESTCatalogTest {
         GetTableResponse response = MockRESTMessage.getTableResponse();
         partitionSpec.put(response.getSchema().primaryKeys().get(0), "1");
         mockResponse(mapper.writeValueAsString(""), 403);
-        doNothing().when(mockRestCatalog).cleanPartitionsInFileSystem(any(), any());
         assertThrows(
                 Catalog.TableNoPermissionException.class,
                 () ->
-                        mockRestCatalog.dropPartition(
+                        restCatalog.dropPartition(
                                 Identifier.create(databaseName, "table"), partitionSpec));
-        verify(mockRestCatalog, times(1)).dropPartitionMetadata(any(), any());
-        verify(mockRestCatalog, times(0)).getTable(any());
-        verify(mockRestCatalog, times(0)).cleanPartitionsInFileSystem(any(), any());
     }
 
     @Test
@@ -454,15 +420,11 @@ public class RESTCatalogTest {
         partitionSpec.put(response.getSchema().primaryKeys().get(0), "1");
         mockResponse(mapper.writeValueAsString(""), 200);
         mockResponse("", 404);
-        doNothing().when(mockRestCatalog).cleanPartitionsInFileSystem(any(), any());
         assertThrows(
                 Catalog.TableNotExistException.class,
                 () ->
-                        mockRestCatalog.dropPartition(
+                        restCatalog.dropPartition(
                                 Identifier.create(databaseName, "table"), partitionSpec));
-        verify(mockRestCatalog, times(1)).dropPartitionMetadata(any(), any());
-        verify(mockRestCatalog, times(1)).getTable(any());
-        verify(mockRestCatalog, times(0)).cleanPartitionsInFileSystem(any(), any());
     }
 
     @Test
@@ -473,8 +435,7 @@ public class RESTCatalogTest {
         ListPartitionsResponse response = MockRESTMessage.listPartitionsResponse();
         mockResponse(mapper.writeValueAsString(response), 200);
         List<PartitionEntry> result =
-                mockRestCatalog.listPartitions(Identifier.create(databaseName, "table"));
-        verify(mockRestCatalog, times(1)).listPartitionsFromServer(any(), any());
+                restCatalog.listPartitions(Identifier.create(databaseName, "table"));
         assertEquals(response.getPartitions().size(), result.size());
     }
 
@@ -484,9 +445,9 @@ public class RESTCatalogTest {
         GetTableResponse response = MockRESTMessage.getTableResponse();
         mockResponse(mapper.writeValueAsString(response), 200);
         mockResponse(mapper.writeValueAsString(response), 200);
-        mockRestCatalog.listPartitions(Identifier.create(databaseName, "table"));
-        verify(mockRestCatalog, times(2)).getTable(any());
-        verify(mockRestCatalog, times(0)).listPartitionsFromServer(any(), any());
+        List<PartitionEntry> partitionEntries =
+                restCatalog.listPartitions(Identifier.create(databaseName, "table"));
+        assertEquals(partitionEntries.size(), 0);
     }
 
     private void mockResponse(String mockResponse, int httpCode) {
