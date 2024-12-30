@@ -59,6 +59,7 @@ import static org.apache.paimon.hive.HiveCatalog.PAIMON_TABLE_IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalog.TABLE_TYPE_PROP;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /** Tests for {@link HiveCatalog}. */
@@ -352,6 +353,58 @@ public class HiveCatalogTest extends CatalogTestBase {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    @Test
+    public void testListTables() throws Exception {
+        String databaseName = "testListTables";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        for (int i = 0; i < 500; i++) {
+            catalog.createTable(
+                    Identifier.create(databaseName, "table" + i),
+                    Schema.newBuilder().column("col", DataTypes.INT()).build(),
+                    true);
+        }
+
+        // use default 300
+        List<String> defaultBatchTables = catalog.listTables(databaseName);
+
+        // use custom 400
+        HiveConf hiveConf = new HiveConf();
+        hiveConf.set(HiveConf.ConfVars.METASTORE_BATCH_RETRIEVE_MAX.varname, "400");
+        String metastoreClientClass = "org.apache.hadoop.hive.metastore.HiveMetaStoreClient";
+        List<String> customBatchTables;
+        try (HiveCatalog customCatalog =
+                new HiveCatalog(fileIO, hiveConf, metastoreClientClass, warehouse)) {
+            customBatchTables = customCatalog.listTables(databaseName);
+        } catch (Exception e) {
+            throw e;
+        }
+        assertEquals(defaultBatchTables.size(), customBatchTables.size());
+        defaultBatchTables.sort(String::compareTo);
+        customBatchTables.sort(String::compareTo);
+        for (int i = 0; i < defaultBatchTables.size(); i++) {
+            assertEquals(defaultBatchTables.get(i), customBatchTables.get(i));
+        }
+
+        // use invalid batch size
+        HiveConf invalidHiveConf = new HiveConf();
+        invalidHiveConf.set(HiveConf.ConfVars.METASTORE_BATCH_RETRIEVE_MAX.varname, "dummy");
+        List<String> invalidBatchSizeTables;
+        try (HiveCatalog invalidBatchSizeCatalog =
+                new HiveCatalog(fileIO, invalidHiveConf, metastoreClientClass, warehouse)) {
+            invalidBatchSizeTables = invalidBatchSizeCatalog.listTables(databaseName);
+        } catch (Exception e) {
+            throw e;
+        }
+        assertEquals(defaultBatchTables.size(), invalidBatchSizeTables.size());
+        invalidBatchSizeTables.sort(String::compareTo);
+        for (int i = 0; i < defaultBatchTables.size(); i++) {
+            assertEquals(defaultBatchTables.get(i), invalidBatchSizeTables.get(i));
+        }
+
+        catalog.dropDatabase(databaseName, true, true);
     }
 
     @Override
