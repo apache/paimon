@@ -398,6 +398,8 @@ public class RESTCatalog implements Catalog {
         Table table = getTable(identifier);
         if (table != null) {
             cleanPartitionsInFileSystem(table, partitions);
+        } else {
+            throw new TableNotExistException(identifier);
         }
     }
 

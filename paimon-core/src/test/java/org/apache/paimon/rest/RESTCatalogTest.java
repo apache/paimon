@@ -402,7 +402,7 @@ public class RESTCatalogTest {
         Map<String, String> partitionSpec = new HashMap<>();
         GetTableResponse response = MockRESTMessage.getTableResponse();
         partitionSpec.put(response.getSchema().primaryKeys().get(0), "1");
-        mockResponse(mapper.writeValueAsString(new SuccessResponse()), 200);
+        mockResponse(mapper.writeValueAsString(""), 200);
         mockResponse(mapper.writeValueAsString(response), 200);
         doNothing().when(mockRestCatalog).cleanPartitionsInFileSystem(any(), any());
         assertDoesNotThrow(
@@ -420,7 +420,7 @@ public class RESTCatalogTest {
         Map<String, String> partitionSpec = new HashMap<>();
         GetTableResponse response = MockRESTMessage.getTableResponse();
         partitionSpec.put(response.getSchema().primaryKeys().get(0), "1");
-        mockResponse(mapper.writeValueAsString(new SuccessResponse()), 404);
+        mockResponse(mapper.writeValueAsString(""), 404);
         mockResponse(mapper.writeValueAsString(response), 200);
         doNothing().when(mockRestCatalog).cleanPartitionsInFileSystem(any(), any());
         assertDoesNotThrow(
@@ -438,7 +438,7 @@ public class RESTCatalogTest {
         Map<String, String> partitionSpec = new HashMap<>();
         GetTableResponse response = MockRESTMessage.getTableResponse();
         partitionSpec.put(response.getSchema().primaryKeys().get(0), "1");
-        mockResponse(mapper.writeValueAsString(new SuccessResponse()), 403);
+        mockResponse(mapper.writeValueAsString(""), 403);
         doNothing().when(mockRestCatalog).cleanPartitionsInFileSystem(any(), any());
         assertThrows(
                 Catalog.TableNoPermissionException.class,

@@ -76,5 +76,5 @@ public class RESTCatalogOptions {
             ConfigOptions.key("metastore-partitioned")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription("REST Catalog whether support list partitions.");
+                    .withDescription("REST Catalog Server whether support list partitions.");
 }
