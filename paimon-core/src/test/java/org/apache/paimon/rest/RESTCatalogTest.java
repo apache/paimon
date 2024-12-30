@@ -477,11 +477,13 @@ public class RESTCatalogTest {
         RESTCatalog restCatalog = new RESTCatalog(CatalogContext.create(options));
         RESTCatalog mockRestCatalog = spy(restCatalog);
         String databaseName = MockRESTMessage.databaseName();
+        GetTableResponse getTableResponse = MockRESTMessage.getTableResponse();
+        mockResponse(mapper.writeValueAsString(getTableResponse), 200);
         ListPartitionsResponse response = MockRESTMessage.listPartitionsResponse();
         mockResponse(mapper.writeValueAsString(response), 200);
         List<PartitionEntry> result =
                 mockRestCatalog.listPartitions(Identifier.create(databaseName, "table"));
-        verify(mockRestCatalog, times(1)).listPartitionsFromServer(any());
+        verify(mockRestCatalog, times(1)).listPartitionsFromServer(any(), any());
         assertEquals(response.getPartitions().size(), result.size());
     }
 
@@ -492,7 +494,7 @@ public class RESTCatalogTest {
         mockResponse(mapper.writeValueAsString(response), 200);
         mockRestCatalog.listPartitions(Identifier.create(databaseName, "table"));
         verify(mockRestCatalog, times(1)).getTable(any());
-        verify(mockRestCatalog, times(0)).listPartitionsFromServer(any());
+        verify(mockRestCatalog, times(0)).listPartitionsFromServer(any(), any());
     }
 
     @Test
@@ -505,8 +507,9 @@ public class RESTCatalogTest {
         fields.add(new DataField(1, "b", DataTypes.STRING()));
         RowType partitionRowType = new RowType(false, fields);
         ListPartitionsResponse.Partition partition =
-                new ListPartitionsResponse.Partition(spec, partitionRowType, 1, 1, 1, 1);
-        PartitionEntry partitionEntry = mockRestCatalog.convertToPartitionEntry(partition);
+                new ListPartitionsResponse.Partition(spec, 1, 1, 1, 1);
+        PartitionEntry partitionEntry =
+                mockRestCatalog.convertToPartitionEntry(partition, partitionRowType);
         InternalRowPartitionComputer partitionComputer =
                 FileStorePathFactory.getPartitionComputer(partitionRowType, null, false);
         Map<String, String> partValues =

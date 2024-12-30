@@ -67,6 +67,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
@@ -408,7 +409,9 @@ public class RESTCatalog implements Catalog {
             throws TableNotExistException {
         boolean whetherSupportListPartitions = context.options().get(METASTORE_PARTITIONED);
         if (whetherSupportListPartitions) {
-            return listPartitionsFromServer(identifier);
+            FileStoreTable table = (FileStoreTable) getTable(identifier);
+            RowType rowType = table.schema().logicalPartitionType();
+            return listPartitionsFromServer(identifier, rowType);
         } else {
             return getTable(identifier).newReadBuilder().newScan().listPartitionEntries();
         }
@@ -462,7 +465,7 @@ public class RESTCatalog implements Catalog {
     }
 
     @VisibleForTesting
-    public List<PartitionEntry> listPartitionsFromServer(Identifier identifier)
+    public List<PartitionEntry> listPartitionsFromServer(Identifier identifier, RowType rowType)
             throws TableNotExistException {
         try {
             ListPartitionsResponse response =
@@ -473,7 +476,7 @@ public class RESTCatalog implements Catalog {
                             headers());
             if (response != null && response.getPartitions() != null) {
                 return response.getPartitions().stream()
-                        .map(this::convertToPartitionEntry)
+                        .map(p -> convertToPartitionEntry(p, rowType))
                         .collect(Collectors.toList());
             } else {
                 return Collections.emptyList();
@@ -486,10 +489,10 @@ public class RESTCatalog implements Catalog {
     }
 
     @VisibleForTesting
-    PartitionEntry convertToPartitionEntry(ListPartitionsResponse.Partition partition) {
-        InternalRowSerializer serializer = new InternalRowSerializer(partition.getPartitionType());
-        GenericRow row =
-                convertSpecToInternalRow(partition.getSpec(), partition.getPartitionType(), null);
+    PartitionEntry convertToPartitionEntry(
+            ListPartitionsResponse.Partition partition, RowType rowType) {
+        InternalRowSerializer serializer = new InternalRowSerializer(rowType);
+        GenericRow row = convertSpecToInternalRow(partition.getSpec(), rowType, null);
         return new PartitionEntry(
                 serializer.toBinaryRow(row).copy(),
                 partition.getRecordCount(),

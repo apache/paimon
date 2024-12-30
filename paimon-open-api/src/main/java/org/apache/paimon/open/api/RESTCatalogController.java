@@ -36,9 +36,6 @@ import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.SuccessResponse;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -56,9 +53,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /** RESTCatalog management APIs. */
@@ -379,14 +374,9 @@ public class RESTCatalogController {
             @PathVariable String database,
             @PathVariable String table) {
         Map<String, String> spec = new HashMap<>();
-        spec.put("a", "1");
-        spec.put("b", "2");
-        List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, "a", DataTypes.INT()));
-        fields.add(new DataField(1, "b", DataTypes.STRING()));
-        RowType partitionType = new RowType(false, fields);
+        spec.put("f1", "1");
         ListPartitionsResponse.Partition partition =
-                new ListPartitionsResponse.Partition(spec, partitionType, 1, 2, 3, 4);
+                new ListPartitionsResponse.Partition(spec, 1, 2, 3, 4);
         return new ListPartitionsResponse(ImmutableList.of(partition));
     }
 

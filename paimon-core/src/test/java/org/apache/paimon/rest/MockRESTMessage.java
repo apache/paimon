@@ -146,14 +146,9 @@ public class MockRESTMessage {
 
     public static ListPartitionsResponse listPartitionsResponse() {
         Map<String, String> spec = new HashMap<>();
-        spec.put("a", "1");
-        spec.put("b", "2");
-        List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, "a", DataTypes.INT()));
-        fields.add(new DataField(1, "b", DataTypes.STRING()));
-        RowType partitionType = new RowType(false, fields);
+        spec.put("f0", "1");
         ListPartitionsResponse.Partition partition =
-                new ListPartitionsResponse.Partition(spec, partitionType, 1, 1, 1, 1);
+                new ListPartitionsResponse.Partition(spec, 1, 1, 1, 1);
         return new ListPartitionsResponse(ImmutableList.of(partition));
     }
 

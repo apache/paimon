@@ -886,8 +886,6 @@ components:
       properties:
         spec:
           type: object
-        partitionType:
-          $ref: '#/components/schemas/RowType'
         recordCount:
           type: integer
           format: int64

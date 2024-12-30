@@ -19,7 +19,6 @@
 package org.apache.paimon.rest.responses;
 
 import org.apache.paimon.rest.RESTResponse;
-import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
@@ -53,7 +52,6 @@ public class ListPartitionsResponse implements RESTResponse {
     public static class Partition implements RESTResponse {
 
         private static final String FIELD_SPEC = "spec";
-        public static final String FIELD_PARTITION_TYPE = "partitionType";
         public static final String FIELD_RECORD_COUNT = "recordCount";
         public static final String FIELD_FILE_SIZE_IN_BYTES = "fileSizeInBytes";
         public static final String FIELD_FILE_COUNT = "fileCount";
@@ -61,9 +59,6 @@ public class ListPartitionsResponse implements RESTResponse {
 
         @JsonProperty(FIELD_SPEC)
         private final Map<String, String> spec;
-
-        @JsonProperty(FIELD_PARTITION_TYPE)
-        private final RowType partitionType;
 
         @JsonProperty(FIELD_RECORD_COUNT)
         private final long recordCount;
@@ -80,13 +75,11 @@ public class ListPartitionsResponse implements RESTResponse {
         @JsonCreator
         public Partition(
                 @JsonProperty(FIELD_SPEC) Map<String, String> spec,
-                @JsonProperty(FIELD_PARTITION_TYPE) RowType partitionType,
                 @JsonProperty(FIELD_RECORD_COUNT) long recordCount,
                 @JsonProperty(FIELD_FILE_SIZE_IN_BYTES) long fileSizeInBytes,
                 @JsonProperty(FIELD_FILE_COUNT) long fileCount,
                 @JsonProperty(FIELD_LAST_FILE_CREATION_TIME) long lastFileCreationTime) {
             this.spec = spec;
-            this.partitionType = partitionType;
             this.recordCount = recordCount;
             this.fileSizeInBytes = fileSizeInBytes;
             this.fileCount = fileCount;
@@ -96,11 +89,6 @@ public class ListPartitionsResponse implements RESTResponse {
         @JsonGetter(FIELD_SPEC)
         public Map<String, String> getSpec() {
             return spec;
-        }
-
-        @JsonGetter(FIELD_PARTITION_TYPE)
-        public RowType getPartitionType() {
-            return partitionType;
         }
 
         @JsonGetter(FIELD_RECORD_COUNT)
