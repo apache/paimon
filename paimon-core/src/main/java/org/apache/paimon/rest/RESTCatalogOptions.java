@@ -71,10 +71,4 @@ public class RESTCatalogOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog auth token provider path.");
-
-    public static final ConfigOption<Boolean> METASTORE_PARTITIONED =
-            ConfigOptions.key("metastore-partitioned")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription("REST Catalog Server whether support list partitions.");
 }

@@ -26,7 +26,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgn
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
-import java.util.Map;
 
 /** Response for listing partitions. */
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -35,80 +34,16 @@ public class ListPartitionsResponse implements RESTResponse {
     public static final String FIELD_PARTITIONS = "partitions";
 
     @JsonProperty(FIELD_PARTITIONS)
-    private final List<Partition> partitions;
+    private final List<PartitionResponse> partitions;
 
     @JsonCreator
-    public ListPartitionsResponse(@JsonProperty(FIELD_PARTITIONS) List<Partition> partitions) {
+    public ListPartitionsResponse(
+            @JsonProperty(FIELD_PARTITIONS) List<PartitionResponse> partitions) {
         this.partitions = partitions;
     }
 
     @JsonGetter(FIELD_PARTITIONS)
-    public List<Partition> getPartitions() {
+    public List<PartitionResponse> getPartitions() {
         return partitions;
-    }
-
-    /** Partition for rest api. */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class Partition implements RESTResponse {
-
-        private static final String FIELD_SPEC = "spec";
-        public static final String FIELD_RECORD_COUNT = "recordCount";
-        public static final String FIELD_FILE_SIZE_IN_BYTES = "fileSizeInBytes";
-        public static final String FIELD_FILE_COUNT = "fileCount";
-        public static final String FIELD_LAST_FILE_CREATION_TIME = "lastFileCreationTime";
-
-        @JsonProperty(FIELD_SPEC)
-        private final Map<String, String> spec;
-
-        @JsonProperty(FIELD_RECORD_COUNT)
-        private final long recordCount;
-
-        @JsonProperty(FIELD_FILE_SIZE_IN_BYTES)
-        private final long fileSizeInBytes;
-
-        @JsonProperty(FIELD_FILE_COUNT)
-        private final long fileCount;
-
-        @JsonProperty(FIELD_LAST_FILE_CREATION_TIME)
-        private final long lastFileCreationTime;
-
-        @JsonCreator
-        public Partition(
-                @JsonProperty(FIELD_SPEC) Map<String, String> spec,
-                @JsonProperty(FIELD_RECORD_COUNT) long recordCount,
-                @JsonProperty(FIELD_FILE_SIZE_IN_BYTES) long fileSizeInBytes,
-                @JsonProperty(FIELD_FILE_COUNT) long fileCount,
-                @JsonProperty(FIELD_LAST_FILE_CREATION_TIME) long lastFileCreationTime) {
-            this.spec = spec;
-            this.recordCount = recordCount;
-            this.fileSizeInBytes = fileSizeInBytes;
-            this.fileCount = fileCount;
-            this.lastFileCreationTime = lastFileCreationTime;
-        }
-
-        @JsonGetter(FIELD_SPEC)
-        public Map<String, String> getSpec() {
-            return spec;
-        }
-
-        @JsonGetter(FIELD_RECORD_COUNT)
-        public long getRecordCount() {
-            return recordCount;
-        }
-
-        @JsonGetter(FIELD_FILE_SIZE_IN_BYTES)
-        public long getFileSizeInBytes() {
-            return fileSizeInBytes;
-        }
-
-        @JsonGetter(FIELD_FILE_COUNT)
-        public long getFileCount() {
-            return fileCount;
-        }
-
-        @JsonGetter(FIELD_LAST_FILE_CREATION_TIME)
-        public long getLastFileCreationTime() {
-            return lastFileCreationTime;
-        }
     }
 }

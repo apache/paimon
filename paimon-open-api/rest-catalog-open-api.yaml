@@ -471,7 +471,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuccessResponse'
+                $ref: '#/components/schemas/PartitionResponse'
         "404":
           description: Resource not found
           content:
@@ -508,11 +508,7 @@ paths:
               $ref: '#/components/schemas/DropPartitionRequest'
       responses:
         "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SuccessResponse'
+          description: Success, no content
         "404":
           description: Resource not found
           content:
@@ -880,8 +876,8 @@ components:
         partitions:
           type: array
           items:
-            $ref: '#/components/schemas/Partition'
-    Partition:
+            $ref: '#/components/schemas/PartitionResponse'
+    PartitionResponse:
       type: object
       properties:
         spec:

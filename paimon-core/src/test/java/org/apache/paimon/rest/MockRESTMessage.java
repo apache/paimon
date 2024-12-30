@@ -34,6 +34,7 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.PartitionResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.types.DataField;
@@ -147,8 +148,7 @@ public class MockRESTMessage {
     public static ListPartitionsResponse listPartitionsResponse() {
         Map<String, String> spec = new HashMap<>();
         spec.put("f0", "1");
-        ListPartitionsResponse.Partition partition =
-                new ListPartitionsResponse.Partition(spec, 1, 1, 1, 1);
+        PartitionResponse partition = new PartitionResponse(spec, 1, 1, 1, 1);
         return new ListPartitionsResponse(ImmutableList.of(partition));
     }
 

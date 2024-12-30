@@ -57,7 +57,7 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
-import org.apache.paimon.rest.responses.SuccessResponse;
+import org.apache.paimon.rest.responses.PartitionResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
@@ -93,7 +93,6 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
-import static org.apache.paimon.rest.RESTCatalogOptions.METASTORE_PARTITIONED;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternalRow;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
@@ -382,7 +381,7 @@ public class RESTCatalog implements Catalog {
                     resourcePaths.partitions(
                             identifier.getDatabaseName(), identifier.getTableName()),
                     request,
-                    SuccessResponse.class,
+                    PartitionResponse.class,
                     headers());
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
@@ -397,17 +396,14 @@ public class RESTCatalog implements Catalog {
         checkNotSystemTable(identifier, "dropPartition");
         dropPartitionMetadata(identifier, partitions);
         Table table = getTable(identifier);
-        if (table != null) {
-            cleanPartitionsInFileSystem(table, partitions);
-        } else {
-            throw new TableNotExistException(identifier);
-        }
+        cleanPartitionsInFileSystem(table, partitions);
     }
 
     @Override
     public List<PartitionEntry> listPartitions(Identifier identifier)
             throws TableNotExistException {
-        boolean whetherSupportListPartitions = context.options().get(METASTORE_PARTITIONED);
+        boolean whetherSupportListPartitions =
+                context.options().get(CoreOptions.METASTORE_PARTITIONED_TABLE);
         if (whetherSupportListPartitions) {
             FileStoreTable table = (FileStoreTable) getTable(identifier);
             RowType rowType = table.schema().logicalPartitionType();
@@ -489,8 +485,7 @@ public class RESTCatalog implements Catalog {
     }
 
     @VisibleForTesting
-    PartitionEntry convertToPartitionEntry(
-            ListPartitionsResponse.Partition partition, RowType rowType) {
+    PartitionEntry convertToPartitionEntry(PartitionResponse partition, RowType rowType) {
         InternalRowSerializer serializer = new InternalRowSerializer(rowType);
         GenericRow row = convertSpecToInternalRow(partition.getSpec(), rowType, null);
         return new PartitionEntry(
@@ -528,18 +523,18 @@ public class RESTCatalog implements Catalog {
         }
     }
 
-    protected SuccessResponse dropPartitionMetadata(
-            Identifier identifier, Map<String, String> partitions)
+    protected boolean dropPartitionMetadata(Identifier identifier, Map<String, String> partitions)
             throws TableNoPermissionException {
         try {
             DropPartitionRequest request = new DropPartitionRequest(partitions);
-            return client.delete(
+            client.delete(
                     resourcePaths.partitions(
                             identifier.getDatabaseName(), identifier.getTableName()),
                     request,
                     headers());
+            return true;
         } catch (NoSuchResourceException ignore) {
-            return new SuccessResponse();
+            return true;
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         }

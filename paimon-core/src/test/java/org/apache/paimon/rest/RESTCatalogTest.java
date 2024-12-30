@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
@@ -34,6 +35,7 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.PartitionResponse;
 import org.apache.paimon.rest.responses.SuccessResponse;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
@@ -472,7 +474,7 @@ public class RESTCatalogTest {
     @Test
     public void testListPartitionsWhenMetastorePartitionedIsTrue() throws Exception {
         Options options = mockInitOptions();
-        options = options.set(RESTCatalogOptions.METASTORE_PARTITIONED, true);
+        options = options.set(CoreOptions.METASTORE_PARTITIONED_TABLE, true);
         mockConfig(warehouseStr);
         RESTCatalog restCatalog = new RESTCatalog(CatalogContext.create(options));
         RESTCatalog mockRestCatalog = spy(restCatalog);
@@ -506,8 +508,7 @@ public class RESTCatalogTest {
         fields.add(new DataField(0, "a", DataTypes.INT()));
         fields.add(new DataField(1, "b", DataTypes.STRING()));
         RowType partitionRowType = new RowType(false, fields);
-        ListPartitionsResponse.Partition partition =
-                new ListPartitionsResponse.Partition(spec, 1, 1, 1, 1);
+        PartitionResponse partition = new PartitionResponse(spec, 1, 1, 1, 1);
         PartitionEntry partitionEntry =
                 mockRestCatalog.convertToPartitionEntry(partition, partitionRowType);
         InternalRowPartitionComputer partitionComputer =
