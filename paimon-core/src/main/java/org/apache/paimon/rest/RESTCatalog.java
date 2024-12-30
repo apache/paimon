@@ -26,9 +26,12 @@ import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -41,7 +44,9 @@ import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreatePartitionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.DropPartitionRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -49,7 +54,9 @@ import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.PartitionResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
@@ -58,10 +65,11 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.paimon.shade.guava30.com.google.common.annotations.VisibleForTesting;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -71,15 +79,20 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
+import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternalRow;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
@@ -132,27 +145,14 @@ public class RESTCatalog implements Catalog {
         Map<String, String> initHeaders =
                 RESTUtil.merge(
                         configHeaders(catalogOptions.toMap()), this.catalogAuth.getHeaders());
-        Options options = new Options(fetchOptionsFromServer(initHeaders, initHeaders));
+        Options options =
+                new Options(fetchOptionsFromServer(initHeaders, catalogContext.options().toMap()));
         this.context =
                 CatalogContext.create(
                         options, catalogContext.preferIO(), catalogContext.fallbackIO());
         this.resourcePaths =
                 ResourcePaths.forCatalogProperties(options.get(RESTCatalogInternalOptions.PREFIX));
         this.fileIO = getFileIOFromOptions(context);
-    }
-
-    private static FileIO getFileIOFromOptions(CatalogContext context) {
-        try {
-            Options options = context.options();
-            String warehouseStr = options.get(CatalogOptions.WAREHOUSE);
-            Path warehousePath = new Path(warehouseStr);
-            CatalogContext contextWithNewOptions =
-                    CatalogContext.create(options, context.preferIO(), context.fallbackIO());
-            return FileIO.get(warehousePath, contextWithNewOptions);
-        } catch (IOException e) {
-            LOG.warn("Can not get FileIO from options.");
-            throw new RuntimeException(e);
-        }
     }
 
     @Override
@@ -360,17 +360,43 @@ public class RESTCatalog implements Catalog {
     @Override
     public void createPartition(Identifier identifier, Map<String, String> partitionSpec)
             throws TableNotExistException {
-        throw new UnsupportedOperationException();
+        try {
+            CreatePartitionRequest request = new CreatePartitionRequest(identifier, partitionSpec);
+            client.post(
+                    resourcePaths.partitions(
+                            identifier.getDatabaseName(), identifier.getTableName()),
+                    request,
+                    PartitionResponse.class,
+                    headers());
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
     }
 
     @Override
     public void dropPartition(Identifier identifier, Map<String, String> partitions)
-            throws TableNotExistException, PartitionNotExistException {}
+            throws TableNotExistException, PartitionNotExistException {
+        checkNotSystemTable(identifier, "dropPartition");
+        dropPartitionMetadata(identifier, partitions);
+        Table table = getTable(identifier);
+        cleanPartitionsInFileSystem(table, partitions);
+    }
 
     @Override
     public List<PartitionEntry> listPartitions(Identifier identifier)
             throws TableNotExistException {
-        throw new UnsupportedOperationException();
+        FileStoreTable table = (FileStoreTable) getTable(identifier);
+        boolean whetherSupportListPartitions =
+                Boolean.parseBoolean(
+                        table.options().get(CoreOptions.METASTORE_PARTITIONED_TABLE.key()));
+        if (whetherSupportListPartitions) {
+            RowType rowType = table.schema().logicalPartitionType();
+            return listPartitionsFromServer(identifier, rowType);
+        } else {
+            return getTable(identifier).newReadBuilder().newScan().listPartitionEntries();
+        }
     }
 
     @Override
@@ -388,16 +414,14 @@ public class RESTCatalog implements Catalog {
         }
     }
 
-    @VisibleForTesting
-    Map<String, String> fetchOptionsFromServer(
+    protected Map<String, String> fetchOptionsFromServer(
             Map<String, String> headers, Map<String, String> clientProperties) {
         ConfigResponse response =
                 client.get(ResourcePaths.V1_CONFIG, ConfigResponse.class, headers);
         return response.merge(clientProperties);
     }
 
-    @VisibleForTesting
-    Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
+    private Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
         Preconditions.checkArgument(identifier.getSystemTableName() == null);
         GetTableResponse response = getTableResponse(identifier);
         FileStoreTable table =
@@ -420,8 +444,42 @@ public class RESTCatalog implements Catalog {
         return table;
     }
 
-    protected GetTableResponse getTableResponse(Identifier identifier)
+    private List<PartitionEntry> listPartitionsFromServer(Identifier identifier, RowType rowType)
             throws TableNotExistException {
+        try {
+            ListPartitionsResponse response =
+                    client.get(
+                            resourcePaths.partitions(
+                                    identifier.getDatabaseName(), identifier.getTableName()),
+                            ListPartitionsResponse.class,
+                            headers());
+            if (response != null && response.getPartitions() != null) {
+                return response.getPartitions().stream()
+                        .map(p -> convertToPartitionEntry(p, rowType))
+                        .collect(Collectors.toList());
+            } else {
+                return Collections.emptyList();
+            }
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    private void cleanPartitionsInFileSystem(Table table, Map<String, String> partitions) {
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        try (FileStoreCommit commit =
+                fileStoreTable
+                        .store()
+                        .newCommit(
+                                createCommitUser(fileStoreTable.coreOptions().toConfiguration()))) {
+            commit.dropPartitions(
+                    Collections.singletonList(partitions), BatchWriteBuilder.COMMIT_IDENTIFIER);
+        }
+    }
+
+    private GetTableResponse getTableResponse(Identifier identifier) throws TableNotExistException {
         try {
             return client.get(
                     resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),
@@ -429,6 +487,23 @@ public class RESTCatalog implements Catalog {
                     headers());
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    private boolean dropPartitionMetadata(Identifier identifier, Map<String, String> partitions)
+            throws TableNoPermissionException, PartitionNotExistException {
+        try {
+            DropPartitionRequest request = new DropPartitionRequest(partitions);
+            client.delete(
+                    resourcePaths.partitions(
+                            identifier.getDatabaseName(), identifier.getTableName()),
+                    request,
+                    headers());
+            return true;
+        } catch (NoSuchResourceException ignore) {
+            throw new PartitionNotExistException(identifier, partitions);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         }
@@ -463,5 +538,30 @@ public class RESTCatalog implements Catalog {
         }
 
         return refreshExecutor;
+    }
+
+    private PartitionEntry convertToPartitionEntry(PartitionResponse partition, RowType rowType) {
+        InternalRowSerializer serializer = new InternalRowSerializer(rowType);
+        GenericRow row = convertSpecToInternalRow(partition.getSpec(), rowType, null);
+        return new PartitionEntry(
+                serializer.toBinaryRow(row).copy(),
+                partition.getRecordCount(),
+                partition.getFileSizeInBytes(),
+                partition.getFileCount(),
+                partition.getLastFileCreationTime());
+    }
+
+    private static FileIO getFileIOFromOptions(CatalogContext context) {
+        try {
+            Options options = context.options();
+            String warehouseStr = options.get(CatalogOptions.WAREHOUSE);
+            Path warehousePath = new Path(warehouseStr);
+            CatalogContext contextWithNewOptions =
+                    CatalogContext.create(options, context.preferIO(), context.fallbackIO());
+            return FileIO.get(warehousePath, contextWithNewOptions);
+        } catch (IOException e) {
+            LOG.warn("Can not get FileIO from options.");
+            throw new RuntimeException(e);
+        }
     }
 }

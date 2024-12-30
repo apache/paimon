@@ -30,4 +30,6 @@ public interface RESTClient extends Closeable {
             String path, RESTRequest body, Class<T> responseType, Map<String, String> headers);
 
     <T extends RESTResponse> T delete(String path, Map<String, String> headers);
+
+    <T extends RESTResponse> T delete(String path, RESTRequest body, Map<String, String> headers);
 }

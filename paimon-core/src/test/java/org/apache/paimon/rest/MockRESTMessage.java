@@ -18,11 +18,14 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreatePartitionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.DropPartitionRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
@@ -30,7 +33,9 @@ import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.PartitionResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.types.DataField;
@@ -39,6 +44,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import java.util.ArrayList;
@@ -131,6 +137,26 @@ public class MockRESTMessage {
         return new AlterTableRequest(getChanges());
     }
 
+    public static CreatePartitionRequest createPartitionRequest(String tableName) {
+        Identifier identifier = Identifier.create(databaseName(), tableName);
+        return new CreatePartitionRequest(identifier, Collections.singletonMap("pt", "1"));
+    }
+
+    public static DropPartitionRequest dropPartitionRequest() {
+        return new DropPartitionRequest(Collections.singletonMap("pt", "1"));
+    }
+
+    public static PartitionResponse partitionResponse() {
+        Map<String, String> spec = new HashMap<>();
+        spec.put("f0", "1");
+        return new PartitionResponse(spec, 1, 1, 1, 1);
+    }
+
+    public static ListPartitionsResponse listPartitionsResponse() {
+        PartitionResponse partition = partitionResponse();
+        return new ListPartitionsResponse(ImmutableList.of(partition));
+    }
+
     public static List<SchemaChange> getChanges() {
         // add option
         SchemaChange addOption = SchemaChange.setOption("snapshot.time-retained", "2h");
@@ -202,20 +228,27 @@ public class MockRESTMessage {
         return schemaChanges;
     }
 
-    public static GetTableResponse getTableResponse() {
-        return new GetTableResponse("/tmp/1", 1, schema());
+    public static GetTableResponse getTableResponseEnablePartition() {
+        Map<String, String> options = new HashMap<>();
+        options.put("option-1", "value-1");
+        options.put(CoreOptions.METASTORE_PARTITIONED_TABLE.key(), "true");
+        return new GetTableResponse("/tmp/2", 1, schema(options));
     }
 
-    private static Schema schema() {
+    public static GetTableResponse getTableResponse() {
+        Map<String, String> options = new HashMap<>();
+        options.put("option-1", "value-1");
+        options.put("option-2", "value-2");
+        return new GetTableResponse("/tmp/1", 1, schema(options));
+    }
+
+    private static Schema schema(Map<String, String> options) {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", new IntType()),
                         new DataField(1, "f1", new IntType()));
         List<String> partitionKeys = Collections.singletonList("f0");
         List<String> primaryKeys = Arrays.asList("f0", "f1");
-        Map<String, String> options = new HashMap<>();
-        options.put("option-1", "value-1");
-        options.put("option-2", "value-2");
         return new Schema(fields, partitionKeys, primaryKeys, options, "comment");
     }
 }

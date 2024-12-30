@@ -28,6 +28,21 @@ servers:
   - url: http://localhost:8080
     description: Server URL in Development environment
 paths:
+  /v1/config:
+    get:
+      tags:
+        - config
+      summary: Get Config
+      operationId: getConfig
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigResponse'
+        "500":
+          description: Internal Server Error
   /v1/{prefix}/databases:
     get:
       tags:
@@ -74,6 +89,102 @@ paths:
                 $ref: '#/components/schemas/CreateDatabaseResponse'
         "409":
           description: Resource has exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}:
+    get:
+      tags:
+        - database
+      summary: Get Database
+      operationId: getDatabases
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetDatabaseResponse'
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+    delete:
+      tags:
+        - database
+      summary: Drop Database
+      operationId: dropDatabase
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success, no content
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/properties:
+    post:
+      tags:
+        - database
+      summary: Alter Database
+      operationId: alterDatabase
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlterDatabaseRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlterDatabaseResponse'
+        "404":
+          description: Resource not found
           content:
             application/json:
               schema:
@@ -237,6 +348,8 @@ paths:
           schema:
             type: string
       responses:
+        "200":
+          description: Success, no content
         "404":
           description: Resource not found
           content:
@@ -293,12 +406,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/properties:
-    post:
+  /v1/{prefix}/databases/{database}/tables/{table}/partitions:
+    get:
       tags:
-        - database
-      summary: Alter Database
-      operationId: alterDatabase
+        - partition
+      summary: List partitions
+      operationId: listPartitions
       parameters:
         - name: prefix
           in: path
@@ -310,18 +423,18 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AlterDatabaseRequest'
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AlterDatabaseResponse'
+                $ref: '#/components/schemas/ListPartitionsResponse'
         "404":
           description: Resource not found
           content:
@@ -330,12 +443,11 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}:
-    get:
+    post:
       tags:
-        - database
-      summary: Get Database
-      operationId: getDatabases
+        - partition
+      summary: Create partition
+      operationId: createPartition
       parameters:
         - name: prefix
           in: path
@@ -347,13 +459,23 @@ paths:
           required: true
           schema:
             type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePartitionRequest'
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GetDatabaseResponse'
+                $ref: '#/components/schemas/PartitionResponse'
         "404":
           description: Resource not found
           content:
@@ -364,9 +486,9 @@ paths:
           description: Internal Server Error
     delete:
       tags:
-        - database
-      summary: Drop Database
-      operationId: dropDatabase
+        - partition
+      summary: Drop partition
+      operationId: dropPartition
       parameters:
         - name: prefix
           in: path
@@ -378,28 +500,25 @@ paths:
           required: true
           schema:
             type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DropPartitionRequest'
       responses:
+        "200":
+          description: Success, no content
         "404":
           description: Resource not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal Server Error
-  /v1/config:
-    get:
-      tags:
-        - config
-      summary: Get Config
-      operationId: getConfig
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ConfigResponse'
         "500":
           description: Internal Server Error
 components:
@@ -413,6 +532,18 @@ components:
           type: object
           additionalProperties:
             type: string
+    CreatePartitionRequest:
+      type: object
+      properties:
+        identifier:
+          $ref: '#/components/schemas/Identifier'
+        spec:
+          type: object
+    DropPartitionRequest:
+      type: object
+      properties:
+        spec:
+          type: object
     CreateDatabaseResponse:
       type: object
       properties:
@@ -468,39 +599,38 @@ components:
         type:
           type: string
           pattern: ^ARRAY.*
+          example: ARRAY
         element:
-          type:
-            $ref: '#/components/schemas/DataType'
+          $ref: '#/components/schemas/DataType'
     MultisetType:
       type: object
       properties:
         type:
           type: string
           pattern: ^MULTISET.*
+          example: MULTISET
         element:
-          type:
-            $ref: '#/components/schemas/DataType'
+          $ref: '#/components/schemas/DataType'
     MapType:
       type: object
       properties:
         type:
           type: string
           pattern: ^MAP.*
+          example: MAP
         key:
-          type:
-            $ref: '#/components/schemas/DataType'
+          $ref: '#/components/schemas/DataType'
         value:
-          type:
-            $ref: '#/components/schemas/DataType'
+          $ref: '#/components/schemas/DataType'
     RowType:
       type: object
       properties:
         type:
           type: string
           pattern: ^ROW.*
+          example: ROW
         fields:
-          type:
-            $ref: '#/components/schemas/DataField'
+          $ref: '#/components/schemas/DataField'
     Identifier:
       type: object
       properties:
@@ -744,7 +874,30 @@ components:
           type: object
           additionalProperties:
             type: string
-
+    ListPartitionsResponse:
+      type: object
+      properties:
+        partitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PartitionResponse'
+    PartitionResponse:
+      type: object
+      properties:
+        spec:
+          type: object
+        recordCount:
+          type: integer
+          format: int64
+        fileSizeInBytes:
+          type: integer
+          format: int64
+        fileCount:
+          type: integer
+          format: int64
+        lastFileCreationTime:
+          type: integer
+          format: int64
   securitySchemes:
     BearerAuth:
       type: http

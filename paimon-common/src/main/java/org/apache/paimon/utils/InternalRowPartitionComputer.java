@@ -111,7 +111,7 @@ public class InternalRowPartitionComputer {
         List<String> fieldNames = partType.getFieldNames();
         for (Map.Entry<String, String> entry : spec.entrySet()) {
             Object value =
-                    defaultPartValue.equals(entry.getValue())
+                    defaultPartValue != null && defaultPartValue.equals(entry.getValue())
                             ? null
                             : castFromString(
                                     entry.getValue(), partType.getField(entry.getKey()).type());
