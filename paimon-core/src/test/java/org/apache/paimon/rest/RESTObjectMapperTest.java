@@ -34,7 +34,7 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
-import org.apache.paimon.rest.responses.SuccessResponse;
+import org.apache.paimon.rest.responses.PartitionResponse;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
@@ -230,10 +230,12 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void successResponseParseTest() throws Exception {
-        SuccessResponse response = new SuccessResponse();
+    public void partitionResponseParseTest() throws Exception {
+        PartitionResponse response = MockRESTMessage.partitionResponse();
         assertDoesNotThrow(() -> mapper.writeValueAsString(response));
         assertDoesNotThrow(
-                () -> mapper.readValue(mapper.writeValueAsString(response), SuccessResponse.class));
+                () ->
+                        mapper.readValue(
+                                mapper.writeValueAsString(response), PartitionResponse.class));
     }
 }

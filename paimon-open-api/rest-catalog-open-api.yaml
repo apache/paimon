@@ -894,8 +894,6 @@ components:
         lastFileCreationTime:
           type: integer
           format: int64
-    SuccessResponse:
-      type: object
   securitySchemes:
     BearerAuth:
       type: http

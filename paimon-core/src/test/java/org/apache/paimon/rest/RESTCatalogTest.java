@@ -36,7 +36,6 @@ import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.PartitionResponse;
-import org.apache.paimon.rest.responses.SuccessResponse;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
@@ -365,7 +364,8 @@ public class RESTCatalogTest {
         String databaseName = MockRESTMessage.databaseName();
         Map<String, String> partitionSpec = new HashMap<>();
         partitionSpec.put("p1", "v1");
-        mockResponse(mapper.writeValueAsString(new SuccessResponse()), 200);
+        PartitionResponse response = MockRESTMessage.partitionResponse();
+        mockResponse(mapper.writeValueAsString(response), 200);
         assertDoesNotThrow(
                 () ->
                         mockRestCatalog.createPartition(
@@ -458,7 +458,7 @@ public class RESTCatalogTest {
         Map<String, String> partitionSpec = new HashMap<>();
         GetTableResponse response = MockRESTMessage.getTableResponse();
         partitionSpec.put(response.getSchema().primaryKeys().get(0), "1");
-        mockResponse(mapper.writeValueAsString(new SuccessResponse()), 200);
+        mockResponse(mapper.writeValueAsString(""), 200);
         mockResponse("", 404);
         doNothing().when(mockRestCatalog).cleanPartitionsInFileSystem(any(), any());
         assertThrows(

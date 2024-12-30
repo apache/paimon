@@ -145,10 +145,14 @@ public class MockRESTMessage {
         return new DropPartitionRequest(Collections.singletonMap("pt", "1"));
     }
 
-    public static ListPartitionsResponse listPartitionsResponse() {
+    public static PartitionResponse partitionResponse() {
         Map<String, String> spec = new HashMap<>();
         spec.put("f0", "1");
-        PartitionResponse partition = new PartitionResponse(spec, 1, 1, 1, 1);
+        return new PartitionResponse(spec, 1, 1, 1, 1);
+    }
+
+    public static ListPartitionsResponse listPartitionsResponse() {
+        PartitionResponse partition = partitionResponse();
         return new ListPartitionsResponse(ImmutableList.of(partition));
     }
 
