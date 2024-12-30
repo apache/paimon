@@ -760,7 +760,8 @@ public class ParquetFileReader implements Closeable {
                             options.getRecordFilter(),
                             getColumnIndexStore(blockIndex),
                             paths.keySet(),
-                            blocks.get(blockIndex).getRowCount());
+                            blocks.get(blockIndex).getRowCount(),
+                            fileIndexResult);
             blockRowRanges.set(blockIndex, rowRanges);
         }
         return rowRanges;
