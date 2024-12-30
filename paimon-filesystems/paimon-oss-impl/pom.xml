@@ -24,7 +24,7 @@
     <parent>
         <artifactId>paimon-filesystems</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>1.0-SNAPSHOT</version>
+        <version>1.0.0</version>
     </parent>
 
     <artifactId>paimon-oss-impl</artifactId>
