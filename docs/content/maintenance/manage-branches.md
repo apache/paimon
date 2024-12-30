@@ -199,7 +199,7 @@ Run the following command:
 
 {{< /tabs >}}
 
-### Batch Reading from Fallback Branch
+## Batch Reading from Fallback Branch
 
 You can set the table option `scan.fallback-branch`
 so that when a batch job reads from the current branch, if a partition does not exist,
