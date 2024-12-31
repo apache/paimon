@@ -20,7 +20,7 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
@@ -255,12 +255,12 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException, PartitionNotExistException;
 
     /**
-     * Get PartitionEntry of all partitions of the table.
+     * Get Partition of all partitions of the table.
      *
      * @param identifier path of the table to list partitions
      * @throws TableNotExistException if the table does not exist
      */
-    List<PartitionEntry> listPartitions(Identifier identifier) throws TableNotExistException;
+    List<Partition> listPartitions(Identifier identifier) throws TableNotExistException;
 
     /**
      * Modify an existing table from a {@link SchemaChange}.

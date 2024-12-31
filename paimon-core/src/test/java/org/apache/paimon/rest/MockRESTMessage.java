@@ -20,6 +20,7 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
@@ -149,11 +150,11 @@ public class MockRESTMessage {
     public static PartitionResponse partitionResponse() {
         Map<String, String> spec = new HashMap<>();
         spec.put("f0", "1");
-        return new PartitionResponse(spec, 1, 1, 1, 1);
+        return new PartitionResponse(new Partition(spec, 1, 1, 1, 1));
     }
 
     public static ListPartitionsResponse listPartitionsResponse() {
-        PartitionResponse partition = partitionResponse();
+        Partition partition = partitionResponse().getPartition();
         return new ListPartitionsResponse(ImmutableList.of(partition));
     }
 

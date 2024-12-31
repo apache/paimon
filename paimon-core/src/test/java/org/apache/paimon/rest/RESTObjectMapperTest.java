@@ -225,8 +225,8 @@ public class RESTObjectMapperTest {
         ListPartitionsResponse parseData =
                 mapper.readValue(responseStr, ListPartitionsResponse.class);
         assertEquals(
-                response.getPartitions().get(0).getFileCount(),
-                parseData.getPartitions().get(0).getFileCount());
+                response.getPartitions().get(0).fileCount(),
+                parseData.getPartitions().get(0).fileCount());
     }
 
     @Test

@@ -22,9 +22,9 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
@@ -424,7 +424,7 @@ public class RESTCatalogTest {
         mockResponse(mapper.writeValueAsString(getTableResponse), 200);
         ListPartitionsResponse response = MockRESTMessage.listPartitionsResponse();
         mockResponse(mapper.writeValueAsString(response), 200);
-        List<PartitionEntry> result =
+        List<Partition> result =
                 restCatalog.listPartitions(Identifier.create(databaseName, "table"));
         assertEquals(response.getPartitions().size(), result.size());
     }
@@ -435,7 +435,7 @@ public class RESTCatalogTest {
         GetTableResponse response = MockRESTMessage.getTableResponseEnablePartition();
         mockResponse(mapper.writeValueAsString(response), 200);
         mockResponse(mapper.writeValueAsString(response), 200);
-        List<PartitionEntry> partitionEntries =
+        List<Partition> partitionEntries =
                 restCatalog.listPartitions(Identifier.create(databaseName, "table"));
         assertEquals(partitionEntries.size(), 0);
     }
