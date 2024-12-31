@@ -119,7 +119,7 @@ public class PartitionStatisticsReporterTest {
                     public void alterPartition(Partition partition) {
                         partitionParams.put(
                                 PartitionPathUtils.generatePartitionPath(
-                                        partition.getSpec(),
+                                        partition.spec(),
                                         table.rowType().project(table.partitionKeys())),
                                 partition);
                     }

@@ -109,16 +109,16 @@ public class HiveMetastoreClient implements MetastoreClient {
 
     @Override
     public void alterPartition(org.apache.paimon.partition.Partition partition) throws Exception {
-        Map<String, String> spec = partition.getSpec();
+        Map<String, String> spec = partition.spec();
         List<String> partitionValues =
                 partitionKeys.stream().map(spec::get).collect(Collectors.toList());
 
         Map<String, String> statistic = new HashMap<>();
-        statistic.put(NUM_FILES_PROP, String.valueOf(partition.getFileCount()));
-        statistic.put(TOTAL_SIZE_PROP, String.valueOf(partition.getFileSizeInBytes()));
-        statistic.put(NUM_ROWS_PROP, String.valueOf(partition.getRecordCount()));
+        statistic.put(NUM_FILES_PROP, String.valueOf(partition.fileCount()));
+        statistic.put(TOTAL_SIZE_PROP, String.valueOf(partition.fileSizeInBytes()));
+        statistic.put(NUM_ROWS_PROP, String.valueOf(partition.recordCount()));
 
-        String modifyTimeSeconds = String.valueOf(partition.getLastFileCreationTime() / 1000);
+        String modifyTimeSeconds = String.valueOf(partition.lastFileCreationTime() / 1000);
         statistic.put(LAST_UPDATE_TIME_PROP, modifyTimeSeconds);
 
         // just for being compatible with hive metastore
@@ -133,7 +133,7 @@ public class HiveMetastoreClient implements MetastoreClient {
                                             identifier.getObjectName(),
                                             partitionValues));
             hivePartition.setValues(partitionValues);
-            hivePartition.setLastAccessTime((int) (partition.getLastFileCreationTime() / 1000));
+            hivePartition.setLastAccessTime((int) (partition.lastFileCreationTime() / 1000));
             hivePartition.getParameters().putAll(statistic);
             clients.execute(
                     client ->

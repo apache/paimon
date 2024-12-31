@@ -72,27 +72,27 @@ public class Partition implements Serializable {
     }
 
     @JsonGetter(FIELD_SPEC)
-    public Map<String, String> getSpec() {
+    public Map<String, String> spec() {
         return spec;
     }
 
     @JsonGetter(FIELD_RECORD_COUNT)
-    public long getRecordCount() {
+    public long recordCount() {
         return recordCount;
     }
 
     @JsonGetter(FIELD_FILE_SIZE_IN_BYTES)
-    public long getFileSizeInBytes() {
+    public long fileSizeInBytes() {
         return fileSizeInBytes;
     }
 
     @JsonGetter(FIELD_FILE_COUNT)
-    public long getFileCount() {
+    public long fileCount() {
         return fileCount;
     }
 
     @JsonGetter(FIELD_LAST_FILE_CREATION_TIME)
-    public long getLastFileCreationTime() {
+    public long lastFileCreationTime() {
         return lastFileCreationTime;
     }
 
