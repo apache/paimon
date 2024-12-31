@@ -19,7 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.table.Partition;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.table.Table;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;

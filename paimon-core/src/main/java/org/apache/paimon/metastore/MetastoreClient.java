@@ -18,7 +18,7 @@
 
 package org.apache.paimon.metastore;
 
-import org.apache.paimon.table.Partition;
+import org.apache.paimon.partition.Partition;
 
 import java.io.Serializable;
 import java.util.LinkedHashMap;

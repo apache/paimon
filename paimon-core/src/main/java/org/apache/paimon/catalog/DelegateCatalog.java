@@ -19,9 +19,9 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.table.Partition;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.view.View;
 

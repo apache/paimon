@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table;
+package org.apache.paimon.partition;
 
 import org.apache.paimon.annotation.Public;
 

@@ -108,7 +108,7 @@ public class HiveMetastoreClient implements MetastoreClient {
     }
 
     @Override
-    public void alterPartition(org.apache.paimon.table.Partition partition) throws Exception {
+    public void alterPartition(org.apache.paimon.partition.Partition partition) throws Exception {
         Map<String, String> spec = partition.getSpec();
         List<String> partitionValues =
                 partitionKeys.stream().map(spec::get).collect(Collectors.toList());

@@ -18,8 +18,8 @@
 
 package org.apache.paimon.rest.responses;
 
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.RESTResponse;
-import org.apache.paimon.table.Partition;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;

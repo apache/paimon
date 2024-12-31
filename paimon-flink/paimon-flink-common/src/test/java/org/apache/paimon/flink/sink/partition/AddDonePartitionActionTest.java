@@ -19,8 +19,8 @@
 package org.apache.paimon.flink.sink.partition;
 
 import org.apache.paimon.metastore.MetastoreClient;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.actions.AddDonePartitionAction;
-import org.apache.paimon.table.Partition;
 
 import org.junit.jupiter.api.Test;
 
