@@ -80,8 +80,8 @@ public class CreateTagFromWatermarkActionITTest extends ActionITCaseBase {
                         Long.toString(watermark2 - 1))
                 .run();
         assertThat(table.tagManager().tagExists("tag2")).isTrue();
-        assertThat(table.tagManager().taggedSnapshot("tag2").watermark()).isEqualTo(watermark2);
-        assertThat(table.tagManager().taggedSnapshot("tag2").timeMillis()).isEqualTo(commitTime2);
+        assertThat(table.tagManager().getOrThrow("tag2").watermark()).isEqualTo(watermark2);
+        assertThat(table.tagManager().getOrThrow("tag2").timeMillis()).isEqualTo(commitTime2);
 
         createAction(
                         CreateTagFromWatermarkAction.class,
@@ -98,8 +98,8 @@ public class CreateTagFromWatermarkActionITTest extends ActionITCaseBase {
                         Long.toString(watermark2 + 1))
                 .run();
         assertThat(table.tagManager().tagExists("tag3")).isTrue();
-        assertThat(table.tagManager().taggedSnapshot("tag3").watermark()).isEqualTo(watermark3);
-        assertThat(table.tagManager().taggedSnapshot("tag3").timeMillis()).isEqualTo(commitTime3);
+        assertThat(table.tagManager().getOrThrow("tag3").watermark()).isEqualTo(watermark3);
+        assertThat(table.tagManager().getOrThrow("tag3").timeMillis()).isEqualTo(commitTime3);
     }
 
     @Test
@@ -131,7 +131,7 @@ public class CreateTagFromWatermarkActionITTest extends ActionITCaseBase {
 
         assertThat(table.snapshotManager().snapshotExists(1)).isFalse();
 
-        Snapshot tagSnapshot1 = table.tagManager().taggedSnapshot("tag1");
+        Snapshot tagSnapshot1 = table.tagManager().getOrThrow("tag1");
 
         long tagsCommitTime = tagSnapshot1.timeMillis();
         long tagsWatermark = tagSnapshot1.watermark();
@@ -158,9 +158,8 @@ public class CreateTagFromWatermarkActionITTest extends ActionITCaseBase {
                         Long.toString(tagsWatermark - 1))
                 .run();
         assertThat(table.tagManager().tagExists("tag2")).isTrue();
-        assertThat(table.tagManager().taggedSnapshot("tag2").watermark()).isEqualTo(tagsWatermark);
-        assertThat(table.tagManager().taggedSnapshot("tag2").timeMillis())
-                .isEqualTo(tagsCommitTime);
+        assertThat(table.tagManager().getOrThrow("tag2").watermark()).isEqualTo(tagsWatermark);
+        assertThat(table.tagManager().getOrThrow("tag2").timeMillis()).isEqualTo(tagsCommitTime);
 
         createAction(
                         CreateTagFromWatermarkAction.class,
@@ -177,7 +176,7 @@ public class CreateTagFromWatermarkActionITTest extends ActionITCaseBase {
                         Long.toString(watermark2 - 1))
                 .run();
         assertThat(table.tagManager().tagExists("tag3")).isTrue();
-        assertThat(table.tagManager().taggedSnapshot("tag3").watermark()).isEqualTo(watermark2);
-        assertThat(table.tagManager().taggedSnapshot("tag3").timeMillis()).isEqualTo(commitTime2);
+        assertThat(table.tagManager().getOrThrow("tag3").watermark()).isEqualTo(watermark2);
+        assertThat(table.tagManager().getOrThrow("tag3").timeMillis()).isEqualTo(commitTime2);
     }
 }

@@ -41,6 +41,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
@@ -172,7 +173,7 @@ public class TagManager {
     /** Make sure the tagNames are ALL tags of one snapshot. */
     public void deleteAllTagsOfOneSnapshot(
             List<String> tagNames, TagDeletion tagDeletion, SnapshotManager snapshotManager) {
-        Snapshot taggedSnapshot = taggedSnapshot(tagNames.get(0));
+        Snapshot taggedSnapshot = getOrThrow(tagNames.get(0)).trimToSnapshot();
         List<Snapshot> taggedSnapshots;
 
         // skip file deletion if snapshot exists
@@ -195,12 +196,13 @@ public class TagManager {
             List<TagCallback> callbacks) {
         checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name '%s' is blank.", tagName);
-        if (!tagExists(tagName)) {
+        Optional<Tag> tag = get(tagName);
+        if (!tag.isPresent()) {
             LOG.warn("Tag '{}' doesn't exist.", tagName);
             return;
         }
 
-        Snapshot taggedSnapshot = taggedSnapshot(tagName);
+        Snapshot taggedSnapshot = tag.get().trimToSnapshot();
         List<Snapshot> taggedSnapshots;
 
         // skip file deletion if snapshot exists
@@ -303,10 +305,21 @@ public class TagManager {
         }
     }
 
-    /** Get the tagged snapshot by name. */
-    public Snapshot taggedSnapshot(String tagName) {
-        checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
-        return Tag.fromPath(fileIO, tagPath(tagName)).trimToSnapshot();
+    /** Return the tag or Optional.empty() if the tag file not found. */
+    public Optional<Tag> get(String tagName) {
+        checkArgument(!StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name shouldn't be blank.");
+        try {
+            return Optional.of(Tag.tryFromPath(fileIO, tagPath(tagName)));
+        } catch (FileNotFoundException e) {
+            return Optional.empty();
+        }
+    }
+
+    /** Return the tag or throw exception indicating the tag not found. */
+    public Tag getOrThrow(String tagName) {
+        return get(tagName)
+                .orElseThrow(
+                        () -> new IllegalArgumentException("Tag '" + tagName + "' doesn't exist."));
     }
 
     public long tagCount() {
@@ -412,10 +425,5 @@ public class TagManager {
                 String.format(
                         "Didn't find tag with snapshot id '%s'.This is unexpected.",
                         taggedSnapshot.id()));
-    }
-
-    /** Read tag for tagName. */
-    public Tag tag(String tagName) {
-        return Tag.fromPath(fileIO, tagPath(tagName));
     }
 }

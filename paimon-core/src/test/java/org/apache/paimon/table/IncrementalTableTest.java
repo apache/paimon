@@ -19,21 +19,35 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.TagManager;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.CoreOptions.INCREMENTAL_AUTO_TAG_START_MODE;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.io.DataFileTestUtils.row;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -300,5 +314,90 @@ public class IncrementalTableTest extends TableTestBase {
 
         assertThat(read(table, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG2")))
                 .containsExactlyInAnyOrder(GenericRow.of(1, 1, 2));
+    }
+
+    @Test
+    public void testIncrementalTagStartMode() throws Exception {
+        // avoid TraceableFileIO catch FileNotFoundException
+        catalog =
+                CatalogFactory.createCatalog(CatalogContext.create(new Path(tempPath.toString())));
+        catalog.createDatabase(database, true);
+
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.STRING())
+                        .primaryKey("a")
+                        .option("bucket", "1")
+                        .option("tag.automatic-creation", "watermark")
+                        .option("tag.creation-period", "daily")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TagManager tagManager = table.tagManager();
+
+        write.write(GenericRow.of(1, BinaryString.fromString("a")));
+        List<CommitMessage> commitMessages = write.prepareCommit(false, 0);
+        commit.commit(
+                new ManifestCommittable(
+                        0,
+                        utcMills("2024-12-21T10:00:00"),
+                        Collections.emptyMap(),
+                        commitMessages));
+        assertThat(tagManager.allTagNames()).containsOnly("2024-12-20");
+
+        // test no earlier tag
+        assertThatThrownBy(
+                        () ->
+                                read(
+                                        table,
+                                        Pair.of(INCREMENTAL_BETWEEN, "2024-12-19,2024-12-20"),
+                                        Pair.of(INCREMENTAL_AUTO_TAG_START_MODE, "earlier-strict")))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "The start tag 2024-12-19 and its earlier tag don't exist. If you allow "
+                                        + "to return empty, please set incremental-auto-tag-start-mode to earlier-or-empty."));
+
+        List<InternalRow> result =
+                read(
+                        table,
+                        Pair.of(INCREMENTAL_BETWEEN, "2024-12-19,2024-12-20"),
+                        Pair.of(INCREMENTAL_AUTO_TAG_START_MODE, "earlier-or-empty"));
+        assertThat(result).isEmpty();
+
+        // test earlier
+        write.write(GenericRow.of(2, BinaryString.fromString("b")));
+        commitMessages = write.prepareCommit(false, 1);
+        commit.commit(
+                new ManifestCommittable(
+                        1,
+                        utcMills("2024-12-23T10:00:00"),
+                        Collections.emptyMap(),
+                        commitMessages));
+        assertThat(tagManager.allTagNames()).containsExactlyInAnyOrder("2024-12-20", "2024-12-22");
+        assertThatThrownBy(() -> read(table, Pair.of(INCREMENTAL_BETWEEN, "2024-12-21,2024-12-22")))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "The start tag 2024-12-21 doesn't exist. If you allow to start from the "
+                                        + "most earlier auto-created tag, please set incremental-auto-tag-start-mode to "
+                                        + "earlier-strict or earlier-or-empty."));
+        result =
+                read(
+                        table,
+                        Pair.of(INCREMENTAL_BETWEEN, "2024-12-21,2024-12-22"),
+                        Pair.of(INCREMENTAL_AUTO_TAG_START_MODE, "earlier-strict"));
+
+        assertThat(result)
+                .containsExactlyInAnyOrder(GenericRow.of(2, BinaryString.fromString("b")));
+    }
+
+    private static long utcMills(String timestamp) {
+        return Timestamp.fromLocalDateTime(LocalDateTime.parse(timestamp)).getMillisecond();
     }
 }

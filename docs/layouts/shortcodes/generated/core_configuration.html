@@ -375,6 +375,12 @@ under the License.
             <td>Whether to ignore delete records.</td>
         </tr>
         <tr>
+            <td><h5>incremental-auto-tag-start-mode</h5></td>
+            <td style="word-wrap: break-word;">strict</td>
+            <td><p>Enum</p></td>
+            <td>Specify the behavior of finding the start when incremental read auto tags. strict, earlier-strict, and earlier-or-empty are available.<br /><ul><li>"strict": Throw exception if the start tag doesn't exist.</li></ul><ul><li>"earlier-strict": If either the start tag or its most earlier tag exists, start from it. Otherwise, throw exception.</li></ul><ul><li>"earlier-or-empty": If either the start tag or its most earlier tag exists, start from it. Otherwise, the incremental changes are empty.</li></ul><br /><br />Possible values:<ul><li>"strict": Throw exception if the start tag doesn't exist.</li><li>"earlier-strict": If either the start tag or its most earlier tag exists, start form it. Otherwise, throw exception.</li><li>"earlier-or-empty": If either the start tag or its most earlier tag exists, start from it. Otherwise, the incremental changes are empty.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>incremental-between</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>

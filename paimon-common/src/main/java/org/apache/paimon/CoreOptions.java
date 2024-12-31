@@ -1080,6 +1080,29 @@ public class CoreOptions implements Serializable {
                             "Read incremental changes between start timestamp (exclusive) and end timestamp, "
                                     + "for example, 't1,t2' means changes between timestamp t1 and timestamp t2.");
 
+    public static final ConfigOption<IncrementalAutoTagStartMode> INCREMENTAL_AUTO_TAG_START_MODE =
+            key("incremental-auto-tag-start-mode")
+                    .enumType(IncrementalAutoTagStartMode.class)
+                    .defaultValue(IncrementalAutoTagStartMode.STRICT)
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Specify the behavior of finding the start when incremental read auto tags. "
+                                                    + "strict, earlier-strict, and earlier-or-empty are available.")
+                                    .linebreak()
+                                    .list(
+                                            text(
+                                                    "\"strict\": Throw exception if the start tag doesn't exist."))
+                                    .list(
+                                            text(
+                                                    "\"earlier-strict\": If either the start tag or its most earlier tag exists, "
+                                                            + "start from it. Otherwise, throw exception."))
+                                    .list(
+                                            text(
+                                                    "\"earlier-or-empty\": If either the start tag or its most earlier tag exists, "
+                                                            + "start from it. Otherwise, the incremental changes are empty."))
+                                    .build());
+
     public static final ConfigOption<Boolean> END_INPUT_CHECK_PARTITION_EXPIRE =
             key("end-input.check-partition-expire")
                     .booleanType()
@@ -1804,6 +1827,10 @@ public class CoreOptions implements Serializable {
 
     public boolean endInputCheckPartitionExpire() {
         return options.get(END_INPUT_CHECK_PARTITION_EXPIRE);
+    }
+
+    public IncrementalAutoTagStartMode incrementalAutoTagStartMode() {
+        return options.get(INCREMENTAL_AUTO_TAG_START_MODE);
     }
 
     public ExpireConfig expireConfig() {
@@ -2726,6 +2753,36 @@ public class CoreOptions implements Serializable {
                             StringUtils.join(
                                     Arrays.stream(IncrementalBetweenScanMode.values()).iterator(),
                                     ",")));
+        }
+    }
+
+    /** Specify the behavior of the start when incremental read auto tags. */
+    public enum IncrementalAutoTagStartMode implements DescribedEnum {
+        STRICT("strict", "Throw exception if the start tag doesn't exist."),
+        EARLIER_STRICT(
+                "earlier-strict",
+                "If either the start tag or its most earlier tag exists, start form it. Otherwise, throw exception."),
+        EARLIER_OR_EMPTY(
+                "earlier-or-empty",
+                "If either the start tag or its most earlier tag exists, start from it. Otherwise, the incremental "
+                        + "changes are empty.");
+
+        private final String value;
+        private final String description;
+
+        IncrementalAutoTagStartMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
         }
     }
 

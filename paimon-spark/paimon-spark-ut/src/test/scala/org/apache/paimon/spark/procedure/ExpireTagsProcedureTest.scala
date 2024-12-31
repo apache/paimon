@@ -97,7 +97,7 @@ class ExpireTagsProcedureTest extends PaimonSparkTestBase {
 
     // tag-2 as the base older_than time.
     // tag-1 expired by its file creation time.
-    val olderThanTime1 = table.tagManager().tag("tag-2").getTagCreateTime
+    val olderThanTime1 = table.tagManager().getOrThrow("tag-2").getTagCreateTime
     val timestamp1 =
       new java.sql.Timestamp(Timestamp.fromLocalDateTime(olderThanTime1).getMillisecond)
     checkAnswer(
@@ -112,7 +112,7 @@ class ExpireTagsProcedureTest extends PaimonSparkTestBase {
 
     // tag-4 as the base older_than time.
     // tag-2,tag-3,tag-5 expired, tag-5 reached its tagTimeRetained.
-    val olderThanTime2 = table.tagManager().tag("tag-4").getTagCreateTime
+    val olderThanTime2 = table.tagManager().getOrThrow("tag-4").getTagCreateTime
     val timestamp2 =
       new java.sql.Timestamp(Timestamp.fromLocalDateTime(olderThanTime2).getMillisecond)
     checkAnswer(

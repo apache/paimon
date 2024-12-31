@@ -97,7 +97,8 @@ public class BatchWriteGeneratorTagOperatorTest extends CommitterOperatorTest {
         // Get tagName from tagManager.
         String tagName = tagManager.allTagNames().get(0);
         // The tag is consistent with the latest snapshot
-        assertThat(tagManager.taggedSnapshot(tagName)).isEqualTo(snapshotManager.latestSnapshot());
+        assertThat(tagManager.getOrThrow(tagName).trimToSnapshot())
+                .isEqualTo(snapshotManager.latestSnapshot());
 
         // test tag expiration
         table.createTag("many-tags-test1");

@@ -143,7 +143,7 @@ class CreateTagFromTimestampProcedureTest extends PaimonSparkTestBase with Strea
 
             val table = loadTable("T")
             val latestCommitTime = table.snapshotManager.latestSnapshot().timeMillis
-            val tagsCommitTime = table.tagManager().taggedSnapshot("test_tag").timeMillis
+            val tagsCommitTime = table.tagManager().getOrThrow("test_tag").timeMillis
             assert(latestCommitTime > tagsCommitTime)
 
             // make snapshot 1 expire.
