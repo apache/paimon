@@ -153,6 +153,16 @@ public class FileStorePathFactory {
                                 partition, "Partition row data is null. This is unexpected.")));
     }
 
+    public Path getPartitionPath(BinaryRow partition) {
+        return new Path(
+                root,
+                PartitionPathUtils.generatePartitionPath(
+                        partitionComputer.generatePartValues(
+                                Preconditions.checkNotNull(
+                                        partition,
+                                        "Partition binary row is null. This is unexpected."))));
+    }
+
     public List<Path> getHierarchicalPartitionPath(BinaryRow partition) {
         return PartitionPathUtils.generateHierarchicalPartitionPaths(
                         partitionComputer.generatePartValues(

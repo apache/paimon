@@ -40,10 +40,6 @@ public class RemoveUnexistingFilesActionFactory implements ActionFactory {
                         params.getRequired(TABLE),
                         catalogConfigMap(params));
 
-        if (params.has(PARTITION)) {
-            action.withPartitions(getPartitions(params));
-        }
-
         if (params.has(DRY_RUN) && Boolean.parseBoolean(params.get(DRY_RUN))) {
             action.dryRun();
         }
@@ -68,11 +64,9 @@ public class RemoveUnexistingFilesActionFactory implements ActionFactory {
         System.out.println("Syntax:");
         System.out.println(
                 "  remove_unexisting_files --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> [--partition <partition_name> [--partition <partition_name>]] "
+                        + "--table <table_name> "
                         + "[--dry_run <false/true>] "
                         + "[--parallelism <parallelism>]");
-        System.out.println(
-                "If partitions are not specified, this action will remove unexisting files from all partitions.");
         System.out.println(
                 "When dry_run is set to true (default false), this action only checks what files will be removed, but not really remove them.");
     }
