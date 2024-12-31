@@ -261,7 +261,25 @@ CREATE TABLE my_partitioned_table (
     'partition.time-interval'='1 d',
     'partition.idle-time-to-done'='15 m',
     'partition.mark-done-action'='done-partition'
+    -- You can also customize a PartitionMarkDoneAction to mark the partition completed.
+    -- 'partition.mark-done-action'='done-partition,custom',
+    -- 'partition.mark-done-action.custom.class'='org.apache.paimon.CustomPartitionMarkDoneAction'
 );
+```
+Define a class CustomPartitionMarkDoneAction to implement the PartitionMarkDoneAction interface.
+```java
+package org.apache.paimon;
+
+public class CustomPartitionMarkDoneAction implements PartitionMarkDoneAction {
+    
+    @Override
+    public void markDone(String partition) {
+        // do something.
+    }
+
+    @Override
+    public void close() {}
+}
 ```
 
 1. Firstly, you need to define the time parser of the partition and the time interval between partitions in order to

@@ -86,7 +86,13 @@ class PartitionMarkDoneTest extends TableTestBase {
         Path location = table.location();
         Path successFile = new Path(location, "a=0/_SUCCESS");
         PartitionMarkDone markDone =
-                PartitionMarkDone.create(false, false, new MockOperatorStateStore(), table).get();
+                PartitionMarkDone.create(
+                                getClass().getClassLoader(),
+                                false,
+                                false,
+                                new MockOperatorStateStore(),
+                                table)
+                        .get();
 
         notifyCommits(markDone, true);
         assertThat(table.fileIO().exists(successFile)).isEqualTo(deletionVectors);
@@ -97,7 +103,7 @@ class PartitionMarkDoneTest extends TableTestBase {
         }
     }
 
-    private void notifyCommits(PartitionMarkDone markDone, boolean isCompact) {
+    public static void notifyCommits(PartitionMarkDone markDone, boolean isCompact) {
         ManifestCommittable committable = new ManifestCommittable(Long.MAX_VALUE);
         DataFileMeta file = DataFileTestUtils.newFile();
         CommitMessageImpl compactMessage;
@@ -122,7 +128,7 @@ class PartitionMarkDoneTest extends TableTestBase {
         markDone.notifyCommittable(singletonList(committable));
     }
 
-    private static class MockOperatorStateStore implements OperatorStateStore {
+    public static class MockOperatorStateStore implements OperatorStateStore {
 
         @Override
         public <K, V> BroadcastState<K, V> getBroadcastState(
@@ -151,7 +157,7 @@ class PartitionMarkDoneTest extends TableTestBase {
         }
     }
 
-    private static class MockListState<T> implements ListState<T> {
+    public static class MockListState<T> implements ListState<T> {
 
         private final List<T> backingList = new ArrayList<>();
 
