@@ -26,11 +26,8 @@ import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -59,13 +56,9 @@ import org.apache.paimon.rest.responses.PartitionResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.CatalogEnvironment;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.FileStoreTableFactory;
-import org.apache.paimon.table.Table;
+import org.apache.paimon.table.*;
 import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
@@ -85,13 +78,12 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 
-import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
-import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
+import static org.apache.paimon.CoreOptions.*;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
+import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
-import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternalRow;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
@@ -419,12 +411,11 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public List<PartitionEntry> listPartitions(Identifier identifier)
-            throws TableNotExistException {
+    public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
         Table table = getTable(identifier);
         Options options = Options.fromMap(table.options());
         if (!options.get(METASTORE_PARTITIONED_TABLE)) {
-            return table.newReadBuilder().newScan().listPartitionEntries();
+            return listPartitionsFromFileSystem(table);
         }
 
         ListPartitionsResponse response;
@@ -441,26 +432,11 @@ public class RESTCatalog implements Catalog {
             throw new TableNoPermissionException(identifier, e);
         }
 
-        if (response == null || response.getPartitions() == null) {
+        if (response == null) {
             return Collections.emptyList();
         }
 
-        RowType partitionType = table.rowType().project(table.partitionKeys());
-        InternalRowSerializer serializer = new InternalRowSerializer(partitionType);
-        String defaultName = options.get(PARTITION_DEFAULT_NAME);
-        List<PartitionEntry> result = new ArrayList<>();
-        for (PartitionResponse partition : response.getPartitions()) {
-            GenericRow row =
-                    convertSpecToInternalRow(partition.getSpec(), partitionType, defaultName);
-            result.add(
-                    new PartitionEntry(
-                            serializer.toBinaryRow(row).copy(),
-                            partition.getRecordCount(),
-                            partition.getFileSizeInBytes(),
-                            partition.getFileCount(),
-                            partition.getLastFileCreationTime()));
-        }
-        return result;
+        return response.getPartitions();
     }
 
     @Override

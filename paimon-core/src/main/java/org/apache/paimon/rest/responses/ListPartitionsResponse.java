@@ -19,6 +19,7 @@
 package org.apache.paimon.rest.responses;
 
 import org.apache.paimon.rest.RESTResponse;
+import org.apache.paimon.table.Partition;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
@@ -34,16 +35,15 @@ public class ListPartitionsResponse implements RESTResponse {
     public static final String FIELD_PARTITIONS = "partitions";
 
     @JsonProperty(FIELD_PARTITIONS)
-    private final List<PartitionResponse> partitions;
+    private final List<Partition> partitions;
 
     @JsonCreator
-    public ListPartitionsResponse(
-            @JsonProperty(FIELD_PARTITIONS) List<PartitionResponse> partitions) {
+    public ListPartitionsResponse(@JsonProperty(FIELD_PARTITIONS) List<Partition> partitions) {
         this.partitions = partitions;
     }
 
     @JsonGetter(FIELD_PARTITIONS)
-    public List<PartitionResponse> getPartitions() {
+    public List<Partition> getPartitions() {
         return partitions;
     }
 }

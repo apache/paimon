@@ -36,6 +36,7 @@ import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.PartitionResponse;
+import org.apache.paimon.table.Partition;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -377,7 +378,7 @@ public class RESTCatalogController {
             @PathVariable String table) {
         Map<String, String> spec = new HashMap<>();
         spec.put("f1", "1");
-        PartitionResponse partition = new PartitionResponse(spec, 1, 2, 3, 4);
+        Partition partition = new Partition(spec, 1, 2, 3, 4);
         return new ListPartitionsResponse(ImmutableList.of(partition));
     }
 
@@ -404,7 +405,7 @@ public class RESTCatalogController {
             @RequestBody CreatePartitionRequest request) {
         Map<String, String> spec = new HashMap<>();
         spec.put("f1", "1");
-        return new PartitionResponse(spec, 0, 0, 0, 4);
+        return new PartitionResponse(new Partition(spec, 0, 0, 0, 4));
     }
 
     @Operation(

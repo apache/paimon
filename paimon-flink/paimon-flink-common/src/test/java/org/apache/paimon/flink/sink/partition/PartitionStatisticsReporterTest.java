@@ -23,11 +23,11 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.metastore.MetastoreClient;
-import org.apache.paimon.metastore.PartitionStats;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.Partition;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -85,7 +85,7 @@ public class PartitionStatisticsReporterTest {
         BatchTableCommit committer = table.newBatchWriteBuilder().newCommit();
         committer.commit(messages);
         AtomicBoolean closed = new AtomicBoolean(false);
-        Map<String, PartitionStats> partitionParams = Maps.newHashMap();
+        Map<String, Partition> partitionParams = Maps.newHashMap();
 
         MetastoreClient client =
                 new MetastoreClient() {
@@ -116,12 +116,12 @@ public class PartitionStatisticsReporterTest {
                     }
 
                     @Override
-                    public void alterPartition(
-                            LinkedHashMap<String, String> partitionSpec,
-                            PartitionStats partitionStats) {
+                    public void alterPartition(Partition partition) {
                         partitionParams.put(
-                                PartitionPathUtils.generatePartitionPath(partitionSpec),
-                                partitionStats);
+                                PartitionPathUtils.generatePartitionPath(
+                                        partition.getSpec(),
+                                        table.rowType().project(table.partitionKeys())),
+                                partition);
                     }
 
                     @Override
@@ -136,7 +136,7 @@ public class PartitionStatisticsReporterTest {
         Assertions.assertThat(partitionParams).containsKey("c1=a/");
         Assertions.assertThat(partitionParams.get("c1=a/").toString())
                 .isEqualTo(
-                        "numFiles: 1, totalSize: 591, numRows: 1, lastUpdateTimeMillis: 1729598544974");
+                        "{spec={c1=a}, recordCount=1, fileSizeInBytes=591, fileCount=1, lastFileCreationTime=1729598544974}");
         action.close();
         Assertions.assertThat(closed).isTrue();
     }

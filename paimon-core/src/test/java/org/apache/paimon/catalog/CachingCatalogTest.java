@@ -21,11 +21,11 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.table.Partition;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -245,12 +245,12 @@ class CachingCatalogTest extends CatalogTestBase {
                         Collections.emptyMap(),
                         "");
         catalog.createTable(tableIdent, schema, false);
-        List<PartitionEntry> partitionEntryList = catalog.listPartitions(tableIdent);
+        List<Partition> partitionEntryList = catalog.listPartitions(tableIdent);
         assertThat(catalog.partitionCache().asMap()).containsKey(tableIdent);
         catalog.invalidateTable(tableIdent);
         catalog.refreshPartitions(tableIdent);
         assertThat(catalog.partitionCache().asMap()).containsKey(tableIdent);
-        List<PartitionEntry> partitionEntryListFromCache =
+        List<Partition> partitionEntryListFromCache =
                 catalog.partitionCache().getIfPresent(tableIdent);
         assertThat(partitionEntryListFromCache).isNotNull();
         assertThat(partitionEntryListFromCache).containsAll(partitionEntryList);

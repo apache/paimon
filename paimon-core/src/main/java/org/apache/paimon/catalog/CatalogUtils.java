@@ -19,14 +19,21 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Partition;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Preconditions;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.CoreOptions.*;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
@@ -116,5 +123,28 @@ public class CatalogUtils {
             throw new Catalog.TableNotExistException(identifier);
         }
         return table;
+    }
+
+    public static List<Partition> listPartitionsFromFileSystem(Table table) {
+        Options options = Options.fromMap(table.options());
+        InternalRowPartitionComputer computer =
+                new InternalRowPartitionComputer(
+                        options.get(PARTITION_DEFAULT_NAME),
+                        table.rowType(),
+                        table.partitionKeys().toArray(new String[0]),
+                        options.get(PARTITION_GENERATE_LEGCY_NAME));
+        List<PartitionEntry> partitionEntries =
+                table.newReadBuilder().newScan().listPartitionEntries();
+        List<Partition> partitions = new ArrayList<>(partitionEntries.size());
+        for (PartitionEntry entry : partitionEntries) {
+            partitions.add(
+                    new Partition(
+                            computer.generatePartValues(entry.partition()),
+                            entry.recordCount(),
+                            entry.fileSizeInBytes(),
+                            entry.fileCount(),
+                            entry.lastFileCreationTime()));
+        }
+        return partitions;
     }
 }

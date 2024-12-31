@@ -18,8 +18,8 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.table.Partition;
 import org.apache.paimon.table.Table;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
@@ -56,7 +56,7 @@ public class TestableCachingCatalog extends CachingCatalog {
         return tableCache;
     }
 
-    public Cache<Identifier, List<PartitionEntry>> partitionCache() {
+    public Cache<Identifier, List<Partition>> partitionCache() {
         partitionCache.cleanUp();
         return partitionCache;
     }
