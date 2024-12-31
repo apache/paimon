@@ -59,7 +59,6 @@ under the License.
         <module>paimon-core</module>
         <module>paimon-flink</module>
         <module>paimon-docs</module>
-        <module>paimon-e2e-tests</module>
         <module>paimon-filesystems</module>
         <module>paimon-format</module>
         <module>paimon-bundle</module>
@@ -81,6 +80,8 @@ under the License.
         <paimon.shade.netty.version>4.1.100.Final</paimon.shade.netty.version>
         <antlr4.version>4.9.3</antlr4.version>
         <hadoop.version>2.8.5</hadoop.version>
+        <hadoop2.version>2.8.5</hadoop2.version>
+        <hadoop3.version>3.2.2</hadoop3.version>
         <scala.binary.version>2.12</scala.binary.version>
         <flink.scala.binary.version>2.12</flink.scala.binary.version>
         <scala212.version>2.12.15</scala212.version>
@@ -401,6 +402,31 @@ under the License.
             <activation>
                 <property>
                     <name>spark4</name>
+                </property>
+            </activation>
+        </profile>
+
+        <profile>
+            <id>hadoop2</id>
+            <properties>
+                <hadoop.version>${hadoop2.version}</hadoop.version>
+            </properties>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+                <property>
+                    <name>hadoop2</name>
+                </property>
+            </activation>
+        </profile>
+
+        <profile>
+            <id>hadoop3</id>
+            <properties>
+                <hadoop.version>${hadoop3.version}</hadoop.version>
+            </properties>
+            <activation>
+                <property>
+                    <name>hadoop3</name>
                 </property>
             </activation>
         </profile>
