@@ -33,7 +33,6 @@ under the License.
 
     <properties>
         <frocksdbjni.version>6.20.3-ververica-2.0</frocksdbjni.version>
-        <okhttp.version>4.12.0</okhttp.version>
     </properties>
 
     <dependencies>
