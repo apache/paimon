@@ -59,6 +59,7 @@ under the License.
         <module>paimon-core</module>
         <module>paimon-flink</module>
         <module>paimon-docs</module>
+        <module>paimon-e2e-tests</module>
         <module>paimon-filesystems</module>
         <module>paimon-format</module>
         <module>paimon-bundle</module>
