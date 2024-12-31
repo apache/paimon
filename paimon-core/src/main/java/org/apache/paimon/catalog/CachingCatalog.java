@@ -19,9 +19,9 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -61,7 +61,7 @@ public class CachingCatalog extends DelegateCatalog {
     @Nullable protected final SegmentsCache<Path> manifestCache;
 
     // partition cache will affect data latency
-    @Nullable protected final Cache<Identifier, List<PartitionEntry>> partitionCache;
+    @Nullable protected final Cache<Identifier, List<Partition>> partitionCache;
 
     public CachingCatalog(Catalog wrapped) {
         this(
@@ -130,7 +130,7 @@ public class CachingCatalog extends DelegateCatalog {
                                 .executor(Runnable::run)
                                 .expireAfterAccess(expirationInterval)
                                 .weigher(
-                                        (Weigher<Identifier, List<PartitionEntry>>)
+                                        (Weigher<Identifier, List<Partition>>)
                                                 (identifier, v) -> v.size())
                                 .maximumWeight(cachedPartitionMaxNum)
                                 .ticker(ticker)
@@ -281,13 +281,12 @@ public class CachingCatalog extends DelegateCatalog {
     }
 
     @Override
-    public List<PartitionEntry> listPartitions(Identifier identifier)
-            throws TableNotExistException {
+    public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
         if (partitionCache == null) {
             return wrapped.listPartitions(identifier);
         }
 
-        List<PartitionEntry> result = partitionCache.getIfPresent(identifier);
+        List<Partition> result = partitionCache.getIfPresent(identifier);
         if (result == null) {
             result = wrapped.listPartitions(identifier);
             partitionCache.put(identifier, result);
@@ -321,7 +320,7 @@ public class CachingCatalog extends DelegateCatalog {
      */
     public void refreshPartitions(Identifier identifier) throws TableNotExistException {
         if (partitionCache != null) {
-            List<PartitionEntry> result = wrapped.listPartitions(identifier);
+            List<Partition> result = wrapped.listPartitions(identifier);
             partitionCache.put(identifier, result);
         }
     }
@@ -341,8 +340,7 @@ public class CachingCatalog extends DelegateCatalog {
         }
         long partitionCacheSize = 0L;
         if (partitionCache != null) {
-            for (Map.Entry<Identifier, List<PartitionEntry>> entry :
-                    partitionCache.asMap().entrySet()) {
+            for (Map.Entry<Identifier, List<Partition>> entry : partitionCache.asMap().entrySet()) {
                 partitionCacheSize += entry.getValue().size();
             }
         }

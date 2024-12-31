@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.sink.partition;
 
 import org.apache.paimon.metastore.MetastoreClient;
-import org.apache.paimon.metastore.PartitionStats;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.actions.AddDonePartitionAction;
 
 import org.junit.jupiter.api.Test;
@@ -68,9 +68,7 @@ class AddDonePartitionActionTest {
                     }
 
                     @Override
-                    public void alterPartition(
-                            LinkedHashMap<String, String> partitionSpec,
-                            PartitionStats partitionStats) {
+                    public void alterPartition(Partition partition) {
                         throw new UnsupportedOperationException();
                     }
 

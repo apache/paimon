@@ -23,9 +23,9 @@ import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.CredentialsProvider;
 import org.apache.paimon.rest.auth.CredentialsProviderFactory;
@@ -251,8 +251,7 @@ public class RESTCatalog implements Catalog {
             throws TableNotExistException, PartitionNotExistException {}
 
     @Override
-    public List<PartitionEntry> listPartitions(Identifier identifier)
-            throws TableNotExistException {
+    public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
         throw new UnsupportedOperationException();
     }
 
