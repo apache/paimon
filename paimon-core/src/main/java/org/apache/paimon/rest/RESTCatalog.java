@@ -436,7 +436,7 @@ public class RESTCatalog implements Catalog {
             throw new TableNoPermissionException(identifier, e);
         }
 
-        if (response == null) {
+        if (response == null || response.getPartitions() == null) {
             return Collections.emptyList();
         }
 
