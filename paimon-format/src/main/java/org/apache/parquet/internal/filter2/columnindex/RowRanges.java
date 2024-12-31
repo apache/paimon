@@ -41,10 +41,11 @@ import java.util.Set;
  * row-group, retrieve the count of the matching rows or check overlapping of a row index range.
  *
  * <p>Note: The class was copied over to support using {@link FileIndexResult} to filter {@link
- * RowRanges}. Added a new method {@link RowRanges#create(long, PrimitiveIterator.OfInt,
+ * RowRanges}. Added a new method {@link RowRanges#create(long, long, PrimitiveIterator.OfInt,
  * OffsetIndex, FileIndexResult)}
  *
- * @see ColumnIndexFilter#calculateRowRanges(Filter, ColumnIndexStore, Set, long, FileIndexResult)
+ * @see ColumnIndexFilter#calculateRowRanges(Filter, ColumnIndexStore, Set, long, long,
+ *     FileIndexResult)
  */
 public class RowRanges {
 
@@ -165,6 +166,7 @@ public class RowRanges {
     /** Support using {@link FileIndexResult} to filter the row ranges. */
     public static RowRanges create(
             long rowCount,
+            long rowIndexOffset,
             PrimitiveIterator.OfInt pageIndexes,
             OffsetIndex offsetIndex,
             @Nullable FileIndexResult fileIndexResult) {
@@ -178,13 +180,14 @@ public class RowRanges {
             if (fileIndexResult instanceof BitmapIndexResult) {
                 RoaringBitmap32 bitmap = ((BitmapIndexResult) fileIndexResult).get();
                 RoaringBitmap32 range =
-                        RoaringBitmap32.bitmapOfRange(firstRowIndex, lastRowIndex + 1);
+                        RoaringBitmap32.bitmapOfRange(
+                                rowIndexOffset + firstRowIndex, rowIndexOffset + lastRowIndex + 1);
                 RoaringBitmap32 result = RoaringBitmap32.and(bitmap, range);
                 if (result.isEmpty()) {
                     continue;
                 }
-                firstRowIndex = result.first();
-                lastRowIndex = result.last();
+                firstRowIndex = result.first() - rowIndexOffset;
+                lastRowIndex = result.last() - rowIndexOffset;
             }
 
             ranges.add(new Range(firstRowIndex, lastRowIndex));

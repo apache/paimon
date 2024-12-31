@@ -67,6 +67,7 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
     private final ColumnIndexStore columnIndexStore;
     private final Set<ColumnPath> columns;
     private final long rowCount;
+    private final long rowIndexOffset;
     @Nullable private final FileIndexResult fileIndexResult;
     private RowRanges allRows;
 
@@ -89,6 +90,7 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
             ColumnIndexStore columnIndexStore,
             Set<ColumnPath> paths,
             long rowCount,
+            long rowIndexOffset,
             @Nullable FileIndexResult fileIndexResult) {
         return filter.accept(
                 new FilterCompat.Visitor<RowRanges>() {
@@ -102,6 +104,7 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
                                                     columnIndexStore,
                                                     paths,
                                                     rowCount,
+                                                    rowIndexOffset,
                                                     fileIndexResult));
                         } catch (MissingOffsetIndexException e) {
                             LOGGER.info(e.getMessage());
@@ -125,10 +128,12 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
             ColumnIndexStore columnIndexStore,
             Set<ColumnPath> paths,
             long rowCount,
+            long rowIndexOffset,
             @Nullable FileIndexResult fileIndexResult) {
         this.columnIndexStore = columnIndexStore;
         this.columns = paths;
         this.rowCount = rowCount;
+        this.rowIndexOffset = rowIndexOffset;
         this.fileIndexResult = fileIndexResult;
     }
 
@@ -227,7 +232,7 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
             return allRows();
         }
 
-        return RowRanges.create(rowCount, func.apply(ci), oi, fileIndexResult);
+        return RowRanges.create(rowCount, rowIndexOffset, func.apply(ci), oi, fileIndexResult);
     }
 
     @Override
