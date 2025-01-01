@@ -59,6 +59,7 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
     @After
     public void after() {
         hiveShell.execute("DROP DATABASE IF EXISTS test_db CASCADE");
+        hiveShell.execute("DROP DATABASE IF EXISTS test_db_iceberg CASCADE");
     }
 
     @Test
@@ -110,6 +111,45 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                         .executeQuery("DESC DATABASE EXTENDED test_db")
                         .toString()
                         .contains("iceberg/test_db"));
+
+        // specify a dedicated hive database and table for paimon iceberg commiter
+        tEnv.executeSql(
+                "CREATE TABLE my_paimon.test_db.t1 ( pt INT, id INT, data STRING, PRIMARY KEY (pt, id) NOT ENFORCED ) "
+                        + "PARTITIONED BY (pt) WITH "
+                        + "( 'metadata.iceberg.storage' = 'hive-catalog', 'metadata.iceberg.uri' = '', 'file.format' = 'avro', "
+                        + " 'metadata.iceberg.database' = 'test_db_iceberg', 'metadata.iceberg.table' = 't1_iceberg',"
+                        // make sure all changes are visible in iceberg metadata
+                        + " 'full-compaction.delta-commits' = '1' )");
+        tEnv.executeSql(
+                        "INSERT INTO my_paimon.test_db.t1 VALUES "
+                                + "(1, 1, 'apple'), (1, 2, 'pear'), (2, 1, 'cat'), (2, 2, 'dog')")
+                .await();
+
+        Assert.assertEquals(
+                Arrays.asList(Row.of("pear", 2, 1), Row.of("dog", 2, 2)),
+                collect(
+                        tEnv.executeSql(
+                                "SELECT data, id, pt FROM my_iceberg.test_db_iceberg.t1_iceberg WHERE id = 2 ORDER BY pt, id")));
+
+        tEnv.executeSql(
+                        "INSERT INTO my_paimon.test_db.t1 VALUES "
+                                + "(1, 1, 'cherry'), (2, 2, 'elephant')")
+                .await();
+        Assert.assertEquals(
+                Arrays.asList(
+                        Row.of(1, 1, "cherry"),
+                        Row.of(1, 2, "pear"),
+                        Row.of(2, 1, "cat"),
+                        Row.of(2, 2, "elephant")),
+                collect(
+                        tEnv.executeSql(
+                                "SELECT * FROM my_iceberg.test_db_iceberg.t1_iceberg ORDER BY pt, id")));
+
+        Assert.assertTrue(
+                hiveShell
+                        .executeQuery("DESC DATABASE EXTENDED test_db_iceberg")
+                        .toString()
+                        .contains("iceberg/test_db"));
     }
 
     @Test
@@ -154,6 +194,36 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                 collect(
                         tEnv.executeSql(
                                 "SELECT data, id, pt FROM my_iceberg.test_db.t WHERE id > 1 ORDER BY pt, id")));
+
+        // specify a dedicated hive database and table for paimon iceberg commiter
+        tEnv.executeSql(
+                "CREATE TABLE my_paimon.test_db.t1 ( pt INT, id INT, data STRING ) PARTITIONED BY (pt) WITH "
+                        + "( 'metadata.iceberg.storage' = 'hive-catalog', 'metadata.iceberg.uri' = '', 'file.format' = 'avro', "
+                        + "'metadata.iceberg.database' = 'test_db_iceberg', 'metadata.iceberg.table' = 't1_iceberg')");
+        tEnv.executeSql(
+                        "INSERT INTO my_paimon.test_db.t1 VALUES "
+                                + "(1, 1, 'apple'), (1, 2, 'pear'), (2, 1, 'cat'), (2, 2, 'dog')")
+                .await();
+
+        Assert.assertEquals(
+                Arrays.asList(Row.of("pear", 2, 1), Row.of("dog", 2, 2)),
+                collect(
+                        tEnv.executeSql(
+                                "SELECT data, id, pt FROM my_iceberg.test_db_iceberg.t1_iceberg WHERE id = 2 ORDER BY pt, id")));
+
+        tEnv.executeSql(
+                        "INSERT INTO my_paimon.test_db.t1 VALUES "
+                                + "(1, 3, 'cherry'), (2, 3, 'elephant')")
+                .await();
+        Assert.assertEquals(
+                Arrays.asList(
+                        Row.of("pear", 2, 1),
+                        Row.of("cherry", 3, 1),
+                        Row.of("dog", 2, 2),
+                        Row.of("elephant", 3, 2)),
+                collect(
+                        tEnv.executeSql(
+                                "SELECT data, id, pt FROM my_iceberg.test_db_iceberg.t1_iceberg WHERE id > 1 ORDER BY pt, id")));
     }
 
     @Test
