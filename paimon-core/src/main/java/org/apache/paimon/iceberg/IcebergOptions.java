@@ -95,16 +95,16 @@ public class IcebergOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Hive database name for Iceberg Hive Catalog. " +
-                                    "Set this as an iceberg database alias if using a centralized Catalog.");
+                            "Hive database name for Iceberg Hive Catalog. "
+                                    + "Set this as an iceberg database alias if using a centralized Catalog.");
 
     public static final ConfigOption<String> HIVE_TABLE =
             key("metadata.iceberg.table")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Hive table name for Iceberg Hive Catalog." +
-                                    "Set this as an iceberg table alias if using a centralized Catalog.");
+                            "Hive table name for Iceberg Hive Catalog."
+                                    + "Set this as an iceberg table alias if using a centralized Catalog.");
 
     /** Where to store Iceberg metadata. */
     public enum StorageType implements DescribedEnum {
