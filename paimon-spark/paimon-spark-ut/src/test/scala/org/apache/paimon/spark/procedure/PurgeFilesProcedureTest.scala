@@ -36,7 +36,6 @@ class PurgeFilesProcedureTest extends PaimonSparkTestBase {
     spark.sql("CALL paimon.sys.purge_files(table => 'test.T')")
     checkAnswer(spark.sql("select * from test.T"), Nil)
 
-    spark.sql("refresh table test.T");
     spark.sql("insert into T select '2', 'aa'");
     checkAnswer(spark.sql("select * from test.T"), Row("2", "aa") :: Nil)
   }
