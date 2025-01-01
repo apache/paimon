@@ -82,6 +82,7 @@ public class PurgeFilesProcedure extends BaseProcedure {
                                                 throw new RuntimeException(e);
                                             }
                                         });
+                        spark().catalog().refreshTable(table.fullName());
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
