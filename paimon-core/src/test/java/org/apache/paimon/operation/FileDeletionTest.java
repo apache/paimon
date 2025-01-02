@@ -313,7 +313,7 @@ public class FileDeletionTest {
         // check manifests
         ManifestList manifestList = store.manifestListFactory().create();
         for (String tagName : Arrays.asList("tag1", "tag2")) {
-            Snapshot snapshot = tagManager.taggedSnapshot(tagName);
+            Snapshot snapshot = tagManager.getOrThrow(tagName);
             List<Path> manifestFilePaths =
                     manifestList.readDataManifests(snapshot).stream()
                             .map(ManifestFileMeta::fileName)
@@ -367,7 +367,7 @@ public class FileDeletionTest {
         FileStorePathFactory pathFactory = store.pathFactory();
         assertPathExists(fileIO, pathFactory.bucketPath(partition, 0));
 
-        Snapshot tag1 = tagManager.taggedSnapshot("tag1");
+        Snapshot tag1 = tagManager.getOrThrow("tag1");
         ManifestList manifestList = store.manifestListFactory().create();
         List<Path> manifestFilePaths =
                 manifestList.readDataManifests(tag1).stream()
@@ -519,8 +519,8 @@ public class FileDeletionTest {
         assertPathNotExists(fileIO, pathFactory.bucketPath(partition, 1));
 
         // check manifests
-        Snapshot tag1 = tagManager.taggedSnapshot("tag1");
-        Snapshot tag3 = tagManager.taggedSnapshot("tag3");
+        Snapshot tag1 = tagManager.getOrThrow("tag1");
+        Snapshot tag3 = tagManager.getOrThrow("tag3");
         List<ManifestFileMeta> existing = manifestList.readDataManifests(tag1);
         existing.addAll(manifestList.readDataManifests(tag3));
         for (ManifestFileMeta manifestFileMeta : snapshot2Data) {
@@ -805,6 +805,6 @@ public class FileDeletionTest {
     }
 
     private void createTag(Snapshot snapshot, String tagName, Duration timeRetained) {
-        tagManager.createTag(snapshot, tagName, timeRetained, Collections.emptyList());
+        tagManager.createTag(snapshot, tagName, timeRetained, Collections.emptyList(), false);
     }
 }

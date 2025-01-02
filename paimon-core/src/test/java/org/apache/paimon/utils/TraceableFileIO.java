@@ -37,7 +37,6 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -62,15 +61,7 @@ public class TraceableFileIO implements FileIO {
 
     @Override
     public PositionOutputStream newOutputStream(Path f, boolean overwrite) throws IOException {
-        return createOutputStream(
-                f,
-                () -> {
-                    try {
-                        return originalFs.newOutputStream(f, overwrite);
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                });
+        return createOutputStream(f, () -> originalFs.newOutputStream(f, overwrite));
     }
 
     @Override
@@ -85,30 +76,22 @@ public class TraceableFileIO implements FileIO {
 
     @Override
     public SeekableInputStream newInputStream(Path f) throws IOException {
-        return createInputStream(
-                f,
-                () -> {
-                    try {
-                        return originalFs.newInputStream(f);
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                });
+        return createInputStream(f, () -> originalFs.newInputStream(f));
     }
 
     private PositionOutputStream createOutputStream(
-            Path f, Supplier<PositionOutputStream> streamOpener) throws IOException {
+            Path f, SupplierWithIOException<PositionOutputStream> streamOpener) throws IOException {
 
-        final Supplier<OutStream> wrappedStreamOpener =
+        final SupplierWithIOException<OutStream> wrappedStreamOpener =
                 () -> new OutStream(ThreadUtils.currentStackString(), f, streamOpener.get(), this);
 
         return createStream(wrappedStreamOpener, OPEN_OUTPUT_STREAMS);
     }
 
     private SeekableInputStream createInputStream(
-            Path f, Supplier<SeekableInputStream> streamOpener) throws IOException {
+            Path f, SupplierWithIOException<SeekableInputStream> streamOpener) throws IOException {
 
-        final Supplier<InStream> wrappedStreamOpener =
+        final SupplierWithIOException<InStream> wrappedStreamOpener =
                 () -> new InStream(ThreadUtils.currentStackString(), f, streamOpener.get(), this);
 
         return createStream(wrappedStreamOpener, OPEN_INPUT_STREAMS);
@@ -144,7 +127,8 @@ public class TraceableFileIO implements FileIO {
         return originalFs.exists(f);
     }
 
-    private <T> T createStream(final Supplier<T> streamOpener, final HashSet<T> openStreams)
+    private <T> T createStream(
+            final SupplierWithIOException<T> streamOpener, final HashSet<T> openStreams)
             throws IOException {
         // open the stream outside the lock.
         final T out = streamOpener.get();

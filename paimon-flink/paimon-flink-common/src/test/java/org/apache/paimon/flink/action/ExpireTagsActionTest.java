@@ -92,7 +92,7 @@ public class ExpireTagsActionTest extends ActionITCaseBase {
         assertThat(table.tagManager().tagExists("tag-5")).isFalse();
 
         // tag-3 as the base older_than time
-        LocalDateTime olderThanTime = table.tagManager().tag("tag-3").getTagCreateTime();
+        LocalDateTime olderThanTime = table.tagManager().getOrThrow("tag-3").getTagCreateTime();
         java.sql.Timestamp timestamp =
                 new java.sql.Timestamp(Timestamp.fromLocalDateTime(olderThanTime).getMillisecond());
         createAction(

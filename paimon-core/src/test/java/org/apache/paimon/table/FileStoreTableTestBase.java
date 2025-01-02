@@ -1080,7 +1080,7 @@ public abstract class FileStoreTableTestBase {
         assertThat(tagManager.tagExists("test-tag")).isTrue();
 
         // verify that test-tag is equal to snapshot 2
-        Snapshot tagged = tagManager.taggedSnapshot("test-tag");
+        Snapshot tagged = tagManager.getOrThrow("test-tag").trimToSnapshot();
         Snapshot snapshot2 = table.snapshotManager().snapshot(2);
         assertThat(tagged.equals(snapshot2)).isTrue();
     }
@@ -1103,7 +1103,7 @@ public abstract class FileStoreTableTestBase {
             TagManager tagManager = new TagManager(new TraceableFileIO(), tablePath);
             assertThat(tagManager.tagExists("test-tag")).isTrue();
             // verify that test-tag is equal to snapshot 1
-            Snapshot tagged = tagManager.taggedSnapshot("test-tag");
+            Snapshot tagged = tagManager.getOrThrow("test-tag").trimToSnapshot();
             Snapshot snapshot1 = table.snapshotManager().snapshot(1);
             assertThat(tagged.equals(snapshot1)).isTrue();
             // snapshot 2
@@ -1116,7 +1116,7 @@ public abstract class FileStoreTableTestBase {
             // verify that tag file exist
             assertThat(tagManager.tagExists("test-tag-2")).isTrue();
             // verify that test-tag is equal to snapshot 1
-            Snapshot tag2 = tagManager.taggedSnapshot("test-tag-2");
+            Snapshot tag2 = tagManager.getOrThrow("test-tag-2").trimToSnapshot();
             assertThat(tag2.equals(snapshot1)).isTrue();
         }
     }
@@ -1138,9 +1138,9 @@ public abstract class FileStoreTableTestBase {
             assertThat(tagManager.tagExists("test-tag")).isTrue();
             // Create again failed if tag existed
             Assertions.assertThatThrownBy(() -> table.createTag("test-tag", 1))
-                    .hasMessageContaining("Tag name 'test-tag' already exists.");
+                    .hasMessageContaining("Tag 'test-tag' already exists.");
             Assertions.assertThatThrownBy(() -> table.createTag("test-tag", 2))
-                    .hasMessageContaining("Tag name 'test-tag' already exists.");
+                    .hasMessageContaining("Tag 'test-tag' already exists.");
         }
     }
 
@@ -1165,7 +1165,7 @@ public abstract class FileStoreTableTestBase {
         assertThat(tagManager.tagExists("test-tag")).isTrue();
 
         // verify that test-tag is equal to snapshot 2
-        Snapshot tagged = tagManager.taggedSnapshot("test-tag");
+        Snapshot tagged = tagManager.getOrThrow("test-tag").trimToSnapshot();
         Snapshot snapshot2 = table.snapshotManager().snapshot(2);
         assertThat(tagged.equals(snapshot2)).isTrue();
 
@@ -1220,7 +1220,7 @@ public abstract class FileStoreTableTestBase {
         assertThatThrownBy(() -> table.createBranch("branch-1", "tag1"))
                 .satisfies(
                         anyCauseMatches(
-                                IllegalArgumentException.class, "Tag name 'tag1' not exists."));
+                                IllegalArgumentException.class, "Tag 'tag1' doesn't exist."));
 
         assertThatThrownBy(() -> table.createBranch("branch0", "test-tag"))
                 .satisfies(
@@ -1409,8 +1409,7 @@ public abstract class FileStoreTableTestBase {
         assertThatThrownBy(() -> table.createTag("", 1))
                 .satisfies(
                         anyCauseMatches(
-                                IllegalArgumentException.class,
-                                String.format("Tag name '%s' is blank", "")));
+                                IllegalArgumentException.class, "Tag name shouldn't be blank"));
     }
 
     @Test

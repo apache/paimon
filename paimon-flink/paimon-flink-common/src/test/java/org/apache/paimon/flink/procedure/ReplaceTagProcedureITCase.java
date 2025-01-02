@@ -44,7 +44,7 @@ public class ReplaceTagProcedureITCase extends CatalogITCaseBase {
                         () ->
                                 sql(
                                         "CALL sys.replace_tag(`table` => 'default.T', tag => 'test_tag')"))
-                .hasMessageContaining("Tag name 'test_tag' does not exist.");
+                .hasMessageContaining("Tag 'test_tag' doesn't exist.");
 
         sql("CALL sys.create_tag(`table` => 'default.T', tag => 'test_tag')");
         assertThat(sql("select tag_name,snapshot_id,time_retained from `T$tags`"))
