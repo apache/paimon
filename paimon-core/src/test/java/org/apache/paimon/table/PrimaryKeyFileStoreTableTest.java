@@ -31,11 +31,13 @@ import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -58,6 +60,7 @@ import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.system.AuditLogTable;
 import org.apache.paimon.table.system.FileMonitorTable;
@@ -68,6 +71,7 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 
+import org.apache.parquet.hadoop.ParquetOutputFormat;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -85,8 +89,10 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -100,7 +106,7 @@ import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
-import static org.apache.paimon.CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD;
+import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
 import static org.apache.paimon.CoreOptions.LOOKUP_LOCAL_FILE_TYPE;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.MergeEngine;
@@ -964,89 +970,110 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
-    public void testDeletionVectorsWithBitmapFileIndexInFile() throws Exception {
+    public void testDeletionVectorsCombineWithFileIndexPushDownParquet() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
                             conf.set(BUCKET, 1);
+                            conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
                             conf.set(DELETION_VECTORS_ENABLED, true);
-                            conf.set(TARGET_FILE_SIZE, MemorySize.ofBytes(1));
-                            conf.set(FILE_INDEX_IN_MANIFEST_THRESHOLD, MemorySize.ofBytes(1));
+                            conf.set(ParquetOutputFormat.BLOCK_SIZE, "1048576");
+                            conf.set(ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK, "100");
+                            conf.set(ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT, "300");
                             conf.set("file-index.bitmap.columns", "b");
                         });
 
-        StreamTableWrite write =
-                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
-        StreamTableCommit commit = table.newCommit(commitUser);
+        BatchWriteBuilder batchWriteBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite batchWrite;
+        BatchTableCommit batchCommit;
 
-        write.write(rowData(1, 1, 300L));
-        write.write(rowData(1, 2, 400L));
-        write.write(rowData(1, 3, 100L));
-        write.write(rowData(1, 4, 100L));
-        commit.commit(0, write.prepareCommit(true, 0));
+        // test bitmap index and deletion vector merge and using EmptyFileRecordReader to read
+        batchWrite =
+                (BatchTableWrite)
+                        batchWriteBuilder
+                                .newWrite()
+                                .withIOManager(new IOManagerImpl(tempDir.toString()));
+        batchCommit = batchWriteBuilder.newCommit();
+        batchWrite.write(rowData(1, 1, 300L));
+        batchWrite.write(rowData(1, 2, 400L));
+        batchWrite.write(rowData(1, 3, 100L));
+        batchWrite.write(rowData(1, 4, 100L));
+        batchCommit.commit(batchWrite.prepareCommit());
+        batchWrite.close();
+        batchCommit.close();
 
-        write.write(rowData(1, 1, 100L));
-        write.write(rowData(1, 2, 100L));
-        write.write(rowData(1, 3, 300L));
-        write.write(rowData(1, 5, 100L));
-        commit.commit(1, write.prepareCommit(true, 1));
+        batchWrite =
+                (BatchTableWrite)
+                        batchWriteBuilder
+                                .newWrite()
+                                .withIOManager(new IOManagerImpl(tempDir.toString()));
+        batchCommit = batchWriteBuilder.newCommit();
+        batchWrite.write(rowDataWithKind(RowKind.DELETE, 1, 1, 300L));
+        batchCommit.commit(batchWrite.prepareCommit());
+        batchWrite.close();
+        batchCommit.close();
 
-        write.write(rowData(1, 4, 200L));
-        commit.commit(2, write.prepareCommit(true, 2));
+        Predicate predicate = new PredicateBuilder(table.rowType()).equal(2, 300L);
+        TableScan.Plan plan = table.newScan().plan();
+        RecordReader<InternalRow> reader =
+                table.newRead().withFilter(predicate).createReader(plan.splits());
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(row -> cnt.incrementAndGet());
+        assertThat(cnt.get()).isEqualTo(0);
+        reader.close();
 
-        PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
-        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
-        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(2);
-        TableRead read = table.newRead().withFilter(builder.equal(2, 100L));
-        assertThat(getResult(read, splits, BATCH_ROW_TO_STRING))
-                .hasSameElementsAs(
-                        Arrays.asList(
-                                "1|1|100|binary|varbinary|mapKey:mapVal|multiset",
-                                "1|2|100|binary|varbinary|mapKey:mapVal|multiset",
-                                "1|5|100|binary|varbinary|mapKey:mapVal|multiset"));
-    }
+        // truncate table
+        FileStoreCommit truncateCommit = table.store().newCommit(UUID.randomUUID().toString());
+        truncateCommit.truncateTable(2);
+        truncateCommit.close();
 
-    @Test
-    public void testDeletionVectorsWithBitmapFileIndexInMeta() throws Exception {
-        FileStoreTable table =
-                createFileStoreTable(
-                        conf -> {
-                            conf.set(BUCKET, 1);
-                            conf.set(DELETION_VECTORS_ENABLED, true);
-                            conf.set(TARGET_FILE_SIZE, MemorySize.ofBytes(1));
-                            conf.set(FILE_INDEX_IN_MANIFEST_THRESHOLD, MemorySize.ofMebiBytes(1));
-                            conf.set("file-index.bitmap.columns", "b");
-                        });
+        // test parquet row ranges filtering
+        int bound = 100;
+        Random random = new Random();
+        Map<Integer, Long> expectedMap = new HashMap<>();
+        batchWrite =
+                (BatchTableWrite)
+                        batchWriteBuilder
+                                .newWrite()
+                                .withIOManager(new IOManagerImpl(tempDir.toString()));
+        batchCommit = batchWriteBuilder.newCommit();
+        for (int i = 0; i < 10000; i++) {
+            long next = random.nextInt(bound);
+            expectedMap.put(i, next);
+            batchWrite.write(rowData(1, i, next));
+        }
+        batchCommit.commit(batchWrite.prepareCommit());
+        batchWrite.close();
+        batchCommit.close();
 
-        StreamTableWrite write =
-                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
-        StreamTableCommit commit = table.newCommit(commitUser);
+        batchWrite =
+                (BatchTableWrite)
+                        batchWriteBuilder
+                                .newWrite()
+                                .withIOManager(new IOManagerImpl(tempDir.toString()));
+        batchCommit = batchWriteBuilder.newCommit();
+        for (int i = 2500; i < 5000; i++) {
+            batchWrite.write(rowDataWithKind(RowKind.DELETE, 1, i, expectedMap.remove(i)));
+        }
+        batchCommit.commit(batchWrite.prepareCommit());
+        batchWrite.close();
+        batchCommit.close();
 
-        write.write(rowData(1, 1, 300L));
-        write.write(rowData(1, 2, 400L));
-        write.write(rowData(1, 3, 100L));
-        write.write(rowData(1, 4, 100L));
-        commit.commit(0, write.prepareCommit(true, 0));
-
-        write.write(rowData(1, 1, 100L));
-        write.write(rowData(1, 2, 100L));
-        write.write(rowData(1, 3, 300L));
-        write.write(rowData(1, 5, 100L));
-        commit.commit(1, write.prepareCommit(true, 1));
-
-        write.write(rowData(1, 4, 200L));
-        commit.commit(2, write.prepareCommit(true, 2));
-
-        PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
-        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
-        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(2);
-        TableRead read = table.newRead().withFilter(builder.equal(2, 100L));
-        assertThat(getResult(read, splits, BATCH_ROW_TO_STRING))
-                .hasSameElementsAs(
-                        Arrays.asList(
-                                "1|1|100|binary|varbinary|mapKey:mapVal|multiset",
-                                "1|2|100|binary|varbinary|mapKey:mapVal|multiset",
-                                "1|5|100|binary|varbinary|mapKey:mapVal|multiset"));
+        for (int i = 0; i < bound; i++) {
+            long next = i;
+            predicate = new PredicateBuilder(table.rowType()).equal(2, next);
+            plan = table.newScan().plan();
+            reader = table.newRead().withFilter(predicate).createReader(plan.splits());
+            AtomicLong expectedCnt = new AtomicLong(0);
+            reader.forEachRemaining(row -> {
+                expectedCnt.incrementAndGet();
+                assertThat(row.getLong(2)).isEqualTo(expectedMap.get(row.getInt(1)));
+            });
+            long count =
+                    expectedMap.entrySet().stream().filter(x -> x.getValue().equals(next)).count();
+            assertThat(expectedCnt.get()).isEqualTo(count);
+            reader.close();
+        }
     }
 
     @Test

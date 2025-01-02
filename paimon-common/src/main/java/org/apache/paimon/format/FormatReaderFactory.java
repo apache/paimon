@@ -24,6 +24,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
 
@@ -45,5 +46,8 @@ public interface FormatReaderFactory {
 
         @Nullable
         FileIndexResult fileIndex();
+
+        @Nullable
+        RoaringBitmap32 deletion();
     }
 }

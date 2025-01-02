@@ -18,7 +18,6 @@
 
 package org.apache.paimon.format.parquet;
 
-import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -49,7 +48,7 @@ public class ParquetUtil {
      */
     public static Pair<Map<String, Statistics<?>>, SimpleStatsExtractor.FileInfo>
             extractColumnStats(FileIO fileIO, Path path) throws IOException {
-        try (ParquetFileReader reader = getParquetReader(fileIO, path, null)) {
+        try (ParquetFileReader reader = getParquetReader(fileIO, path)) {
             ParquetMetadata parquetMetadata = reader.getFooter();
             List<BlockMetaData> blockMetaDataList = parquetMetadata.getBlocks();
             Map<String, Statistics<?>> resultStats = new HashMap<>();
@@ -78,12 +77,12 @@ public class ParquetUtil {
      * @param path the path of parquet files to be read
      * @return parquet reader, used for reading footer, status, etc.
      */
-    public static ParquetFileReader getParquetReader(
-            FileIO fileIO, Path path, FileIndexResult fileIndexResult) throws IOException {
+    public static ParquetFileReader getParquetReader(FileIO fileIO, Path path) throws IOException {
         return new ParquetFileReader(
                 ParquetInputFile.fromPath(fileIO, path),
                 ParquetReadOptions.builder().build(),
-                fileIndexResult);
+                null,
+                null);
     }
 
     static void assertStatsClass(

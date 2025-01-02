@@ -93,6 +93,10 @@ public class BitmapDeletionVector implements DeletionVector {
         }
     }
 
+    public RoaringBitmap32 get() {
+        return roaringBitmap.clone();
+    }
+
     public static DeletionVector deserializeFromByteBuffer(ByteBuffer buffer) throws IOException {
         RoaringBitmap32 bitmap = new RoaringBitmap32();
         bitmap.deserialize(buffer);

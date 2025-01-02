@@ -40,12 +40,13 @@ import java.util.Set;
  * column index based filtering. To be used iterate over the matching row indexes to be read from a
  * row-group, retrieve the count of the matching rows or check overlapping of a row index range.
  *
- * <p>Note: The class was copied over to support using {@link FileIndexResult} to filter {@link
- * RowRanges}. Added a new method {@link RowRanges#create(long, long, PrimitiveIterator.OfInt,
- * OffsetIndex, FileIndexResult)}
+ * <p>Note: The class was copied over to support using {@link FileIndexResult} and deletion vector
+ * result to filter or narrow the {@link RowRanges}. Added a new method {@link
+ * RowRanges#create(long, long, PrimitiveIterator.OfInt, OffsetIndex, FileIndexResult,
+ * RoaringBitmap32)}
  *
  * @see ColumnIndexFilter#calculateRowRanges(Filter, ColumnIndexStore, Set, long, long,
- *     FileIndexResult)
+ *     FileIndexResult, RoaringBitmap32)
  */
 public class RowRanges {
 
@@ -163,13 +164,17 @@ public class RowRanges {
         return ranges;
     }
 
-    /** Support using {@link FileIndexResult} to filter the row ranges. */
+    /**
+     * Support using the {@link FileIndexResult} and the deletion vector result to filter the row
+     * ranges.
+     */
     public static RowRanges create(
             long rowCount,
             long rowIndexOffset,
             PrimitiveIterator.OfInt pageIndexes,
             OffsetIndex offsetIndex,
-            @Nullable FileIndexResult fileIndexResult) {
+            @Nullable FileIndexResult fileIndexResult,
+            @Nullable RoaringBitmap32 deletion) {
         RowRanges ranges = new RowRanges();
         while (pageIndexes.hasNext()) {
             int pageIndex = pageIndexes.nextInt();
@@ -183,6 +188,19 @@ public class RowRanges {
                         RoaringBitmap32.bitmapOfRange(
                                 rowIndexOffset + firstRowIndex, rowIndexOffset + lastRowIndex + 1);
                 RoaringBitmap32 result = RoaringBitmap32.and(bitmap, range);
+                if (result.isEmpty()) {
+                    continue;
+                }
+                firstRowIndex = result.first() - rowIndexOffset;
+                lastRowIndex = result.last() - rowIndexOffset;
+            }
+
+            // using deletion vector result to filter or narrow the row ranges
+            if (deletion != null) {
+                RoaringBitmap32 range =
+                        RoaringBitmap32.bitmapOfRange(
+                                rowIndexOffset + firstRowIndex, rowIndexOffset + lastRowIndex + 1);
+                RoaringBitmap32 result = RoaringBitmap32.andNot(range, deletion);
                 if (result.isEmpty()) {
                     continue;
                 }
