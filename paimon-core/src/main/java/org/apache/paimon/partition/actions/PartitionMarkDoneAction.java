@@ -21,6 +21,7 @@ package org.apache.paimon.partition.actions;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.StringUtils;
 
 import java.io.Closeable;
 import java.util.Arrays;
@@ -68,7 +69,7 @@ public interface PartitionMarkDoneAction extends Closeable {
     }
 
     static PartitionMarkDoneAction getCustomMarkDoneAction(ClassLoader cl, CoreOptions options) {
-        if (options.partitionMarkDoneCustomClass() == null) {
+        if (StringUtils.isNullOrWhitespaceOnly(options.partitionMarkDoneCustomClass())) {
             throw new IllegalArgumentException(
                     String.format(
                             "You need to set [%s] when you add [%s] mark done action in your property [%s].",
