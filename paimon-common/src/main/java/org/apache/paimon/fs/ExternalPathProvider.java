@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /** Provider for external paths. */
@@ -135,5 +136,57 @@ public class ExternalPathProvider implements Serializable {
 
     public boolean externalPathExists() {
         return externalPathExists;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+
+        ExternalPathProvider that = (ExternalPathProvider) o;
+        return currentIndex == that.currentIndex
+                && externalPathExists == that.externalPathExists
+                && externalPathsMap.equals(that.externalPathsMap)
+                && externalPathsList.equals(that.externalPathsList)
+                && externalPathStrategy == that.externalPathStrategy
+                && externalFSStrategy == that.externalFSStrategy
+                && Objects.equals(dbAndTableRelativePath, that.dbAndTableRelativePath);
+    }
+
+    @Override
+    public String toString() {
+        return "ExternalPathProvider{"
+                + " externalPathsMap="
+                + externalPathsMap
+                + ", externalPathsList="
+                + externalPathsList
+                + ", externalPathStrategy="
+                + externalPathStrategy
+                + ", externalFSStrategy="
+                + externalFSStrategy
+                + ", currentIndex="
+                + currentIndex
+                + ", externalPathExists="
+                + externalPathExists
+                + ", dbAndTableRelativePath='"
+                + dbAndTableRelativePath
+                + '\''
+                + "}";
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(
+                externalPathsMap,
+                externalPathsList,
+                externalPathStrategy,
+                externalFSStrategy,
+                currentIndex,
+                externalPathExists,
+                dbAndTableRelativePath);
     }
 }
