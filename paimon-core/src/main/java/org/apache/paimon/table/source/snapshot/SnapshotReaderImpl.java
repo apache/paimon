@@ -54,6 +54,7 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -250,6 +251,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public SnapshotReader withBucket(int bucket) {
         scan.withBucket(bucket);
+        return this;
+    }
+
+    public SnapshotReader withBuckets(Collection<Integer> buckets) {
+        scan.withBuckets(buckets);
         return this;
     }
 

@@ -27,6 +27,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.SingleFileWriter;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
@@ -207,6 +208,10 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         }
 
         public ManifestFile create() {
+            return create(null);
+        }
+
+        public ManifestFile create(List<Predicate> filters) {
             RowType entryType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
             return new ManifestFile(
                     fileIO,
@@ -214,7 +219,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     partitionType,
                     new ManifestEntrySerializer(),
                     entryType,
-                    fileFormat.createReaderFactory(entryType),
+                    fileFormat.createReaderFactory(entryType, filters),
                     fileFormat.createWriterFactory(entryType),
                     compression,
                     pathFactory.manifestFileFactory(),
