@@ -40,9 +40,9 @@ public class FactoryUtilTest {
                                         Thread.currentThread().getContextClassLoader(),
                                         DummyFactory.class,
                                         "non-exist-factory"))
-                .isInstanceOf(FactoryException.class)
+                .isInstanceOf(FactoryNotFoundException.class)
                 .hasMessageContaining(
-                        "Could not find any factory for identifier '%s' that implements '%s' in the classpath.",
-                        "non-exist-factory", DummyFactory.class.getName());
+                        "Could not find any factory for identifier '%s' in the classpath.",
+                        "non-exist-factory", DummyFactory.class.getName(), "");
     }
 }
