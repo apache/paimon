@@ -25,6 +25,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.ServiceLoader;
@@ -74,6 +75,12 @@ public class FactoryUtil {
                                     .collect(Collectors.joining("\n"))));
         }
         if (matchingFactories.size() > 1) {
+            if (matchingFactories.stream().map(Factory::priority).distinct().count() > 1) {
+                return (T)
+                        matchingFactories.stream()
+                                .min(Comparator.comparingInt(Factory::priority))
+                                .get();
+            }
             throw new FactoryException(
                     String.format(
                             "Multiple factories for identifier '%s' that implement '%s' found in the classpath.\n\n"

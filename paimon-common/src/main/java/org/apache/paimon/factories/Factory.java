@@ -37,4 +37,16 @@ public interface Factory {
      * using "-" (e.g. {@code elasticsearch-7}).
      */
     String identifier();
+
+    /**
+     * This is the priority of the factory, allows you to override the default factory
+     * implementation. The default officially implemented factory priority is 9. If the number is
+     * less than 9, the smaller number will be selected for execution. If the smallest priority also
+     * conflicts, an exception will be thrown.
+     *
+     * @return priority
+     */
+    default int priority() {
+        return 9;
+    }
 }
