@@ -394,7 +394,8 @@ public class ParquetFileReader implements Closeable {
                                                     RoaringBitmap32.bitmapOfRange(
                                                             rowIndexOffset,
                                                             rowIndexOffset + it.getRowCount());
-                                            return !RoaringBitmap32.andNot(range, deletion).isEmpty();
+                                            return !RoaringBitmap32.andNot(range, deletion)
+                                                    .isEmpty();
                                         })
                                 .collect(Collectors.toList());
             }

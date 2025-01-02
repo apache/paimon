@@ -918,9 +918,12 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         assertThat(result.size()).isEqualTo((200000 - 90000) - (187795 - 93421));
 
-        assertThat(result).doesNotContain("1|93421|9342100|binary|varbinary|mapKey:mapVal|multiset");
-        assertThat(result).doesNotContain("1|187794|18779400|binary|varbinary|mapKey:mapVal|multiset");
-        assertThat(result).doesNotContain("1|200000|20000000|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(result)
+                .doesNotContain("1|93421|9342100|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(result)
+                .doesNotContain("1|187794|18779400|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(result)
+                .doesNotContain("1|200000|20000000|binary|varbinary|mapKey:mapVal|multiset");
 
         assertThat(result).contains("1|199999|19999900|binary|varbinary|mapKey:mapVal|multiset");
         assertThat(result).contains("1|90000|9000000|binary|varbinary|mapKey:mapVal|multiset");
