@@ -869,11 +869,14 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                         writeBuilder
                                 .newWrite()
                                 .withIOManager(new IOManagerImpl(tempDir.toString()));
-        for (int i = 110000; i < 115000; i++) {
+
+        // test row ranges filter
+        for (int i = 1000; i < 6000; i++) {
             write.write(rowDataWithKind(RowKind.DELETE, 1, i, i * 100L));
         }
 
-        for (int i = 130000; i < 135000; i++) {
+        // test deletion vector filter row group
+        for (int i = 93421; i < 187795; i++) {
             write.write(rowDataWithKind(RowKind.DELETE, 1, i, i * 100L));
         }
 
@@ -886,9 +889,8 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         Random random = new Random();
 
         // point filter
-
         for (int i = 0; i < 10; i++) {
-            int value = random.nextInt(110000);
+            int value = 6000 + random.nextInt(93421 - 6000);
             TableRead read = table.newRead().withFilter(builder.equal(1, value)).executeFilter();
             assertThat(getResult(read, splits, BATCH_ROW_TO_STRING))
                     .isEqualTo(
@@ -899,7 +901,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         }
 
         for (int i = 0; i < 10; i++) {
-            int value = 130000 + random.nextInt(5000);
+            int value = 93421 + random.nextInt(187795 - 93421);
             TableRead read = table.newRead().withFilter(builder.equal(1, value)).executeFilter();
             assertThat(getResult(read, splits, BATCH_ROW_TO_STRING)).isEmpty();
         }
@@ -908,29 +910,22 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                 table.newRead()
                         .withFilter(
                                 PredicateBuilder.and(
-                                        builder.greaterOrEqual(1, 100000),
-                                        builder.lessThan(1, 150000)))
+                                        builder.greaterOrEqual(1, 90000),
+                                        builder.lessThan(1, 200000)))
                         .executeFilter();
 
         List<String> result = getResult(tableRead, splits, BATCH_ROW_TO_STRING);
 
-        assertThat(result.size()).isEqualTo(40000); // filter 10000
+        assertThat(result.size()).isEqualTo((200000 - 90000) - (187795 - 93421));
 
-        assertThat(result)
-                .doesNotContain("1|110000|11000000|binary|varbinary|mapKey:mapVal|multiset");
-        assertThat(result)
-                .doesNotContain("1|114999|11499900|binary|varbinary|mapKey:mapVal|multiset");
-        assertThat(result)
-                .doesNotContain("1|130000|13000000|binary|varbinary|mapKey:mapVal|multiset");
-        assertThat(result)
-                .doesNotContain("1|134999|13499900|binary|varbinary|mapKey:mapVal|multiset");
-        assertThat(result).contains("1|100000|10000000|binary|varbinary|mapKey:mapVal|multiset");
-        assertThat(result).contains("1|149999|14999900|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(result).doesNotContain("1|93421|9342100|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(result).doesNotContain("1|187794|18779400|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(result).doesNotContain("1|200000|20000000|binary|varbinary|mapKey:mapVal|multiset");
 
-        assertThat(result).contains("1|101099|10109900|binary|varbinary|mapKey:mapVal|multiset");
-        assertThat(result).contains("1|115000|11500000|binary|varbinary|mapKey:mapVal|multiset");
-        assertThat(result).contains("1|129999|12999900|binary|varbinary|mapKey:mapVal|multiset");
-        assertThat(result).contains("1|135000|13500000|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(result).contains("1|199999|19999900|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(result).contains("1|90000|9000000|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(result).contains("1|187795|18779500|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(result).contains("1|93420|9342000|binary|varbinary|mapKey:mapVal|multiset");
     }
 
     @Test
@@ -977,7 +972,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                             conf.set(BUCKET, 1);
                             conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
                             conf.set(DELETION_VECTORS_ENABLED, true);
-                            conf.set(ParquetOutputFormat.BLOCK_SIZE, "1048576");
+                            conf.set(ParquetOutputFormat.BLOCK_SIZE, "524288");
                             conf.set(ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK, "100");
                             conf.set(ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT, "300");
                             conf.set("file-index.bitmap.columns", "b");
@@ -1037,7 +1032,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 .newWrite()
                                 .withIOManager(new IOManagerImpl(tempDir.toString()));
         batchCommit = batchWriteBuilder.newCommit();
-        for (int i = 0; i < 10000; i++) {
+        for (int i = 0; i < 100000; i++) {
             long next = random.nextInt(bound);
             expectedMap.put(i, next);
             batchWrite.write(rowData(1, i, next));
@@ -1052,7 +1047,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 .newWrite()
                                 .withIOManager(new IOManagerImpl(tempDir.toString()));
         batchCommit = batchWriteBuilder.newCommit();
-        for (int i = 2500; i < 5000; i++) {
+        for (int i = 25000; i < 50000; i++) {
             batchWrite.write(rowDataWithKind(RowKind.DELETE, 1, i, expectedMap.remove(i)));
         }
         batchCommit.commit(batchWrite.prepareCommit());

@@ -366,6 +366,7 @@ public class ParquetFileReader implements Closeable {
                 }
                 blocks = RowGroupFilter.filterRowGroups(levels, recordFilter, blocks, this);
             }
+
             if (fileIndexResult instanceof BitmapIndexResult) {
                 RoaringBitmap32 selection = ((BitmapIndexResult) fileIndexResult).get();
                 RoaringBitmap32 result =
@@ -379,6 +380,21 @@ public class ParquetFileReader implements Closeable {
                                                             rowIndexOffset,
                                                             rowIndexOffset + it.getRowCount())
                                                     > 0;
+                                        })
+                                .collect(Collectors.toList());
+            }
+
+            if (deletion != null) {
+                blocks =
+                        blocks.stream()
+                                .filter(
+                                        it -> {
+                                            long rowIndexOffset = it.getRowIndexOffset();
+                                            RoaringBitmap32 range =
+                                                    RoaringBitmap32.bitmapOfRange(
+                                                            rowIndexOffset,
+                                                            rowIndexOffset + it.getRowCount());
+                                            return !RoaringBitmap32.andNot(range, deletion).isEmpty();
                                         })
                                 .collect(Collectors.toList());
             }
