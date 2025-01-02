@@ -1065,10 +1065,11 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
             plan = table.newScan().plan();
             reader = table.newRead().withFilter(predicate).createReader(plan.splits());
             AtomicLong expectedCnt = new AtomicLong(0);
-            reader.forEachRemaining(row -> {
-                expectedCnt.incrementAndGet();
-                assertThat(row.getLong(2)).isEqualTo(expectedMap.get(row.getInt(1)));
-            });
+            reader.forEachRemaining(
+                    row -> {
+                        expectedCnt.incrementAndGet();
+                        assertThat(row.getLong(2)).isEqualTo(expectedMap.get(row.getInt(1)));
+                    });
             long count =
                     expectedMap.entrySet().stream().filter(x -> x.getValue().equals(next)).count();
             assertThat(expectedCnt.get()).isEqualTo(count);
