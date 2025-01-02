@@ -107,6 +107,7 @@ public class CompactProcedure extends BaseProcedure {
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
                 ProcedureParameter.optional("partitions", StringType),
+                ProcedureParameter.optional("compact_strategy", StringType),
                 ProcedureParameter.optional("order_strategy", StringType),
                 ProcedureParameter.optional("order_by", StringType),
                 ProcedureParameter.optional("where", StringType),
@@ -119,6 +120,9 @@ public class CompactProcedure extends BaseProcedure {
                     new StructField[] {
                         new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
                     });
+
+    private static final String MINOR = "minor";
+    private static final String FULL = "full";
 
     protected CompactProcedure(TableCatalog tableCatalog) {
         super(tableCatalog);
@@ -138,15 +142,17 @@ public class CompactProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String partitions = blank(args, 1) ? null : args.getString(1);
-        String sortType = blank(args, 2) ? TableSorter.OrderType.NONE.name() : args.getString(2);
+        // make full compact strategy as default.
+        String compactStrategy = blank(args, 2) ? FULL : args.getString(2);
+        String sortType = blank(args, 3) ? TableSorter.OrderType.NONE.name() : args.getString(3);
         List<String> sortColumns =
-                blank(args, 3)
+                blank(args, 4)
                         ? Collections.emptyList()
-                        : Arrays.asList(args.getString(3).split(","));
-        String where = blank(args, 4) ? null : args.getString(4);
-        String options = args.isNullAt(5) ? null : args.getString(5);
+                        : Arrays.asList(args.getString(4).split(","));
+        String where = blank(args, 5) ? null : args.getString(5);
+        String options = args.isNullAt(6) ? null : args.getString(6);
         Duration partitionIdleTime =
-                blank(args, 6) ? null : TimeUtils.parseDuration(args.getString(6));
+                blank(args, 7) ? null : TimeUtils.parseDuration(args.getString(7));
         if (TableSorter.OrderType.NONE.name().equals(sortType) && !sortColumns.isEmpty()) {
             throw new IllegalArgumentException(
                     "order_strategy \"none\" cannot work with order_by columns.");
@@ -155,6 +161,14 @@ public class CompactProcedure extends BaseProcedure {
             throw new IllegalArgumentException(
                     "sort compact do not support 'partition_idle_time'.");
         }
+
+        if (!(compactStrategy.equalsIgnoreCase(FULL) || compactStrategy.equalsIgnoreCase(MINOR))) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "The compact strategy only supports 'full' or 'minor', but '%s' is configured.",
+                            compactStrategy));
+        }
+
         checkArgument(
                 partitions == null || where == null,
                 "partitions and where cannot be used together.");
@@ -192,6 +206,7 @@ public class CompactProcedure extends BaseProcedure {
                             newInternalRow(
                                     execute(
                                             (FileStoreTable) table,
+                                            compactStrategy,
                                             sortType,
                                             sortColumns,
                                             relation,
@@ -212,6 +227,7 @@ public class CompactProcedure extends BaseProcedure {
 
     private boolean execute(
             FileStoreTable table,
+            String compactStrategy,
             String sortType,
             List<String> sortColumns,
             DataSourceV2Relation relation,
@@ -219,6 +235,7 @@ public class CompactProcedure extends BaseProcedure {
             @Nullable Duration partitionIdleTime) {
         BucketMode bucketMode = table.bucketMode();
         TableSorter.OrderType orderType = TableSorter.OrderType.of(sortType);
+        boolean fullCompact = compactStrategy.equalsIgnoreCase(FULL);
         Predicate filter =
                 condition == null
                         ? null
@@ -233,7 +250,8 @@ public class CompactProcedure extends BaseProcedure {
             switch (bucketMode) {
                 case HASH_FIXED:
                 case HASH_DYNAMIC:
-                    compactAwareBucketTable(table, filter, partitionIdleTime, javaSparkContext);
+                    compactAwareBucketTable(
+                            table, fullCompact, filter, partitionIdleTime, javaSparkContext);
                     break;
                 case BUCKET_UNAWARE:
                     compactUnAwareBucketTable(table, filter, partitionIdleTime, javaSparkContext);
@@ -259,6 +277,7 @@ public class CompactProcedure extends BaseProcedure {
 
     private void compactAwareBucketTable(
             FileStoreTable table,
+            boolean fullCompact,
             @Nullable Predicate filter,
             @Nullable Duration partitionIdleTime,
             JavaSparkContext javaSparkContext) {
@@ -304,7 +323,7 @@ public class CompactProcedure extends BaseProcedure {
                                                             SerializationUtils.deserializeBinaryRow(
                                                                     pair.getLeft()),
                                                             pair.getRight(),
-                                                            true);
+                                                            fullCompact);
                                                 }
                                                 CommitMessageSerializer serializer =
                                                         new CommitMessageSerializer();

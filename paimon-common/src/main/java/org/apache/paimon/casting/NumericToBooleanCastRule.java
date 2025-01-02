@@ -37,6 +37,6 @@ class NumericToBooleanCastRule extends AbstractCastRule<Number, Boolean> {
 
     @Override
     public CastExecutor<Number, Boolean> create(DataType inputType, DataType targetType) {
-        return value -> value.intValue() != 0;
+        return value -> value.longValue() != 0;
     }
 }

@@ -25,8 +25,6 @@ import java.util.Optional;
 public class CreateTagFromTimestampActionFactory implements ActionFactory {
     public static final String IDENTIFIER = "create_tag_from_timestamp";
 
-    private static final String TABLE = "table";
-
     private static final String TAG = "tag";
 
     private static final String TIMESTAMP = "timestamp";
@@ -40,16 +38,18 @@ public class CreateTagFromTimestampActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        String warehouse = params.get(WAREHOUSE);
-        String table = params.get(TABLE);
-        String tag = params.get(TAG);
         Long timestamp = Long.parseLong(params.get(TIMESTAMP));
         String timeRetained = params.get(TIME_RETAINED);
-        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
+        Map<String, String> catalogConfig = catalogConfigMap(params);
 
         CreateTagFromTimestampAction createTagFromTimestampAction =
                 new CreateTagFromTimestampAction(
-                        warehouse, table, tag, timestamp, timeRetained, catalogConfig);
+                        params.getRequired(DATABASE),
+                        params.getRequired(TABLE),
+                        params.getRequired(TAG),
+                        timestamp,
+                        timeRetained,
+                        catalogConfig);
         return Optional.of(createTagFromTimestampAction);
     }
 
@@ -61,7 +61,8 @@ public class CreateTagFromTimestampActionFactory implements ActionFactory {
         System.out.println("Syntax:");
         System.out.println(
                 "  create_tag_from_timestamp --warehouse <warehouse_path> "
-                        + "--table <database.table_name> "
+                        + "--database <database_name>"
+                        + "--table <table_name> "
                         + "--tag <tag> "
                         + "--timestamp <timestamp> "
                         + "[--timeRetained <duration>] "

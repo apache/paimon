@@ -31,6 +31,7 @@ import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableScan;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -39,6 +40,7 @@ import org.apache.flink.table.connector.source.abilities.SupportsFilterPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsLimitPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
 import org.apache.flink.table.expressions.ResolvedExpression;
+import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -122,11 +124,11 @@ public abstract class FlinkTableSource
 
     @Override
     public boolean supportsNestedProjection() {
-        return false;
+        return true;
     }
 
     @Override
-    public void applyProjection(int[][] projectedFields) {
+    public void applyProjection(int[][] projectedFields, DataType producedDataType) {
         this.projectFields = projectedFields;
     }
 
@@ -172,11 +174,7 @@ public abstract class FlinkTableSource
     protected void scanSplitsForInference() {
         if (splitStatistics == null) {
             if (table instanceof DataTable) {
-                List<PartitionEntry> partitionEntries =
-                        table.newReadBuilder()
-                                .withFilter(predicate)
-                                .newScan()
-                                .listPartitionEntries();
+                List<PartitionEntry> partitionEntries = newTableScan().listPartitionEntries();
                 long totalSize = 0;
                 long rowCount = 0;
                 for (PartitionEntry entry : partitionEntries) {
@@ -187,13 +185,16 @@ public abstract class FlinkTableSource
                 splitStatistics =
                         new SplitStatistics((int) (totalSize / splitTargetSize + 1), rowCount);
             } else {
-                List<Split> splits =
-                        table.newReadBuilder().withFilter(predicate).newScan().plan().splits();
+                List<Split> splits = newTableScan().plan().splits();
                 splitStatistics =
                         new SplitStatistics(
                                 splits.size(), splits.stream().mapToLong(Split::rowCount).sum());
             }
         }
+    }
+
+    private TableScan newTableScan() {
+        return table.newReadBuilder().dropStats().withFilter(predicate).newScan();
     }
 
     /** Split statistics for inferring row count and parallelism size. */

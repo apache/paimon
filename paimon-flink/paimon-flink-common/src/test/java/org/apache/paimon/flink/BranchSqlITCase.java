@@ -27,6 +27,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -347,6 +348,11 @@ public class BranchSqlITCase extends CatalogITCaseBase {
                         "+I[bucket, 2]",
                         "+I[snapshot.time-retained, 1 h]",
                         "+I[scan.infer-parallelism, false]");
+        assertThat(collectResult("SELECT * FROM t$options /*+ OPTIONS('branch'='test') */"))
+                .containsExactlyInAnyOrder(
+                        "+I[bucket, 2]",
+                        "+I[snapshot.time-retained, 1 h]",
+                        "+I[scan.infer-parallelism, false]");
     }
 
     @Test
@@ -359,6 +365,10 @@ public class BranchSqlITCase extends CatalogITCaseBase {
 
         sql("ALTER TABLE t$branch_b1 SET ('snapshot.time-retained' = '5 h')");
         assertThat(collectResult("SELECT schema_id FROM t$branch_b1$schemas order by schema_id"))
+                .containsExactlyInAnyOrder("+I[0]", "+I[1]");
+        assertThat(
+                        collectResult(
+                                "SELECT schema_id FROM t$schemas /*+ OPTIONS('branch'='b1') */ order by schema_id"))
                 .containsExactlyInAnyOrder("+I[0]", "+I[1]");
     }
 
@@ -373,6 +383,8 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         sql("INSERT INTO t$branch_b1 VALUES (3, 4)");
         assertThat(collectResult("SELECT * FROM t$branch_b1$audit_log"))
                 .containsExactlyInAnyOrder("+I[+I, 3, 4]");
+        assertThat(collectResult("SELECT * FROM t$audit_log /*+ OPTIONS('branch'='b1') */"))
+                .containsExactlyInAnyOrder("+I[+I, 3, 4]");
     }
 
     @Test
@@ -384,6 +396,8 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         sql("CALL sys.create_branch('default.t', 'b1')");
         sql("INSERT INTO t$branch_b1 VALUES (3, 4)");
         assertThat(collectResult("SELECT * FROM t$branch_b1$ro"))
+                .containsExactlyInAnyOrder("+I[3, 4]");
+        assertThat(collectResult("SELECT * FROM t$ro /*+ OPTIONS('branch'='b1') */"))
                 .containsExactlyInAnyOrder("+I[3, 4]");
     }
 
@@ -399,6 +413,10 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         assertThat(collectResult("SELECT min_value_stats FROM t$files"))
                 .containsExactlyInAnyOrder("+I[{a=1, b=2}]");
         assertThat(collectResult("SELECT min_value_stats FROM t$branch_b1$files"))
+                .containsExactlyInAnyOrder("+I[{a=3, b=4}]", "+I[{a=5, b=6}]");
+        assertThat(
+                        collectResult(
+                                "SELECT min_value_stats FROM t$files /*+ OPTIONS('branch'='b1') */"))
                 .containsExactlyInAnyOrder("+I[{a=3, b=4}]", "+I[{a=5, b=6}]");
     }
 
@@ -416,9 +434,14 @@ public class BranchSqlITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder("+I[tag1, 1, 1]");
         assertThat(collectResult("SELECT tag_name,snapshot_id,record_count FROM t$branch_b1$tags"))
                 .containsExactlyInAnyOrder("+I[tag1, 1, 1]", "+I[tag2, 2, 2]");
+        assertThat(
+                        collectResult(
+                                "SELECT tag_name,snapshot_id,record_count FROM t$tags /*+ OPTIONS('branch'='b1') */"))
+                .containsExactlyInAnyOrder("+I[tag1, 1, 1]", "+I[tag2, 2, 2]");
     }
 
     @Test
+    @Timeout(60)
     public void testBranchConsumersTable() throws Exception {
         sql("CREATE TABLE t (a INT, b INT)");
         sql("INSERT INTO t VALUES (1, 2), (3,4)");
@@ -430,10 +453,19 @@ public class BranchSqlITCase extends CatalogITCaseBase {
                                 "SELECT * FROM t$branch_b1 /*+ OPTIONS('consumer-id'='id1','consumer.expiration-time'='3h') */"));
         sql("INSERT INTO t$branch_b1 VALUES (5, 6), (7, 8)");
         assertThat(iterator.collect(2)).containsExactlyInAnyOrder(Row.of(5, 6), Row.of(7, 8));
+        List<String> branchResult;
+        do {
+            branchResult = collectResult("SELECT * FROM t$branch_b1$consumers");
+            if (!branchResult.isEmpty()) {
+                break;
+            }
+            Thread.sleep(1000);
+        } while (true);
         iterator.close();
 
         assertThat(collectResult("SELECT * FROM t$consumers")).isEmpty();
-        assertThat(collectResult("SELECT * FROM t$branch_b1$consumers"))
+        assertThat(branchResult).containsExactlyInAnyOrder("+I[id1, 2]");
+        assertThat(collectResult("SELECT * FROM t$consumers /*+ OPTIONS('branch'='b1') */"))
                 .containsExactlyInAnyOrder("+I[id1, 2]");
     }
 
@@ -458,6 +490,31 @@ public class BranchSqlITCase extends CatalogITCaseBase {
                             .isTrue();
                     assertThat((long) row.getField(2)).isGreaterThan(0L);
                 });
+        List<Row> dynamicOptionRes =
+                sql(
+                        "SELECT schema_id, file_name, file_size FROM t$manifests /*+ OPTIONS('branch'='b1') */");
+        assertThat(dynamicOptionRes).containsExactlyInAnyOrderElementsOf(res);
+    }
+
+    @Test
+    public void testBranchSnapshotsTable() throws Exception {
+        sql("CREATE TABLE t (a INT, b INT)");
+        sql("INSERT INTO t VALUES (1, 2)");
+
+        sql("CALL sys.create_branch('default.t', 'b1')");
+        sql("INSERT INTO t$branch_b1 VALUES (3, 4)");
+        sql("INSERT INTO t$branch_b1 VALUES (5, 6)");
+
+        assertThat(collectResult("SELECT snapshot_id, schema_id, commit_kind FROM t$snapshots"))
+                .containsExactlyInAnyOrder("+I[1, 0, APPEND]");
+        assertThat(
+                        collectResult(
+                                "SELECT snapshot_id, schema_id, commit_kind FROM t$branch_b1$snapshots"))
+                .containsExactlyInAnyOrder("+I[1, 0, APPEND]", "+I[2, 0, APPEND]");
+        assertThat(
+                        collectResult(
+                                "SELECT snapshot_id, schema_id, commit_kind FROM t$snapshots /*+ OPTIONS('branch'='b1') */"))
+                .containsExactlyInAnyOrder("+I[1, 0, APPEND]", "+I[2, 0, APPEND]");
     }
 
     @Test
@@ -478,6 +535,10 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         assertThat(
                         collectResult(
                                 "SELECT `partition`, record_count, file_count FROM t$branch_b1$partitions"))
+                .containsExactlyInAnyOrder("+I[[1], 2, 2]", "+I[[2], 3, 2]");
+        assertThat(
+                        collectResult(
+                                "SELECT `partition`, record_count, file_count FROM t$partitions /*+ OPTIONS('branch'='b1') */"))
                 .containsExactlyInAnyOrder("+I[[1], 2, 2]", "+I[[2], 3, 2]");
     }
 

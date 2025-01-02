@@ -18,12 +18,11 @@
 
 package org.apache.paimon.metastore;
 
-import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.partition.Partition;
 
 import java.io.Serializable;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * A metastore client related to a table. All methods of this interface operate on the same specific
@@ -31,32 +30,17 @@ import java.util.Map;
  */
 public interface MetastoreClient extends AutoCloseable {
 
-    void addPartition(BinaryRow partition) throws Exception;
+    void addPartition(LinkedHashMap<String, String> partition) throws Exception;
 
-    default void addPartitions(List<BinaryRow> partitions) throws Exception {
-        for (BinaryRow partition : partitions) {
-            addPartition(partition);
-        }
-    }
+    void addPartitions(List<LinkedHashMap<String, String>> partitions) throws Exception;
 
-    void addPartition(LinkedHashMap<String, String> partitionSpec) throws Exception;
+    void dropPartition(LinkedHashMap<String, String> partition) throws Exception;
 
-    default void addPartitionsSpec(List<LinkedHashMap<String, String>> partitionSpecsList)
-            throws Exception {
-        for (LinkedHashMap<String, String> partitionSpecs : partitionSpecsList) {
-            addPartition(partitionSpecs);
-        }
-    }
+    void dropPartitions(List<LinkedHashMap<String, String>> partitions) throws Exception;
 
-    void deletePartition(LinkedHashMap<String, String> partitionSpec) throws Exception;
+    void markPartitionDone(LinkedHashMap<String, String> partition) throws Exception;
 
-    void markDone(LinkedHashMap<String, String> partitionSpec) throws Exception;
-
-    default void alterPartition(
-            LinkedHashMap<String, String> partitionSpec,
-            Map<String, String> parameters,
-            long modifyTime)
-            throws Exception {
+    default void alterPartition(Partition partition) throws Exception {
         throw new UnsupportedOperationException();
     }
 

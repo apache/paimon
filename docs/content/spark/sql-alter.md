@@ -95,12 +95,54 @@ ALTER TABLE my_table ADD COLUMNS (
 );
 ```
 
+The following SQL adds a nested column `f3` to a struct type.
+
+```sql
+-- column v previously has type STRUCT<f1: STRING, f2: INT>
+ALTER TABLE my_table ADD COLUMN v.f3 STRING;
+```
+
+The following SQL adds a nested column `f3` to a struct type, which is the element type of an array type.
+
+```sql
+-- column v previously has type ARRAY<STRUCT<f1: STRING, f2: INT>>
+ALTER TABLE my_table ADD COLUMN v.element.f3 STRING;
+```
+
+The following SQL adds a nested column `f3` to a struct type, which is the value type of a map type.
+
+```sql
+-- column v previously has type MAP<INT, STRUCT<f1: STRING, f2: INT>>
+ALTER TABLE my_table ADD COLUMN v.value.f3 STRING;
+```
+
 ## Renaming Column Name
 
 The following SQL renames column `c0` in table `my_table` to `c1`.
 
 ```sql
 ALTER TABLE my_table RENAME COLUMN c0 TO c1;
+```
+
+The following SQL renames a nested column `f1` to `f100` in a struct type.
+
+```sql
+-- column v previously has type STRUCT<f1: STRING, f2: INT>
+ALTER TABLE my_table RENAME COLUMN v.f1 to f100;
+```
+
+The following SQL renames a nested column `f1` to `f100` in a struct type, which is the element type of an array type.
+
+```sql
+-- column v previously has type ARRAY<STRUCT<f1: STRING, f2: INT>>
+ALTER TABLE my_table RENAME COLUMN v.element.f1 to f100;
+```
+
+The following SQL renames a nested column `f1` to `f100` in a struct type, which is the value type of a map type.
+
+```sql
+-- column v previously has type MAP<INT, STRUCT<f1: STRING, f2: INT>>
+ALTER TABLE my_table RENAME COLUMN v.value.f1 to f100;
 ```
 
 ## Dropping Columns
@@ -110,6 +152,35 @@ The following SQL drops two columns `c1` and `c2` from table `my_table`.
 ```sql
 ALTER TABLE my_table DROP COLUMNS (c1, c2);
 ```
+
+The following SQL drops a nested column `f2` from a struct type.
+
+```sql
+-- column v previously has type STRUCT<f1: STRING, f2: INT>
+ALTER TABLE my_table DROP COLUMN v.f2;
+```
+
+The following SQL drops a nested column `f2` from a struct type, which is the element type of an array type.
+
+```sql
+-- column v previously has type ARRAY<STRUCT<f1: STRING, f2: INT>>
+ALTER TABLE my_table DROP COLUMN v.element.f2;
+```
+
+The following SQL drops a nested column `f2` from a struct type, which is the value type of a map type.
+
+```sql
+-- column v previously has type MAP<INT, STRUCT<f1: STRING, f2: INT>>
+ALTER TABLE my_table DROP COLUMN v.value.f2;
+```
+
+In hive catalog, you need to ensure:
+
+1. disable `hive.metastore.disallow.incompatible.col.type.changes` in your hive server
+2. or `spark-sql --conf spark.hadoop.hive.metastore.disallow.incompatible.col.type.changes=false` in your spark.
+
+Otherwise this operation may fail, throws an exception like `The following columns have types incompatible with the
+existing columns in their respective positions`.
 
 ## Dropping Partitions
 
@@ -155,4 +226,43 @@ ALTER TABLE my_table ALTER COLUMN col_a AFTER col_b;
 
 ```sql
 ALTER TABLE my_table ALTER COLUMN col_a TYPE DOUBLE;
+```
+
+The following SQL changes the type of a nested column `f2` to `BIGINT` in a struct type.
+
+```sql
+-- column v previously has type STRUCT<f1: STRING, f2: INT>
+ALTER TABLE my_table ALTER COLUMN v.f2 TYPE BIGINT;
+```
+
+The following SQL changes the type of a nested column `f2` to `BIGINT` in a struct type, which is the element type of an array type.
+
+```sql
+-- column v previously has type ARRAY<STRUCT<f1: STRING, f2: INT>>
+ALTER TABLE my_table ALTER COLUMN v.element.f2 TYPE BIGINT;
+```
+
+The following SQL changes the type of a nested column `f2` to `BIGINT` in a struct type, which is the value type of a map type.
+
+```sql
+-- column v previously has type MAP<INT, STRUCT<f1: STRING, f2: INT>>
+ALTER TABLE my_table ALTER COLUMN v.value.f2 TYPE BIGINT;
+```
+
+
+# ALTER DATABASE
+
+The following SQL sets one or more properties in the specified database. If a particular property is already set in the database, override the old value with the new one.
+
+```sql
+ALTER { DATABASE | SCHEMA | NAMESPACE } my_database
+    SET { DBPROPERTIES | PROPERTIES } ( property_name = property_value [ , ... ] )
+```
+
+## Altering Database Location
+
+The following SQL sets the location of the specified database to `file:/temp/my_database.db`.
+
+```sql
+ALTER DATABASE my_database SET LOCATION 'file:/temp/my_database.db'
 ```

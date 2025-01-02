@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.FileSystemCatalogOptions;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -31,7 +30,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.BeforeAll;
@@ -1285,8 +1285,11 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", "default_checkpoint");
         mySqlConfig.put("table-name", "t");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRestartStrategy(RestartStrategies.noRestart());
+        // Using `none` to avoid compatibility issues with Flink 1.18-.
+        Configuration configuration = new Configuration();
+        configuration.set(RestartStrategyOptions.RESTART_STRATEGY, "none");
+        StreamExecutionEnvironment env =
+                StreamExecutionEnvironment.getExecutionEnvironment(configuration);
 
         MySqlSyncTableAction action = syncTableActionBuilder(mySqlConfig).build();
         action.withStreamExecutionEnvironment(env);
@@ -1323,7 +1326,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 syncTableActionBuilder(mySqlConfig)
                         .withCatalogConfig(
                                 Collections.singletonMap(
-                                        FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false"))
+                                        CatalogOptions.CASE_SENSITIVE.key(), "false"))
                         .withComputedColumnArgs("SUBSTRING=substring(UPPERCASE_STRING,2)")
                         .build();
         runActionWithDefaultEnv(action);
@@ -1359,7 +1362,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 syncTableActionBuilder(mySqlConfig)
                         .withCatalogConfig(
                                 Collections.singletonMap(
-                                        FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false"))
+                                        CatalogOptions.CASE_SENSITIVE.key(), "false"))
                         .withPrimaryKeys("ID1", "PART")
                         .withPartitionKeys("PART")
                         .build();

@@ -18,8 +18,6 @@
 
 package org.apache.paimon.options;
 
-import org.apache.paimon.options.description.Description;
-import org.apache.paimon.options.description.TextElement;
 import org.apache.paimon.table.CatalogTableType;
 
 import java.time.Duration;
@@ -89,7 +87,7 @@ public class CatalogOptions {
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(
-                            "Controls whether the catalog will cache databases, tables and manifests.");
+                            "Controls whether the catalog will cache databases, tables, manifests and partitions.");
 
     public static final ConfigOption<Duration> CACHE_EXPIRATION_INTERVAL_MS =
             key("cache.expiration-interval")
@@ -123,33 +121,19 @@ public class CatalogOptions {
                     .noDefaultValue()
                     .withDescription("Controls the maximum memory to cache manifest content.");
 
-    public static final ConfigOption<String> LINEAGE_META =
-            key("lineage-meta")
-                    .stringType()
-                    .noDefaultValue()
+    public static final ConfigOption<Integer> CACHE_SNAPSHOT_MAX_NUM_PER_TABLE =
+            key("cache.snapshot.max-num-per-table")
+                    .intType()
+                    .defaultValue(20)
                     .withDescription(
-                            Description.builder()
-                                    .text(
-                                            "The lineage meta to store table and data lineage information.")
-                                    .linebreak()
-                                    .linebreak()
-                                    .text("Possible values:")
-                                    .linebreak()
-                                    .list(
-                                            TextElement.text(
-                                                    "\"jdbc\": Use standard jdbc to store table and data lineage information."))
-                                    .list(
-                                            TextElement.text(
-                                                    "\"custom\": You can implement LineageMetaFactory and LineageMeta to store lineage information in customized storage."))
-                                    .build());
+                            "Controls the max number for snapshots per table in the catalog are cached.");
 
-    public static final ConfigOption<Boolean> ALLOW_UPPER_CASE =
-            ConfigOptions.key("allow-upper-case")
+    public static final ConfigOption<Boolean> CASE_SENSITIVE =
+            ConfigOptions.key("case-sensitive")
                     .booleanType()
                     .noDefaultValue()
-                    .withDescription(
-                            "Indicates whether this catalog allow upper case, "
-                                    + "its default value depends on the implementation of the specific catalog.");
+                    .withFallbackKeys("allow-upper-case")
+                    .withDescription("Indicates whether this catalog is case-sensitive.");
 
     public static final ConfigOption<Boolean> SYNC_ALL_PROPERTIES =
             ConfigOptions.key("sync-all-properties")

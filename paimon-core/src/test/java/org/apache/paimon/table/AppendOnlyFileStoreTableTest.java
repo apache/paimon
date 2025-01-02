@@ -58,6 +58,7 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.parquet.hadoop.ParquetOutputFormat;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -70,7 +71,9 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -78,7 +81,12 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.CoreOptions.DATA_FILE_PATH_DIRECTORY;
+import static org.apache.paimon.CoreOptions.FILE_FORMAT;
+import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
 import static org.apache.paimon.CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD;
+import static org.apache.paimon.CoreOptions.METADATA_STATS_MODE;
+import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucket;
 import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucketKeyHashCode;
@@ -110,7 +118,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                 table.store()
                         .pathFactory()
                         .createDataFilePathFactory(split.partition(), split.bucket())
-                        .toPath(split.dataFiles().get(0).fileName());
+                        .toPath(split.dataFiles().get(0));
         table.fileIO().deleteQuietly(path);
 
         // read
@@ -140,6 +148,26 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                 "2|21|201|binary|varbinary|mapKey:mapVal|multiset",
                                 "2|22|202|binary|varbinary|mapKey:mapVal|multiset",
                                 "2|21|201|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
+    public void testReadWriteWithDataDirectory() throws Exception {
+        Consumer<Options> optionsSetter = options -> options.set(DATA_FILE_PATH_DIRECTORY, "data");
+        writeData(optionsSetter);
+        FileStoreTable table = createFileStoreTable(optionsSetter);
+
+        assertThat(table.fileIO().exists(new Path(tablePath, "data/pt=1"))).isTrue();
+
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newRead();
+        assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
+                .hasSameElementsAs(
+                        Arrays.asList(
+                                "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|11|101|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|12|102|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|11|101|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|12|102|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     @Test
@@ -229,7 +257,6 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     public void testBatchFilter(boolean statsDenseStore) throws Exception {
         Consumer<Options> optionsSetter =
                 options -> {
-                    options.set(CoreOptions.METADATA_STATS_DENSE_STORE, statsDenseStore);
                     if (statsDenseStore) {
                         options.set(CoreOptions.METADATA_STATS_MODE, "none");
                         options.set("fields.b.stats-mode", "full");
@@ -574,6 +601,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                 createUnawareBucketFileStoreTable(
                         rowType,
                         options -> {
+                            options.set(METADATA_STATS_MODE, "NONE");
                             options.set(
                                     FileIndexOptions.FILE_INDEX
                                             + "."
@@ -600,7 +628,11 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(GenericRow.of(1, BinaryString.fromString("B"), 3L));
         write.write(GenericRow.of(1, BinaryString.fromString("C"), 3L));
         result.addAll(write.prepareCommit(true, 0));
+        write.write(GenericRow.of(1, BinaryString.fromString("A"), 4L));
+        write.write(GenericRow.of(1, BinaryString.fromString("B"), 3L));
         write.write(GenericRow.of(1, BinaryString.fromString("C"), 4L));
+        write.write(GenericRow.of(1, BinaryString.fromString("D"), 2L));
+        write.write(GenericRow.of(1, BinaryString.fromString("D"), 4L));
         result.addAll(write.prepareCommit(true, 0));
         commit.commit(0, result);
         result.clear();
@@ -639,6 +671,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                 createUnawareBucketFileStoreTable(
                         rowType,
                         options -> {
+                            options.set(METADATA_STATS_MODE, "NONE");
                             options.set(
                                     FileIndexOptions.FILE_INDEX
                                             + "."
@@ -665,7 +698,11 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(GenericRow.of(1, BinaryString.fromString("B"), 3L));
         write.write(GenericRow.of(1, BinaryString.fromString("C"), 3L));
         result.addAll(write.prepareCommit(true, 0));
+        write.write(GenericRow.of(1, BinaryString.fromString("A"), 4L));
+        write.write(GenericRow.of(1, BinaryString.fromString("B"), 3L));
         write.write(GenericRow.of(1, BinaryString.fromString("C"), 4L));
+        write.write(GenericRow.of(1, BinaryString.fromString("D"), 2L));
+        write.write(GenericRow.of(1, BinaryString.fromString("D"), 4L));
         result.addAll(write.prepareCommit(true, 0));
         commit.commit(0, result);
         result.clear();
@@ -689,6 +726,94 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                     assertThat(row.getString(1).toString()).isEqualTo("C");
                     assertThat(row.getLong(2)).isEqualTo(4L);
                 });
+    }
+
+    @Test
+    public void testBitmapIndexResultFilterParquetRowRanges() throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.STRING())
+                        .field("event", DataTypes.STRING())
+                        .field("price", DataTypes.INT())
+                        .build();
+        // in unaware-bucket mode, we split files into splits all the time
+        FileStoreTable table =
+                createUnawareBucketFileStoreTable(
+                        rowType,
+                        options -> {
+                            options.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
+                            options.set(WRITE_ONLY, true);
+                            options.set(
+                                    FileIndexOptions.FILE_INDEX
+                                            + "."
+                                            + BitSliceIndexBitmapFileIndexFactory.BSI_INDEX
+                                            + "."
+                                            + CoreOptions.COLUMNS,
+                                    "price");
+                            options.set(ParquetOutputFormat.BLOCK_SIZE, "1048576");
+                            options.set(
+                                    ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK, "100");
+                            options.set(ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT, "300");
+                        });
+
+        int bound = 300000;
+        Random random = new Random();
+        Map<Integer, Integer> expectedMap = new HashMap<>();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        for (int j = 0; j < 1000000; j++) {
+            int next = random.nextInt(bound);
+            BinaryString uuid = BinaryString.fromString(UUID.randomUUID().toString());
+            expectedMap.compute(next, (key, value) -> value == null ? 1 : value + 1);
+            write.write(GenericRow.of(uuid, uuid, next));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        // test eq
+        for (int i = 0; i < 10; i++) {
+            int key = random.nextInt(bound);
+            Predicate predicate = new PredicateBuilder(rowType).equal(2, key);
+            TableScan.Plan plan = table.newScan().plan();
+            RecordReader<InternalRow> reader =
+                    table.newRead().withFilter(predicate).createReader(plan.splits());
+            AtomicInteger cnt = new AtomicInteger(0);
+            reader.forEachRemaining(
+                    row -> {
+                        cnt.incrementAndGet();
+                        assertThat(row.getInt(2)).isEqualTo(key);
+                    });
+            assertThat(cnt.get()).isEqualTo(expectedMap.getOrDefault(key, 0));
+            reader.close();
+        }
+
+        //  test between
+        for (int i = 0; i < 10; i++) {
+            int max = random.nextInt(bound) + 1;
+            int min = random.nextInt(max);
+            Predicate predicate =
+                    PredicateBuilder.and(
+                            new PredicateBuilder(rowType).greaterOrEqual(2, min),
+                            new PredicateBuilder(rowType).lessOrEqual(2, max));
+            TableScan.Plan plan = table.newScan().plan();
+            RecordReader<InternalRow> reader =
+                    table.newRead().withFilter(predicate).createReader(plan.splits());
+            AtomicInteger cnt = new AtomicInteger(0);
+            reader.forEachRemaining(
+                    row -> {
+                        cnt.addAndGet(1);
+                        assertThat(row.getInt(2)).isGreaterThanOrEqualTo(min);
+                        assertThat(row.getInt(2)).isLessThanOrEqualTo(max);
+                    });
+            Optional<Integer> reduce =
+                    expectedMap.entrySet().stream()
+                            .filter(x -> x.getKey() >= min && x.getKey() <= max)
+                            .map(Map.Entry::getValue)
+                            .reduce(Integer::sum);
+            assertThat(cnt.get()).isEqualTo(reduce.orElse(0));
+            reader.close();
+        }
     }
 
     @Test

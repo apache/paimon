@@ -34,9 +34,9 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -51,6 +51,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
+import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 
 import org.apache.hadoop.conf.Configuration;
@@ -62,6 +63,7 @@ import org.apache.parquet.hadoop.ParquetFileWriter;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.example.ExampleParquetWriter;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
+import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.schema.ConversionPatterns;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
@@ -97,6 +99,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT32;
+import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT64;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -165,6 +168,7 @@ public class ParquetReadWriteTest {
                                     new VarCharType(VarCharType.MAX_LENGTH))),
                     new ArrayType(true, RowType.builder().field("a", new IntType()).build()),
                     RowType.of(
+                            new IntType(),
                             new ArrayType(
                                     true,
                                     RowType.builder()
@@ -174,8 +178,11 @@ public class ParquetReadWriteTest {
                                                             true,
                                                             new ArrayType(true, new IntType())))
                                             .field("c", new IntType())
-                                            .build()),
-                            new IntType()));
+                                            .build())),
+                    RowType.of(
+                            new ArrayType(RowType.of(new VarCharType(255))),
+                            RowType.of(new IntType()),
+                            new VarCharType(255)));
 
     @TempDir public File folder;
 
@@ -463,7 +470,9 @@ public class ParquetReadWriteTest {
                 format.createReader(
                         new FormatReaderContext(
                                 new LocalFileIO(), path, new LocalFileIO().getFileSize(path)));
-        compareNestedRow(rows, new RecordReaderIterator<>(reader));
+        List<InternalRow> results = new ArrayList<>(1283);
+        reader.forEachRemaining(results::add);
+        compareNestedRow(rows, results);
     }
 
     @Test
@@ -489,11 +498,17 @@ public class ParquetReadWriteTest {
                         new DataField(0, "a", DataTypes.INT()),
                         new DataField(1, "b", DataTypes.ARRAY(DataTypes.STRING())),
                         new DataField(
-                                2, "c", DataTypes.MAP(DataTypes.INT(), new RowType(nestedFields))));
+                                2,
+                                "c",
+                                DataTypes.MAP(
+                                        DataTypes.INT(),
+                                        DataTypes.MAP(
+                                                DataTypes.BIGINT(), new RowType(nestedFields)))));
         RowType rowType = new RowType(fields);
 
         int baseId = 536870911;
-        Type mapValueType =
+        int depthLimit = 1 << 10;
+        Type innerMapValueType =
                 new GroupType(
                                 Type.Repetition.OPTIONAL,
                                 "value",
@@ -506,7 +521,17 @@ public class ParquetReadWriteTest {
                                         .as(LogicalTypeAnnotation.stringType())
                                         .named("v2")
                                         .withId(4))
-                        .withId(baseId - 2);
+                        .withId(baseId + depthLimit * 2 + 2);
+        Type outerMapValueType =
+                ConversionPatterns.mapType(
+                                Type.Repetition.OPTIONAL,
+                                "value",
+                                "key_value",
+                                Types.primitive(INT64, Type.Repetition.REQUIRED)
+                                        .named("key")
+                                        .withId(baseId - depthLimit * 2 - 2),
+                                innerMapValueType)
+                        .withId(baseId + depthLimit * 2 + 1);
         Type expected =
                 new MessageType(
                         "table",
@@ -519,7 +544,7 @@ public class ParquetReadWriteTest {
                                                         Type.Repetition.OPTIONAL)
                                                 .as(LogicalTypeAnnotation.stringType())
                                                 .named("element")
-                                                .withId(baseId + 1))
+                                                .withId(baseId + depthLimit + 1))
                                 .withId(1),
                         ConversionPatterns.mapType(
                                         Type.Repetition.OPTIONAL,
@@ -527,11 +552,76 @@ public class ParquetReadWriteTest {
                                         "key_value",
                                         Types.primitive(INT32, Type.Repetition.REQUIRED)
                                                 .named("key")
-                                                .withId(baseId + 2),
-                                        mapValueType)
+                                                .withId(baseId - depthLimit * 2 - 1),
+                                        outerMapValueType)
                                 .withId(2));
         Type actual = ParquetSchemaConverter.convertToParquetMessageType("table", rowType);
         assertThat(actual).isEqualTo(expected);
+    }
+
+    @Test
+    public void testReadBinaryWrittenByParquet() throws Exception {
+        Path path = new Path(folder.getPath(), UUID.randomUUID().toString());
+        Configuration conf = new Configuration();
+        MessageType schema =
+                new MessageType(
+                        "origin-parquet",
+                        Types.primitive(
+                                        PrimitiveType.PrimitiveTypeName.BINARY,
+                                        Type.Repetition.REQUIRED)
+                                .named("f0")
+                                .withId(0),
+                        Types.primitive(
+                                        PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY,
+                                        Type.Repetition.REQUIRED)
+                                .length(10)
+                                .named("f1")
+                                .withId(1));
+
+        List<InternalRow> targetRows = new ArrayList<>();
+        try (ParquetWriter<Group> writer =
+                ExampleParquetWriter.builder(
+                                HadoopOutputFile.fromPath(
+                                        new org.apache.hadoop.fs.Path(path.toString()), conf))
+                        .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
+                        .withConf(new Configuration())
+                        .withType(schema)
+                        .build()) {
+            SimpleGroupFactory simpleGroupFactory = new SimpleGroupFactory(schema);
+            for (int i = 0; i < 100; i++) {
+                Group row = simpleGroupFactory.newGroup();
+                byte[] randomLengthBytes = new byte[ThreadLocalRandom.current().nextInt(1, 100)];
+                byte[] fixedLengthBytes = new byte[10];
+                ThreadLocalRandom.current().nextBytes(randomLengthBytes);
+                ThreadLocalRandom.current().nextBytes(fixedLengthBytes);
+
+                targetRows.add(GenericRow.of(randomLengthBytes, fixedLengthBytes));
+
+                row.append("f0", Binary.fromConstantByteArray(randomLengthBytes));
+                row.append("f1", Binary.fromConstantByteArray(fixedLengthBytes));
+                writer.write(row);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Create data by parquet origin writer failed.");
+        }
+
+        RowType paimonRowType =
+                RowType.builder()
+                        .fields(new VarBinaryType(VarCharType.MAX_LENGTH), new BinaryType(10))
+                        .build();
+
+        ParquetReaderFactory format =
+                new ParquetReaderFactory(new Options(), paimonRowType, 500, FilterCompat.NOOP);
+
+        RecordReader<InternalRow> reader =
+                format.createReader(
+                        new FormatReaderContext(
+                                new LocalFileIO(), path, new LocalFileIO().getFileSize(path)));
+        reader.forEachRemaining(
+                row -> {
+                    Assertions.assertArrayEquals(row.getBinary(0), row.getBinary(0));
+                    Assertions.assertArrayEquals(row.getBinary(1), row.getBinary(1));
+                });
     }
 
     private void innerTestTypes(File folder, List<Integer> records, int rowGroupSize)
@@ -786,6 +876,7 @@ public class ParquetReadWriteTest {
                             new GenericArray(
                                     new GenericRow[] {GenericRow.of(i), GenericRow.of(i + 1)}),
                             GenericRow.of(
+                                    i,
                                     new GenericArray(
                                             new GenericRow[] {
                                                 GenericRow.of(
@@ -804,8 +895,8 @@ public class ParquetReadWriteTest {
                                                                     null
                                                                 }),
                                                         i)
-                                            }),
-                                    i)));
+                                            })),
+                            null));
         }
         return rows;
     }
@@ -856,15 +947,17 @@ public class ParquetReadWriteTest {
                 row1.add(0, i);
                 Group row2 = rowList.addGroup(0);
                 row2.add(0, i + 1);
+                f4.addGroup(0);
 
-                // add ROW<`f0` ARRAY<ROW<`b` ARRAY<ARRAY<INT>>, `c` INT>>, `f1` INT>>
+                // add ROW<`f0` INT , `f1` INTARRAY<ROW<`b` ARRAY<ARRAY<INT>>, `c` INT>>>>
                 Group f5 = row.addGroup("f5");
-                Group arrayRow = f5.addGroup(0);
+                f5.add(0, i);
+                Group arrayRow = f5.addGroup(1);
                 Group insideRow = arrayRow.addGroup(0).addGroup(0);
                 Group insideArray = insideRow.addGroup(0);
                 createParquetDoubleNestedArray(insideArray, i);
                 insideRow.add(1, i);
-                f5.add(1, i);
+                arrayRow.addGroup(0);
                 writer.write(row);
             }
         } catch (Exception e) {
@@ -901,12 +994,12 @@ public class ParquetReadWriteTest {
         }
     }
 
-    private void compareNestedRow(
-            List<InternalRow> rows, RecordReaderIterator<InternalRow> iterator) throws Exception {
-        for (InternalRow origin : rows) {
-            assertThat(iterator.hasNext()).isTrue();
-            InternalRow result = iterator.next();
+    private void compareNestedRow(List<InternalRow> rows, List<InternalRow> results) {
+        Assertions.assertEquals(rows.size(), results.size());
 
+        for (InternalRow result : results) {
+            int index = result.getInt(0);
+            InternalRow origin = rows.get(index);
             Assertions.assertEquals(origin.getInt(0), result.getInt(0));
 
             // int[]
@@ -957,46 +1050,48 @@ public class ParquetReadWriteTest {
                     origin.getArray(4).getRow(1, 1).getInt(0),
                     result.getArray(4).getRow(1, 1).getInt(0));
 
+            Assertions.assertEquals(origin.getRow(5, 2).getInt(0), result.getRow(5, 2).getInt(0));
             Assertions.assertEquals(
-                    origin.getRow(5, 2).getArray(0).getRow(0, 2).getArray(0).getArray(0).getInt(0),
-                    result.getRow(5, 2).getArray(0).getRow(0, 2).getArray(0).getArray(0).getInt(0));
+                    origin.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).getArray(0).getInt(0),
+                    result.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).getArray(0).getInt(0));
             Assertions.assertEquals(
-                    origin.getRow(5, 2).getArray(0).getRow(0, 2).getArray(0).getArray(0).getInt(1),
-                    result.getRow(5, 2).getArray(0).getRow(0, 2).getArray(0).getArray(0).getInt(1));
+                    origin.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).getArray(0).getInt(1),
+                    result.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).getArray(0).getInt(1));
             Assertions.assertTrue(
                     result.getRow(5, 2)
-                            .getArray(0)
+                            .getArray(1)
                             .getRow(0, 2)
                             .getArray(0)
                             .getArray(0)
                             .isNullAt(2));
 
             Assertions.assertEquals(
-                    origin.getRow(5, 2).getArray(0).getRow(0, 2).getArray(0).getArray(1).getInt(0),
-                    result.getRow(5, 2).getArray(0).getRow(0, 2).getArray(0).getArray(1).getInt(0));
+                    origin.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).getArray(1).getInt(0),
+                    result.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).getArray(1).getInt(0));
             Assertions.assertEquals(
-                    origin.getRow(5, 2).getArray(0).getRow(0, 2).getArray(0).getArray(1).getInt(1),
-                    result.getRow(5, 2).getArray(0).getRow(0, 2).getArray(0).getArray(1).getInt(1));
+                    origin.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).getArray(1).getInt(1),
+                    result.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).getArray(1).getInt(1));
             Assertions.assertTrue(
                     result.getRow(5, 2)
-                            .getArray(0)
+                            .getArray(1)
                             .getRow(0, 2)
                             .getArray(0)
                             .getArray(1)
                             .isNullAt(2));
 
             Assertions.assertEquals(
-                    0, result.getRow(5, 2).getArray(0).getRow(0, 2).getArray(0).getArray(2).size());
+                    0, result.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).getArray(2).size());
             Assertions.assertTrue(
-                    result.getRow(5, 2).getArray(0).getRow(0, 2).getArray(0).isNullAt(3));
+                    result.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).isNullAt(3));
 
             Assertions.assertEquals(
-                    origin.getRow(5, 2).getArray(0).getRow(0, 2).getInt(1),
-                    result.getRow(5, 2).getArray(0).getRow(0, 2).getInt(1));
-            Assertions.assertEquals(origin.getRow(5, 2).getInt(1), result.getRow(5, 2).getInt(1));
+                    origin.getRow(5, 2).getArray(1).getRow(0, 2).getInt(1),
+                    result.getRow(5, 2).getArray(1).getRow(0, 2).getInt(1));
+            Assertions.assertTrue(result.isNullAt(6));
+            Assertions.assertTrue(result.getRow(6, 2).isNullAt(0));
+            Assertions.assertTrue(result.getRow(6, 2).isNullAt(1));
+            Assertions.assertTrue(result.getRow(6, 2).isNullAt(2));
         }
-        assertThat(iterator.hasNext()).isFalse();
-        iterator.close();
     }
 
     private void fillWithMap(Map<String, String> map, InternalMap internalMap, int index) {

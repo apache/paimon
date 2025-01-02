@@ -62,7 +62,7 @@ trait ColumnPruningAndPushDown extends Scan with Logging {
       _readBuilder.withFilter(pushedPredicate)
     }
     pushDownLimit.foreach(_readBuilder.withLimit)
-    _readBuilder
+    _readBuilder.dropStats()
   }
 
   final def metadataColumns: Seq[PaimonMetadataColumn] = {

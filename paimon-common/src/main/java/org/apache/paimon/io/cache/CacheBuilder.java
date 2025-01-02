@@ -72,6 +72,10 @@ public abstract class CacheBuilder {
                     org.apache.paimon.shade.guava30.com.google.common.cache.CacheBuilder
                             .newBuilder()
                             .weigher(CacheBuilder::weigh)
+                            // The concurrency level determines the number of segment caches in
+                            // Guava,limiting the maximum block entries held in cache. Since we do
+                            // not access this cache concurrently, it is set to 1.
+                            .concurrencyLevel(1)
                             .maximumWeight(memorySize.getBytes())
                             .removalListener(this::onRemoval)
                             .build());

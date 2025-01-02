@@ -109,6 +109,12 @@ public abstract class AbstractDataTableScan implements DataTableScan {
         return this;
     }
 
+    @Override
+    public AbstractDataTableScan dropStats() {
+        snapshotReader.dropStats();
+        return this;
+    }
+
     public CoreOptions options() {
         return options;
     }

@@ -45,6 +45,8 @@ import io.debezium.relational.history.TableChanges;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.cdc.connectors.mysql.source.config.MySqlSourceOptions;
 import org.apache.flink.cdc.debezium.table.DebeziumOptions;
+import org.apache.flink.configuration.ConfigOption;
+import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.util.Collector;
 import org.slf4j.Logger;
@@ -99,11 +101,14 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         String stringifyServerTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
 
-        this.isDebeziumSchemaCommentsEnabled =
-                mySqlConfig.getBoolean(
-                        DebeziumOptions.DEBEZIUM_OPTIONS_PREFIX
-                                + RelationalDatabaseConnectorConfig.INCLUDE_SCHEMA_COMMENTS.name(),
-                        false);
+        ConfigOption<Boolean> includeSchemaCommentsConfig =
+                ConfigOptions.key(
+                                DebeziumOptions.DEBEZIUM_OPTIONS_PREFIX
+                                        + RelationalDatabaseConnectorConfig.INCLUDE_SCHEMA_COMMENTS
+                                                .name())
+                        .booleanType()
+                        .defaultValue(false);
+        this.isDebeziumSchemaCommentsEnabled = mySqlConfig.get(includeSchemaCommentsConfig);
         this.serverTimeZone =
                 stringifyServerTimeZone == null
                         ? ZoneId.systemDefault()

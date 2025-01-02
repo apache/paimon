@@ -32,13 +32,13 @@ public class ArrowBundleRecords implements BundleRecords {
 
     private final VectorSchemaRoot vectorSchemaRoot;
     private final RowType rowType;
-    private final boolean allowUpperCase;
+    private final boolean caseSensitive;
 
     public ArrowBundleRecords(
-            VectorSchemaRoot vectorSchemaRoot, RowType rowType, boolean allowUpperCase) {
+            VectorSchemaRoot vectorSchemaRoot, RowType rowType, boolean caseSensitive) {
         this.vectorSchemaRoot = vectorSchemaRoot;
         this.rowType = rowType;
-        this.allowUpperCase = allowUpperCase;
+        this.caseSensitive = caseSensitive;
     }
 
     public VectorSchemaRoot getVectorSchemaRoot() {
@@ -52,7 +52,7 @@ public class ArrowBundleRecords implements BundleRecords {
 
     @Override
     public Iterator<InternalRow> iterator() {
-        ArrowBatchReader arrowBatchReader = new ArrowBatchReader(rowType, allowUpperCase);
+        ArrowBatchReader arrowBatchReader = new ArrowBatchReader(rowType, caseSensitive);
         return arrowBatchReader.readBatch(vectorSchemaRoot).iterator();
     }
 }

@@ -25,6 +25,7 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.operation.metrics.CacheMetrics;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -76,6 +77,13 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
                                 this::createIterator);
     }
 
+    public ObjectsFile<T> withCacheMetrics(@Nullable CacheMetrics cacheMetrics) {
+        if (cache != null) {
+            cache.withCacheMetrics(cacheMetrics);
+        }
+        return this;
+    }
+
     public FileIO fileIO() {
         return fileIO;
     }
@@ -94,7 +102,8 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
     }
 
     public List<T> read(String fileName, @Nullable Long fileSize) {
-        return read(fileName, fileSize, Filter.alwaysTrue(), Filter.alwaysTrue());
+        return read(
+                fileName, fileSize, Filter.alwaysTrue(), Filter.alwaysTrue(), Filter.alwaysTrue());
     }
 
     public List<T> readWithIOException(String fileName) throws IOException {
@@ -103,7 +112,8 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
 
     public List<T> readWithIOException(String fileName, @Nullable Long fileSize)
             throws IOException {
-        return readWithIOException(fileName, fileSize, Filter.alwaysTrue(), Filter.alwaysTrue());
+        return readWithIOException(
+                fileName, fileSize, Filter.alwaysTrue(), Filter.alwaysTrue(), Filter.alwaysTrue());
     }
 
     public boolean exists(String fileName) {
@@ -118,9 +128,10 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
             String fileName,
             @Nullable Long fileSize,
             Filter<InternalRow> loadFilter,
-            Filter<InternalRow> readFilter) {
+            Filter<InternalRow> readFilter,
+            Filter<T> readTFilter) {
         try {
-            return readWithIOException(fileName, fileSize, loadFilter, readFilter);
+            return readWithIOException(fileName, fileSize, loadFilter, readFilter, readTFilter);
         } catch (IOException e) {
             throw new RuntimeException("Failed to read " + fileName, e);
         }
@@ -130,14 +141,16 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
             String fileName,
             @Nullable Long fileSize,
             Filter<InternalRow> loadFilter,
-            Filter<InternalRow> readFilter)
+            Filter<InternalRow> readFilter,
+            Filter<T> readTFilter)
             throws IOException {
         Path path = pathFactory.toPath(fileName);
         if (cache != null) {
-            return cache.read(path, fileSize, loadFilter, readFilter);
+            return cache.read(path, fileSize, loadFilter, readFilter, readTFilter);
         }
 
-        return readFromIterator(createIterator(path, fileSize), serializer, readFilter);
+        return readFromIterator(
+                createIterator(path, fileSize), serializer, readFilter, readTFilter);
     }
 
     public String writeWithoutRolling(Collection<T> records) {
@@ -184,13 +197,17 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
     public static <V> List<V> readFromIterator(
             CloseableIterator<InternalRow> inputIterator,
             ObjectSerializer<V> serializer,
-            Filter<InternalRow> readFilter) {
+            Filter<InternalRow> readFilter,
+            Filter<V> readVFilter) {
         try (CloseableIterator<InternalRow> iterator = inputIterator) {
             List<V> result = new ArrayList<>();
             while (iterator.hasNext()) {
                 InternalRow row = iterator.next();
                 if (readFilter.test(row)) {
-                    result.add(serializer.fromRow(row));
+                    V v = serializer.fromRow(row);
+                    if (readVFilter.test(v)) {
+                        result.add(v);
+                    }
                 }
             }
             return result;

@@ -28,15 +28,17 @@ import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
 import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
 
 /** Entry representing a file. */
@@ -52,11 +54,16 @@ public interface FileEntry {
 
     String fileName();
 
+    @Nullable
+    String externalPath();
+
     Identifier identifier();
 
     BinaryRow minKey();
 
     BinaryRow maxKey();
+
+    List<String> extraFiles();
 
     /**
      * The same {@link Identifier} indicates that the {@link ManifestEntry} refers to the same data
@@ -69,6 +76,7 @@ public interface FileEntry {
         public final String fileName;
         public final List<String> extraFiles;
         @Nullable private final byte[] embeddedIndex;
+        @Nullable public final String externalPath;
 
         /* Cache the hash code for the string */
         private Integer hash;
@@ -79,13 +87,15 @@ public interface FileEntry {
                 int level,
                 String fileName,
                 List<String> extraFiles,
-                @Nullable byte[] embeddedIndex) {
+                @Nullable byte[] embeddedIndex,
+                @Nullable String externalPath) {
             this.partition = partition;
             this.bucket = bucket;
             this.level = level;
             this.fileName = fileName;
             this.extraFiles = extraFiles;
             this.embeddedIndex = embeddedIndex;
+            this.externalPath = externalPath;
         }
 
         @Override
@@ -102,7 +112,8 @@ public interface FileEntry {
                     && Objects.equals(partition, that.partition)
                     && Objects.equals(fileName, that.fileName)
                     && Objects.equals(extraFiles, that.extraFiles)
-                    && Objects.deepEquals(embeddedIndex, that.embeddedIndex);
+                    && Objects.deepEquals(embeddedIndex, that.embeddedIndex)
+                    && Objects.deepEquals(externalPath, that.externalPath);
         }
 
         @Override
@@ -115,7 +126,8 @@ public interface FileEntry {
                                 level,
                                 fileName,
                                 extraFiles,
-                                Arrays.hashCode(embeddedIndex));
+                                Arrays.hashCode(embeddedIndex),
+                                externalPath);
             }
             return hash;
         }
@@ -134,6 +146,8 @@ public interface FileEntry {
                     + extraFiles
                     + ", embeddedIndex="
                     + Arrays.toString(embeddedIndex)
+                    + ", externalPath="
+                    + externalPath
                     + '}';
         }
 
@@ -148,7 +162,9 @@ public interface FileEntry {
                     + ", extraFiles "
                     + extraFiles
                     + ", embeddedIndex "
-                    + Arrays.toString(embeddedIndex);
+                    + Arrays.toString(embeddedIndex)
+                    + ", externalPath "
+                    + externalPath;
         }
     }
 
@@ -214,7 +230,11 @@ public interface FileEntry {
         return readDeletedEntries(
                 m ->
                         manifestFile.read(
-                                m.fileName(), m.fileSize(), Filter.alwaysTrue(), deletedFilter()),
+                                m.fileName(),
+                                m.fileSize(),
+                                Filter.alwaysTrue(),
+                                deletedFilter(),
+                                Filter.alwaysTrue()),
                 manifestFiles,
                 manifestReadParallelism);
     }
@@ -234,11 +254,11 @@ public interface FileEntry {
                                 .filter(e -> e.kind() == FileKind.DELETE)
                                 .map(FileEntry::identifier)
                                 .collect(Collectors.toList());
-        Iterable<Identifier> identifiers =
-                sequentialBatchedExecute(processor, manifestFiles, manifestReadParallelism);
-        Set<Identifier> result = new HashSet<>();
-        for (Identifier identifier : identifiers) {
-            result.add(identifier);
+        Iterator<Identifier> identifiers =
+                randomlyExecuteSequentialReturn(processor, manifestFiles, manifestReadParallelism);
+        Set<Identifier> result = ConcurrentHashMap.newKeySet();
+        while (identifiers.hasNext()) {
+            result.add(identifiers.next());
         }
         return result;
     }
@@ -246,5 +266,10 @@ public interface FileEntry {
     static Filter<InternalRow> deletedFilter() {
         Function<InternalRow, FileKind> getter = ManifestEntrySerializer.kindGetter();
         return row -> getter.apply(row) == FileKind.DELETE;
+    }
+
+    static Filter<InternalRow> addFilter() {
+        Function<InternalRow, FileKind> getter = ManifestEntrySerializer.kindGetter();
+        return row -> getter.apply(row) == FileKind.ADD;
     }
 }

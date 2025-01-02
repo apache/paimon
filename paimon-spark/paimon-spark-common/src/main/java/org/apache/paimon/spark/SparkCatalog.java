@@ -22,11 +22,13 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
 import org.apache.paimon.spark.catalog.SupportFunction;
+import org.apache.paimon.spark.catalog.SupportView;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.FormatTableOptions;
 
@@ -50,7 +52,6 @@ import org.apache.spark.sql.execution.datasources.v2.FileTable;
 import org.apache.spark.sql.execution.datasources.v2.csv.CSVTable;
 import org.apache.spark.sql.execution.datasources.v2.orc.OrcTable;
 import org.apache.spark.sql.execution.datasources.v2.parquet.ParquetTable;
-import org.apache.spark.sql.internal.SessionState;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
@@ -68,14 +69,14 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
-import static org.apache.paimon.options.CatalogOptions.ALLOW_UPPER_CASE;
 import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 import static org.apache.paimon.spark.util.OptionUtils.copyWithSQLConf;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.spark.utils.CatalogUtils.checkNamespace;
+import static org.apache.paimon.spark.utils.CatalogUtils.toIdentifier;
 
 /** Spark {@link TableCatalog} for paimon. */
-public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
+public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, SupportView {
 
     private static final Logger LOG = LoggerFactory.getLogger(SparkCatalog.class);
 
@@ -88,18 +89,10 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
     @Override
     public void initialize(String name, CaseInsensitiveStringMap options) {
         this.catalogName = name;
-        Map<String, String> newOptions = new HashMap<>(options.asCaseSensitiveMap());
-        SessionState sessionState = SparkSession.active().sessionState();
-
         CatalogContext catalogContext =
-                CatalogContext.create(Options.fromMap(options), sessionState.newHadoopConf());
-
-        // if spark is case-insensitive, set allow upper case to catalog
-        if (!sessionState.conf().caseSensitiveAnalysis()) {
-            newOptions.put(ALLOW_UPPER_CASE.key(), "true");
-        }
-        options = new CaseInsensitiveStringMap(newOptions);
-
+                CatalogContext.create(
+                        Options.fromMap(options),
+                        SparkSession.active().sessionState().newHadoopConf());
         this.catalog = CatalogFactory.createCatalog(catalogContext);
         this.defaultDatabase =
                 options.getOrDefault(DEFAULT_DATABASE.key(), DEFAULT_DATABASE.defaultValue());
@@ -126,12 +119,10 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
     @Override
     public void createNamespace(String[] namespace, Map<String, String> metadata)
             throws NamespaceAlreadyExistsException {
-        checkArgument(
-                isValidateNamespace(namespace),
-                "Namespace %s is not valid",
-                Arrays.toString(namespace));
+        checkNamespace(namespace);
         try {
-            catalog.createDatabase(namespace[0], false, metadata);
+            String databaseName = getDatabaseNameFromNamespace(namespace);
+            catalog.createDatabase(databaseName, false, metadata);
         } catch (Catalog.DatabaseAlreadyExistException e) {
             throw new NamespaceAlreadyExistsException(namespace);
         }
@@ -152,11 +143,10 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
         if (namespace.length == 0) {
             return listNamespaces();
         }
-        if (!isValidateNamespace(namespace)) {
-            throw new NoSuchNamespaceException(namespace);
-        }
+        checkNamespace(namespace);
         try {
-            catalog.getDatabase(namespace[0]);
+            String databaseName = getDatabaseNameFromNamespace(namespace);
+            catalog.getDatabase(databaseName);
             return new String[0][];
         } catch (Catalog.DatabaseNotExistException e) {
             throw new NoSuchNamespaceException(namespace);
@@ -166,13 +156,10 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
     @Override
     public Map<String, String> loadNamespaceMetadata(String[] namespace)
             throws NoSuchNamespaceException {
-        checkArgument(
-                isValidateNamespace(namespace),
-                "Namespace %s is not valid",
-                Arrays.toString(namespace));
-        String dataBaseName = namespace[0];
+        checkNamespace(namespace);
         try {
-            return catalog.getDatabase(dataBaseName).options();
+            String databaseName = getDatabaseNameFromNamespace(namespace);
+            return catalog.getDatabase(databaseName).options();
         } catch (Catalog.DatabaseNotExistException e) {
             throw new NoSuchNamespaceException(namespace);
         }
@@ -207,12 +194,10 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
      */
     public boolean dropNamespace(String[] namespace, boolean cascade)
             throws NoSuchNamespaceException {
-        checkArgument(
-                isValidateNamespace(namespace),
-                "Namespace %s is not valid",
-                Arrays.toString(namespace));
+        checkNamespace(namespace);
         try {
-            catalog.dropDatabase(namespace[0], false, cascade);
+            String databaseName = getDatabaseNameFromNamespace(namespace);
+            catalog.dropDatabase(databaseName, false, cascade);
             return true;
         } catch (Catalog.DatabaseNotExistException e) {
             throw new NoSuchNamespaceException(namespace);
@@ -224,12 +209,10 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
 
     @Override
     public Identifier[] listTables(String[] namespace) throws NoSuchNamespaceException {
-        checkArgument(
-                isValidateNamespace(namespace),
-                "Missing database in namespace: %s",
-                Arrays.toString(namespace));
+        checkNamespace(namespace);
         try {
-            return catalog.listTables(namespace[0]).stream()
+            String databaseName = getDatabaseNameFromNamespace(namespace);
+            return catalog.listTables(databaseName).stream()
                     .map(table -> Identifier.of(namespace, table))
                     .toArray(Identifier[]::new);
         } catch (Catalog.DatabaseNotExistException e) {
@@ -239,10 +222,7 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
 
     @Override
     public void invalidateTable(Identifier ident) {
-        try {
-            catalog.invalidateTable(toIdentifier(ident));
-        } catch (NoSuchTableException ignored) {
-        }
+        catalog.invalidateTable(toIdentifier(ident));
     }
 
     @Override
@@ -312,26 +292,8 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
             Map<String, String> properties)
             throws TableAlreadyExistsException, NoSuchNamespaceException {
         try {
-            String provider = properties.get(TableCatalog.PROP_PROVIDER);
-            if ((!usePaimon(provider))
-                    && SparkSource.FORMAT_NAMES().contains(provider.toLowerCase())) {
-                Map<String, String> newProperties = new HashMap<>(properties);
-                newProperties.put(TYPE.key(), FORMAT_TABLE.toString());
-                newProperties.put(FILE_FORMAT.key(), provider.toLowerCase());
-                catalog.createTable(
-                        toIdentifier(ident),
-                        toInitialSchema(schema, partitions, newProperties),
-                        false);
-            } else {
-                checkArgument(
-                        usePaimon(provider),
-                        "SparkCatalog can only create paimon table, but current provider is %s",
-                        provider);
-                catalog.createTable(
-                        toIdentifier(ident),
-                        toInitialSchema(schema, partitions, properties),
-                        false);
-            }
+            catalog.createTable(
+                    toIdentifier(ident), toInitialSchema(schema, partitions, properties), false);
             return loadTable(ident);
         } catch (Catalog.TableAlreadyExistException e) {
             throw new TableAlreadyExistsException(ident);
@@ -347,7 +309,7 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
         try {
             catalog.dropTable(toIdentifier(ident), false);
             return true;
-        } catch (Catalog.TableNotExistException | NoSuchTableException e) {
+        } catch (Catalog.TableNotExistException e) {
             return false;
         }
     }
@@ -373,20 +335,20 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
             TableChange.AddColumn add = (TableChange.AddColumn) change;
             SchemaChange.Move move = getMove(add.position(), add.fieldNames());
             return SchemaChange.addColumn(
-                    Arrays.asList(add.fieldNames()),
+                    add.fieldNames(),
                     toPaimonType(add.dataType()).copy(add.isNullable()),
                     add.comment(),
                     move);
         } else if (change instanceof TableChange.RenameColumn) {
             TableChange.RenameColumn rename = (TableChange.RenameColumn) change;
-            return SchemaChange.renameColumn(Arrays.asList(rename.fieldNames()), rename.newName());
+            return SchemaChange.renameColumn(rename.fieldNames(), rename.newName());
         } else if (change instanceof TableChange.DeleteColumn) {
             TableChange.DeleteColumn delete = (TableChange.DeleteColumn) change;
-            return SchemaChange.dropColumn(Arrays.asList(delete.fieldNames()));
+            return SchemaChange.dropColumn(delete.fieldNames());
         } else if (change instanceof TableChange.UpdateColumnType) {
             TableChange.UpdateColumnType update = (TableChange.UpdateColumnType) change;
             return SchemaChange.updateColumnType(
-                    Arrays.asList(update.fieldNames()), toPaimonType(update.newDataType()), true);
+                    update.fieldNames(), toPaimonType(update.newDataType()), true);
         } else if (change instanceof TableChange.UpdateColumnNullability) {
             TableChange.UpdateColumnNullability update =
                     (TableChange.UpdateColumnNullability) change;
@@ -420,11 +382,18 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
     private Schema toInitialSchema(
             StructType schema, Transform[] partitions, Map<String, String> properties) {
         Map<String, String> normalizedProperties = new HashMap<>(properties);
-        if (!normalizedProperties.containsKey(TableCatalog.PROP_PROVIDER)) {
-            normalizedProperties.put(TableCatalog.PROP_PROVIDER, SparkSource.NAME());
+        String provider = properties.get(TableCatalog.PROP_PROVIDER);
+        if (!usePaimon(provider) && SparkSource.FORMAT_NAMES().contains(provider.toLowerCase())) {
+            normalizedProperties.put(TYPE.key(), FORMAT_TABLE.toString());
+            normalizedProperties.put(FILE_FORMAT.key(), provider.toLowerCase());
         }
+        normalizedProperties.remove(TableCatalog.PROP_PROVIDER);
         normalizedProperties.remove(PRIMARY_KEY_IDENTIFIER);
         normalizedProperties.remove(TableCatalog.PROP_COMMENT);
+        if (normalizedProperties.containsKey(TableCatalog.PROP_LOCATION)) {
+            String path = normalizedProperties.remove(TableCatalog.PROP_LOCATION);
+            normalizedProperties.put(CoreOptions.PATH.key(), path);
+        }
         String pkAsString = properties.get(PRIMARY_KEY_IDENTIFIER);
         List<String> primaryKeys =
                 pkAsString == null
@@ -454,10 +423,6 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
         }
     }
 
-    private boolean isValidateNamespace(String[] namespace) {
-        return namespace.length == 1;
-    }
-
     @Override
     public void renameTable(Identifier oldIdent, Identifier newIdent)
             throws NoSuchTableException, TableAlreadyExistsException {
@@ -471,15 +436,6 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
     }
 
     // --------------------- tools ------------------------------------------
-
-    protected org.apache.paimon.catalog.Identifier toIdentifier(Identifier ident)
-            throws NoSuchTableException {
-        if (!isValidateNamespace(ident.namespace())) {
-            throw new NoSuchTableException(ident);
-        }
-
-        return new org.apache.paimon.catalog.Identifier(ident.namespace()[0], ident.name());
-    }
 
     protected org.apache.spark.sql.connector.catalog.Table loadSparkTable(
             Identifier ident, Map<String, String> extraOptions) throws NoSuchTableException {
@@ -555,10 +511,35 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
         return partitionColNames;
     }
 
-    // --------------------- unsupported methods ----------------------------
-
     @Override
-    public void alterNamespace(String[] namespace, NamespaceChange... changes) {
-        throw new UnsupportedOperationException("Alter namespace in Spark is not supported yet.");
+    public void alterNamespace(String[] namespace, NamespaceChange... changes)
+            throws NoSuchNamespaceException {
+        checkNamespace(namespace);
+        try {
+            String databaseName = getDatabaseNameFromNamespace(namespace);
+            List<PropertyChange> propertyChanges =
+                    Arrays.stream(changes).map(this::toPropertyChange).collect(Collectors.toList());
+            catalog.alterDatabase(databaseName, propertyChanges, false);
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new NoSuchNamespaceException(namespace);
+        }
+    }
+
+    private PropertyChange toPropertyChange(NamespaceChange change) {
+        if (change instanceof NamespaceChange.SetProperty) {
+            NamespaceChange.SetProperty set = (NamespaceChange.SetProperty) change;
+            return PropertyChange.setProperty(set.property(), set.value());
+        } else if (change instanceof NamespaceChange.RemoveProperty) {
+            NamespaceChange.RemoveProperty remove = (NamespaceChange.RemoveProperty) change;
+            return PropertyChange.removeProperty(remove.property());
+
+        } else {
+            throw new UnsupportedOperationException(
+                    "Change is not supported: " + change.getClass());
+        }
+    }
+
+    private String getDatabaseNameFromNamespace(String[] namespace) {
+        return namespace[0];
     }
 }

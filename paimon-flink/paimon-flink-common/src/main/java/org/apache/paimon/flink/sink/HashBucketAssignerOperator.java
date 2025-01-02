@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.flink.ProcessRecordAttributesUtil;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.index.BucketAssigner;
 import org.apache.paimon.index.HashBucketAssigner;
 import org.apache.paimon.index.SimpleHashBucketAssigner;
@@ -76,8 +77,8 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
                 StateUtils.getSingleValueFromState(
                         context, "commit_user_state", String.class, initialCommitUser);
 
-        int numberTasks = getRuntimeContext().getNumberOfParallelSubtasks();
-        int taskId = getRuntimeContext().getIndexOfThisSubtask();
+        int numberTasks = RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext());
+        int taskId = RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext());
         long targetRowNum = table.coreOptions().dynamicBucketTargetRowNum();
         this.assigner =
                 overwrite

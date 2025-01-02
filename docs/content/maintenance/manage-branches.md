@@ -87,6 +87,10 @@ CALL sys.create_branch('default.T', 'empty_branch');
 
 You can delete branch by its name.
 
+{{< hint warning >}}
+__Note:__ The `Delete Branches` operation only deletes the metadata file. If you want to clear the data written during the branch, use [remove_orphan_files]({{< ref "flink/procedures" >}})
+{{< /hint >}}
+
 {{< tabs "delete-branches" >}}
 
 {{< tab "Flink SQL" >}}
@@ -199,7 +203,7 @@ Run the following command:
 
 {{< /tabs >}}
 
-### Batch Reading from Fallback Branch
+## Batch Reading from Fallback Branch
 
 You can set the table option `scan.fallback-branch`
 so that when a batch job reads from the current branch, if a partition does not exist,

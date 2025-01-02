@@ -104,7 +104,7 @@ cp flink-shaded-hadoop-2-uber-*.jar <FLINK_HOME>/lib/
 
 **Step 4: Start a Flink Local Cluster**
 
-In order to run multiple Flink jobs at the same time, you need to modify the cluster configuration in `<FLINK_HOME>/conf/flink-conf.yaml`.
+In order to run multiple Flink jobs at the same time, you need to modify the cluster configuration in `<FLINK_HOME>/conf/flink-conf.yaml`(Flink version < 1.19) or `<FLINK_HOME>/conf/config.yaml`(Flink version >= 1.19).
 
 ```yaml
 taskmanager.numberOfTaskSlots: 2

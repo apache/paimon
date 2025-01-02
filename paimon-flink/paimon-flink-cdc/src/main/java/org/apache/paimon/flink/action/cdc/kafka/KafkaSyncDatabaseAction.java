@@ -29,11 +29,8 @@ import java.util.Map;
 public class KafkaSyncDatabaseAction extends SyncDatabaseActionBase {
 
     public KafkaSyncDatabaseAction(
-            String warehouse,
-            String database,
-            Map<String, String> catalogConfig,
-            Map<String, String> kafkaConfig) {
-        super(warehouse, database, catalogConfig, kafkaConfig, SyncJobHandler.SourceType.KAFKA);
+            String database, Map<String, String> catalogConfig, Map<String, String> kafkaConfig) {
+        super(database, catalogConfig, kafkaConfig, SyncJobHandler.SourceType.KAFKA);
     }
 
     @Override

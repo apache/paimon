@@ -19,6 +19,7 @@
 package org.apache.paimon.data;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.types.DataType;
@@ -333,6 +334,14 @@ public final class BinaryRow extends BinarySection implements InternalRow, DataS
         int fieldOffset = getFieldOffset(pos);
         final long offsetAndLen = segments[0].getLong(fieldOffset);
         return MemorySegmentUtils.readBinary(segments, offset, fieldOffset, offsetAndLen);
+    }
+
+    @Override
+    public Variant getVariant(int pos) {
+        assertIndexIsValid(pos);
+        int fieldOffset = getFieldOffset(pos);
+        final long offsetAndLen = segments[0].getLong(fieldOffset);
+        return MemorySegmentUtils.readVariant(segments, offset, offsetAndLen);
     }
 
     @Override

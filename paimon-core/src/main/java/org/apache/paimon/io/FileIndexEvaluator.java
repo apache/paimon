@@ -40,6 +40,15 @@ public class FileIndexEvaluator {
             DataFileMeta file)
             throws IOException {
         if (dataFilter != null && !dataFilter.isEmpty()) {
+            byte[] embeddedIndex = file.embeddedIndex();
+            if (embeddedIndex != null) {
+                try (FileIndexPredicate predicate =
+                        new FileIndexPredicate(embeddedIndex, dataSchema.logicalRowType())) {
+                    return predicate.evaluate(
+                            PredicateBuilder.and(dataFilter.toArray(new Predicate[0])));
+                }
+            }
+
             List<String> indexFiles =
                     file.extraFiles().stream()
                             .filter(name -> name.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX))
@@ -53,7 +62,7 @@ public class FileIndexEvaluator {
                 // go to file index check
                 try (FileIndexPredicate predicate =
                         new FileIndexPredicate(
-                                dataFilePathFactory.toPath(indexFiles.get(0)),
+                                dataFilePathFactory.toAlignedPath(indexFiles.get(0), file),
                                 fileIO,
                                 dataSchema.logicalRowType())) {
                     return predicate.evaluate(

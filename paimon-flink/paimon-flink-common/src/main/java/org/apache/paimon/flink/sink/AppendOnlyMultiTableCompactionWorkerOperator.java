@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
 import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.compact.UnawareBucketCompactor;
 import org.apache.paimon.options.Options;
@@ -28,6 +29,9 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 
+import org.apache.flink.streaming.api.operators.StreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,7 +57,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
             LoggerFactory.getLogger(AppendOnlyMultiTableCompactionWorkerOperator.class);
 
     private final String commitUser;
-    private final Catalog.Loader catalogLoader;
+    private final CatalogLoader catalogLoader;
 
     // support multi table compaction
     private transient Map<Identifier, UnawareBucketCompactor> compactorContainer;
@@ -62,9 +66,12 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
 
     private transient Catalog catalog;
 
-    public AppendOnlyMultiTableCompactionWorkerOperator(
-            Catalog.Loader catalogLoader, String commitUser, Options options) {
-        super(options);
+    private AppendOnlyMultiTableCompactionWorkerOperator(
+            StreamOperatorParameters<MultiTableCommittable> parameters,
+            CatalogLoader catalogLoader,
+            String commitUser,
+            Options options) {
+        super(parameters, options);
         this.commitUser = commitUser;
         this.catalogLoader = catalogLoader;
     }
@@ -174,5 +181,35 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
         }
 
         ExceptionUtils.throwMultiException(exceptions);
+    }
+
+    /** {@link StreamOperatorFactory} of {@link AppendOnlyMultiTableCompactionWorkerOperator}. */
+    public static class Factory
+            extends PrepareCommitOperator.Factory<
+                    MultiTableUnawareAppendCompactionTask, MultiTableCommittable> {
+
+        private final String commitUser;
+        private final CatalogLoader catalogLoader;
+
+        public Factory(CatalogLoader catalogLoader, String commitUser, Options options) {
+            super(options);
+            this.commitUser = commitUser;
+            this.catalogLoader = catalogLoader;
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T extends StreamOperator<MultiTableCommittable>> T createStreamOperator(
+                StreamOperatorParameters<MultiTableCommittable> parameters) {
+            return (T)
+                    new AppendOnlyMultiTableCompactionWorkerOperator(
+                            parameters, catalogLoader, commitUser, options);
+        }
+
+        @Override
+        @SuppressWarnings("rawtypes")
+        public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
+            return AppendOnlyMultiTableCompactionWorkerOperator.class;
+        }
     }
 }

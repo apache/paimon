@@ -38,6 +38,7 @@ public class SimpleFileEntry implements FileEntry {
     @Nullable private final byte[] embeddedIndex;
     private final BinaryRow minKey;
     private final BinaryRow maxKey;
+    @Nullable private final String externalPath;
 
     public SimpleFileEntry(
             FileKind kind,
@@ -48,7 +49,8 @@ public class SimpleFileEntry implements FileEntry {
             List<String> extraFiles,
             @Nullable byte[] embeddedIndex,
             BinaryRow minKey,
-            BinaryRow maxKey) {
+            BinaryRow maxKey,
+            @Nullable String externalPath) {
         this.kind = kind;
         this.partition = partition;
         this.bucket = bucket;
@@ -58,6 +60,7 @@ public class SimpleFileEntry implements FileEntry {
         this.embeddedIndex = embeddedIndex;
         this.minKey = minKey;
         this.maxKey = maxKey;
+        this.externalPath = externalPath;
     }
 
     public static SimpleFileEntry from(ManifestEntry entry) {
@@ -70,7 +73,8 @@ public class SimpleFileEntry implements FileEntry {
                 entry.file().extraFiles(),
                 entry.file().embeddedIndex(),
                 entry.minKey(),
-                entry.maxKey());
+                entry.maxKey(),
+                entry.externalPath());
     }
 
     public static List<SimpleFileEntry> from(List<ManifestEntry> entries) {
@@ -102,9 +106,16 @@ public class SimpleFileEntry implements FileEntry {
         return fileName;
     }
 
+    @Nullable
+    @Override
+    public String externalPath() {
+        return externalPath;
+    }
+
     @Override
     public Identifier identifier() {
-        return new Identifier(partition, bucket, level, fileName, extraFiles, embeddedIndex);
+        return new Identifier(
+                partition, bucket, level, fileName, extraFiles, embeddedIndex, externalPath);
     }
 
     @Override
@@ -115,6 +126,11 @@ public class SimpleFileEntry implements FileEntry {
     @Override
     public BinaryRow maxKey() {
         return maxKey;
+    }
+
+    @Override
+    public List<String> extraFiles() {
+        return extraFiles;
     }
 
     @Override
@@ -133,12 +149,14 @@ public class SimpleFileEntry implements FileEntry {
                 && Objects.equals(fileName, that.fileName)
                 && Objects.equals(extraFiles, that.extraFiles)
                 && Objects.equals(minKey, that.minKey)
-                && Objects.equals(maxKey, that.maxKey);
+                && Objects.equals(maxKey, that.maxKey)
+                && Objects.equals(externalPath, that.externalPath);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(kind, partition, bucket, level, fileName, extraFiles, minKey, maxKey);
+        return Objects.hash(
+                kind, partition, bucket, level, fileName, extraFiles, minKey, maxKey, externalPath);
     }
 
     @Override
@@ -160,6 +178,8 @@ public class SimpleFileEntry implements FileEntry {
                 + minKey
                 + ", maxKey="
                 + maxKey
+                + ", externalPath="
+                + externalPath
                 + '}';
     }
 }

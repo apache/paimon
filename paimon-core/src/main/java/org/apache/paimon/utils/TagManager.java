@@ -23,7 +23,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.Tag;
@@ -255,7 +255,7 @@ public class TagManager {
         skippedSnapshots.add(right);
 
         // delete data files and empty directories
-        Predicate<ManifestEntry> dataFileSkipper = null;
+        Predicate<ExpireFileEntry> dataFileSkipper = null;
         boolean success = true;
         try {
             dataFileSkipper = tagDeletion.dataFileSkipper(skippedSnapshots);
@@ -353,7 +353,7 @@ public class TagManager {
                 // If the tag file is not found, it might be deleted by
                 // other processes, so just skip this tag
                 try {
-                    Snapshot snapshot = Snapshot.fromJson(fileIO.readFileUtf8(path));
+                    Snapshot snapshot = Tag.tryFromPath(fileIO, path).trimToSnapshot();
                     tags.computeIfAbsent(snapshot, s -> new ArrayList<>()).add(tagName);
                 } catch (FileNotFoundException ignored) {
                 }
@@ -371,9 +371,9 @@ public class TagManager {
             List<Pair<Tag, String>> tags = new ArrayList<>();
             for (Path path : paths) {
                 String tagName = path.getName().substring(TAG_PREFIX.length());
-                Tag tag = Tag.safelyFromPath(fileIO, path);
-                if (tag != null) {
-                    tags.add(Pair.of(tag, tagName));
+                try {
+                    tags.add(Pair.of(Tag.tryFromPath(fileIO, path), tagName));
+                } catch (FileNotFoundException ignored) {
                 }
             }
             return tags;

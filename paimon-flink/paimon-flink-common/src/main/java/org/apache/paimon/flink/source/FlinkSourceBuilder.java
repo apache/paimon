@@ -22,11 +22,12 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.StartupMode;
 import org.apache.paimon.CoreOptions.StreamingReadMode;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.Projection;
 import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.sink.FlinkSink;
 import org.apache.paimon.flink.source.align.AlignedContinuousFileStoreSource;
-import org.apache.paimon.flink.source.operator.MonitorFunction;
+import org.apache.paimon.flink.source.operator.MonitorSource;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -46,7 +47,6 @@ import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.util.DataFormatConverters;
@@ -172,37 +172,49 @@ public class FlinkSourceBuilder {
         return this;
     }
 
-    private ReadBuilder createReadBuilder() {
-        ReadBuilder readBuilder =
-                table.newReadBuilder().withProjection(projectedFields).withFilter(predicate);
+    private ReadBuilder createReadBuilder(@Nullable org.apache.paimon.types.RowType readType) {
+        ReadBuilder readBuilder = table.newReadBuilder();
+        if (readType != null) {
+            readBuilder.withReadType(readType);
+        }
+        readBuilder.withFilter(predicate);
         if (limit != null) {
             readBuilder.withLimit(limit.intValue());
         }
-        return readBuilder;
+        return readBuilder.dropStats();
     }
 
     private DataStream<RowData> buildStaticFileSource() {
         Options options = Options.fromMap(table.options());
         return toDataStream(
                 new StaticFileStoreSource(
-                        createReadBuilder(),
+                        createReadBuilder(projectedRowType()),
                         limit,
                         options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
                         options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE),
-                        dynamicPartitionFilteringInfo));
+                        dynamicPartitionFilteringInfo,
+                        outerProject()));
     }
 
     private DataStream<RowData> buildContinuousFileSource() {
         return toDataStream(
                 new ContinuousFileStoreSource(
-                        createReadBuilder(), table.options(), limit, bucketMode));
+                        createReadBuilder(projectedRowType()),
+                        table.options(),
+                        limit,
+                        bucketMode,
+                        outerProject()));
     }
 
     private DataStream<RowData> buildAlignedContinuousFileSource() {
         assertStreamingConfigurationForAlignMode(env);
         return toDataStream(
                 new AlignedContinuousFileStoreSource(
-                        createReadBuilder(), table.options(), limit, bucketMode));
+                        createReadBuilder(projectedRowType()),
+                        table.options(),
+                        limit,
+                        bucketMode,
+                        outerProject()));
     }
 
     private DataStream<RowData> toDataStream(Source<RowData, ?, ?> source) {
@@ -238,6 +250,20 @@ public class FlinkSourceBuilder {
         return InternalTypeInfo.of(produceType);
     }
 
+    private @Nullable org.apache.paimon.types.RowType projectedRowType() {
+        return Optional.ofNullable(projectedFields)
+                .map(Projection::of)
+                .map(p -> p.project(table.rowType()))
+                .orElse(null);
+    }
+
+    private @Nullable NestedProjectedRowData outerProject() {
+        return Optional.ofNullable(projectedFields)
+                .map(Projection::of)
+                .map(p -> p.getOuterProjectRow(table.rowType()))
+                .orElse(null);
+    }
+
     /** Build source {@link DataStream} with {@link RowData}. */
     public DataStream<Row> buildForRow() {
         DataType rowType = fromLogicalToDataType(toLogicalType(table.rowType()));
@@ -259,7 +285,9 @@ public class FlinkSourceBuilder {
         if (conf.contains(CoreOptions.CONSUMER_ID)
                 && !conf.contains(CoreOptions.CONSUMER_EXPIRATION_TIME)) {
             throw new IllegalArgumentException(
-                    "consumer.expiration-time should be specified when using consumer-id.");
+                    "You need to configure 'consumer.expiration-time' (ALTER TABLE) and restart your write job for it"
+                            + " to take effect, when you need consumer-id feature. This is to prevent consumers from leaving"
+                            + " too many snapshots that could pose a risk to the file system.");
         }
 
         if (sourceBounded) {
@@ -279,7 +307,10 @@ public class FlinkSourceBuilder {
                 return toDataStream(
                         HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(
                                         LogHybridSourceFactory.buildHybridFirstSource(
-                                                table, projectedFields, predicate))
+                                                table,
+                                                projectedRowType(),
+                                                predicate,
+                                                outerProject()))
                                 .addSource(
                                         new LogHybridSourceFactory(logSourceProvider),
                                         Boundedness.CONTINUOUS_UNBOUNDED)
@@ -305,16 +336,17 @@ public class FlinkSourceBuilder {
                     "Cannot limit streaming source, please use batch execution mode.");
         }
         dataStream =
-                MonitorFunction.buildSource(
+                MonitorSource.buildSource(
                         env,
                         sourceName,
                         produceTypeInfo(),
-                        createReadBuilder(),
+                        createReadBuilder(projectedRowType()),
                         conf.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis(),
                         watermarkStrategy == null,
                         conf.get(
                                 FlinkConnectorOptions.STREAMING_READ_SHUFFLE_BUCKET_WITH_PARTITION),
-                        bucketMode);
+                        bucketMode,
+                        outerProject());
         if (parallelism != null) {
             dataStream.getTransformation().setParallelism(parallelism);
         }
@@ -329,30 +361,25 @@ public class FlinkSourceBuilder {
         checkArgument(
                 checkpointConfig.isCheckpointingEnabled(),
                 "The align mode of paimon source is only supported when checkpoint enabled. Please set "
-                        + ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL.key()
-                        + "larger than 0");
+                        + "execution.checkpointing.interval larger than 0");
         checkArgument(
                 checkpointConfig.getMaxConcurrentCheckpoints() == 1,
                 "The align mode of paimon source supports at most one ongoing checkpoint at the same time. Please set "
-                        + ExecutionCheckpointingOptions.MAX_CONCURRENT_CHECKPOINTS.key()
-                        + " to 1");
+                        + "execution.checkpointing.max-concurrent-checkpoints to 1");
         checkArgument(
                 checkpointConfig.getCheckpointTimeout()
                         > conf.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_TIMEOUT)
                                 .toMillis(),
                 "The align mode of paimon source requires that the timeout of checkpoint is greater than the timeout of the source's snapshot alignment. Please increase "
-                        + ExecutionCheckpointingOptions.CHECKPOINTING_TIMEOUT.key()
-                        + " or decrease "
+                        + "execution.checkpointing.timeout or decrease "
                         + FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_TIMEOUT.key());
         checkArgument(
                 !env.getCheckpointConfig().isUnalignedCheckpointsEnabled(),
                 "The align mode of paimon source currently does not support unaligned checkpoints. Please set "
-                        + ExecutionCheckpointingOptions.ENABLE_UNALIGNED.key()
-                        + " to false.");
+                        + "execution.checkpointing.unaligned.enabled to false.");
         checkArgument(
                 env.getCheckpointConfig().getCheckpointingMode() == CheckpointingMode.EXACTLY_ONCE,
                 "The align mode of paimon source currently only supports EXACTLY_ONCE checkpoint mode. Please set "
-                        + ExecutionCheckpointingOptions.CHECKPOINTING_MODE.key()
-                        + " to exactly-once");
+                        + "execution.checkpointing.mode to exactly-once");
     }
 }

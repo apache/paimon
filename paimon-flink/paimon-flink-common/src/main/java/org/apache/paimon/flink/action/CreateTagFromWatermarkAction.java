@@ -26,19 +26,22 @@ import java.util.Map;
 
 /** Create tag from watermark action for Flink. */
 public class CreateTagFromWatermarkAction extends ActionBase {
+
+    private final String database;
     private final String table;
     private final String tag;
     private final Long watermark;
     private final String timeRetained;
 
     public CreateTagFromWatermarkAction(
-            String warehouse,
+            String database,
             String table,
             String tag,
             Long watermark,
             String timeRetained,
             Map<String, String> catalogConfig) {
-        super(warehouse, catalogConfig);
+        super(catalogConfig);
+        this.database = database;
         this.table = table;
         this.tag = tag;
         this.watermark = watermark;
@@ -51,6 +54,10 @@ public class CreateTagFromWatermarkAction extends ActionBase {
                 new CreateTagFromWatermarkProcedure();
         createTagFromWatermarkProcedure.withCatalog(catalog);
         createTagFromWatermarkProcedure.call(
-                new DefaultProcedureContext(env), table, tag, watermark, timeRetained);
+                new DefaultProcedureContext(env),
+                database + "." + table,
+                tag,
+                watermark,
+                timeRetained);
     }
 }

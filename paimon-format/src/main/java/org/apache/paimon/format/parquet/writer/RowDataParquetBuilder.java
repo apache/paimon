@@ -60,6 +60,10 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
                                 conf.getInt(
                                         ParquetOutputFormat.PAGE_SIZE,
                                         ParquetWriter.DEFAULT_PAGE_SIZE))
+                        .withPageRowCountLimit(
+                                conf.getInt(
+                                        ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT,
+                                        ParquetProperties.DEFAULT_PAGE_ROW_COUNT_LIMIT))
                         .withDictionaryPageSize(
                                 conf.getInt(
                                         ParquetOutputFormat.DICTIONARY_PAGE_SIZE,

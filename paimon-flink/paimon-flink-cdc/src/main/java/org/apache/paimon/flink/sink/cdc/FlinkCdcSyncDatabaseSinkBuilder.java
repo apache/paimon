@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
@@ -66,14 +66,13 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     @Nullable private Integer parallelism;
     private double committerCpu;
     @Nullable private MemorySize committerMemory;
-    private boolean commitChaining;
 
     // Paimon catalog used to check and create tables. There will be two
     //     places where this catalog is used. 1) in processing function,
     //     it will check newly added tables and create the corresponding
     //     Paimon tables. 2) in multiplex sink where it is used to
     //     initialize different writers to multiple tables.
-    private Catalog.Loader catalogLoader;
+    private CatalogLoader catalogLoader;
     // database to sync, currently only support single database
     private String database;
     private MultiTablesSinkMode mode;
@@ -103,7 +102,6 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         this.parallelism = options.get(FlinkConnectorOptions.SINK_PARALLELISM);
         this.committerCpu = options.get(FlinkConnectorOptions.SINK_COMMITTER_CPU);
         this.committerMemory = options.get(FlinkConnectorOptions.SINK_COMMITTER_MEMORY);
-        this.commitChaining = options.get(FlinkConnectorOptions.SINK_COMMITTER_OPERATOR_CHAINING);
         this.commitUser = createCommitUser(options);
         return this;
     }
@@ -113,7 +111,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         return this;
     }
 
-    public FlinkCdcSyncDatabaseSinkBuilder<T> withCatalogLoader(Catalog.Loader catalogLoader) {
+    public FlinkCdcSyncDatabaseSinkBuilder<T> withCatalogLoader(CatalogLoader catalogLoader) {
         this.catalogLoader = catalogLoader;
         return this;
     }
@@ -169,7 +167,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
 
         FlinkCdcMultiTableSink sink =
                 new FlinkCdcMultiTableSink(
-                        catalogLoader, committerCpu, committerMemory, commitChaining, commitUser);
+                        catalogLoader, committerCpu, committerMemory, commitUser);
         sink.sinkFrom(partitioned);
     }
 

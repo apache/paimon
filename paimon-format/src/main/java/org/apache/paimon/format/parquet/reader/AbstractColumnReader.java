@@ -69,9 +69,6 @@ public abstract class AbstractColumnReader<VECTOR extends WritableColumnVector>
     /** If true, the current page is dictionary encoded. */
     private boolean isCurrentPageDictionaryEncoded;
 
-    /** Total values in the current page. */
-    //    private int pageValueCount;
-
     /**
      * Helper struct to track intermediate states while reading Parquet pages in the column chunk.
      */
@@ -90,7 +87,7 @@ public abstract class AbstractColumnReader<VECTOR extends WritableColumnVector>
      */
 
     /** Run length decoder for data and dictionary. */
-    protected RunLengthDecoder runLenDecoder;
+    RunLengthDecoder runLenDecoder;
 
     /** Data input stream. */
     ByteBufferInputStream dataInputStream;

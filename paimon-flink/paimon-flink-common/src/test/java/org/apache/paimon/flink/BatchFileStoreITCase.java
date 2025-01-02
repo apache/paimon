@@ -34,6 +34,7 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -560,17 +561,51 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
         String sql = "SELECT COUNT(*) FROM count_append_dv";
         assertThat(sql(sql)).containsOnly(Row.of(2L));
-        validateCount1NotPushDown(sql);
+        validateCount1PushDown(sql);
     }
 
     @Test
     public void testCountStarPK() {
-        sql("CREATE TABLE count_pk (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING)");
-        sql("INSERT INTO count_pk VALUES (1, 'a'), (2, 'b')");
+        sql(
+                "CREATE TABLE count_pk (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING) WITH ('file.format' = 'avro')");
+        sql("INSERT INTO count_pk VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd')");
+        sql("INSERT INTO count_pk VALUES (1, 'e')");
 
         String sql = "SELECT COUNT(*) FROM count_pk";
-        assertThat(sql(sql)).containsOnly(Row.of(2L));
+        assertThat(sql(sql)).containsOnly(Row.of(4L));
         validateCount1NotPushDown(sql);
+    }
+
+    @Test
+    public void testCountStarPKDv() {
+        sql(
+                "CREATE TABLE count_pk_dv (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING) WITH ("
+                        + "'file.format' = 'avro', "
+                        + "'deletion-vectors.enabled' = 'true')");
+        sql("INSERT INTO count_pk_dv VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd')");
+        sql("INSERT INTO count_pk_dv VALUES (1, 'e')");
+
+        String sql = "SELECT COUNT(*) FROM count_pk_dv";
+        assertThat(sql(sql)).containsOnly(Row.of(4L));
+        validateCount1PushDown(sql);
+    }
+
+    @Test
+    public void testParquetRowDecimalAndTimestamp() {
+        sql(
+                "CREATE TABLE parquet_row_decimal(`row` ROW<f0 DECIMAL(2,1)>) WITH ('file.format' = 'parquet')");
+        sql("INSERT INTO parquet_row_decimal VALUES ( (ROW(1.2)) )");
+
+        assertThat(sql("SELECT * FROM parquet_row_decimal"))
+                .containsExactly(Row.of(Row.of(new BigDecimal("1.2"))));
+
+        sql(
+                "CREATE TABLE parquet_row_timestamp(`row` ROW<f0 TIMESTAMP(0)>) WITH ('file.format' = 'parquet')");
+        sql("INSERT INTO parquet_row_timestamp VALUES ( (ROW(TIMESTAMP'2024-11-13 18:00:00')) )");
+
+        assertThat(sql("SELECT * FROM parquet_row_timestamp"))
+                .containsExactly(
+                        Row.of(Row.of(DateTimeUtils.toLocalDateTime("2024-11-13 18:00:00", 0))));
     }
 
     private void validateCount1PushDown(String sql) {

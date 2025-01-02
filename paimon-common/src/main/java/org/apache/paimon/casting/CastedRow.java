@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.RowKind;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -34,8 +35,6 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  *
  * <p>It reads data from underlying {@link InternalRow} according to source logical type and casts
  * it with specific {@link CastExecutor}.
- *
- * <p>Note: This class supports only top-level castings, not nested castings.
  */
 public class CastedRow implements InternalRow {
 
@@ -130,6 +129,11 @@ public class CastedRow implements InternalRow {
 
     @Override
     public byte[] getBinary(int pos) {
+        return castMapping[pos].getFieldOrNull(row);
+    }
+
+    @Override
+    public Variant getVariant(int pos) {
         return castMapping[pos].getFieldOrNull(row);
     }
 

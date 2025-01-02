@@ -19,8 +19,16 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.types.DataTypes;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FileSystemCatalog}. */
 public class FileSystemCatalogTest extends CatalogTestBase {
@@ -28,6 +36,44 @@ public class FileSystemCatalogTest extends CatalogTestBase {
     @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
-        catalog = new FileSystemCatalog(fileIO, new Path(warehouse));
+        Options catalogOptions = new Options();
+        catalog = new FileSystemCatalog(fileIO, new Path(warehouse), catalogOptions);
+    }
+
+    @Test
+    public void testCreateTableCaseSensitive() throws Exception {
+        catalog.createDatabase("test_db", false);
+        Identifier identifier = Identifier.create("test_db", "new_TABLE");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("Pk1", DataTypes.INT())
+                        .column("pk2", DataTypes.STRING())
+                        .column("pk3", DataTypes.STRING())
+                        .column(
+                                "Col1",
+                                DataTypes.ROW(
+                                        DataTypes.STRING(),
+                                        DataTypes.BIGINT(),
+                                        DataTypes.TIMESTAMP(),
+                                        DataTypes.ARRAY(DataTypes.STRING())))
+                        .column("col2", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT()))
+                        .column("col3", DataTypes.ARRAY(DataTypes.ROW(DataTypes.STRING())))
+                        .partitionKeys("Pk1", "pk2")
+                        .primaryKey("Pk1", "pk2", "pk3")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+    }
+
+    @Test
+    public void testAlterDatabase() throws Exception {
+        String databaseName = "test_alter_db";
+        catalog.createDatabase(databaseName, false);
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterDatabase(
+                                        databaseName,
+                                        Lists.newArrayList(PropertyChange.removeProperty("a")),
+                                        false))
+                .isInstanceOf(UnsupportedOperationException.class);
     }
 }

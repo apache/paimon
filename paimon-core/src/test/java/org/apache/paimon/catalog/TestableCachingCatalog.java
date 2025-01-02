@@ -18,8 +18,8 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.table.Table;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
@@ -38,7 +38,14 @@ public class TestableCachingCatalog extends CachingCatalog {
     private final Duration cacheExpirationInterval;
 
     public TestableCachingCatalog(Catalog catalog, Duration expirationInterval, Ticker ticker) {
-        super(catalog, expirationInterval, MemorySize.ZERO, Long.MAX_VALUE, Long.MAX_VALUE, ticker);
+        super(
+                catalog,
+                expirationInterval,
+                MemorySize.ZERO,
+                Long.MAX_VALUE,
+                Long.MAX_VALUE,
+                Integer.MAX_VALUE,
+                ticker);
         this.cacheExpirationInterval = expirationInterval;
     }
 
@@ -49,7 +56,7 @@ public class TestableCachingCatalog extends CachingCatalog {
         return tableCache;
     }
 
-    public Cache<Identifier, List<PartitionEntry>> partitionCache() {
+    public Cache<Identifier, List<Partition>> partitionCache() {
         partitionCache.cleanUp();
         return partitionCache;
     }

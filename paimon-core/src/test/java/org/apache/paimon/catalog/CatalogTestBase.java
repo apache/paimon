@@ -54,6 +54,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.Assert.assertEquals;
 
 /** Base test class of paimon catalog in {@link Catalog}. */
 public abstract class CatalogTestBase {
@@ -947,5 +948,63 @@ public abstract class CatalogTestBase {
         assertThatThrownBy(() -> catalog.getTable(identifier))
                 .isInstanceOf(Catalog.TableNotExistException.class);
         assertThat(catalog.getTable(newIdentifier)).isInstanceOf(FormatTable.class);
+    }
+
+    @Test
+    public void testTableUUID() throws Exception {
+        catalog.createDatabase("test_db", false);
+        Identifier identifier = Identifier.create("test_db", "test_table");
+        catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
+        Table table = catalog.getTable(identifier);
+        String uuid = table.uuid();
+        assertThat(uuid).startsWith(identifier.getFullName() + ".");
+        assertThat(Long.parseLong(uuid.substring((identifier.getFullName() + ".").length())))
+                .isGreaterThan(0);
+    }
+
+    protected void alterDatabaseWhenSupportAlter() throws Exception {
+        // Alter database
+        String databaseName = "db_to_alter";
+        catalog.createDatabase(databaseName, false);
+        String key = "key1";
+        String key2 = "key2";
+        // Add property
+        catalog.alterDatabase(
+                databaseName,
+                Lists.newArrayList(
+                        PropertyChange.setProperty(key, "value"),
+                        PropertyChange.setProperty(key2, "value")),
+                false);
+        Database db = catalog.getDatabase(databaseName);
+        assertEquals("value", db.options().get(key));
+        assertEquals("value", db.options().get(key2));
+        // Update property
+        catalog.alterDatabase(
+                databaseName,
+                Lists.newArrayList(
+                        PropertyChange.setProperty(key, "value1"),
+                        PropertyChange.setProperty(key2, "value1")),
+                false);
+        db = catalog.getDatabase(databaseName);
+        assertEquals("value1", db.options().get(key));
+        assertEquals("value1", db.options().get(key2));
+        // remove property
+        catalog.alterDatabase(
+                databaseName,
+                Lists.newArrayList(
+                        PropertyChange.removeProperty(key), PropertyChange.removeProperty(key2)),
+                false);
+        db = catalog.getDatabase(databaseName);
+        assertEquals(false, db.options().containsKey(key));
+        assertEquals(false, db.options().containsKey(key2));
+        // Remove non-existent property
+        catalog.alterDatabase(
+                databaseName,
+                Lists.newArrayList(
+                        PropertyChange.removeProperty(key), PropertyChange.removeProperty(key2)),
+                false);
+        db = catalog.getDatabase(databaseName);
+        assertEquals(false, db.options().containsKey(key));
+        assertEquals(false, db.options().containsKey(key2));
     }
 }

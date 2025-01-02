@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.sink.MultiTableCommittable;
 import org.apache.paimon.flink.sink.MultiTableCommittableTypeInfo;
@@ -82,7 +83,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
     private Identifier firstTable;
     private Catalog catalog;
     private Identifier secondTable;
-    private Catalog.Loader catalogLoader;
+    private CatalogLoader catalogLoader;
     private Schema firstTableSchema;
 
     @BeforeEach
@@ -340,7 +341,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         harness.close();
     }
 
-    private Catalog.Loader createCatalogLoader() {
+    private CatalogLoader createCatalogLoader() {
         Options catalogOptions = createCatalogOptions(warehouse);
         return () -> CatalogFactory.createCatalog(CatalogContext.create(catalogOptions));
     }
@@ -688,9 +689,9 @@ public class CdcRecordStoreMultiWriteOperatorTest {
     }
 
     private OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable>
-            createTestHarness(Catalog.Loader catalogLoader) throws Exception {
-        CdcRecordStoreMultiWriteOperator operator =
-                new CdcRecordStoreMultiWriteOperator(
+            createTestHarness(CatalogLoader catalogLoader) throws Exception {
+        CdcRecordStoreMultiWriteOperator.Factory operatorFactory =
+                new CdcRecordStoreMultiWriteOperator.Factory(
                         catalogLoader,
                         (t, commitUser, state, ioManager, memoryPoolFactory, metricGroup) ->
                                 new StoreSinkWriteImpl(
@@ -709,7 +710,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         TypeSerializer<MultiTableCommittable> outputSerializer =
                 new MultiTableCommittableTypeInfo().createSerializer(new ExecutionConfig());
         OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable> harness =
-                new OneInputStreamOperatorTestHarness<>(operator, inputSerializer);
+                new OneInputStreamOperatorTestHarness<>(operatorFactory, inputSerializer);
         harness.setup(outputSerializer);
         return harness;
     }

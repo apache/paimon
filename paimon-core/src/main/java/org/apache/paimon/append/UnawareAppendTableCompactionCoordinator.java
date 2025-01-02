@@ -27,6 +27,7 @@ import org.apache.paimon.deletionvectors.append.UnawareAppendDeletionFileMaintai
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
@@ -379,6 +380,10 @@ public class UnawareAppendTableCompactionCoordinator {
             if (filter != null) {
                 snapshotReader.withFilter(filter);
             }
+            // drop stats to reduce memory
+            if (table.coreOptions().manifestDeleteFileDropStats()) {
+                snapshotReader.dropStats();
+            }
             this.streamingMode = isStreaming;
         }
 
@@ -387,6 +392,9 @@ public class UnawareAppendTableCompactionCoordinator {
             if (nextSnapshot == null) {
                 nextSnapshot = snapshotManager.latestSnapshotId();
                 if (nextSnapshot == null) {
+                    if (!streamingMode) {
+                        throw new EndOfScanException();
+                    }
                     return;
                 }
                 snapshotReader.withMode(ScanMode.ALL);
@@ -438,7 +446,12 @@ public class UnawareAppendTableCompactionCoordinator {
                 }
 
                 if (currentIterator.hasNext()) {
-                    return currentIterator.next();
+                    ManifestEntry entry = currentIterator.next();
+                    if (entry.kind() == FileKind.DELETE) {
+                        continue;
+                    } else {
+                        return entry;
+                    }
                 }
                 currentIterator = null;
             }

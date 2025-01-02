@@ -20,7 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
-import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.options.Options;
 
@@ -32,8 +32,8 @@ import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
-import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.table.data.RowData;
 
 import java.io.Serializable;
@@ -55,13 +55,17 @@ public class CombinedTableCompactorSink implements Serializable {
     private static final String WRITER_NAME = "Writer";
     private static final String GLOBAL_COMMITTER_NAME = "Global Committer";
 
-    private final Catalog.Loader catalogLoader;
+    private final CatalogLoader catalogLoader;
     private final boolean ignorePreviousFiles;
+    private final boolean fullCompaction;
+
     private final Options options;
 
-    public CombinedTableCompactorSink(Catalog.Loader catalogLoader, Options options) {
+    public CombinedTableCompactorSink(
+            CatalogLoader catalogLoader, Options options, boolean fullCompaction) {
         this.catalogLoader = catalogLoader;
         this.ignorePreviousFiles = false;
+        this.fullCompaction = fullCompaction;
         this.options = options;
     }
 
@@ -104,7 +108,10 @@ public class CombinedTableCompactorSink implements Serializable {
                                 String.format("%s-%s", "Multi-Bucket-Table", WRITER_NAME),
                                 new MultiTableCommittableTypeInfo(),
                                 combinedMultiComacptionWriteOperator(
-                                        env.getCheckpointConfig(), isStreaming, commitUser))
+                                        env.getCheckpointConfig(),
+                                        isStreaming,
+                                        fullCompaction,
+                                        commitUser))
                         .setParallelism(awareBucketTableSource.getParallelism());
 
         SingleOutputStreamOperator<MultiTableCommittable> unawareBucketTableRewriter =
@@ -112,7 +119,7 @@ public class CombinedTableCompactorSink implements Serializable {
                         .transform(
                                 String.format("%s-%s", "Unaware-Bucket-Table", WRITER_NAME),
                                 new MultiTableCommittableTypeInfo(),
-                                new AppendOnlyMultiTableCompactionWorkerOperator(
+                                new AppendOnlyMultiTableCompactionWorkerOperator.Factory(
                                         catalogLoader, commitUser, options))
                         .setParallelism(unawareBucketTableSource.getParallelism());
 
@@ -153,28 +160,34 @@ public class CombinedTableCompactorSink implements Serializable {
                         .transform(
                                 GLOBAL_COMMITTER_NAME,
                                 new MultiTableCommittableTypeInfo(),
-                                new CommitterOperator<>(
+                                new CommitterOperatorFactory<>(
                                         streamingCheckpointEnabled,
                                         false,
-                                        options.get(SINK_COMMITTER_OPERATOR_CHAINING),
                                         commitUser,
                                         createCommitterFactory(isStreaming),
                                         createCommittableStateManager(),
                                         options.get(END_INPUT_WATERMARK)))
                         .setParallelism(written.getParallelism());
-        return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
+        if (!options.get(SINK_COMMITTER_OPERATOR_CHAINING)) {
+            committed = committed.startNewChain();
+        }
+        return committed.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
     // TODO:refactor FlinkSink to adopt this sink
-    protected OneInputStreamOperator<RowData, MultiTableCommittable>
+    protected OneInputStreamOperatorFactory<RowData, MultiTableCommittable>
             combinedMultiComacptionWriteOperator(
-                    CheckpointConfig checkpointConfig, boolean isStreaming, String commitUser) {
-        return new MultiTablesStoreCompactOperator(
+                    CheckpointConfig checkpointConfig,
+                    boolean isStreaming,
+                    boolean fullCompaction,
+                    String commitUser) {
+        return new MultiTablesStoreCompactOperator.Factory(
                 catalogLoader,
                 commitUser,
                 checkpointConfig,
                 isStreaming,
                 ignorePreviousFiles,
+                fullCompaction,
                 options);
     }
 

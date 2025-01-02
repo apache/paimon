@@ -31,6 +31,7 @@ import static org.apache.paimon.types.DataTypeRoot.MULTISET;
 import static org.apache.paimon.types.DataTypeRoot.ROW;
 import static org.apache.paimon.types.DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE;
 import static org.apache.paimon.types.DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE;
+import static org.apache.paimon.types.DataTypeRoot.VARIANT;
 
 /** Utils for type. */
 public class TypeCheckUtils {
@@ -95,8 +96,16 @@ public class TypeCheckUtils {
         return type.getTypeRoot() == ROW;
     }
 
+    public static boolean isVariant(DataType type) {
+        return type.getTypeRoot() == VARIANT;
+    }
+
     public static boolean isComparable(DataType type) {
-        return !isMap(type) && !isMultiset(type) && !isRow(type) && !isArray(type);
+        return !isMap(type)
+                && !isMultiset(type)
+                && !isRow(type)
+                && !isArray(type)
+                && !isVariant(type);
     }
 
     public static boolean isMutable(DataType type) {

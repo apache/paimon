@@ -25,7 +25,7 @@ under the License.
     <parent>
         <groupId>org.apache.paimon</groupId>
         <artifactId>paimon-flink</artifactId>
-        <version>1.0-SNAPSHOT</version>
+        <version>1.1-SNAPSHOT</version>
     </parent>
 
     <packaging>jar</packaging>
@@ -34,7 +34,7 @@ under the License.
     <name>Paimon : Flink : CDC</name>
 
     <properties>
-        <flink.version>1.18.1</flink.version>
+        <flink.version>1.20.0</flink.version>
         <flink.cdc.version>3.1.1</flink.cdc.version>
         <flink.mongodb.cdc.version>3.1.1</flink.mongodb.cdc.version>
         <avro.version>1.11.4</avro.version>
@@ -43,7 +43,7 @@ under the License.
         <mongodb.testcontainers.version>1.19.1</mongodb.testcontainers.version>
         <flink.connector.pulsar.version>4.0.0-1.17</flink.connector.pulsar.version>
         <confluent.platform.version>7.5.0</confluent.platform.version>
-        <flink.connector.kafka.version>3.0.1-1.18</flink.connector.kafka.version>
+        <flink.connector.kafka.version>3.3.0-1.20</flink.connector.kafka.version>
     </properties>
 
     <repositories>
@@ -166,6 +166,13 @@ under the License.
         </dependency>
 
         <!-- test dependencies -->
+
+        <dependency>
+            <groupId>commons-codec</groupId>
+            <artifactId>commons-codec</artifactId>
+            <version>1.9</version>
+            <scope>test</scope>
+        </dependency>
 
         <dependency>
             <groupId>org.apache.paimon</groupId>

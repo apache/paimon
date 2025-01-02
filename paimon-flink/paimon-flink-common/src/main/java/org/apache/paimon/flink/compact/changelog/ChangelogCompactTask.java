@@ -96,7 +96,7 @@ public class ChangelogCompactTask implements Serializable {
                         outputStream,
                         results,
                         table,
-                        dataFilePathFactory.toPath(meta.fileName()),
+                        dataFilePathFactory.toPath(meta),
                         bucket,
                         false,
                         meta);
@@ -111,7 +111,7 @@ public class ChangelogCompactTask implements Serializable {
                         outputStream,
                         results,
                         table,
-                        dataFilePathFactory.toPath(meta.fileName()),
+                        dataFilePathFactory.toPath(meta),
                         bucket,
                         true,
                         meta);
@@ -167,11 +167,12 @@ public class ChangelogCompactTask implements Serializable {
         table.fileIO()
                 .rename(
                         changelogTempPath,
-                        dataFilePathFactory.toPath(
+                        dataFilePathFactory.toAlignedPath(
                                 realName
                                         + "."
                                         + CompactedChangelogReadOnlyFormat.getIdentifier(
-                                                baseResult.meta.fileFormat())));
+                                                baseResult.meta.fileFormat()),
+                                baseResult.meta));
 
         List<Committable> newCommittables = new ArrayList<>();
 

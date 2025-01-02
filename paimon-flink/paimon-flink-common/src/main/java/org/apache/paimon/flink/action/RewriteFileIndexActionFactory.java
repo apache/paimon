@@ -35,12 +35,10 @@ public class RewriteFileIndexActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        String warehouse = params.get(WAREHOUSE);
-        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
+        Map<String, String> catalogConfig = catalogConfigMap(params);
         String identifier = params.get(IDENTIFIER_KEY);
 
-        RewriteFileIndexAction action =
-                new RewriteFileIndexAction(warehouse, identifier, catalogConfig);
+        RewriteFileIndexAction action = new RewriteFileIndexAction(identifier, catalogConfig);
 
         return Optional.of(action);
     }

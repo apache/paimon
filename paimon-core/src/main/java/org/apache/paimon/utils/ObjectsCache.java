@@ -26,6 +26,7 @@ import org.apache.paimon.data.SimpleCollectingOutputView;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentSource;
+import org.apache.paimon.operation.metrics.CacheMetrics;
 import org.apache.paimon.types.RowType;
 
 import org.slf4j.Logger;
@@ -52,6 +53,8 @@ public class ObjectsCache<K, V> {
     private final FunctionWithIOException<K, Long> fileSizeFunction;
     private final BiFunctionWithIOE<K, Long, CloseableIterator<InternalRow>> reader;
 
+    @Nullable private CacheMetrics cacheMetrics;
+
     public ObjectsCache(
             SegmentsCache<K> cache,
             ObjectSerializer<V> projectedSerializer,
@@ -66,18 +69,29 @@ public class ObjectsCache<K, V> {
         this.reader = reader;
     }
 
+    public void withCacheMetrics(@Nullable CacheMetrics cacheMetrics) {
+        this.cacheMetrics = cacheMetrics;
+    }
+
     public List<V> read(
             K key,
             @Nullable Long fileSize,
             Filter<InternalRow> loadFilter,
-            Filter<InternalRow> readFilter)
+            Filter<InternalRow> readFilter,
+            Filter<V> readVFilter)
             throws IOException {
         Segments segments = cache.getIfPresents(key);
         if (segments != null) {
-            return readFromSegments(segments, readFilter);
+            if (cacheMetrics != null) {
+                cacheMetrics.increaseHitObject();
+            }
+            return readFromSegments(segments, readFilter, readVFilter);
         } else {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("not match cache key {}", key);
+            }
+            if (cacheMetrics != null) {
+                cacheMetrics.increaseMissedObject();
             }
             if (fileSize == null) {
                 fileSize = fileSizeFunction.apply(key);
@@ -85,15 +99,16 @@ public class ObjectsCache<K, V> {
             if (fileSize <= cache.maxElementSize()) {
                 segments = readSegments(key, fileSize, loadFilter);
                 cache.put(key, segments);
-                return readFromSegments(segments, readFilter);
+                return readFromSegments(segments, readFilter, readVFilter);
             } else {
                 return readFromIterator(
-                        reader.apply(key, fileSize), projectedSerializer, readFilter);
+                        reader.apply(key, fileSize), projectedSerializer, readFilter, readVFilter);
             }
         }
     }
 
-    private List<V> readFromSegments(Segments segments, Filter<InternalRow> readFilter)
+    private List<V> readFromSegments(
+            Segments segments, Filter<InternalRow> readFilter, Filter<V> readVFilter)
             throws IOException {
         InternalRowSerializer formatSerializer = this.formatSerializer.get();
         List<V> entries = new ArrayList<>();
@@ -105,7 +120,10 @@ public class ObjectsCache<K, V> {
             try {
                 formatSerializer.mapFromPages(binaryRow, view);
                 if (readFilter.test(binaryRow)) {
-                    entries.add(projectedSerializer.fromRow(binaryRow));
+                    V v = projectedSerializer.fromRow(binaryRow);
+                    if (readVFilter.test(v)) {
+                        entries.add(v);
+                    }
                 }
             } catch (EOFException e) {
                 return entries;

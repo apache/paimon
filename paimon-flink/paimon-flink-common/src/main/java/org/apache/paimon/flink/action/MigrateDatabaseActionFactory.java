@@ -37,21 +37,15 @@ public class MigrateDatabaseActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        String warehouse = params.get(WAREHOUSE);
         String connector = params.get(SOURCE_TYPE);
         String sourceHiveDatabase = params.get(DATABASE);
-        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
+        Map<String, String> catalogConfig = catalogConfigMap(params);
         String tableConf = params.get(OPTIONS);
         Integer parallelism = Integer.parseInt(params.get(PARALLELISM));
 
         MigrateDatabaseAction migrateDatabaseAction =
                 new MigrateDatabaseAction(
-                        connector,
-                        warehouse,
-                        sourceHiveDatabase,
-                        catalogConfig,
-                        tableConf,
-                        parallelism);
+                        connector, sourceHiveDatabase, catalogConfig, tableConf, parallelism);
         return Optional.of(migrateDatabaseAction);
     }
 

@@ -184,6 +184,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue("data-")
                     .withDescription("Specify the file name prefix of data files.");
 
+    @Immutable
+    public static final ConfigOption<String> DATA_FILE_PATH_DIRECTORY =
+            key("data-file.path-directory")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Specify the path directory of data files.");
+
     public static final ConfigOption<String> CHANGELOG_FILE_PREFIX =
             key("changelog-file.prefix")
                     .stringType()
@@ -315,7 +322,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> SNAPSHOT_EXPIRE_LIMIT =
             key("snapshot.expire.limit")
                     .intType()
-                    .defaultValue(10)
+                    .defaultValue(50)
                     .withDescription(
                             "The maximum number of snapshots allowed to expire at a time.");
 
@@ -527,6 +534,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether to force a compaction before commit.");
 
+    public static final ConfigOption<Duration> COMMIT_TIMEOUT =
+            key("commit.timeout")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription("Timeout duration of retry when commit failed.");
+
     public static final ConfigOption<Integer> COMMIT_MAX_RETRIES =
             key("commit.max-retries")
                     .intType()
@@ -630,6 +643,14 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Whether to remove the whole row in partial-update engine when -D records are received.");
+
+    @Immutable
+    public static final ConfigOption<String> PARTIAL_UPDATE_REMOVE_RECORD_ON_SEQUENCE_GROUP =
+            key("partial-update.remove-record-on-sequence-group")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "When -D records of the given sequence groups are received, remove the whole row.");
 
     @Immutable
     public static final ConfigOption<String> ROWKIND_FIELD =
@@ -801,6 +822,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(Duration.ofHours(1))
                     .withDescription("The check interval of partition expiration.");
 
+    public static final ConfigOption<Integer> PARTITION_EXPIRATION_MAX_NUM =
+            key("partition.expiration-max-num")
+                    .intType()
+                    .defaultValue(100)
+                    .withDescription("The default deleted num of partition expiration.");
+
     public static final ConfigOption<String> PARTITION_TIMESTAMP_FORMATTER =
             key("partition.timestamp-formatter")
                     .stringType()
@@ -883,7 +910,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<LookupLocalFileType> LOOKUP_LOCAL_FILE_TYPE =
             key("lookup.local-file-type")
                     .enumType(LookupLocalFileType.class)
-                    .defaultValue(LookupLocalFileType.HASH)
+                    .defaultValue(LookupLocalFileType.SORT)
                     .withDescription("The local file type for lookup.");
 
     public static final ConfigOption<Float> LOOKUP_HASH_LOAD_FACTOR =
@@ -1093,7 +1120,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Boolean> METADATA_STATS_DENSE_STORE =
             key("metadata.stats-dense-store")
                     .booleanType()
-                    .defaultValue(false)
+                    .defaultValue(true)
                     .withDescription(
                             Description.builder()
                                     .text(
@@ -1102,8 +1129,8 @@ public class CoreOptions implements Serializable {
                                                     + " none statistic mode is set.")
                                     .linebreak()
                                     .text(
-                                            "Note, when this mode is enabled, the Paimon sdk in reading engine requires"
-                                                    + " at least version 0.9.1 or 1.0.0 or higher.")
+                                            "Note, when this mode is enabled with 'metadata.stats-mode:none', the Paimon sdk in"
+                                                    + " reading engine requires at least version 0.9.1 or 1.0.0 or higher.")
                                     .build());
 
     public static final ConfigOption<String> COMMIT_CALLBACKS =
@@ -1235,6 +1262,12 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Whether to automatically complete missing tags.");
+
+    public static final ConfigOption<String> TAG_BATCH_CUSTOMIZED_NAME =
+            key("tag.batch.customized-name")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Use customized name when creating tags in Batch mode.");
 
     public static final ConfigOption<Duration> SNAPSHOT_WATERMARK_IDLE_TIMEOUT =
             key("snapshot.watermark-idle-timeout")
@@ -1418,6 +1451,21 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("The object location for object table.");
 
+    public static final ConfigOption<Boolean> MANIFEST_DELETE_FILE_DROP_STATS =
+            key("manifest.delete-file-drop-stats")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "For DELETE manifest entry in manifest file, drop stats to reduce memory and storage."
+                                    + " Default value is false only for compatibility of old reader.");
+
+    public static final ConfigOption<Boolean> DATA_FILE_THIN_MODE =
+            key("data-file.thin-mode")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Enable data file thin mode to avoid duplicate columns storage.");
+
     @ExcludeFromDocumentation("Only used internally to support materialized table")
     public static final ConfigOption<String> MATERIALIZED_TABLE_DEFINITION_QUERY =
             key("materialized-table.definition-query")
@@ -1541,6 +1589,10 @@ public class CoreOptions implements Serializable {
         return createFileFormat(options, FILE_FORMAT);
     }
 
+    public String fileFormatString() {
+        return normalizeFileFormat(options.get(FILE_FORMAT));
+    }
+
     public FileFormat manifestFormat() {
         return createFileFormat(options, MANIFEST_FORMAT);
     }
@@ -1608,6 +1660,11 @@ public class CoreOptions implements Serializable {
 
     public String dataFilePrefix() {
         return options.get(DATA_FILE_PREFIX);
+    }
+
+    @Nullable
+    public String dataFilePathDirectory() {
+        return options.get(DATA_FILE_PATH_DIRECTORY);
     }
 
     public String changelogFilePrefix() {
@@ -1907,6 +1964,12 @@ public class CoreOptions implements Serializable {
         return options.get(COMMIT_FORCE_COMPACT);
     }
 
+    public long commitTimeout() {
+        return options.get(COMMIT_TIMEOUT) == null
+                ? Long.MAX_VALUE
+                : options.get(COMMIT_TIMEOUT).toMillis();
+    }
+
     public int commitMaxRetries() {
         return options.get(COMMIT_MAX_RETRIES);
     }
@@ -1937,6 +2000,10 @@ public class CoreOptions implements Serializable {
 
     public boolean needLookup() {
         return lookupStrategy().needLookup;
+    }
+
+    public boolean manifestDeleteFileDropStats() {
+        return options.get(MANIFEST_DELETE_FILE_DROP_STATS);
     }
 
     public LookupStrategy lookupStrategy() {
@@ -2106,6 +2173,10 @@ public class CoreOptions implements Serializable {
         return options.get(PARTITION_EXPIRATION_CHECK_INTERVAL);
     }
 
+    public int partitionExpireMaxNum() {
+        return options.get(PARTITION_EXPIRATION_MAX_NUM);
+    }
+
     public PartitionExpireStrategy partitionExpireStrategy() {
         return options.get(PARTITION_EXPIRATION_STRATEGY);
     }
@@ -2178,6 +2249,10 @@ public class CoreOptions implements Serializable {
 
     public boolean tagAutomaticCompletion() {
         return options.get(TAG_AUTOMATIC_COMPLETION);
+    }
+
+    public String tagBatchCustomizedName() {
+        return options.get(TAG_BATCH_CUSTOMIZED_NAME);
     }
 
     public Duration snapshotWatermarkIdleTimeout() {
@@ -2301,6 +2376,10 @@ public class CoreOptions implements Serializable {
 
     public boolean statsDenseStore() {
         return options.get(METADATA_STATS_DENSE_STORE);
+    }
+
+    public boolean dataFileThinMode() {
+        return options.get(DATA_FILE_THIN_MODE);
     }
 
     /** Specifies the merge engine for table with primary key. */

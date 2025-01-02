@@ -41,7 +41,6 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.time.Duration;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -59,17 +58,14 @@ public class CompactAction extends TableActionBase {
 
     @Nullable private Duration partitionIdleTime = null;
 
-    public CompactAction(String warehouse, String database, String tableName) {
-        this(warehouse, database, tableName, Collections.emptyMap(), Collections.emptyMap());
-    }
+    private Boolean fullCompaction;
 
     public CompactAction(
-            String warehouse,
             String database,
             String tableName,
             Map<String, String> catalogConfig,
             Map<String, String> tableConf) {
-        super(warehouse, database, tableName, catalogConfig);
+        super(database, tableName, catalogConfig);
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(
                     String.format(
@@ -100,6 +96,11 @@ public class CompactAction extends TableActionBase {
         return this;
     }
 
+    public CompactAction withFullCompaction(Boolean fullCompaction) {
+        this.fullCompaction = fullCompaction;
+        return this;
+    }
+
     @Override
     public void build() throws Exception {
         ReadableConfig conf = env.getConfiguration();
@@ -124,6 +125,13 @@ public class CompactAction extends TableActionBase {
     private void buildForTraditionalCompaction(
             StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming)
             throws Exception {
+        if (fullCompaction == null) {
+            fullCompaction = !isStreaming;
+        } else {
+            Preconditions.checkArgument(
+                    !(fullCompaction && isStreaming),
+                    "The full compact strategy is only supported in batch mode. Please add -Dexecution.runtime-mode=BATCH.");
+        }
         if (isStreaming) {
             // for completely asynchronous compaction
             HashMap<String, String> dynamicOptions =
@@ -138,7 +146,7 @@ public class CompactAction extends TableActionBase {
         }
         CompactorSourceBuilder sourceBuilder =
                 new CompactorSourceBuilder(identifier.getFullName(), table);
-        CompactorSinkBuilder sinkBuilder = new CompactorSinkBuilder(table);
+        CompactorSinkBuilder sinkBuilder = new CompactorSinkBuilder(table, fullCompaction);
 
         sourceBuilder.withPartitionPredicate(getPredicate());
         DataStreamSource<RowData> source =

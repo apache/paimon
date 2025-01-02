@@ -51,12 +51,11 @@ public class SortCompactAction extends CompactAction {
     private List<String> orderColumns;
 
     public SortCompactAction(
-            String warehouse,
             String database,
             String tableName,
             Map<String, String> catalogConfig,
             Map<String, String> tableConf) {
-        super(warehouse, database, tableName, catalogConfig, tableConf);
+        super(database, tableName, catalogConfig, tableConf);
 
         table = table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true"));
     }

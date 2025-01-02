@@ -54,6 +54,10 @@ public class MessageQueueCdcTimestampExtractor implements CdcTimestampExtractor 
         } else if (JsonSerdeUtil.isNodeExists(record, "source", "connector")) {
             // Dbz json
             return JsonSerdeUtil.extractValue(record, Long.class, "ts_ms");
+        } else if (JsonSerdeUtil.isNodeExists(record, "payload", "timestamp")) {
+            // Aliyun json
+            return JsonSerdeUtil.extractValue(
+                    record, Long.class, "payload", "timestamp", "systemTime");
         }
         throw new RuntimeException(
                 String.format(

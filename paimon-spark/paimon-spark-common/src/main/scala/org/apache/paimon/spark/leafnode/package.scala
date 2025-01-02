@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark
 
-import org.apache.spark.sql.catalyst.plans.logical.{LeafCommand, LeafParsedStatement}
+import org.apache.spark.sql.catalyst.plans.logical.{BinaryCommand, LeafCommand, LeafParsedStatement, UnaryCommand}
 import org.apache.spark.sql.execution.command.LeafRunnableCommand
 import org.apache.spark.sql.execution.datasources.v2.LeafV2CommandExec
 
@@ -30,6 +30,9 @@ package object leafnode {
 
   trait PaimonLeafCommand extends LeafCommand
 
-  trait PaimonLeafV2CommandExec extends LeafV2CommandExec
+  trait PaimonUnaryCommand extends UnaryCommand
 
+  trait PaimonBinaryCommand extends BinaryCommand
+
+  trait PaimonLeafV2CommandExec extends LeafV2CommandExec
 }

@@ -110,7 +110,7 @@ If you don't want to use Deletion Vectors mode, you want to query fast enough in
 older data, you can also:
 
 1. Configure 'compaction.optimization-interval' when writing data.
-2. Query from [read-optimized system table]({{< ref "maintenance/system-tables#read-optimized-table" >}}). Reading from
+2. Query from [read-optimized system table]({{< ref "concepts/system-tables#read-optimized-table" >}}). Reading from
    results of optimized files avoids merging records with the same key, thus improving reading performance.
 
 You can flexibly balance query performance and data latency when reading.

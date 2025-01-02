@@ -67,7 +67,8 @@ All available procedures are listed below.
             order_by => 'order_by', 
             options => 'options', 
             `where` => 'where', 
-            partition_idle_time => 'partition_idle_time') <br/><br/>
+            partition_idle_time => 'partition_idle_time',
+            compact_strategy => 'compact_strategy') <br/><br/>
          -- Use indexed argument<br/>
          CALL [catalog.]sys.compact('table') <br/><br/>
          CALL [catalog.]sys.compact('table', 'partitions') <br/><br/> 
@@ -76,6 +77,7 @@ All available procedures are listed below.
          CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options') <br/><br/>
          CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options', 'where') <br/><br/>
          CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options', 'where', 'partition_idle_time') <br/><br/>
+         CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options', 'where', 'partition_idle_time', 'compact_strategy') <br/><br/>
       </td>
       <td>
          To compact a table. Arguments:
@@ -86,6 +88,7 @@ All available procedures are listed below.
             <li>options(optional): additional dynamic options of the table.</li>
             <li>where(optional): partition predicate(Can't be used together with "partitions"). Note: as where is a keyword,a pair of backticks need to add around like `where`.</li>
             <li>partition_idle_time(optional): this is used to do a full compaction for partition which had not received any new data for 'partition_idle_time'. And only these partitions will be compacted. This argument can not be used with order compact.</li>
+            <li>compact_strategy(optional): this determines how to pick files to be merged, the default is determined by the runtime execution mode. 'full' strategy only supports batch mode. All files will be selected for merging. 'minor' strategy: Pick the set of files that need to be merged based on specified conditions.</li>
       </td>
       <td>
          -- use partition filter <br/>
@@ -104,7 +107,8 @@ All available procedures are listed below.
             including_tables => 'includingTables', 
             excluding_tables => 'excludingTables', 
             table_options => 'tableOptions', 
-            partition_idle_time => 'partitionIdleTime') <br/><br/>
+            partition_idle_time => 'partitionIdleTime',
+            compact_strategy => 'compact_strategy') <br/><br/>
          -- Use indexed argument<br/>
          CALL [catalog.]sys.compact_database() <br/><br/>
          CALL [catalog.]sys.compact_database('includingDatabases') <br/><br/> 
@@ -112,7 +116,8 @@ All available procedures are listed below.
          CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables') <br/><br/> 
          CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables') <br/><br/>
          CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions') <br/><br/>
-         CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions', 'partitionIdleTime')
+         CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions', 'partitionIdleTime')<br/><br/>
+         CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions', 'partitionIdleTime', 'compact_strategy')<br/><br/>
       </td>
       <td>
          To compact databases. Arguments:
@@ -124,6 +129,7 @@ All available procedures are listed below.
             <li>excludingTables: to specify tables that are not compacted. You can use regular expression.</li>
             <li>tableOptions: additional dynamic options of the table.</li>
             <li>partition_idle_time: this is used to do a full compaction for partition which had not received any new data for 'partition_idle_time'. And only these partitions will be compacted.</li>
+            <li>compact_strategy(optional): this determines how to pick files to be merged, the default is determined by the runtime execution mode. 'full' strategy only supports batch mode. All files will be selected for merging. 'minor' strategy: Pick the set of files that need to be merged based on specified conditions.</li>
       </td>
       <td>
          CALL sys.compact_database(
@@ -131,7 +137,8 @@ All available procedures are listed below.
             mode => 'combined', 
             including_tables => 'table_.*', 
             excluding_tables => 'ignore', 
-            table_options => 'sink.parallelism=4')
+            table_options => 'sink.parallelism=4',
+            compat_strategy => 'full')
       </td>
    </tr>
    <tr>
@@ -406,10 +413,53 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
+          <td>rollback_to_watermark</td>
+      <td>
+         -- for Flink 1.18<br/>
+         -- rollback to the snapshot which earlier or equal than watermark.<br/>
+         CALL sys.rollback_to_watermark('identifier', watermark)<br/><br/>
+         -- for Flink 1.19 and later<br/>
+         -- rollback to the snapshot which earlier or equal than watermark.<br/>
+         CALL sys.rollback_to_watermark(`table` => 'default.T', `watermark` => watermark)<br/><br/>
+      </td>
+      <td>
+         To rollback to the snapshot which earlier or equal than watermark. Argument:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>watermark (Long): Roll back to the snapshot which earlier or equal than watermark.</li>
+      </td>
+      <td>
+         -- for Flink 1.18<br/>
+         CALL sys.rollback_to_watermark('default.T', 1730292023000)
+         -- for Flink 1.19 and later<br/>
+         CALL sys.rollback_to_watermark(`table` => 'default.T', watermark => 1730292023000)
+      </td>
+   </tr>
+   <tr>
+          <td>purge_files</td>
+      <td>
+         -- for Flink 1.18<br/>
+         -- clear table with purge files directly.<br/>
+         CALL sys.purge_files('identifier')<br/><br/>
+         -- for Flink 1.19 and later<br/>
+         -- clear table with purge files directly.<br/>
+         CALL sys.purge_files(`table` => 'default.T')<br/><br/>
+      </td>
+      <td>
+         To clear table with purge files directly. Argument:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+      </td>
+      <td>
+         -- for Flink 1.18<br/>
+         CALL sys.purge_files('default.T')
+         -- for Flink 1.19 and later<br/>
+         CALL sys.purge_files(`table` => 'default.T')
+      </td>
+   </tr>
+   <tr>
       <td>expire_snapshots</td>
       <td>
          -- Use named argument<br/>
-         CALL [catalog.]sys.reset_consumer(<br/>
+         CALL [catalog.]sys.expire_snapshots(<br/>
             `table` => 'identifier', <br/>
             retain_max => 'retain_max', <br/>
             retain_min => 'retain_min', <br/>

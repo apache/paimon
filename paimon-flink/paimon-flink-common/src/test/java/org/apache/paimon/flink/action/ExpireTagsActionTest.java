@@ -63,8 +63,10 @@ public class ExpireTagsActionTest extends ActionITCaseBase {
                         "expire_tags",
                         "--warehouse",
                         warehouse,
+                        "--database",
+                        database,
                         "--table",
-                        database + ".T")
+                        "T")
                 .run();
         // no tags expired
         assertThat(table.tagManager().tags().size()).isEqualTo(3);
@@ -79,8 +81,10 @@ public class ExpireTagsActionTest extends ActionITCaseBase {
                         "expire_tags",
                         "--warehouse",
                         warehouse,
+                        "--database",
+                        database,
                         "--table",
-                        database + ".T")
+                        "T")
                 .run();
         // tag-4,tag-5 expires
         assertThat(table.tagManager().tags().size()).isEqualTo(3);
@@ -96,8 +100,10 @@ public class ExpireTagsActionTest extends ActionITCaseBase {
                         "expire_tags",
                         "--warehouse",
                         warehouse,
+                        "--database",
+                        database,
                         "--table",
-                        database + ".T",
+                        "T",
                         "--older_than",
                         timestamp.toString())
                 .run();

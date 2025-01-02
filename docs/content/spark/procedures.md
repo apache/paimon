@@ -47,12 +47,14 @@ This section introduce all available spark procedures about paimon.
             <li>order_strategy: 'order' or 'zorder' or 'hilbert' or 'none'. Left empty for 'none'.</li>
             <li>order_columns: the columns need to be sort. Left empty if 'order_strategy' is 'none'.</li>
             <li>partition_idle_time: this is used to do a full compaction for partition which had not received any new data for 'partition_idle_time'. And only these partitions will be compacted. This argument can not be used with order compact.</li>
+            <li>compact_strategy: this determines how to pick files to be merged, the default is determined by the runtime execution mode. 'full' strategy only supports batch mode. All files will be selected for merging. 'minor' strategy: Pick the set of files that need to be merged based on specified conditions.</li>
       </td>
       <td>
          SET spark.sql.shuffle.partitions=10; --set the compact parallelism <br/><br/>
          CALL sys.compact(table => 'T', partitions => 'p=0;p=1',  order_strategy => 'zorder', order_by => 'a,b') <br/><br/>
          CALL sys.compact(table => 'T', where => 'p>0 and p<3', order_strategy => 'zorder', order_by => 'a,b') <br/><br/>
-         CALL sys.compact(table => 'T', partition_idle_time => '60s')
+         CALL sys.compact(table => 'T', partition_idle_time => '60s')<br/><br/>
+         CALL sys.compact(table => 'T', compact_strategy => 'minor')<br/><br/>
       </td>
     </tr>
     <tr>
@@ -175,6 +177,27 @@ This section introduce all available spark procedures about paimon.
       </td>
       <td>
           CALL sys.rollback_to_timestamp(table => 'default.T', timestamp => 1730292023000)<br/><br/>
+      </td>
+    </tr>
+    <tr>
+      <td>rollback_to_watermark</td>
+      <td>
+         To rollback to the snapshot which earlier or equal than watermark. Argument:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>watermark: roll back to the snapshot which earlier or equal than watermark.</li>
+      </td>
+      <td>
+          CALL sys.rollback_to_watermark(table => 'default.T', watermark => 1730292023000)<br/><br/>
+      </td>
+    </tr>
+    <tr>
+      <td>purge_files</td>
+      <td>
+         To clear table with purge files directly. Argument:
+            <li>table: the target table identifier. Cannot be empty.</li>
+      </td>
+      <td>
+          CALL sys.purge_files(table => 'default.T')<br/><br/>
       </td>
     </tr>
     <tr>

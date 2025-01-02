@@ -82,7 +82,7 @@ public class VectorMappingUtilsTest {
         int[] mapping = new int[] {0, 2, 1, 3, 2, 3, 1, 0, 4};
 
         ColumnVector[] newColumnVectors =
-                VectorMappingUtils.createIndexMappedVectors(mapping, columnVectors);
+                VectorMappingUtils.createMappedVectors(mapping, columnVectors);
 
         for (int i = 0; i < mapping.length; i++) {
             Assertions.assertThat(newColumnVectors[i]).isEqualTo(columnVectors[mapping[i]]);

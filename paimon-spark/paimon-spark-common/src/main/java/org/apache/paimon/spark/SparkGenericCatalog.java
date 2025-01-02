@@ -52,7 +52,7 @@ import org.apache.spark.sql.execution.datasources.v2.V2SessionCatalog;
 import org.apache.spark.sql.internal.SQLConf;
 import org.apache.spark.sql.internal.SessionState;
 import org.apache.spark.sql.internal.StaticSQLConf;
-import org.apache.spark.sql.paimon.shims;
+import org.apache.spark.sql.paimon.shims.SparkShimLoader;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 import org.slf4j.Logger;
@@ -62,7 +62,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Callable;
 
-import static org.apache.paimon.options.CatalogOptions.ALLOW_UPPER_CASE;
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.apache.paimon.spark.SparkCatalogOptions.CREATE_UNDERLYING_SESSION_CATALOG;
@@ -186,7 +185,7 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
     @Override
     public void invalidateTable(Identifier ident) {
         // We do not need to check whether the table exists and whether
-        // it is an Paimon table to reduce remote service requests.
+        // it is a Paimon table to reduce remote service requests.
         sparkCatalog.invalidateTable(ident);
         asTableCatalog().invalidateTable(ident);
     }
@@ -203,7 +202,8 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
             return sparkCatalog.createTable(ident, schema, partitions, properties);
         } else {
             // delegate to the session catalog
-            return shims.createTable(asTableCatalog(), ident, schema, partitions, properties);
+            return SparkShimLoader.getSparkShim()
+                    .createTable(asTableCatalog(), ident, schema, partitions, properties);
         }
     }
 
@@ -241,7 +241,6 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
         SparkSession sparkSession = SparkSession.active();
         SessionState sessionState = sparkSession.sessionState();
         Configuration hadoopConf = sessionState.newHadoopConf();
-        SparkConf sparkConf = new SparkConf();
         if (options.containsKey(METASTORE.key())
                 && options.get(METASTORE.key()).equalsIgnoreCase("hive")) {
             String uri = options.get(CatalogOptions.URI.key());
@@ -256,11 +255,6 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
                 }
             }
         }
-        if ("in-memory"
-                .equals(sparkSession.conf().get(StaticSQLConf.CATALOG_IMPLEMENTATION().key()))) {
-            LOG.warn("InMemoryCatalog here may cause bad effect.");
-        }
-
         this.catalogName = name;
         this.sparkCatalog = new SparkCatalog();
 
@@ -272,6 +266,7 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
                 CREATE_UNDERLYING_SESSION_CATALOG.key(),
                 CREATE_UNDERLYING_SESSION_CATALOG.defaultValue())) {
             this.underlyingSessionCatalogEnabled = true;
+            SparkConf sparkConf = new SparkConf();
             for (Map.Entry<String, String> entry : options.entrySet()) {
                 sparkConf.set("spark.hadoop." + entry.getKey(), entry.getValue());
                 hadoopConf.set(entry.getKey(), entry.getValue());
@@ -287,12 +282,6 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
         Map<String, String> newOptions = new HashMap<>(options.asCaseSensitiveMap());
         fillAliyunConfigurations(newOptions, hadoopConf);
         fillCommonConfigurations(newOptions, sqlConf);
-
-        // if spark is case-insensitive, set allow upper case to catalog
-        if (!sqlConf.caseSensitiveAnalysis()) {
-            newOptions.put(ALLOW_UPPER_CASE.key(), "true");
-        }
-
         return new CaseInsensitiveStringMap(newOptions);
     }
 
@@ -312,13 +301,16 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
             String warehouse = sqlConf.warehousePath();
             options.put(WAREHOUSE.key(), warehouse);
         }
+
         if (!options.containsKey(METASTORE.key())) {
             String metastore = sqlConf.getConf(StaticSQLConf.CATALOG_IMPLEMENTATION());
             if (HiveCatalogOptions.IDENTIFIER.equals(metastore)) {
                 options.put(METASTORE.key(), metastore);
             }
         }
+
         options.put(CatalogOptions.FORMAT_TABLE_ENABLED.key(), "false");
+
         String sessionCatalogDefaultDatabase = SQLConfUtils.defaultDatabase(sqlConf);
         if (options.containsKey(DEFAULT_DATABASE.key())) {
             String userDefineDefaultDatabase = options.get(DEFAULT_DATABASE.key());

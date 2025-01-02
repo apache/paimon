@@ -81,13 +81,12 @@ public class BranchesTable implements ReadonlyTable {
     private final FileIO fileIO;
     private final Path location;
 
-    public BranchesTable(FileStoreTable dataTable) {
-        this(dataTable.fileIO(), dataTable.location());
-    }
+    private final FileStoreTable dataTable;
 
-    public BranchesTable(FileIO fileIO, Path location) {
-        this.fileIO = fileIO;
-        this.location = location;
+    public BranchesTable(FileStoreTable dataTable) {
+        this.fileIO = dataTable.fileIO();
+        this.location = dataTable.location();
+        this.dataTable = dataTable;
     }
 
     @Override
@@ -117,7 +116,7 @@ public class BranchesTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new BranchesTable(fileIO, location);
+        return new BranchesTable(dataTable.copy(dynamicOptions));
     }
 
     private class BranchesScan extends ReadOnceTableScan {

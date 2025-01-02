@@ -28,6 +28,7 @@ import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.OutOfRangeException;
@@ -203,9 +204,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         if (partitionLoader != null) {
             partitionLoader.open();
             partitionLoader.checkRefresh();
-            BinaryRow partition = partitionLoader.partition();
-            if (partition != null) {
-                lookupTable.specificPartitionFilter(createSpecificPartFilter(partition));
+            List<BinaryRow> partitions = partitionLoader.partitions();
+            if (!partitions.isEmpty()) {
+                lookupTable.specificPartitionFilter(createSpecificPartFilter(partitions));
             }
         }
 
@@ -236,20 +237,20 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             tryRefresh();
 
             InternalRow key = new FlinkRowWrapper(keyRow);
-            if (partitionLoader != null) {
-                if (partitionLoader.partition() == null) {
-                    return Collections.emptyList();
-                }
-                key = JoinedRow.join(key, partitionLoader.partition());
+            if (partitionLoader == null) {
+                return lookupInternal(key);
             }
 
-            List<InternalRow> results = lookupTable.get(key);
-            List<RowData> rows = new ArrayList<>(results.size());
-            for (InternalRow matchedRow : results) {
-                rows.add(new FlinkRowData(matchedRow));
+            if (partitionLoader.partitions().isEmpty()) {
+                return Collections.emptyList();
+            }
+
+            List<RowData> rows = new ArrayList<>();
+            for (BinaryRow partition : partitionLoader.partitions()) {
+                rows.addAll(lookupInternal(JoinedRow.join(key, partition)));
             }
             return rows;
-        } catch (OutOfRangeException e) {
+        } catch (OutOfRangeException | ReopenException e) {
             reopen();
             return lookup(keyRow);
         } catch (Exception e) {
@@ -257,7 +258,28 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         }
     }
 
-    private Predicate createSpecificPartFilter(BinaryRow partition) {
+    private List<RowData> lookupInternal(InternalRow key) throws IOException {
+        List<RowData> rows = new ArrayList<>();
+        List<InternalRow> lookupResults = lookupTable.get(key);
+        for (InternalRow matchedRow : lookupResults) {
+            rows.add(new FlinkRowData(matchedRow));
+        }
+        return rows;
+    }
+
+    private Predicate createSpecificPartFilter(List<BinaryRow> partitions) {
+        Predicate partFilter = null;
+        for (BinaryRow partition : partitions) {
+            if (partFilter == null) {
+                partFilter = createSinglePartFilter(partition);
+            } else {
+                partFilter = PredicateBuilder.or(partFilter, createSinglePartFilter(partition));
+            }
+        }
+        return partFilter;
+    }
+
+    private Predicate createSinglePartFilter(BinaryRow partition) {
         RowType rowType = table.rowType();
         List<String> partitionKeys = table.partitionKeys();
         Object[] partitionSpec =
@@ -291,15 +313,15 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         // 2. refresh dynamic partition
         if (partitionLoader != null) {
             boolean partitionChanged = partitionLoader.checkRefresh();
-            BinaryRow partition = partitionLoader.partition();
-            if (partition == null) {
+            List<BinaryRow> partitions = partitionLoader.partitions();
+            if (partitions.isEmpty()) {
                 // no data to be load, fast exit
                 return;
             }
 
             if (partitionChanged) {
                 // reopen with latest partition
-                lookupTable.specificPartitionFilter(createSpecificPartFilter(partition));
+                lookupTable.specificPartitionFilter(createSpecificPartFilter(partitions));
                 lookupTable.close();
                 lookupTable.open();
                 // no need to refresh the lookup table because it is reopened

@@ -28,7 +28,7 @@ under the License.
 
 Paimon's write performance is closely related to checkpoint, so if you need greater write throughput:
 
-1. Flink Configuration (`'flink-conf.yaml'` or `SET` in SQL): Increase the checkpoint interval
+1. Flink Configuration (`'flink-conf.yaml'/'config.yaml'` or `SET` in SQL): Increase the checkpoint interval
    (`'execution.checkpointing.interval'`), increase max concurrent checkpoints to 3
    (`'execution.checkpointing.max-concurrent-checkpoints'`), or just use batch mode.
 2. Increase `write-buffer-size`.
@@ -160,12 +160,3 @@ You can use fine-grained-resource-management of Flink to increase committer heap
 1. Configure Flink Configuration `cluster.fine-grained-resource-management.enabled: true`. (This is default after Flink 1.18)
 2. Configure Paimon Table Options: `sink.committer-memory`, for example 300 MB, depends on your `TaskManager`.
    (`sink.committer-cpu` is also supported)
-
-## Changelog Compaction
-
-If Flink's checkpoint interval is short (for example, 30 seconds) and the number of buckets is large,
-each snapshot may produce lots of small changelog files.
-Too many files may put a burden on the distributed storage cluster.
-
-In order to compact small changelog files into large ones, you can set the table option `changelog.precommit-compact = true`.
-Default value of this option is false, if true, it will add a compact coordinator and worker operator after the writer operator, which copies changelog files into large ones.

@@ -105,7 +105,8 @@ public class ManifestFileTest {
                         CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
                         CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
-                        CoreOptions.FILE_COMPRESSION.defaultValue());
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null);
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         FileIO fileIO = FileIOFinder.find(path);
         return new ManifestFile.Factory(

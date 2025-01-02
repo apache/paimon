@@ -24,6 +24,7 @@ import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
@@ -236,6 +237,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public SnapshotReader enableValueFilter() {
+        scan.enableValueFilter();
+        return this;
+    }
+
+    @Override
     public SnapshotReader withManifestEntryFilter(Filter<ManifestEntry> filter) {
         scan.withManifestEntryFilter(filter);
         return this;
@@ -267,6 +274,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public SnapshotReader withDataFileNameFilter(Filter<String> fileNameFilter) {
         scan.withDataFileNameFilter(fileNameFilter);
+        return this;
+    }
+
+    @Override
+    public SnapshotReader dropStats() {
+        scan.dropStats();
         return this;
     }
 
@@ -492,23 +505,24 @@ public class SnapshotReaderImpl implements SnapshotReader {
         List<DeletionFile> deletionFiles = new ArrayList<>(dataFiles.size());
         Map<String, IndexFileMeta> dataFileToIndexFileMeta = new HashMap<>();
         for (IndexFileMeta indexFileMeta : indexFileMetas) {
-            if (indexFileMeta.deletionVectorsRanges() != null) {
-                for (String dataFileName : indexFileMeta.deletionVectorsRanges().keySet()) {
-                    dataFileToIndexFileMeta.put(dataFileName, indexFileMeta);
+            if (indexFileMeta.deletionVectorMetas() != null) {
+                for (DeletionVectorMeta dvMeta : indexFileMeta.deletionVectorMetas().values()) {
+                    dataFileToIndexFileMeta.put(dvMeta.dataFileName(), indexFileMeta);
                 }
             }
         }
         for (DataFileMeta file : dataFiles) {
             IndexFileMeta indexFileMeta = dataFileToIndexFileMeta.get(file.fileName());
             if (indexFileMeta != null) {
-                Map<String, Pair<Integer, Integer>> ranges = indexFileMeta.deletionVectorsRanges();
-                if (ranges != null && ranges.containsKey(file.fileName())) {
-                    Pair<Integer, Integer> range = ranges.get(file.fileName());
+                LinkedHashMap<String, DeletionVectorMeta> dvMetas =
+                        indexFileMeta.deletionVectorMetas();
+                if (dvMetas != null && dvMetas.containsKey(file.fileName())) {
                     deletionFiles.add(
                             new DeletionFile(
                                     indexFileHandler.filePath(indexFileMeta).toString(),
-                                    range.getKey(),
-                                    range.getValue()));
+                                    dvMetas.get(file.fileName()).offset(),
+                                    dvMetas.get(file.fileName()).length(),
+                                    dvMetas.get(file.fileName()).cardinality()));
                     continue;
                 }
             }

@@ -70,11 +70,11 @@ public interface FileStoreScan {
 
     FileStoreScan withSnapshot(Snapshot snapshot);
 
-    FileStoreScan withManifestList(List<ManifestFileMeta> manifests);
-
     FileStoreScan withKind(ScanMode scanMode);
 
     FileStoreScan withLevelFilter(Filter<Integer> levelFilter);
+
+    FileStoreScan enableValueFilter();
 
     FileStoreScan withManifestEntryFilter(Filter<ManifestEntry> filter);
 
@@ -83,6 +83,8 @@ public interface FileStoreScan {
     FileStoreScan withDataFileNameFilter(Filter<String> fileNameFilter);
 
     FileStoreScan withMetrics(ScanMetrics metrics);
+
+    FileStoreScan dropStats();
 
     @Nullable
     Integer parallelism();

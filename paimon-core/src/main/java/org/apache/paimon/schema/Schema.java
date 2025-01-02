@@ -26,6 +26,12 @@ import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
@@ -46,29 +52,43 @@ import java.util.stream.Collectors;
  * @since 0.4.0
  */
 @Public
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Schema {
 
+    private static final String FIELD_FIELDS = "fields";
+    private static final String FIELD_PARTITION_KEYS = "partitionKeys";
+    private static final String FIELD_PRIMARY_KEYS = "primaryKeys";
+    private static final String FIELD_OPTIONS = "options";
+    private static final String FIELD_COMMENT = "comment";
+
+    @JsonProperty(FIELD_FIELDS)
     private final List<DataField> fields;
 
+    @JsonProperty(FIELD_PARTITION_KEYS)
     private final List<String> partitionKeys;
 
+    @JsonProperty(FIELD_PRIMARY_KEYS)
     private final List<String> primaryKeys;
 
+    @JsonProperty(FIELD_OPTIONS)
     private final Map<String, String> options;
 
+    @Nullable
+    @JsonProperty(FIELD_COMMENT)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private final String comment;
 
+    @JsonCreator
     public Schema(
-            List<DataField> fields,
-            List<String> partitionKeys,
-            List<String> primaryKeys,
-            Map<String, String> options,
-            String comment) {
+            @JsonProperty(FIELD_FIELDS) List<DataField> fields,
+            @JsonProperty(FIELD_PARTITION_KEYS) List<String> partitionKeys,
+            @JsonProperty(FIELD_PRIMARY_KEYS) List<String> primaryKeys,
+            @JsonProperty(FIELD_OPTIONS) Map<String, String> options,
+            @Nullable @JsonProperty(FIELD_COMMENT) String comment) {
         this.options = new HashMap<>(options);
         this.partitionKeys = normalizePartitionKeys(partitionKeys);
         this.primaryKeys = normalizePrimaryKeys(primaryKeys);
         this.fields = normalizeFields(fields, this.primaryKeys, this.partitionKeys);
-
         this.comment = comment;
     }
 
@@ -76,22 +96,27 @@ public class Schema {
         return new RowType(false, fields);
     }
 
+    @JsonGetter(FIELD_FIELDS)
     public List<DataField> fields() {
         return fields;
     }
 
+    @JsonGetter(FIELD_PARTITION_KEYS)
     public List<String> partitionKeys() {
         return partitionKeys;
     }
 
+    @JsonGetter(FIELD_PRIMARY_KEYS)
     public List<String> primaryKeys() {
         return primaryKeys;
     }
 
+    @JsonGetter(FIELD_OPTIONS)
     public Map<String, String> options() {
         return options;
     }
 
+    @JsonGetter(FIELD_COMMENT)
     public String comment() {
         return comment;
     }
@@ -340,14 +365,5 @@ public class Schema {
         public Schema build() {
             return new Schema(columns, partitionKeys, primaryKeys, options, comment);
         }
-    }
-
-    public static Schema fromTableSchema(TableSchema tableSchema) {
-        return new Schema(
-                tableSchema.fields(),
-                tableSchema.partitionKeys(),
-                tableSchema.primaryKeys(),
-                tableSchema.options(),
-                tableSchema.comment());
     }
 }

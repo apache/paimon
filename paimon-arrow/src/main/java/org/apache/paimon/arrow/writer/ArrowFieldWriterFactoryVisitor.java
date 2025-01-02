@@ -39,6 +39,7 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.complex.ListVector;
@@ -136,6 +137,11 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
         return fieldVector ->
                 new ArrowFieldWriters.TimestampWriter(
                         fieldVector, localZonedTimestampType.getPrecision(), null);
+    }
+
+    @Override
+    public ArrowFieldWriterFactory visit(VariantType variantType) {
+        throw new UnsupportedOperationException("Doesn't support VariantType.");
     }
 
     @Override

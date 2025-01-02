@@ -135,6 +135,12 @@ under the License.
             <td>Maximum number of retries when commit failed.</td>
         </tr>
         <tr>
+            <td><h5>commit.timeout</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>Timeout duration of retry when commit failed.</td>
+        </tr>
+        <tr>
             <td><h5>commit.user-prefix</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -213,10 +219,22 @@ under the License.
             <td>The TTL in rocksdb index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
         </tr>
         <tr>
+            <td><h5>data-file.path-directory</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the path directory of data files.</td>
+        </tr>
+        <tr>
             <td><h5>data-file.prefix</h5></td>
             <td style="word-wrap: break-word;">"data-"</td>
             <td>String</td>
             <td>Specify the file name prefix of data files.</td>
+        </tr>
+        <tr>
+            <td><h5>data-file.thin-mode</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Enable data file thin mode to avoid duplicate columns storage.</td>
         </tr>
         <tr>
             <td><h5>delete-file.thread-num</h5></td>
@@ -443,7 +461,7 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
         </tr>
         <tr>
             <td><h5>lookup.local-file-type</h5></td>
-            <td style="word-wrap: break-word;">hash</td>
+            <td style="word-wrap: break-word;">sort</td>
             <td><p>Enum</p></td>
             <td>The local file type for lookup.<br /><br />Possible values:<ul><li>"sort": Construct a sorted file for lookup.</li><li>"hash": Construct a hash file for lookup.</li></ul></td>
         </tr>
@@ -452,6 +470,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">"zstd"</td>
             <td>String</td>
             <td>Default file compression for manifest.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.delete-file-drop-stats</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>For DELETE manifest entry in manifest file, drop stats to reduce memory and storage. Default value is false only for compatibility of old reader.</td>
         </tr>
         <tr>
             <td><h5>manifest.format</h5></td>
@@ -485,9 +509,9 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
         </tr>
         <tr>
             <td><h5>metadata.stats-dense-store</h5></td>
-            <td style="word-wrap: break-word;">false</td>
+            <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
-            <td>Whether to store statistic densely in metadata (manifest files), which will significantly reduce the storage size of metadata when the none statistic mode is set.<br />Note, when this mode is enabled, the Paimon sdk in reading engine requires at least version 0.9.1 or 1.0.0 or higher.</td>
+            <td>Whether to store statistic densely in metadata (manifest files), which will significantly reduce the storage size of metadata when the none statistic mode is set.<br />Note, when this mode is enabled with 'metadata.stats-mode:none', the Paimon sdk in reading engine requires at least version 0.9.1 or 1.0.0 or higher.</td>
         </tr>
         <tr>
             <td><h5>metadata.stats-mode</h5></td>
@@ -558,6 +582,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Whether to remove the whole row in partial-update engine when -D records are received.</td>
         </tr>
         <tr>
+            <td><h5>partial-update.remove-record-on-sequence-group</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>When -D records of the given sequence groups are received, remove the whole row.</td>
+        </tr>
+        <tr>
             <td><h5>partition</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -580,6 +610,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">1 h</td>
             <td>Duration</td>
             <td>The check interval of partition expiration.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.expiration-max-num</h5></td>
+            <td style="word-wrap: break-word;">100</td>
+            <td>Integer</td>
+            <td>The default deleted num of partition expiration.</td>
         </tr>
         <tr>
             <td><h5>partition.expiration-strategy</h5></td>
@@ -751,7 +787,7 @@ This config option does not affect the default filesystem metastore.</td>
         </tr>
         <tr>
             <td><h5>snapshot.expire.limit</h5></td>
-            <td style="word-wrap: break-word;">10</td>
+            <td style="word-wrap: break-word;">50</td>
             <td>Integer</td>
             <td>The maximum number of snapshots allowed to expire at a time.</td>
         </tr>
@@ -863,6 +899,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">none</td>
             <td><p>Enum</p></td>
             <td>Whether to create tag automatically. And how to generate tags.<br /><br />Possible values:<ul><li>"none": No automatically created tags.</li><li>"process-time": Based on the time of the machine, create TAG once the processing time passes period time plus delay.</li><li>"watermark": Based on the watermark of the input, create TAG once the watermark passes period time plus delay.</li><li>"batch": In the batch processing scenario, the tag corresponding to the current snapshot is generated after the task is completed.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>tag.batch.customized-name</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Use customized name when creating tags in Batch mode.</td>
         </tr>
         <tr>
             <td><h5>tag.callback.#.param</h5></td>

@@ -288,7 +288,7 @@ public class FlinkConnectorOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Specific dynamic partition for lookup, only support 'max_pt()' currently.");
+                            "Specific dynamic partition for lookup, supports 'max_pt()' and 'max_two_pt()' currently.");
 
     public static final ConfigOption<Duration> LOOKUP_DYNAMIC_PARTITION_REFRESH_INTERVAL =
             ConfigOptions.key("lookup.dynamic-partition.refresh-interval")

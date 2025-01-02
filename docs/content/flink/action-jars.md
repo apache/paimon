@@ -50,7 +50,7 @@ Paimon supports "MERGE INTO" via submitting the 'merge_into' job through `flink 
 
 {{< hint info >}}
 Important table properties setting:
-1. Only [primary key table]({{< ref "primary-key-table" >}}) supports this feature.
+1. Only [primary key table]({{< ref "primary-key-table/overview" >}}) supports this feature.
 2. The action won't produce UPDATE_BEFORE, so it's not recommended to set 'changelog-producer' = 'input'.
    {{< /hint >}}
 

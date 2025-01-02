@@ -26,6 +26,8 @@ import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.util.Map;
 
+import static org.apache.paimon.flink.action.ActionFactory.FULL;
+import static org.apache.paimon.flink.action.CompactActionFactory.checkCompactStrategy;
 import static org.apache.paimon.utils.ParameterUtils.parseCommaSeparatedKeyValues;
 
 /**
@@ -51,6 +53,7 @@ import static org.apache.paimon.utils.ParameterUtils.parseCommaSeparatedKeyValue
  *
  *  -- set table options ('k=v,...')
  *  CALL sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions')
+ *
  * </code></pre>
  */
 public class CompactDatabaseProcedure extends ProcedureBase {
@@ -106,7 +109,8 @@ public class CompactDatabaseProcedure extends ProcedureBase {
                 includingTables,
                 excludingTables,
                 tableOptions,
-                "");
+                "",
+                null);
     }
 
     public String[] call(
@@ -116,12 +120,12 @@ public class CompactDatabaseProcedure extends ProcedureBase {
             String includingTables,
             String excludingTables,
             String tableOptions,
-            String partitionIdleTime)
+            String partitionIdleTime,
+            String compactStrategy)
             throws Exception {
-        String warehouse = catalog.warehouse();
         Map<String, String> catalogOptions = catalog.options();
         CompactDatabaseAction action =
-                new CompactDatabaseAction(warehouse, catalogOptions)
+                new CompactDatabaseAction(catalogOptions)
                         .includingDatabases(nullable(includingDatabases))
                         .includingTables(nullable(includingTables))
                         .excludingTables(nullable(excludingTables))
@@ -131,6 +135,10 @@ public class CompactDatabaseProcedure extends ProcedureBase {
         }
         if (!StringUtils.isNullOrWhitespaceOnly(partitionIdleTime)) {
             action.withPartitionIdleTime(TimeUtils.parseDuration(partitionIdleTime));
+        }
+
+        if (checkCompactStrategy(compactStrategy)) {
+            action.withFullCompaction(compactStrategy.trim().equalsIgnoreCase(FULL));
         }
 
         return execute(procedureContext, action, "Compact database job");

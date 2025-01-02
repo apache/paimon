@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -33,6 +34,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SerializableConsumer;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -105,7 +107,8 @@ public abstract class OrphanFilesClean implements Serializable {
 
         List<String> abnormalBranches = new ArrayList<>();
         for (String branch : branches) {
-            if (!new SchemaManager(table.fileIO(), table.location(), branch).latest().isPresent()) {
+            SchemaManager schemaManager = table.schemaManager().copyWithBranch(branch);
+            if (!schemaManager.latest().isPresent()) {
                 abnormalBranches.add(branch);
             }
         }
@@ -119,21 +122,45 @@ public abstract class OrphanFilesClean implements Serializable {
         return branches;
     }
 
-    protected void cleanSnapshotDir(List<String> branches, Consumer<Path> deletedFileConsumer) {
+    protected void cleanSnapshotDir(
+            List<String> branches,
+            Consumer<Path> deletedFilesConsumer,
+            Consumer<Long> deletedFilesLenInBytesConsumer) {
         for (String branch : branches) {
             FileStoreTable branchTable = table.switchToBranch(branch);
             SnapshotManager snapshotManager = branchTable.snapshotManager();
 
             // specially handle the snapshot directory
-            List<Path> nonSnapshotFiles = snapshotManager.tryGetNonSnapshotFiles(this::oldEnough);
-            nonSnapshotFiles.forEach(fileCleaner);
-            nonSnapshotFiles.forEach(deletedFileConsumer);
+            List<Pair<Path, Long>> nonSnapshotFiles =
+                    snapshotManager.tryGetNonSnapshotFiles(this::oldEnough);
+            nonSnapshotFiles.forEach(
+                    nonSnapshotFile ->
+                            cleanFile(
+                                    nonSnapshotFile,
+                                    deletedFilesConsumer,
+                                    deletedFilesLenInBytesConsumer));
 
             // specially handle the changelog directory
-            List<Path> nonChangelogFiles = snapshotManager.tryGetNonChangelogFiles(this::oldEnough);
-            nonChangelogFiles.forEach(fileCleaner);
-            nonChangelogFiles.forEach(deletedFileConsumer);
+            List<Pair<Path, Long>> nonChangelogFiles =
+                    snapshotManager.tryGetNonChangelogFiles(this::oldEnough);
+            nonChangelogFiles.forEach(
+                    nonChangelogFile ->
+                            cleanFile(
+                                    nonChangelogFile,
+                                    deletedFilesConsumer,
+                                    deletedFilesLenInBytesConsumer));
         }
+    }
+
+    private void cleanFile(
+            Pair<Path, Long> deleteFileInfo,
+            Consumer<Path> deletedFilesConsumer,
+            Consumer<Long> deletedFilesLenInBytesConsumer) {
+        Path filePath = deleteFileInfo.getLeft();
+        Long fileSize = deleteFileInfo.getRight();
+        deletedFilesConsumer.accept(filePath);
+        deletedFilesLenInBytesConsumer.accept(fileSize);
+        fileCleaner.accept(filePath);
     }
 
     protected Set<Snapshot> safelyGetAllSnapshots(String branch) throws IOException {
@@ -352,9 +379,18 @@ public abstract class OrphanFilesClean implements Serializable {
     }
 
     public static long olderThanMillis(@Nullable String olderThan) {
-        return isNullOrWhitespaceOnly(olderThan)
-                ? System.currentTimeMillis() - TimeUnit.DAYS.toMillis(1)
-                : DateTimeUtils.parseTimestampData(olderThan, 3, TimeZone.getDefault())
-                        .getMillisecond();
+        if (isNullOrWhitespaceOnly(olderThan)) {
+            return System.currentTimeMillis() - TimeUnit.DAYS.toMillis(1);
+        } else {
+            Timestamp parsedTimestampData =
+                    DateTimeUtils.parseTimestampData(olderThan, 3, TimeZone.getDefault());
+            Preconditions.checkArgument(
+                    parsedTimestampData.compareTo(
+                                    Timestamp.fromEpochMillis(System.currentTimeMillis()))
+                            < 0,
+                    "The arg olderThan must be less than now, because dataFiles that are currently being written and not referenced by snapshots will be mistakenly cleaned up.");
+
+            return parsedTimestampData.getMillisecond();
+        }
     }
 }

@@ -61,12 +61,15 @@ import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanne
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.utils.TagManager;
+
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 
 import javax.annotation.Nullable;
 
@@ -90,12 +93,17 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final long serialVersionUID = 1L;
+
     private static final String WATERMARK_PREFIX = "watermark-";
 
     protected final FileIO fileIO;
     protected final Path path;
     protected final TableSchema tableSchema;
     protected final CatalogEnvironment catalogEnvironment;
+
+    @Nullable protected transient SegmentsCache<Path> manifestCache;
+    @Nullable protected transient Cache<Path, Snapshot> snapshotCache;
+    @Nullable protected transient Cache<String, Statistics> statsCache;
 
     protected AbstractFileStoreTable(
             FileIO fileIO,
@@ -120,7 +128,19 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void setManifestCache(SegmentsCache<Path> manifestCache) {
+        this.manifestCache = manifestCache;
         store().setManifestCache(manifestCache);
+    }
+
+    @Override
+    public void setSnapshotCache(Cache<Path, Snapshot> cache) {
+        this.snapshotCache = cache;
+        store().setSnapshotCache(cache);
+    }
+
+    @Override
+    public void setStatsCache(Cache<String, Statistics> cache) {
+        this.statsCache = cache;
     }
 
     @Override
@@ -168,10 +188,33 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public String uuid() {
+        if (catalogEnvironment.uuid() != null) {
+            return catalogEnvironment.uuid();
+        }
+        long earliestCreationTime = schemaManager().earliestCreationTime();
+        return fullName() + "." + earliestCreationTime;
+    }
+
+    @Override
     public Optional<Statistics> statistics() {
         Snapshot snapshot = TimeTravelUtil.resolveSnapshot(this);
         if (snapshot != null) {
-            return store().newStatsFileHandler().readStats(snapshot);
+            String file = snapshot.statistics();
+            if (file == null) {
+                return Optional.empty();
+            }
+            if (statsCache != null) {
+                Statistics stats = statsCache.getIfPresent(file);
+                if (stats != null) {
+                    return Optional.of(stats);
+                }
+            }
+            Statistics stats = store().newStatsFileHandler().readStats(file);
+            if (statsCache != null) {
+                statsCache.put(file, stats);
+            }
+            return Optional.of(stats);
         }
         return Optional.empty();
     }
@@ -326,12 +369,26 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public FileStoreTable copy(TableSchema newTableSchema) {
-        return newTableSchema.primaryKeys().isEmpty()
-                ? new AppendOnlyFileStoreTable(fileIO, path, newTableSchema, catalogEnvironment)
-                : new PrimaryKeyFileStoreTable(fileIO, path, newTableSchema, catalogEnvironment);
+        AbstractFileStoreTable copied =
+                newTableSchema.primaryKeys().isEmpty()
+                        ? new AppendOnlyFileStoreTable(
+                                fileIO, path, newTableSchema, catalogEnvironment)
+                        : new PrimaryKeyFileStoreTable(
+                                fileIO, path, newTableSchema, catalogEnvironment);
+        if (snapshotCache != null) {
+            copied.setSnapshotCache(snapshotCache);
+        }
+        if (manifestCache != null) {
+            copied.setManifestCache(manifestCache);
+        }
+        if (statsCache != null) {
+            copied.setStatsCache(statsCache);
+        }
+        return copied;
     }
 
-    protected SchemaManager schemaManager() {
+    @Override
+    public SchemaManager schemaManager() {
         return new SchemaManager(fileIO(), path, currentBranch());
     }
 
@@ -413,7 +470,15 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         if (options.partitionedTableInMetastore()
                 && metastoreClientFactory != null
                 && !tableSchema.partitionKeys().isEmpty()) {
-            callbacks.add(new AddPartitionCommitCallback(metastoreClientFactory.create()));
+            InternalRowPartitionComputer partitionComputer =
+                    new InternalRowPartitionComputer(
+                            options.partitionDefaultName(),
+                            tableSchema.logicalPartitionType(),
+                            tableSchema.partitionKeys().toArray(new String[0]),
+                            options.legacyPartitionName());
+            callbacks.add(
+                    new AddPartitionCommitCallback(
+                            metastoreClientFactory.create(), partitionComputer));
         }
 
         TagPreview tagPreview = TagPreview.create(options);

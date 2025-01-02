@@ -24,14 +24,17 @@ import org.apache.paimon.data.InternalRow;
  * Get field value from row with given pos and cast it according to specific {@link CastExecutor}.
  */
 public class CastFieldGetter {
+
     private final InternalRow.FieldGetter fieldGetter;
     private final CastExecutor<Object, Object> castExecutor;
 
+    @SuppressWarnings("unchecked")
     public CastFieldGetter(InternalRow.FieldGetter fieldGetter, CastExecutor<?, ?> castExecutor) {
         this.fieldGetter = fieldGetter;
         this.castExecutor = (CastExecutor<Object, Object>) castExecutor;
     }
 
+    @SuppressWarnings("unchecked")
     public <V> V getFieldOrNull(InternalRow row) {
         Object value = fieldGetter.getFieldOrNull(row);
         return value == null ? null : (V) castExecutor.cast(value);

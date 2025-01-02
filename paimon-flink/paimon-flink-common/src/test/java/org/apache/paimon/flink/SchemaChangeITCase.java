@@ -25,8 +25,11 @@ import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -35,6 +38,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for schema changes. */
@@ -248,7 +252,8 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     public void testModifyColumnTypeBooleanAndNumeric() {
         // boolean To numeric and numeric To boolean
         sql("CREATE TABLE T (a BOOLEAN, b BOOLEAN, c TINYINT, d INT, e BIGINT, f DOUBLE)");
-        sql("INSERT INTO T VALUES(true, false, cast(0 as TINYINT), 1 , 123, 3.14)");
+        sql(
+                "INSERT INTO T VALUES(true, false, cast(0 as TINYINT), 1 , -9223372036854775808, 3.14)");
 
         sql("ALTER TABLE T MODIFY (a TINYINT, b INT, c BOOLEAN, d BOOLEAN, e BOOLEAN)");
         List<Row> result = sql("SHOW CREATE TABLE T");
@@ -1015,7 +1020,6 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         sql("INSERT INTO T1 VALUES ('a', 'b', 'l')");
         sql("INSERT INTO T1 VALUES ('a', 'd', 'n')");
         sql("INSERT INTO T1 VALUES ('a', 'e', 'm')");
-        List<Row> sql = sql("select * from T1");
         assertThat(sql("select * from T1").toString()).isEqualTo("[+I[a, d, n]]");
 
         // test for get small record
@@ -1024,7 +1028,6 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         sql("INSERT INTO T2 VALUES ('a', 'b', 1)");
         sql("INSERT INTO T2 VALUES ('a', 'd', 3)");
         sql("INSERT INTO T2 VALUES ('a', 'e', 2)");
-        sql = sql("select * from T2");
         assertThat(sql("select * from T2").toString()).isEqualTo("[+I[a, b, 1]]");
 
         // test for get largest record
@@ -1033,7 +1036,6 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         sql("INSERT INTO T3 VALUES ('a', 'b', 1.0)");
         sql("INSERT INTO T3 VALUES ('a', 'd', 3.0)");
         sql("INSERT INTO T3 VALUES ('a', 'e', 2.0)");
-        sql = sql("select * from T3");
         assertThat(sql("select * from T3").toString()).isEqualTo("[+I[a, d, 3.0]]");
     }
 
@@ -1088,5 +1090,113 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                         anyCauseMatches(
                                 UnsupportedOperationException.class,
                                 "Cannot change bucket to -1."));
+    }
+
+    @ParameterizedTest()
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testUpdateNestedColumn(String formatType) {
+        sql(
+                "CREATE TABLE T "
+                        + "( k INT, v ROW(f1 INT, f2 ROW(f1 STRING, f2 INT NOT NULL)), PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( 'bucket' = '1', 'file.format' = '"
+                        + formatType
+                        + "' )");
+        sql(
+                "INSERT INTO T VALUES (1, ROW(10, ROW('apple', 100))), (2, ROW(20, ROW('banana', 200)))");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, Row.of(10, Row.of("apple", 100))),
+                        Row.of(2, Row.of(20, Row.of("banana", 200))));
+
+        sql("ALTER TABLE T MODIFY (v ROW(f1 BIGINT, f2 ROW(f3 DOUBLE, f2 INT), f3 STRING))");
+        sql(
+                "INSERT INTO T VALUES "
+                        + "(1, ROW(1000000000001, ROW(101.0, 101), 'cat')), "
+                        + "(3, ROW(3000000000001, ROW(301.0, CAST(NULL AS INT)), 'dog'))");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, Row.of(1000000000001L, Row.of(101.0, 101), "cat")),
+                        Row.of(2, Row.of(20L, Row.of(null, 200), null)),
+                        Row.of(3, Row.of(3000000000001L, Row.of(301.0, null), "dog")));
+
+        sql(
+                "ALTER TABLE T MODIFY (v ROW(f1 BIGINT, f2 ROW(f3 DOUBLE, f1 STRING, f2 INT), f3 STRING))");
+        sql(
+                "INSERT INTO T VALUES "
+                        + "(1, ROW(1000000000002, ROW(102.0, 'APPLE', 102), 'cat')), "
+                        + "(4, ROW(4000000000002, ROW(402.0, 'LEMON', 402), 'tiger'))");
+        assertThat(sql("SELECT k, v.f2.f1, v.f3 FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "APPLE", "cat"),
+                        Row.of(2, null, null),
+                        Row.of(3, null, "dog"),
+                        Row.of(4, "LEMON", "tiger"));
+
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY (v ROW(f1 BIGINT, f2 INT, f3 STRING))"))
+                .hasRootCauseMessage(
+                        "Column v.f2 can only be updated to row type, and cannot be updated to INTEGER type");
+    }
+
+    @ParameterizedTest()
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testUpdateRowInArrayAndMap(String formatType) {
+        sql(
+                "CREATE TABLE T "
+                        + "( k INT, v1 ARRAY<ROW(f1 INT, f2 STRING)>, v2 MAP<INT, ROW(f1 STRING, f2 INT)>, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( 'bucket' = '1', 'file.format' = '"
+                        + formatType
+                        + "' )");
+        sql(
+                "INSERT INTO T VALUES "
+                        + "(1, ARRAY[ROW(100, 'apple'), ROW(101, 'banana')], MAP[100, ROW('cat', 1000), 101, ROW('dog', 1001)]), "
+                        + "(2, ARRAY[ROW(200, 'pear'), ROW(201, 'grape')], MAP[200, ROW('tiger', 2000), 201, ROW('wolf', 2001)])");
+
+        Map<Integer, Row> map1 = new HashMap<>();
+        map1.put(100, Row.of("cat", 1000));
+        map1.put(101, Row.of("dog", 1001));
+        Map<Integer, Row> map2 = new HashMap<>();
+        map2.put(200, Row.of("tiger", 2000));
+        map2.put(201, Row.of("wolf", 2001));
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, new Row[] {Row.of(100, "apple"), Row.of(101, "banana")}, map1),
+                        Row.of(2, new Row[] {Row.of(200, "pear"), Row.of(201, "grape")}, map2));
+
+        sql(
+                "ALTER TABLE T MODIFY (v1 ARRAY<ROW(f1 BIGINT, f2 STRING, f3 STRING)>, v2 MAP<INT, ROW(f3 DOUBLE, f2 INT)>)");
+        sql(
+                "INSERT INTO T VALUES "
+                        + "(1, ARRAY[ROW(1000000000000, 'apple', 'A'), ROW(1000000000001, 'banana', 'B')], MAP[100, ROW(1000.0, 1000), 101, ROW(1001.0, 1001)]), "
+                        + "(3, ARRAY[ROW(3000000000000, 'mango', 'M'), ROW(3000000000001, 'cherry', 'C')], MAP[300, ROW(3000.0, 3000), 301, ROW(3001.0, 3001)])");
+
+        map1.clear();
+        map1.put(100, Row.of(1000.0, 1000));
+        map1.put(101, Row.of(1001.0, 1001));
+        map2.clear();
+        map2.put(200, Row.of(null, 2000));
+        map2.put(201, Row.of(null, 2001));
+        Map<Integer, Row> map3 = new HashMap<>();
+        map3.put(300, Row.of(3000.0, 3000));
+        map3.put(301, Row.of(3001.0, 3001));
+        assertThat(sql("SELECT v2, v1, k FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(
+                                map1,
+                                new Row[] {
+                                    Row.of(1000000000000L, "apple", "A"),
+                                    Row.of(1000000000001L, "banana", "B")
+                                },
+                                1),
+                        Row.of(
+                                map2,
+                                new Row[] {Row.of(200L, "pear", null), Row.of(201L, "grape", null)},
+                                2),
+                        Row.of(
+                                map3,
+                                new Row[] {
+                                    Row.of(3000000000000L, "mango", "M"),
+                                    Row.of(3000000000001L, "cherry", "C")
+                                },
+                                3));
     }
 }

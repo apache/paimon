@@ -29,8 +29,10 @@ import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.Serializable;
+import java.io.UncheckedIOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -296,19 +298,6 @@ public class TableSchema implements Serializable {
                 timeMillis);
     }
 
-    public static TableSchema fromJson(String json) {
-        return JsonSerdeUtil.fromJson(json, TableSchema.class);
-    }
-
-    public static TableSchema fromPath(FileIO fileIO, Path path) {
-        try {
-            String json = fileIO.readFileUtf8(path);
-            return TableSchema.fromJson(json);
-        } catch (IOException e) {
-            throw new RuntimeException("Fails to read schema from path " + path, e);
-        }
-    }
-
     @Override
     public String toString() {
         return JsonSerdeUtil.toJson(this);
@@ -340,5 +329,50 @@ public class TableSchema implements Serializable {
 
     public static List<DataField> newFields(RowType rowType) {
         return rowType.getFields();
+    }
+
+    public Schema toSchema() {
+        return new Schema(fields, partitionKeys, primaryKeys, options, comment);
+    }
+
+    // =================== Utils for reading =========================
+
+    public static TableSchema fromJson(String json) {
+        return JsonSerdeUtil.fromJson(json, TableSchema.class);
+    }
+
+    public static TableSchema fromPath(FileIO fileIO, Path path) {
+        try {
+            return tryFromPath(fileIO, path);
+        } catch (FileNotFoundException e) {
+            throw new RuntimeException(e.getMessage(), e);
+        }
+    }
+
+    public static TableSchema tryFromPath(FileIO fileIO, Path path) throws FileNotFoundException {
+        try {
+            return fromJson(fileIO.readFileUtf8(path));
+        } catch (FileNotFoundException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    public static TableSchema create(long schemaId, Schema schema) {
+        List<DataField> fields = schema.fields();
+        List<String> partitionKeys = schema.partitionKeys();
+        List<String> primaryKeys = schema.primaryKeys();
+        Map<String, String> options = schema.options();
+        int highestFieldId = RowType.currentHighestFieldId(fields);
+
+        return new TableSchema(
+                schemaId,
+                fields,
+                highestFieldId,
+                partitionKeys,
+                primaryKeys,
+                options,
+                schema.comment());
     }
 }

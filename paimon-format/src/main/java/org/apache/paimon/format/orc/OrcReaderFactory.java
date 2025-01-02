@@ -23,13 +23,16 @@ import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
+import org.apache.paimon.data.columnar.VectorizedRowIterator;
 import org.apache.paimon.fileindex.FileIndexResult;
+import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.OrcFormatReaderContext;
 import org.apache.paimon.format.fs.HadoopReadOnlyFileSystem;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
@@ -54,8 +57,8 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.List;
 
+import static org.apache.paimon.format.orc.OrcTypeUtil.convertToOrcSchema;
 import static org.apache.paimon.format.orc.reader.AbstractOrcColumnVector.createPaimonVector;
-import static org.apache.paimon.format.orc.reader.OrcSplitReaderUtil.toOrcType;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** An ORC reader that produces a stream of {@link ColumnarRow} records. */
@@ -80,7 +83,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             final int batchSize,
             final boolean deletionVectorsEnabled) {
         this.hadoopConfig = checkNotNull(hadoopConfig);
-        this.schema = toOrcType(readType);
+        this.schema = convertToOrcSchema(readType);
         this.tableType = readType;
         this.conjunctPredicates = checkNotNull(conjunctPredicates);
         this.batchSize = batchSize;
@@ -156,7 +159,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
         private final Pool.Recycler<OrcReaderBatch> recycler;
 
         private final VectorizedColumnBatch paimonColumnBatch;
-        private final ColumnarRowIterator result;
+        private final VectorizedRowIterator result;
 
         protected OrcReaderBatch(
                 final Path filePath,
@@ -167,7 +170,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             this.recycler = checkNotNull(recycler);
             this.paimonColumnBatch = paimonColumnBatch;
             this.result =
-                    new ColumnarRowIterator(
+                    new VectorizedRowIterator(
                             filePath, new ColumnarRow(paimonColumnBatch), this::recycle);
         }
 
@@ -184,7 +187,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             return orcVectorizedRowBatch;
         }
 
-        private RecordIterator<InternalRow> convertAndGetIterator(
+        private ColumnarRowIterator convertAndGetIterator(
                 VectorizedRowBatch orcBatch, long rowNumber) {
             // no copying from the ORC column vectors to the Paimon columns vectors necessary,
             // because they point to the same data arrays internally design
@@ -209,8 +212,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
      * batch is addressed by the starting row number of the batch, plus the number of records to be
      * skipped before.
      */
-    private static final class OrcVectorizedReader
-            implements org.apache.paimon.reader.RecordReader<InternalRow> {
+    private static final class OrcVectorizedReader implements FileRecordReader<InternalRow> {
 
         private final RecordReader orcReader;
         private final Pool<OrcReaderBatch> pool;
@@ -222,7 +224,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
 
         @Nullable
         @Override
-        public RecordIterator<InternalRow> readBatch() throws IOException {
+        public ColumnarRowIterator readBatch() throws IOException {
             final OrcReaderBatch batch = getCachedEntry();
             final VectorizedRowBatch orcVectorBatch = batch.orcVectorizedRowBatch();
 
@@ -258,7 +260,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             org.apache.paimon.fs.Path path,
             long splitStart,
             long splitLength,
-            FileIndexResult fileIndexResult,
+            @Nullable FileIndexResult fileIndexResult,
             boolean deletionVectorsEnabled)
             throws IOException {
         org.apache.orc.Reader orcReader = createReader(conf, fileIO, path, fileIndexResult);
@@ -276,9 +278,11 @@ public class OrcReaderFactory implements FormatReaderFactory {
                             .skipCorruptRecords(OrcConf.SKIP_CORRUPT_DATA.getBoolean(conf))
                             .tolerateMissingSchema(
                                     OrcConf.TOLERATE_MISSING_SCHEMA.getBoolean(conf));
-            if (!conjunctPredicates.isEmpty() && !deletionVectorsEnabled) {
-                // deletion vectors can not enable this feature, cased by getRowNumber would be
-                // changed.
+            if (!conjunctPredicates.isEmpty()
+                    && !deletionVectorsEnabled
+                    && !(fileIndexResult instanceof BitmapIndexResult)) {
+                // row group filter push down will make row number change incorrect
+                // so deletion vectors mode and bitmap index cannot work with row group push down
                 options.useSelected(OrcConf.READER_USE_SELECTED.getBoolean(conf));
                 options.allowSARGToFilter(OrcConf.ALLOW_SARG_TO_FILTER.getBoolean(conf));
             }
@@ -342,7 +346,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             org.apache.hadoop.conf.Configuration conf,
             FileIO fileIO,
             org.apache.paimon.fs.Path path,
-            FileIndexResult fileIndexResult)
+            @Nullable FileIndexResult fileIndexResult)
             throws IOException {
         // open ORC file and create reader
         org.apache.hadoop.fs.Path hPath = new org.apache.hadoop.fs.Path(path.toUri());

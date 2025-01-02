@@ -31,7 +31,7 @@ under the License.
     <artifactId>paimon-parent</artifactId>
     <groupId>org.apache.paimon</groupId>
     <name>Paimon : </name>
-    <version>1.0-SNAPSHOT</version>
+    <version>1.1-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <url>https://paimon.apache.org</url>
@@ -69,11 +69,12 @@ under the License.
         <module>paimon-test-utils</module>
         <module>paimon-arrow</module>
         <module>tools/ci/paimon-ci-tools</module>
+        <module>paimon-open-api</module>
     </modules>
 
     <properties>
-        <project.build.outputTimestamp>2024-09-04T06:33:27Z</project.build.outputTimestamp>
-        <paimon.shade.version>0.6.0-incubating</paimon.shade.version>
+        <project.build.outputTimestamp>2024-12-23T13:01:30Z</project.build.outputTimestamp>
+        <paimon.shade.version>0.8.0</paimon.shade.version>
         <paimon.shade.jackson.version>2.14.2</paimon.shade.jackson.version>
         <paimon.shade.guava.version>30.1.1-jre</paimon.shade.guava.version>
         <paimon.shade.caffeine.version>2.9.3</paimon.shade.caffeine.version>
@@ -114,6 +115,12 @@ under the License.
         <!-- TODO upgrade after connector releases x-1.19 version -->
         <test.flink.connector.kafka.version>3.0.1-1.18</test.flink.connector.kafka.version>
         <test.mysql.connector.java.version>8.0.27</test.mysql.connector.java.version>
+
+        <!-- spark profile properties-->
+        <paimon-sparkx-common>paimon-spark3-common</paimon-sparkx-common>
+        <paimon-spark-common.spark.version>3.5.3</paimon-spark-common.spark.version>
+        <test.spark.main.version>3.3</test.spark.main.version>
+        <test.spark.version>3.3.0</test.spark.version>
 
         <zstd-jni.version>1.5.5-11</zstd-jni.version>
         <janino.version>3.0.11</janino.version>
@@ -522,6 +529,7 @@ under the License.
                         <exclude>release/**</exclude>
                         <!-- antlr grammar files -->
                         <exclude>paimon-common/src/main/antlr4/**</exclude>
+                        <exclude>paimon-core/src/test/resources/compatibility/**</exclude>
                     </excludes>
                 </configuration>
             </plugin>
@@ -1022,14 +1030,27 @@ under the License.
     <!--
     <repositories>
         <repository>
+            <id>central</id>
+            <url>https://repo.maven.apache.org/maven2</url>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
+        <repository>
             <id>apache-releases</id>
             <name>apache releases</name>
             <url>https://repository.apache.org/content/repositories/releases/</url>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
         </repository>
         <repository>
             <id>apache-snapshots</id>
             <name>apache snapshots</name>
             <url>https://repository.apache.org/content/repositories/snapshots/</url>
+            <releases>
+                <enabled>false</enabled>
+            </releases>
         </repository>
     </repositories>
     -->

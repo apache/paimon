@@ -42,7 +42,6 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Function;
@@ -56,13 +55,13 @@ import static org.apache.paimon.io.DataFilePathFactory.dataFileToFileIndexPath;
  * <p>NOTE: records given to the writer must be sorted because it does not compare the min max keys
  * to produce {@link DataFileMeta}.
  */
-public class KeyValueDataFileWriter
+public abstract class KeyValueDataFileWriter
         extends StatsCollectingSingleFileWriter<KeyValue, DataFileMeta> {
 
     private static final Logger LOG = LoggerFactory.getLogger(KeyValueDataFileWriter.class);
 
-    private final RowType keyType;
-    private final RowType valueType;
+    protected final RowType keyType;
+    protected final RowType valueType;
     private final long schemaId;
     private final int level;
 
@@ -85,6 +84,7 @@ public class KeyValueDataFileWriter
             Function<KeyValue, InternalRow> converter,
             RowType keyType,
             RowType valueType,
+            RowType writeRowType,
             @Nullable SimpleStatsExtractor simpleStatsExtractor,
             long schemaId,
             int level,
@@ -97,11 +97,11 @@ public class KeyValueDataFileWriter
                 factory,
                 path,
                 converter,
-                KeyValue.schema(keyType, valueType),
+                writeRowType,
                 simpleStatsExtractor,
                 compression,
                 StatsCollectorFactories.createStatsFactories(
-                        options, KeyValue.schema(keyType, valueType).getFieldNames()),
+                        options, writeRowType.getFieldNames(), keyType.getFieldNames()),
                 options.asyncFileWrite());
 
         this.keyType = keyType;
@@ -166,17 +166,11 @@ public class KeyValueDataFileWriter
             return null;
         }
 
-        SimpleColStats[] rowStats = fieldStats();
-        int numKeyFields = keyType.getFieldCount();
+        Pair<SimpleColStats[], SimpleColStats[]> keyValueStats = fetchKeyValueStats(fieldStats());
 
-        SimpleColStats[] keyFieldStats = Arrays.copyOfRange(rowStats, 0, numKeyFields);
-        SimpleStats keyStats = keyStatsConverter.toBinaryAllMode(keyFieldStats);
-
-        SimpleColStats[] valFieldStats =
-                Arrays.copyOfRange(rowStats, numKeyFields + 2, rowStats.length);
-
+        SimpleStats keyStats = keyStatsConverter.toBinaryAllMode(keyValueStats.getKey());
         Pair<List<String>, SimpleStats> valueStatsPair =
-                valueStatsConverter.toBinary(valFieldStats);
+                valueStatsConverter.toBinary(keyValueStats.getValue());
 
         DataFileIndexWriter.FileIndexResult indexResult =
                 dataFileIndexWriter == null
@@ -201,8 +195,11 @@ public class KeyValueDataFileWriter
                 deleteRecordCount,
                 indexResult.embeddedIndexBytes(),
                 fileSource,
-                valueStatsPair.getKey());
+                valueStatsPair.getKey(),
+                null);
     }
+
+    abstract Pair<SimpleColStats[], SimpleColStats[]> fetchKeyValueStats(SimpleColStats[] rowStats);
 
     @Override
     public void close() throws IOException {

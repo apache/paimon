@@ -27,13 +27,21 @@ import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.runtime.operators.testutils.DummyEnvironment;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
+import org.apache.flink.streaming.runtime.tasks.SourceOperatorStreamTask;
+import org.apache.flink.streaming.util.MockOutput;
+import org.apache.flink.streaming.util.MockStreamConfig;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Objects;
 
@@ -54,12 +62,23 @@ public class BatchWriteGeneratorTagOperatorTest extends CommitterOperatorTest {
         StreamTableWrite write =
                 table.newStreamWriteBuilder().withCommitUser(initialCommitUser).newWrite();
 
-        OneInputStreamOperator<Committable, Committable> committerOperator =
-                createCommitterOperator(
+        OneInputStreamOperatorFactory<Committable, Committable> committerOperatorFactory =
+                createCommitterOperatorFactory(
                         table,
                         initialCommitUser,
                         new RestoreAndFailCommittableStateManager<>(
                                 ManifestCommittableSerializer::new));
+
+        OneInputStreamOperator<Committable, Committable> committerOperator =
+                committerOperatorFactory.createStreamOperator(
+                        new StreamOperatorParameters<>(
+                                new SourceOperatorStreamTask<Integer>(new DummyEnvironment()),
+                                new MockStreamConfig(new Configuration(), 1),
+                                new MockOutput<>(new ArrayList<>()),
+                                null,
+                                null,
+                                null));
+
         committerOperator.open();
 
         TableCommitImpl tableCommit = table.newCommit(initialCommitUser);
@@ -105,14 +124,65 @@ public class BatchWriteGeneratorTagOperatorTest extends CommitterOperatorTest {
         assertThat(tagManager.allTagNames()).containsOnly("many-tags-test2", tagName);
     }
 
+    @Test
+    public void testBatchWriteGeneratorCustomizedTag() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        String customizedTag = "customized-tag";
+        // set tag.automatic-creation = batch
+        HashMap<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put("tag.automatic-creation", "batch");
+        dynamicOptions.put("tag.batch.customized-name", customizedTag);
+        table = table.copy(dynamicOptions);
+
+        StreamTableWrite write =
+                table.newStreamWriteBuilder().withCommitUser(initialCommitUser).newWrite();
+
+        OneInputStreamOperatorFactory<Committable, Committable> committerOperatorFactory =
+                createCommitterOperatorFactory(
+                        table,
+                        initialCommitUser,
+                        new RestoreAndFailCommittableStateManager<>(
+                                ManifestCommittableSerializer::new));
+
+        OneInputStreamOperator<Committable, Committable> committerOperator =
+                committerOperatorFactory.createStreamOperator(
+                        new StreamOperatorParameters<>(
+                                new SourceOperatorStreamTask<Integer>(new DummyEnvironment()),
+                                new MockStreamConfig(new Configuration(), 1),
+                                new MockOutput<>(new ArrayList<>()),
+                                null,
+                                null,
+                                null));
+
+        committerOperator.open();
+
+        TableCommitImpl tableCommit = table.newCommit(initialCommitUser);
+
+        write.write(GenericRow.of(1, 10L));
+        tableCommit.commit(write.prepareCommit(false, 1));
+
+        TagManager tagManager = table.tagManager();
+
+        // No tag is generated before the finish method
+        assertThat(table.tagManager().tagCount()).isEqualTo(0);
+        committerOperator.finish();
+        // After the finish method, a tag is generated
+        assertThat(table.tagManager().tagCount()).isEqualTo(1);
+        // Get tagName from tagManager.
+        String tagName = tagManager.allTagNames().get(0);
+        assertThat(tagName).isEqualTo(customizedTag);
+    }
+
     @Override
-    protected OneInputStreamOperator<Committable, Committable> createCommitterOperator(
-            FileStoreTable table,
-            String commitUser,
-            CommittableStateManager<ManifestCommittable> committableStateManager) {
-        return new BatchWriteGeneratorTagOperator<>(
-                (CommitterOperator<Committable, ManifestCommittable>)
-                        super.createCommitterOperator(table, commitUser, committableStateManager),
+    protected OneInputStreamOperatorFactory<Committable, Committable>
+            createCommitterOperatorFactory(
+                    FileStoreTable table,
+                    String commitUser,
+                    CommittableStateManager<ManifestCommittable> committableStateManager) {
+        return new BatchWriteGeneratorTagOperatorFactory<>(
+                (CommitterOperatorFactory<Committable, ManifestCommittable>)
+                        super.createCommitterOperatorFactory(
+                                table, commitUser, committableStateManager),
                 table);
     }
 }

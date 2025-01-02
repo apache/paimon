@@ -54,6 +54,8 @@ import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+
 import javax.annotation.Nullable;
 
 import java.time.Duration;
@@ -79,6 +81,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Nullable private final SegmentsCache<Path> writeManifestCache;
     @Nullable private SegmentsCache<Path> readManifestCache;
+    @Nullable private Cache<Path, Snapshot> snapshotCache;
 
     protected AbstractFileStore(
             FileIO fileIO,
@@ -102,21 +105,26 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public FileStorePathFactory pathFactory() {
+        return pathFactory(options.fileFormatString());
+    }
+
+    protected FileStorePathFactory pathFactory(String format) {
         return new FileStorePathFactory(
                 options.path(),
                 partitionType,
                 options.partitionDefaultName(),
-                options.fileFormat().getFormatIdentifier(),
+                format,
                 options.dataFilePrefix(),
                 options.changelogFilePrefix(),
                 options.legacyPartitionName(),
                 options.fileSuffixIncludeCompression(),
-                options.fileCompression());
+                options.fileCompression(),
+                options.dataFilePathDirectory());
     }
 
     @Override
     public SnapshotManager snapshotManager() {
-        return new SnapshotManager(fileIO, options.path(), options.branch());
+        return new SnapshotManager(fileIO, options.path(), options.branch(), snapshotCache);
     }
 
     @Override
@@ -215,6 +223,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 tableName,
                 commitUser,
                 partitionType,
+                options,
                 options.partitionDefaultName(),
                 pathFactory(),
                 snapshotManager(),
@@ -233,7 +242,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 bucketMode(),
                 options.scanManifestParallelism(),
                 callbacks,
-                options.commitMaxRetries());
+                options.commitMaxRetries(),
+                options.commitTimeout());
     }
 
     @Override
@@ -305,7 +315,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newScan(),
                 newCommit(commitUser),
                 metastoreClient,
-                options.endInputCheckPartitionExpire());
+                options.endInputCheckPartitionExpire(),
+                options.partitionExpireMaxNum());
     }
 
     @Override
@@ -339,5 +350,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public void setManifestCache(SegmentsCache<Path> manifestCache) {
         this.readManifestCache = manifestCache;
+    }
+
+    @Override
+    public void setSnapshotCache(Cache<Path, Snapshot> cache) {
+        this.snapshotCache = cache;
     }
 }

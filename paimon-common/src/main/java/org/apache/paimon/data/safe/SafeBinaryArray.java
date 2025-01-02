@@ -25,6 +25,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.memory.BytesUtils;
 
 import static org.apache.paimon.data.BinaryArray.calculateHeaderInBytes;
@@ -144,6 +145,11 @@ public final class SafeBinaryArray implements InternalArray {
     @Override
     public byte[] getBinary(int pos) {
         return BytesUtils.readBinary(bytes, offset, getElementOffset(pos, 8), getLong(pos));
+    }
+
+    @Override
+    public Variant getVariant(int pos) {
+        return BytesUtils.readVariant(bytes, offset, getLong(pos));
     }
 
     @Override

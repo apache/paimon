@@ -22,11 +22,10 @@ import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.options.Options;
 
+import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.source.ParallelSourceFunction;
-import org.apache.flink.streaming.api.transformations.LegacySinkTransformation;
 import org.apache.flink.streaming.api.transformations.OneInputTransformation;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.junit.jupiter.api.Test;
@@ -45,14 +44,7 @@ public class FlinkCdcMultiTableSinkTest {
         env.setParallelism(8);
         int inputParallelism = ThreadLocalRandom.current().nextInt(8) + 1;
         DataStreamSource<CdcMultiplexRecord> input =
-                env.addSource(
-                                new ParallelSourceFunction<CdcMultiplexRecord>() {
-                                    @Override
-                                    public void run(SourceContext<CdcMultiplexRecord> ctx) {}
-
-                                    @Override
-                                    public void cancel() {}
-                                })
+                env.fromData(CdcMultiplexRecord.class, new CdcMultiplexRecord("", "", null))
                         .setParallelism(inputParallelism);
 
         FlinkCdcMultiTableSink sink =
@@ -60,13 +52,11 @@ public class FlinkCdcMultiTableSinkTest {
                         () -> FlinkCatalogFactory.createPaimonCatalog(new Options()),
                         FlinkConnectorOptions.SINK_COMMITTER_CPU.defaultValue(),
                         null,
-                        true,
                         UUID.randomUUID().toString());
         DataStreamSink<?> dataStreamSink = sink.sinkFrom(input);
 
         // check the transformation graph
-        LegacySinkTransformation<?> end =
-                (LegacySinkTransformation<?>) dataStreamSink.getTransformation();
+        Transformation<?> end = dataStreamSink.getTransformation();
         assertThat(end.getName()).isEqualTo("end");
 
         OneInputTransformation<?, ?> committer =

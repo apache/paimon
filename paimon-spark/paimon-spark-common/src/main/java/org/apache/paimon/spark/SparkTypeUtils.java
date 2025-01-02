@@ -42,7 +42,9 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 
+import org.apache.spark.sql.paimon.shims.SparkShimLoader;
 import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.LongType;
@@ -79,6 +81,10 @@ public class SparkTypeUtils {
 
     public static DataType fromPaimonType(org.apache.paimon.types.DataType type) {
         return type.accept(PaimonToSparkTypeVisitor.INSTANCE);
+    }
+
+    public static org.apache.paimon.types.RowType toPaimonRowType(StructType type) {
+        return (RowType) toPaimonType(type);
     }
 
     public static org.apache.paimon.types.DataType toPaimonType(DataType dataType) {
@@ -211,6 +217,11 @@ public class SparkTypeUtils {
         @Override
         public DataType visit(LocalZonedTimestampType localZonedTimestampType) {
             return DataTypes.TimestampType;
+        }
+
+        @Override
+        public DataType visit(VariantType variantType) {
+            return SparkShimLoader.getSparkShim().SparkVariantType();
         }
 
         @Override
@@ -377,6 +388,8 @@ public class SparkTypeUtils {
             } else if (atomic instanceof org.apache.spark.sql.types.TimestampNTZType) {
                 // Move TimestampNTZType to the end for compatibility with spark3.3 and below
                 return new TimestampType();
+            } else if (SparkShimLoader.getSparkShim().isSparkVariantType(atomic)) {
+                return new VariantType();
             }
 
             throw new UnsupportedOperationException(

@@ -108,7 +108,7 @@ public class PickFilesUtil {
                         pathFactory
                                 .createDataFilePathFactory(
                                         simpleFileEntry.partition(), simpleFileEntry.bucket())
-                                .toPath(simpleFileEntry.fileName());
+                                .toPath(simpleFileEntry);
                 dataFiles.add(dataFilePath);
             }
 

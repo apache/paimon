@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.PrepareCommitOperator;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.TableWriteOperator;
@@ -26,12 +27,17 @@ import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.runtime.state.StateInitializationContext;
+import org.apache.flink.streaming.api.operators.StreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 import java.io.IOException;
 import java.util.Optional;
 
+import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.MAX_RETRY_NUM_TIMES;
 import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.RETRY_SLEEP_TIME;
+import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.SKIP_CORRUPT_RECORD;
 import static org.apache.paimon.flink.sink.cdc.CdcRecordUtils.toGenericRow;
 
 /**
@@ -43,13 +49,20 @@ public class CdcDynamicBucketWriteOperator extends TableWriteOperator<Tuple2<Cdc
 
     private final long retrySleepMillis;
 
-    public CdcDynamicBucketWriteOperator(
+    private final int maxRetryNumTimes;
+
+    private final boolean skipCorruptRecord;
+
+    private CdcDynamicBucketWriteOperator(
+            StreamOperatorParameters<Committable> parameters,
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
-        super(table, storeSinkWriteProvider, initialCommitUser);
+        super(parameters, table, storeSinkWriteProvider, initialCommitUser);
         this.retrySleepMillis =
                 table.coreOptions().toConfiguration().get(RETRY_SLEEP_TIME).toMillis();
+        this.maxRetryNumTimes = table.coreOptions().toConfiguration().get(MAX_RETRY_NUM_TIMES);
+        this.skipCorruptRecord = table.coreOptions().toConfiguration().get(SKIP_CORRUPT_RECORD);
     }
 
     @Override
@@ -68,7 +81,7 @@ public class CdcDynamicBucketWriteOperator extends TableWriteOperator<Tuple2<Cdc
         Tuple2<CdcRecord, Integer> record = element.getValue();
         Optional<GenericRow> optionalConverted = toGenericRow(record.f0, table.schema().fields());
         if (!optionalConverted.isPresent()) {
-            while (true) {
+            for (int retry = 0; retry < maxRetryNumTimes; ++retry) {
                 table = table.copyWithLatestSchema();
                 optionalConverted = toGenericRow(record.f0, table.schema().fields());
                 if (optionalConverted.isPresent()) {
@@ -79,10 +92,44 @@ public class CdcDynamicBucketWriteOperator extends TableWriteOperator<Tuple2<Cdc
             write.replace(table);
         }
 
-        try {
-            write.write(optionalConverted.get(), record.f1);
-        } catch (Exception e) {
-            throw new IOException(e);
+        if (!optionalConverted.isPresent()) {
+            if (skipCorruptRecord) {
+                LOG.warn("Skipping corrupt or unparsable record {}", record);
+            } else {
+                throw new RuntimeException("Unable to process element. Possibly a corrupt record");
+            }
+        } else {
+            try {
+                write.write(optionalConverted.get(), record.f1);
+            } catch (Exception e) {
+                throw new IOException(e);
+            }
+        }
+    }
+
+    /** {@link StreamOperatorFactory} of {@link CdcDynamicBucketWriteOperator}. */
+    public static class Factory extends TableWriteOperator.Factory<Tuple2<CdcRecord, Integer>> {
+
+        public Factory(
+                FileStoreTable table,
+                StoreSinkWrite.Provider storeSinkWriteProvider,
+                String initialCommitUser) {
+            super(table, storeSinkWriteProvider, initialCommitUser);
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T extends StreamOperator<Committable>> T createStreamOperator(
+                StreamOperatorParameters<Committable> parameters) {
+            return (T)
+                    new CdcDynamicBucketWriteOperator(
+                            parameters, table, storeSinkWriteProvider, initialCommitUser);
+        }
+
+        @Override
+        @SuppressWarnings("rawtypes")
+        public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
+            return CdcDynamicBucketWriteOperator.class;
         }
     }
 }

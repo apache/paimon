@@ -18,10 +18,12 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -30,6 +32,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.HadoopUtils;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.apache.hadoop.hive.conf.HiveConf;
@@ -38,6 +41,7 @@ import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.thrift.TException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -51,10 +55,11 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORECONNECTURLKEY;
-import static org.apache.paimon.hive.HiveCatalog.PAIMON_TABLE_TYPE_VALUE;
+import static org.apache.paimon.hive.HiveCatalog.PAIMON_TABLE_IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalog.TABLE_TYPE_PROP;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /** Tests for {@link HiveCatalog}. */
@@ -81,23 +86,18 @@ public class HiveCatalogTest extends CatalogTestBase {
     @Test
     public void testCheckIdentifierUpperCase() throws Exception {
         catalog.createDatabase("test_db", false);
-        assertThatThrownBy(
-                        () ->
-                                catalog.createTable(
-                                        Identifier.create("TEST_DB", "new_table"),
-                                        DEFAULT_TABLE_SCHEMA,
-                                        false))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Database name [TEST_DB] cannot contain upper case in the catalog.");
-
+        assertThatThrownBy(() -> catalog.createDatabase("TEST_DB", false))
+                .isInstanceOf(Catalog.DatabaseAlreadyExistException.class)
+                .hasMessage("Database TEST_DB already exists.");
+        catalog.createTable(Identifier.create("TEST_DB", "new_table"), DEFAULT_TABLE_SCHEMA, false);
         assertThatThrownBy(
                         () ->
                                 catalog.createTable(
                                         Identifier.create("test_db", "NEW_TABLE"),
                                         DEFAULT_TABLE_SCHEMA,
                                         false))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Table name [NEW_TABLE] cannot contain upper case in the catalog.");
+                .isInstanceOf(Catalog.TableAlreadyExistException.class)
+                .hasMessage("Table test_db.NEW_TABLE already exists.");
     }
 
     private static final String HADOOP_CONF_DIR =
@@ -170,6 +170,11 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testAlterDatabase() throws Exception {
+        this.alterDatabaseWhenSupportAlter();
+    }
+
+    @Test
     public void testAddHiveTableParameters() {
         try {
             // Create a new database for the test
@@ -214,7 +219,7 @@ public class HiveCatalogTest extends CatalogTestBase {
             assertThat(tableProperties).containsEntry("comment", "this is a hive table");
             assertThat(tableProperties)
                     .containsEntry(
-                            TABLE_TYPE_PROP, PAIMON_TABLE_TYPE_VALUE.toUpperCase(Locale.ROOT));
+                            TABLE_TYPE_PROP, PAIMON_TABLE_IDENTIFIER.toUpperCase(Locale.ROOT));
         } catch (Exception e) {
             fail("Test failed due to exception: " + e.getMessage());
         }
@@ -350,6 +355,58 @@ public class HiveCatalogTest extends CatalogTestBase {
         }
     }
 
+    @Test
+    public void testListTables() throws Exception {
+        String databaseName = "testListTables";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        for (int i = 0; i < 500; i++) {
+            catalog.createTable(
+                    Identifier.create(databaseName, "table" + i),
+                    Schema.newBuilder().column("col", DataTypes.INT()).build(),
+                    true);
+        }
+
+        // use default 300
+        List<String> defaultBatchTables = catalog.listTables(databaseName);
+
+        // use custom 400
+        HiveConf hiveConf = new HiveConf();
+        hiveConf.set(HiveConf.ConfVars.METASTORE_BATCH_RETRIEVE_MAX.varname, "400");
+        String metastoreClientClass = "org.apache.hadoop.hive.metastore.HiveMetaStoreClient";
+        List<String> customBatchTables;
+        try (HiveCatalog customCatalog =
+                new HiveCatalog(fileIO, hiveConf, metastoreClientClass, warehouse)) {
+            customBatchTables = customCatalog.listTables(databaseName);
+        } catch (Exception e) {
+            throw e;
+        }
+        assertEquals(defaultBatchTables.size(), customBatchTables.size());
+        defaultBatchTables.sort(String::compareTo);
+        customBatchTables.sort(String::compareTo);
+        for (int i = 0; i < defaultBatchTables.size(); i++) {
+            assertEquals(defaultBatchTables.get(i), customBatchTables.get(i));
+        }
+
+        // use invalid batch size
+        HiveConf invalidHiveConf = new HiveConf();
+        invalidHiveConf.set(HiveConf.ConfVars.METASTORE_BATCH_RETRIEVE_MAX.varname, "dummy");
+        List<String> invalidBatchSizeTables;
+        try (HiveCatalog invalidBatchSizeCatalog =
+                new HiveCatalog(fileIO, invalidHiveConf, metastoreClientClass, warehouse)) {
+            invalidBatchSizeTables = invalidBatchSizeCatalog.listTables(databaseName);
+        } catch (Exception e) {
+            throw e;
+        }
+        assertEquals(defaultBatchTables.size(), invalidBatchSizeTables.size());
+        invalidBatchSizeTables.sort(String::compareTo);
+        for (int i = 0; i < defaultBatchTables.size(); i++) {
+            assertEquals(defaultBatchTables.get(i), invalidBatchSizeTables.get(i));
+        }
+
+        catalog.dropDatabase(databaseName, true, true);
+    }
+
     @Override
     protected boolean supportsView() {
         return true;
@@ -358,5 +415,37 @@ public class HiveCatalogTest extends CatalogTestBase {
     @Override
     protected boolean supportsFormatTable() {
         return true;
+    }
+
+    @Test
+    public void testCreateExternalTableWithLocation(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        HiveConf hiveConf = new HiveConf();
+        String jdoConnectionURL = "jdbc:derby:memory:" + UUID.randomUUID();
+        hiveConf.setVar(METASTORECONNECTURLKEY, jdoConnectionURL + ";create=true");
+        hiveConf.set(CatalogOptions.TABLE_TYPE.key(), "external");
+        String metastoreClientClass = "org.apache.hadoop.hive.metastore.HiveMetaStoreClient";
+        HiveCatalog externalWarehouseCatalog =
+                new HiveCatalog(fileIO, hiveConf, metastoreClientClass, warehouse);
+
+        String externalTablePath = tempDir.toString();
+
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(new DataField(0, "foo", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        ImmutableMap.of("path", externalTablePath),
+                        "");
+
+        Identifier identifier = Identifier.create("default", "my_table");
+        externalWarehouseCatalog.createTable(identifier, schema, true);
+
+        org.apache.paimon.table.Table table = externalWarehouseCatalog.getTable(identifier);
+        assertThat(table.options())
+                .extracting(CoreOptions.PATH.key())
+                .isEqualTo("file:" + externalTablePath);
+
+        externalWarehouseCatalog.close();
     }
 }

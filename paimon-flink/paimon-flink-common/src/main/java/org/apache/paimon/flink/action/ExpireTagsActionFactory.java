@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.action;
 
-import java.util.Map;
 import java.util.Optional;
 
 /** Factory to create {@link ExpireTagsAction}. */
@@ -35,13 +34,12 @@ public class ExpireTagsActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        String warehouse = params.get(WAREHOUSE);
-        String table = params.get(TABLE);
-        String olderThan = params.get(OLDER_THAN);
-        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
-
         ExpireTagsAction expireTagsAction =
-                new ExpireTagsAction(warehouse, table, olderThan, catalogConfig);
+                new ExpireTagsAction(
+                        params.getRequired(DATABASE),
+                        params.getRequired(TABLE),
+                        params.get(OLDER_THAN),
+                        catalogConfigMap(params));
         return Optional.of(expireTagsAction);
     }
 
@@ -53,7 +51,8 @@ public class ExpireTagsActionFactory implements ActionFactory {
         System.out.println("Syntax:");
         System.out.println(
                 "  expire_tags --warehouse <warehouse_path> "
-                        + "--table <database.table_name> "
+                        + "--database <database>"
+                        + "--table <table> "
                         + "[--older_than <older_than>]");
     }
 }

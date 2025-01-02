@@ -23,13 +23,9 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -55,12 +51,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link CompactAction}. */
 public class CompactActionITCase extends CompactActionITCaseBase {
-
-    private static final DataType[] FIELD_TYPES =
-            new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.STRING()};
-
-    private static final RowType ROW_TYPE =
-            RowType.of(FIELD_TYPES, new String[] {"k", "v", "hh", "dt"});
 
     @Test
     @Timeout(60)
@@ -402,31 +392,6 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                 .hasMessage("sort compact do not support 'partition_idle_time'.");
     }
 
-    private FileStoreTable prepareTable(
-            List<String> partitionKeys,
-            List<String> primaryKeys,
-            List<String> bucketKey,
-            Map<String, String> tableOptions)
-            throws Exception {
-        FileStoreTable table =
-                createFileStoreTable(ROW_TYPE, partitionKeys, primaryKeys, bucketKey, tableOptions);
-
-        StreamWriteBuilder streamWriteBuilder =
-                table.newStreamWriteBuilder().withCommitUser(commitUser);
-        write = streamWriteBuilder.newWrite();
-        commit = streamWriteBuilder.newCommit();
-
-        return table;
-    }
-
-    private void checkLatestSnapshot(
-            FileStoreTable table, long snapshotId, Snapshot.CommitKind commitKind) {
-        SnapshotManager snapshotManager = table.snapshotManager();
-        Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
-        assertThat(snapshot.id()).isEqualTo(snapshotId);
-        assertThat(snapshot.commitKind()).isEqualTo(commitKind);
-    }
-
     private void runAction(boolean isStreaming) throws Exception {
         runAction(isStreaming, false);
     }
@@ -444,17 +409,17 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         }
 
         ArrayList<String> baseArgs =
-                Lists.newArrayList(
-                        "compact",
-                        "--warehouse",
-                        warehouse,
-                        "--database",
-                        database,
-                        "--table",
-                        tableName);
+                Lists.newArrayList("compact", "--database", database, "--table", tableName);
+
         ThreadLocalRandom random = ThreadLocalRandom.current();
+        if (random.nextBoolean()) {
+            baseArgs.addAll(Lists.newArrayList("--warehouse", warehouse));
+        } else {
+            baseArgs.addAll(Lists.newArrayList("--catalog_conf", "warehouse=" + warehouse));
+        }
+
         if (unawareBucket) {
-            if (true) {
+            if (random.nextBoolean()) {
                 baseArgs.addAll(Lists.newArrayList("--where", "k=1"));
             } else {
                 baseArgs.addAll(Lists.newArrayList("--partition", "k=1"));

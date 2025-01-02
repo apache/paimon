@@ -24,6 +24,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.types.RowType;
 
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
 import java.util.List;
@@ -46,6 +47,8 @@ public class FileStorePathFactory {
     private final boolean fileSuffixIncludeCompression;
     private final String fileCompression;
 
+    @Nullable private final String dataFilePathDirectory;
+
     private final AtomicInteger manifestFileCount;
     private final AtomicInteger manifestListCount;
     private final AtomicInteger indexManifestCount;
@@ -61,8 +64,10 @@ public class FileStorePathFactory {
             String changelogFilePrefix,
             boolean legacyPartitionName,
             boolean fileSuffixIncludeCompression,
-            String fileCompression) {
+            String fileCompression,
+            @Nullable String dataFilePathDirectory) {
         this.root = root;
+        this.dataFilePathDirectory = dataFilePathDirectory;
         this.uuid = UUID.randomUUID().toString();
 
         this.partitionComputer =
@@ -125,16 +130,19 @@ public class FileStorePathFactory {
     }
 
     public Path bucketPath(BinaryRow partition, int bucket) {
-        return new Path(root + "/" + relativePartitionAndBucketPath(partition, bucket));
+        return new Path(root, relativeBucketPath(partition, bucket));
     }
 
-    public Path relativePartitionAndBucketPath(BinaryRow partition, int bucket) {
+    public Path relativeBucketPath(BinaryRow partition, int bucket) {
+        Path relativeBucketPath = new Path(BUCKET_PATH_PREFIX + bucket);
         String partitionPath = getPartitionString(partition);
-        String fullPath =
-                partitionPath.isEmpty()
-                        ? BUCKET_PATH_PREFIX + bucket
-                        : partitionPath + "/" + BUCKET_PATH_PREFIX + bucket;
-        return new Path(fullPath);
+        if (!partitionPath.isEmpty()) {
+            relativeBucketPath = new Path(partitionPath, relativeBucketPath);
+        }
+        if (dataFilePathDirectory != null) {
+            relativeBucketPath = new Path(dataFilePathDirectory, relativeBucketPath);
+        }
+        return relativeBucketPath;
     }
 
     /** IMPORTANT: This method is NOT THREAD SAFE. */

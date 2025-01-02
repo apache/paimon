@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.system;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -111,24 +110,13 @@ public class SnapshotsTable implements ReadonlyTable {
 
     private final FileIO fileIO;
     private final Path location;
-    private final String branch;
 
     private final FileStoreTable dataTable;
 
     public SnapshotsTable(FileStoreTable dataTable) {
-        this(
-                dataTable.fileIO(),
-                dataTable.location(),
-                dataTable,
-                CoreOptions.branch(dataTable.schema().options()));
-    }
-
-    public SnapshotsTable(
-            FileIO fileIO, Path location, FileStoreTable dataTable, String branchName) {
-        this.fileIO = fileIO;
-        this.location = location;
+        this.fileIO = dataTable.fileIO();
+        this.location = dataTable.location();
         this.dataTable = dataTable;
-        this.branch = branchName;
     }
 
     @Override
@@ -158,7 +146,7 @@ public class SnapshotsTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new SnapshotsTable(fileIO, location, dataTable.copy(dynamicOptions), branch);
+        return new SnapshotsTable(dataTable.copy(dynamicOptions));
     }
 
     private class SnapshotsScan extends ReadOnceTableScan {
@@ -298,9 +286,8 @@ public class SnapshotsTable implements ReadonlyTable {
             if (!(split instanceof SnapshotsSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
-            SnapshotManager snapshotManager =
-                    new SnapshotManager(fileIO, ((SnapshotsSplit) split).location, branch);
 
+            SnapshotManager snapshotManager = dataTable.snapshotManager();
             Iterator<Snapshot> snapshots;
             if (!snapshotIds.isEmpty()) {
                 snapshots = snapshotManager.snapshotsWithId(snapshotIds);

@@ -37,6 +37,13 @@ public interface Filter<T> {
      */
     boolean test(T t);
 
+    default Filter<T> and(Filter<? super T> other) {
+        if (other == null) {
+            return this;
+        }
+        return t -> test(t) && other.test(t);
+    }
+
     @SuppressWarnings({"unchecked", "rawtypes"})
     static <T> Filter<T> alwaysTrue() {
         return (Filter) ALWAYS_TRUE;
