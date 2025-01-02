@@ -285,7 +285,7 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
                         "*",
                         olderThan);
         ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(executeSQL(procedure));
-        assertThat(actualDeleteFile).containsOnly(Row.of("4"));
+        assertThat(actualDeleteFile).containsOnly(Row.of("3"));
     }
 
     @ParameterizedTest

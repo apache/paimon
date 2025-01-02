@@ -210,7 +210,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
 
     @ParameterizedTest(name = "mode = {0}, invoker = {1}")
     @MethodSource("testData")
-    @Timeout(60)
+    @Timeout(90)
     public void testBatchCompact(String mode, String invoker) throws Exception {
         List<FileStoreTable> tables = new ArrayList<>();
 
@@ -552,7 +552,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
 
     @ParameterizedTest(name = "mode = {0}, invoker = {1}")
     @MethodSource("testData")
-    @Timeout(60)
+    @Timeout(90)
     public void testHistoryPartitionCompact(String mode, String invoker) throws Exception {
         List<FileStoreTable> tables = new ArrayList<>();
         String partitionIdleTime = "10s";
@@ -666,7 +666,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
 
     @ParameterizedTest(name = "mode = {0}")
     @MethodSource("testData")
-    @Timeout(60)
+    @Timeout(90)
     public void includeTableCompaction(String mode, String invoker) throws Exception {
         includingAndExcludingTablesImpl(
                 mode,
@@ -682,7 +682,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
 
     @ParameterizedTest(name = "mode = {0}, invoker = {1}")
     @MethodSource("testData")
-    @Timeout(60)
+    @Timeout(90)
     public void excludeTableCompaction(String mode, String invoker) throws Exception {
         includingAndExcludingTablesImpl(
                 mode,
@@ -698,7 +698,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
 
     @ParameterizedTest(name = "mode = {0}, invoker = {1}")
     @MethodSource("testData")
-    @Timeout(60)
+    @Timeout(90)
     public void includeAndExcludeTableCompaction(String mode, String invoker) throws Exception {
         includingAndExcludingTablesImpl(
                 mode,

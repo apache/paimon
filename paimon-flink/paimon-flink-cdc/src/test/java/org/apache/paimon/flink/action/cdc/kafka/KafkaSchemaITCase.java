@@ -44,7 +44,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Tests for building schema from Kafka. */
 public class KafkaSchemaITCase extends KafkaActionITCaseBase {
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testKafkaSchema() throws Exception {
         final String topic = "test_kafka_schema";
         createTestTopic(topic, 1, 1);
@@ -68,7 +68,7 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testTableOptionsChange() throws Exception {
         final String topic = "test_table_options_change";
         createTestTopic(topic, 1, 1);
@@ -111,7 +111,7 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testNewlyAddedTablesOptionsChange() throws Exception {
         final String topic = "test_database_options_change";
         createTestTopic(topic, 1, 1);

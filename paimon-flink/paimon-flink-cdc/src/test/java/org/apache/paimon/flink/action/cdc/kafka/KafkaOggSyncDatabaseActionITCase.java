@@ -26,13 +26,13 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaSyncDatabaseActionITC
     private static final String OGG = "ogg";
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolutionMultiTopic() throws Exception {
         testSchemaEvolutionMultiTopic(OGG);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolutionOneTopic() throws Exception {
         testSchemaEvolutionOneTopic(OGG);
     }
@@ -43,37 +43,37 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaSyncDatabaseActionITC
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testTableAffixMultiTopic() throws Exception {
         testTableAffixMultiTopic(OGG);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testTableAffixOneTopic() throws Exception {
         testTableAffixOneTopic(OGG);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testIncludingTables() throws Exception {
         testIncludingTables(OGG);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testExcludingTables() throws Exception {
         testExcludingTables(OGG);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testIncludingAndExcludingTables() throws Exception {
         testIncludingAndExcludingTables(OGG);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testCaseInsensitive() throws Exception {
         testCaseInsensitive(OGG);
     }

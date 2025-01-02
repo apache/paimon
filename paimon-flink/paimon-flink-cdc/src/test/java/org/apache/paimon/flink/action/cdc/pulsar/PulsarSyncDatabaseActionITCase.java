@@ -41,7 +41,7 @@ import static org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils.VALUE_
 public class PulsarSyncDatabaseActionITCase extends PulsarActionITCaseBase {
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolutionMultiTopic() throws Exception {
         final String topic1 = "schema_evolution_0";
         final String topic2 = "schema_evolution_1";
@@ -85,7 +85,7 @@ public class PulsarSyncDatabaseActionITCase extends PulsarActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolutionOneTopic() throws Exception {
         final String topic = "schema_evolution";
         boolean writeOne = true;

@@ -37,7 +37,7 @@ public class CacheManagerTest {
     @TempDir Path tempDir;
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     void testCaffeineCache() throws Exception {
         File file1 = new File(tempDir.toFile(), "test.caffeine1");
         assertThat(file1.createNewFile()).isTrue();

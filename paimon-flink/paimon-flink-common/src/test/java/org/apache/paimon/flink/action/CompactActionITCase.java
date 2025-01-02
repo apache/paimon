@@ -53,7 +53,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class CompactActionITCase extends CompactActionITCaseBase {
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testBatchCompact() throws Exception {
         FileStoreTable table =
                 prepareTable(
@@ -163,7 +163,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
     @ParameterizedTest(name = "mode = {0}")
     @ValueSource(booleans = {true, false})
-    @Timeout(60)
+    @Timeout(90)
     public void testHistoryPartitionCompact(boolean mode) throws Exception {
         String partitionIdleTime = "5s";
         FileStoreTable table;

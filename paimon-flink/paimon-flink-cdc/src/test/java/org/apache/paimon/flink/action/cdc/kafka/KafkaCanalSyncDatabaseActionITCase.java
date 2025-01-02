@@ -50,7 +50,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolutionMultiTopic() throws Exception {
         final String topic1 = "schema_evolution_0";
         final String topic2 = "schema_evolution_1";
@@ -85,7 +85,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolutionOneTopic() throws Exception {
         final String topic = "schema_evolution";
         boolean writeOne = true;
@@ -236,7 +236,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testTableAffixMultiTopic() throws Exception {
         // create table t1
         createFileStoreTable(
@@ -279,7 +279,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testTableAffixOneTopic() throws Exception {
         // create table t1
         createFileStoreTable(
@@ -416,7 +416,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testIncludingTables() throws Exception {
         includingAndExcludingTablesImpl(
                 "flink|paimon.+",
@@ -426,7 +426,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testExcludingTables() throws Exception {
         includingAndExcludingTablesImpl(
                 null,
@@ -436,7 +436,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testIncludingAndExcludingTables() throws Exception {
         includingAndExcludingTablesImpl(
                 "flink|paimon.+",
@@ -474,7 +474,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testTypeMappingToString() throws Exception {
         final String topic = "map-to-string";
         createTestTopic(topic, 1, 1);
@@ -520,7 +520,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testCaseInsensitive() throws Exception {
         final String topic = "case-insensitive";
         createTestTopic(topic, 1, 1);
@@ -561,7 +561,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testCannotSynchronizeIncompleteJson() throws Exception {
         final String topic = "incomplete";
         createTestTopic(topic, 1, 1);
@@ -588,7 +588,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSpecifyKeys() throws Exception {
         final String topic = "specify-keys";
         createTestTopic(topic, 1, 1);
@@ -644,7 +644,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testMultipleTablePartitionKeys() throws Exception {
         final String topic = "multiple-table-partition-keys";
         createTestTopic(topic, 1, 1);

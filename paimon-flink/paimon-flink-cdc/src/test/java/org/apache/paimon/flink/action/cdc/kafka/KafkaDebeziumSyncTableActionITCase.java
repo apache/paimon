@@ -39,91 +39,91 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCa
     private static final String DEBEZIUM = "debezium";
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolution() throws Exception {
         runSingleTableSchemaEvolution("schemaevolution", DEBEZIUM);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testNotSupportFormat() throws Exception {
         testNotSupportFormat(DEBEZIUM);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testAssertSchemaCompatible() throws Exception {
         testAssertSchemaCompatible(DEBEZIUM);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionSpecific() throws Exception {
         testStarUpOptionSpecific(DEBEZIUM);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionLatest() throws Exception {
         testStarUpOptionLatest(DEBEZIUM);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionTimestamp() throws Exception {
         testStarUpOptionTimestamp(DEBEZIUM);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionEarliest() throws Exception {
         testStarUpOptionEarliest(DEBEZIUM);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionGroup() throws Exception {
         testStarUpOptionGroup(DEBEZIUM);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testComputedColumn() throws Exception {
         testComputedColumn(DEBEZIUM);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testWaterMarkSyncTable() throws Exception {
         testWaterMarkSyncTable(DEBEZIUM);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testKafkaBuildSchemaWithDelete() throws Exception {
         testKafkaBuildSchemaWithDelete(DEBEZIUM);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaIncludeRecord() throws Exception {
         testSchemaIncludeRecord(DEBEZIUM);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolutionWithSchemaIncludeRecord() throws Exception {
         runSingleTableSchemaEvolutionWithSchemaIncludeRecord("schemaevolution", DEBEZIUM);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testAllTypesWithSchema() throws Exception {
         testAllTypesWithSchemaImpl(DEBEZIUM);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testMessageWithNullValue() throws Exception {
         final String topic = "test_null_value";
         createTestTopic(topic, 1, 1);

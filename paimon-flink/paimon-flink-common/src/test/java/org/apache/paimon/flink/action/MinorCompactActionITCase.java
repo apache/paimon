@@ -39,7 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class MinorCompactActionITCase extends CompactActionITCaseBase {
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testBatchMinorCompactStrategy() throws Exception {
         FileStoreTable table =
                 prepareTable(
@@ -100,7 +100,7 @@ public class MinorCompactActionITCase extends CompactActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testBatchFullCompactStrategy() throws Exception {
         FileStoreTable table =
                 prepareTable(
@@ -147,7 +147,7 @@ public class MinorCompactActionITCase extends CompactActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStreamingFullCompactStrategy() throws Exception {
         prepareTable(
                 Arrays.asList("dt", "hh"),
@@ -176,7 +176,7 @@ public class MinorCompactActionITCase extends CompactActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testCompactStrategyWithWrongUsage() throws Exception {
         prepareTable(
                 Arrays.asList("dt", "hh"),

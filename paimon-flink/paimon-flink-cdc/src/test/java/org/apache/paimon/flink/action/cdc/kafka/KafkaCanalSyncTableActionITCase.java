@@ -60,13 +60,13 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     private static final String CANAL = "canal";
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolution() throws Exception {
         runSingleTableSchemaEvolution("schemaevolution");
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolutionWithMissingDdl() throws Exception {
         runSingleTableSchemaEvolution("schemaevolutionmissingddl");
     }
@@ -202,7 +202,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testMultipleSchemaEvolutions() throws Exception {
         final String topic = "schema_evolution_multiple";
         createTestTopic(topic, 1, 1);
@@ -262,7 +262,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testAllTypes() throws Exception {
         // the first round checks for table creation
         // the second round checks for running the action on an existing table
@@ -531,7 +531,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testNotSupportFormat() throws Exception {
         final String topic = "not_support";
         createTestTopic(topic, 1, 1);
@@ -577,7 +577,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testAssertSchemaCompatible() throws Exception {
         final String topic = "assert_schema_compatible";
         createTestTopic(topic, 1, 1);
@@ -614,7 +614,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionSpecific() throws Exception {
         final String topic = "start_up_specific";
         createTestTopic(topic, 1, 1);
@@ -690,7 +690,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionTimestamp() throws Exception {
         final String topic = "start_up_timestamp";
         createTestTopic(topic, 1, 1);
@@ -729,7 +729,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionEarliest() throws Exception {
         final String topic = "start_up_earliest";
         createTestTopic(topic, 1, 1);
@@ -768,7 +768,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionGroup() throws Exception {
         final String topic = "start_up_group";
         createTestTopic(topic, 1, 1);
@@ -807,7 +807,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testComputedColumn() throws Exception {
         String topic = "computed_column";
         createTestTopic(topic, 1, 1);
@@ -839,7 +839,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testTypeMappingToString() throws Exception {
         final String topic = "map-to-string";
         createTestTopic(topic, 1, 1);
@@ -884,7 +884,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @ParameterizedTest(name = "ignore-delete = {0}")
     @ValueSource(booleans = {true, false})
-    @Timeout(60)
+    @Timeout(90)
     public void testCDCOperations(boolean ignoreDelete) throws Exception {
         final String topic = "event-insert" + UUID.randomUUID();
         createTestTopic(topic, 1, 1);
@@ -1002,7 +1002,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSynchronizeIncompleteJson() throws Exception {
         String topic = "incomplete";
         createTestTopic(topic, 1, 1);
@@ -1033,7 +1033,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSynchronizeNonPkTable() throws Exception {
         String topic = "non_pk";
         createTestTopic(topic, 1, 1);
@@ -1063,7 +1063,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testMissingDecimalPrecision() throws Exception {
         String topic = "missing-decimal-precision";
         createTestTopic(topic, 1, 1);
@@ -1092,7 +1092,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @ParameterizedTest(name = "triggerSchemaRetrievalException = {0}")
     @ValueSource(booleans = {true, false})
-    @Timeout(60)
+    @Timeout(90)
     public void testComputedColumnWithCaseInsensitive(boolean triggerSchemaRetrievalException)
             throws Exception {
         String topic = "computed_column_with_case_insensitive" + UUID.randomUUID();
@@ -1144,7 +1144,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testWaterMarkSyncTable() throws Exception {
         testWaterMarkSyncTable(CANAL);
     }

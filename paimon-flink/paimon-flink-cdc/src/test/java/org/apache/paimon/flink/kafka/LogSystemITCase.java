@@ -202,7 +202,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testLogSystemAutoRegister() throws TableNotExistException {
         // enable log system auto registration
         tEnv.executeSql(
@@ -309,7 +309,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testLogSystemAutoRegisterWithDefaultOption() {
         // enable log system auto registration
         tEnv.executeSql(

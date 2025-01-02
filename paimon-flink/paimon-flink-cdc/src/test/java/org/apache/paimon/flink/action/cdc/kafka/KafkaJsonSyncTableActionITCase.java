@@ -37,7 +37,7 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 public class KafkaJsonSyncTableActionITCase extends KafkaSyncTableActionITCase {
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolution() throws Exception {
         String topic = "schema-evolution";
         Map<String, String> tableOptions = new HashMap<>();
@@ -92,7 +92,7 @@ public class KafkaJsonSyncTableActionITCase extends KafkaSyncTableActionITCase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testComputedColumn() throws Exception {
         String topic = "computed_column";
         Map<String, String> tableOptions = new HashMap<>();

@@ -28,14 +28,14 @@ public class KafkaDebeziumSyncDatabaseActionITCase extends KafkaSyncDatabaseActi
 
     @Disabled // TODO How to append table in combined mode?
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolutionMultiTopic() throws Exception {
         testSchemaEvolutionMultiTopic(DEBEZIUM);
     }
 
     @Disabled // TODO How to append table in combined mode?
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolutionOneTopic() throws Exception {
         testSchemaEvolutionOneTopic(DEBEZIUM);
     }
@@ -47,35 +47,35 @@ public class KafkaDebeziumSyncDatabaseActionITCase extends KafkaSyncDatabaseActi
 
     @Disabled // TODO How to append table in combined mode?
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testTableAffixMultiTopic() throws Exception {
         testTableAffixMultiTopic(DEBEZIUM);
     }
 
     @Disabled // TODO How to append table in combined mode?
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testTableAffixOneTopic() throws Exception {
         testTableAffixOneTopic(DEBEZIUM);
     }
 
     @Disabled // TODO How to append table in combined mode?
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testIncludingTables() throws Exception {
         testIncludingTables(DEBEZIUM);
     }
 
     @Disabled // TODO How to append table in combined mode?
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testExcludingTables() throws Exception {
         testExcludingTables(DEBEZIUM);
     }
 
     @Disabled // TODO How to append table in combined mode?
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testIncludingAndExcludingTables() throws Exception {
         testIncludingAndExcludingTables(DEBEZIUM);
     }

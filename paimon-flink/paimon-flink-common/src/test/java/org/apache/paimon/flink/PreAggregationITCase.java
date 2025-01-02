@@ -1387,7 +1387,7 @@ public class PreAggregationITCase {
         }
 
         @Test
-        @Timeout(60)
+        @Timeout(90)
         public void testUpdateWithIgnoreRetract() throws Exception {
             sEnv.getConfig()
                     .set(

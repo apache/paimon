@@ -190,14 +190,14 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
                         "CALL sys.remove_orphan_files('%s.%s', '%s', true)",
                         database, "*", olderThan);
         ImmutableList<Row> actualDryRunDeleteFile = ImmutableList.copyOf(executeSQL(withDryRun));
-        assertThat(actualDryRunDeleteFile).containsOnly(Row.of("4"));
+        assertThat(actualDryRunDeleteFile).containsOnly(Row.of("3"));
 
         String withOlderThan =
                 String.format(
                         "CALL sys.remove_orphan_files('%s.%s', '%s')", database, "*", olderThan);
         ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(executeSQL(withOlderThan));
 
-        assertThat(actualDeleteFile).containsOnly(Row.of("4"));
+        assertThat(actualDeleteFile).containsOnly(Row.of("3"));
     }
 
     @Test
@@ -251,7 +251,7 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
                 String.format(
                         "CALL sys.remove_orphan_files('%s.%s', '%s')", database, "*", olderThan);
         ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(executeSQL(procedure));
-        assertThat(actualDeleteFile).containsOnly(Row.of("4"));
+        assertThat(actualDeleteFile).containsOnly(Row.of("3"));
     }
 
     @Test

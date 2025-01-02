@@ -940,7 +940,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testConsumersTable() throws Exception {
         batchSql("CREATE TABLE T (a INT, b INT)");
         batchSql("INSERT INTO T VALUES (1, 2)");

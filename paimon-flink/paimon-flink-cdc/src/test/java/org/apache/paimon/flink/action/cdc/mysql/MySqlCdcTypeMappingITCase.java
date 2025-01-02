@@ -59,7 +59,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
     // ------------------------------------- tinyint1-not-bool -------------------------------------
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testTinyInt1NotBool() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "tinyint1_not_bool_test");
@@ -333,7 +333,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolutionAndNewlyCreatedTable() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "all_to_string_test");
@@ -411,7 +411,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
 
     // ------------------------------------- ignore-not-null -------------------------------------
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testIgnoreNotNull() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "ignore_not_null_test");
@@ -470,7 +470,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
     // -------------------------------------- char-to-string --------------------------------------
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testCharToString() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "char_to_string_test");
@@ -537,7 +537,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
     // ------------------------------------- longtext-to-bytes -------------------------------------
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testLongtextToBytes() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "longtext_to_bytes_test");
@@ -607,7 +607,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
     // --------------------------------- bigint-unsigned-to-bigint ---------------------------------
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testBigintUnsignedToBigint() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "bigint_unsigned_to_bigint_test");

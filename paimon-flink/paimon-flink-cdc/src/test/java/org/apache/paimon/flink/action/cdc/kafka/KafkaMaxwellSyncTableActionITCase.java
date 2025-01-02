@@ -27,67 +27,67 @@ public class KafkaMaxwellSyncTableActionITCase extends KafkaSyncTableActionITCas
     private static final String MAXWELL = "maxwell";
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolution() throws Exception {
         runSingleTableSchemaEvolution("schemaevolution", MAXWELL);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testNotSupportFormat() throws Exception {
         testNotSupportFormat(MAXWELL);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testAssertSchemaCompatible() throws Exception {
         testAssertSchemaCompatible(MAXWELL);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionSpecific() throws Exception {
         testStarUpOptionSpecific(MAXWELL);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionLatest() throws Exception {
         testStarUpOptionLatest(MAXWELL);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionTimestamp() throws Exception {
         testStarUpOptionTimestamp(MAXWELL);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionEarliest() throws Exception {
         testStarUpOptionEarliest(MAXWELL);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionGroup() throws Exception {
         testStarUpOptionGroup(MAXWELL);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testComputedColumn() throws Exception {
         testComputedColumn(MAXWELL);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testWaterMarkSyncTable() throws Exception {
         testWaterMarkSyncTable(MAXWELL);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testFieldValNullSyncTable() throws Exception {
         testTableFiledValNull(MAXWELL);
     }

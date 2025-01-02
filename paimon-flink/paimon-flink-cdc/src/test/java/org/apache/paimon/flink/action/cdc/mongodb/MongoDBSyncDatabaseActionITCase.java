@@ -42,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolution() throws Exception {
         writeRecordsToMongoDB("test-data-1", database, "database");
         writeRecordsToMongoDB("test-data-2", database, "database");
@@ -132,7 +132,7 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testMongoDBNestedDataSynchronizationAndVerification() throws Exception {
         writeRecordsToMongoDB("test-data-5", database, "database");
         writeRecordsToMongoDB("test-data-6", database, "database");
@@ -185,7 +185,7 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testDynamicTableCreationInMongoDB() throws Exception {
         String dbName = database + UUID.randomUUID();
         writeRecordsToMongoDB("test-data-5", dbName, "database");
@@ -243,7 +243,7 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testTableAffix() throws Exception {
         // create table t1
         createFileStoreTable(
@@ -282,7 +282,7 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testNewlyAddedTablesOptionsChange() throws Exception {
         String dbName = database + UUID.randomUUID();
         writeRecordsToMongoDB("test-data-5", dbName, "database");

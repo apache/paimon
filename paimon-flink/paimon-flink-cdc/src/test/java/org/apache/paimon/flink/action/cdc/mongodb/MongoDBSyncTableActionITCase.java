@@ -42,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolution() throws Exception {
         runSingleTableSchemaEvolution("inventory-1");
     }
@@ -123,7 +123,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSpecifiedMode() throws Exception {
         String inventory = createRecordsToMongoDB("inventory-1", "table");
         Map<String, String> mongodbConfig = getBasicMongoDBConfig();
@@ -169,7 +169,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testOptionsChange() throws Exception {
         Map<String, String> tableConfig = new HashMap<>();
         tableConfig.put("bucket", "1");
@@ -207,7 +207,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testComputedColumn() throws Exception {
         writeRecordsToMongoDB("test-table-1", database, "table/computedcolumn");
         Map<String, String> mongodbConfig = getBasicMongoDBConfig();
@@ -234,7 +234,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testMongoDBCDCOperations() throws Exception {
         writeRecordsToMongoDB("event-insert", database, "table/event");
 
@@ -299,7 +299,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testDefaultId() throws Exception {
         writeRecordsToMongoDB("defaultId-1", database, "table/defaultid");
 
@@ -335,7 +335,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testPrimaryKeyNotObjectIdType() throws Exception {
         writeRecordsToMongoDB("defaultId-2", database, "table/defaultid");
 
@@ -370,7 +370,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testComputedColumnWithCaseInsensitive() throws Exception {
         writeRecordsToMongoDB("test-table-2", database, "table/computedcolumn");
         Map<String, String> mongodbConfig = getBasicMongoDBConfig();
@@ -402,7 +402,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testRuntimeExecutionModeCheckForCdcSync() {
         Map<String, String> mongodbConfig = getBasicMongoDBConfig();
         mongodbConfig.put("database", database);

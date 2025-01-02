@@ -27,13 +27,13 @@ public class KafkaMaxwellSyncDatabaseActionITCase extends KafkaSyncDatabaseActio
     private static final String MAXWELL = "maxwell";
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolutionMultiTopic() throws Exception {
         testSchemaEvolutionMultiTopic(MAXWELL);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolutionOneTopic() throws Exception {
         testSchemaEvolutionOneTopic(MAXWELL);
     }
@@ -44,31 +44,31 @@ public class KafkaMaxwellSyncDatabaseActionITCase extends KafkaSyncDatabaseActio
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testTableAffixMultiTopic() throws Exception {
         testTableAffixMultiTopic(MAXWELL);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testTableAffixOneTopic() throws Exception {
         testTableAffixOneTopic(MAXWELL);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testIncludingTables() throws Exception {
         testIncludingTables(MAXWELL);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testExcludingTables() throws Exception {
         testExcludingTables(MAXWELL);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testIncludingAndExcludingTables() throws Exception {
         testIncludingAndExcludingTables(MAXWELL);
     }

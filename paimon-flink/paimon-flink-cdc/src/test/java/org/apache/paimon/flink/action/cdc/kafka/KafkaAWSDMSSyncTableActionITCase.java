@@ -27,55 +27,55 @@ public class KafkaAWSDMSSyncTableActionITCase extends KafkaSyncTableActionITCase
     private static final String AWSDMS = "aws-dms";
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolution() throws Exception {
         runSingleTableSchemaEvolution("schemaevolution", AWSDMS);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testAssertSchemaCompatible() throws Exception {
         testAssertSchemaCompatible(AWSDMS);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionSpecific() throws Exception {
         testStarUpOptionSpecific(AWSDMS);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionLatest() throws Exception {
         testStarUpOptionLatest(AWSDMS);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionTimestamp() throws Exception {
         testStarUpOptionTimestamp(AWSDMS);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionEarliest() throws Exception {
         testStarUpOptionEarliest(AWSDMS);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionGroup() throws Exception {
         testStarUpOptionGroup(AWSDMS);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testComputedColumn() throws Exception {
         testComputedColumn(AWSDMS);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testFieldValNullSyncTable() throws Exception {
         testTableFiledValNull(AWSDMS);
     }

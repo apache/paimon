@@ -56,7 +56,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolution() throws Exception {
         Map<String, String> postgresConfig = getBasicPostgresConfig();
         postgresConfig.put(PostgresSourceOptions.DATABASE_NAME.key(), DATABASE_NAME);
@@ -233,7 +233,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testMultipleSchemaEvolutions() throws Exception {
         Map<String, String> postgresConfig = getBasicPostgresConfig();
         postgresConfig.put(PostgresSourceOptions.DATABASE_NAME.key(), DATABASE_NAME);

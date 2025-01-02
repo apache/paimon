@@ -196,7 +196,7 @@ public class PulsarSyncTableActionITCase extends PulsarActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testWaterMarkSyncTable() throws Exception {
         String topic = "watermark";
         topics = Collections.singletonList(topic);

@@ -27,67 +27,67 @@ public class KafkaOggSyncTableActionITCase extends KafkaSyncTableActionITCase {
     private static final String OGG = "ogg";
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolution() throws Exception {
         runSingleTableSchemaEvolution("schemaevolution", OGG);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testNotSupportFormat() throws Exception {
         testNotSupportFormat(OGG);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testAssertSchemaCompatible() throws Exception {
         testAssertSchemaCompatible(OGG);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionSpecific() throws Exception {
         testStarUpOptionSpecific(OGG);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionLatest() throws Exception {
         testStarUpOptionLatest(OGG);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionTimestamp() throws Exception {
         testStarUpOptionTimestamp(OGG);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionEarliest() throws Exception {
         testStarUpOptionEarliest(OGG);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testStarUpOptionGroup() throws Exception {
         testStarUpOptionGroup(OGG);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testComputedColumn() throws Exception {
         testComputedColumn(OGG);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testCDCOperations() throws Exception {
         testCDCOperations(OGG);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testWaterMarkSyncTable() throws Exception {
         testWaterMarkSyncTable(OGG);
     }

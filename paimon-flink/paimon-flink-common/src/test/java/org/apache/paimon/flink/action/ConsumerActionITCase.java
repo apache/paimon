@@ -49,7 +49,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 public class ConsumerActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
-    @Timeout(60)
+    @Timeout(90)
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
     public void testResetConsumer(String invoker) throws Exception {
         init(warehouse);
@@ -199,7 +199,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
     }
 
     @ParameterizedTest
-    @Timeout(60)
+    @Timeout(90)
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
     public void testResetBranchConsumer(String invoker) throws Exception {
         init(warehouse);

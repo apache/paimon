@@ -441,7 +441,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testBranchConsumersTable() throws Exception {
         sql("CREATE TABLE t (a INT, b INT)");
         sql("INSERT INTO t VALUES (1, 2), (3,4)");

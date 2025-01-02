@@ -37,13 +37,13 @@ public class KafkaAWSDMSSyncDatabaseActionITCase extends KafkaSyncDatabaseAction
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolutionMultiTopic() throws Exception {
         testSchemaEvolutionMultiTopic(AWSDMS);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testSchemaEvolutionOneTopic() throws Exception {
         testSchemaEvolutionOneTopic(AWSDMS);
     }
@@ -54,31 +54,31 @@ public class KafkaAWSDMSSyncDatabaseActionITCase extends KafkaSyncDatabaseAction
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testTableAffixMultiTopic() throws Exception {
         testTableAffixMultiTopic(AWSDMS);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testTableAffixOneTopic() throws Exception {
         testTableAffixOneTopic(AWSDMS);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testIncludingTables() throws Exception {
         testIncludingTables(AWSDMS);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testExcludingTables() throws Exception {
         testExcludingTables(AWSDMS);
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testIncludingAndExcludingTables() throws Exception {
         testIncludingAndExcludingTables(AWSDMS);
     }

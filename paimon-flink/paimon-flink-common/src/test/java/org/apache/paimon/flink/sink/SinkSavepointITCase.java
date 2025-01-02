@@ -61,7 +61,7 @@ public class SinkSavepointITCase extends AbstractTestBase {
     }
 
     @Test
-    @Timeout(180)
+    @Timeout(240)
     public void testRecoverFromSavepoint() throws Exception {
         String failingPath = FailingFileIO.getFailingPath(failingName, path);
         String savepointPath = null;

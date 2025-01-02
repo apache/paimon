@@ -42,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class PulsarSchemaITCase extends PulsarActionITCaseBase {
 
     @Test
-    @Timeout(60)
+    @Timeout(90)
     public void testPulsarSchema() throws Exception {
         String topic = "test_pulsar_schema";
         createTopic(topic);

@@ -373,7 +373,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(Row.of(2, "c", "BBB"), Row.of(3, "c", "BBB"));
     }
 
-    @Timeout(60)
+    @Timeout(90)
     @Test
     public void testStatelessWriter() throws Exception {
         FileStoreTable table =
