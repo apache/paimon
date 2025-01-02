@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.ServiceLoader;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /** Utility for working with {@link Factory}s. */
@@ -38,15 +39,12 @@ public class FactoryUtil {
     private static final Cache<ClassLoader, List<Factory>> FACTORIES =
             Caffeine.newBuilder().softValues().maximumSize(100).executor(Runnable::run).build();
 
-    /** Discovers a factory using the given factory base class and identifier. */
-    @SuppressWarnings("unchecked")
     public static <T extends Factory> T discoverFactory(
             ClassLoader classLoader, Class<T> factoryClass, String identifier) {
-        final List<Factory> factories = getFactories(classLoader);
-
-        final List<Factory> foundFactories =
-                factories.stream()
+        final List<T> foundFactories =
+                getFactories(classLoader).stream()
                         .filter(f -> factoryClass.isAssignableFrom(f.getClass()))
+                        .map(factoryClass::cast)
                         .collect(Collectors.toList());
 
         if (foundFactories.isEmpty()) {
@@ -56,31 +54,37 @@ public class FactoryUtil {
                             factoryClass.getName()));
         }
 
-        final List<Factory> matchingFactories =
-                foundFactories.stream()
-                        .filter(f -> f.identifier().equals(identifier))
+        return matchFactory(foundFactories, Factory::identifier, identifier);
+    }
+
+    /** Discovers a factory using the given factory base class and identifier. */
+    @SuppressWarnings("unchecked")
+    public static <T> T matchFactory(
+            List<T> factories, Function<T, String> identifierFunction, String identifier) {
+
+        final List<T> matchingFactories =
+                factories.stream()
+                        .filter(f -> identifierFunction.apply(f).equals(identifier))
                         .collect(Collectors.toList());
 
         if (matchingFactories.isEmpty()) {
-            throw new FactoryException(
+            throw new FactoryNotFoundException(
                     String.format(
-                            "Could not find any factory for identifier '%s' that implements '%s' in the classpath.\n\n"
+                            "Could not find any factory for identifier '%s' in the classpath.\n\n"
                                     + "Available factory identifiers are:\n\n"
                                     + "%s",
                             identifier,
-                            factoryClass.getName(),
-                            foundFactories.stream()
-                                    .map(Factory::identifier)
+                            factories.stream()
+                                    .map(identifierFunction)
                                     .collect(Collectors.joining("\n"))));
         }
         if (matchingFactories.size() > 1) {
             throw new FactoryException(
                     String.format(
-                            "Multiple factories for identifier '%s' that implement '%s' found in the classpath.\n\n"
+                            "Multiple factories for identifier '%s' in the classpath.\n\n"
                                     + "Ambiguous factory classes are:\n\n"
                                     + "%s",
                             identifier,
-                            factoryClass.getName(),
                             matchingFactories.stream()
                                     .map(f -> f.getClass().getName())
                                     .sorted()

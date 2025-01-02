@@ -19,7 +19,9 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.factories.FactoryNotFoundException;
 import org.apache.paimon.factories.FactoryUtil;
+import org.apache.paimon.factories.FormatFactoryUtil;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -91,12 +93,18 @@ public abstract class FileFormat {
         if (identifier != null) {
             identifier = identifier.toLowerCase();
         }
-        FileFormatFactory fileFormatFactory =
-                FactoryUtil.discoverFactory(
-                        FileFormatFactory.class.getClassLoader(),
-                        FileFormatFactory.class,
-                        identifier);
-        return fileFormatFactory.create(context);
+        try {
+            FileFormatFactory fileFormatFactory =
+                    FactoryUtil.discoverFactory(
+                            FileFormatFactory.class.getClassLoader(),
+                            FileFormatFactory.class,
+                            identifier);
+            return fileFormatFactory.create(context);
+        } catch (FactoryNotFoundException e) {
+            // Compatible with existing third-party factory implementations .
+            return FormatFactoryUtil.discoverFactory(FileFormat.class.getClassLoader(), identifier)
+                    .create(context);
+        }
     }
 
     protected Options getIdentifierPrefixOptions(Options options) {
