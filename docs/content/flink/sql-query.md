@@ -105,6 +105,19 @@ If you want see `DELETE` records, you can use audit_log table:
 SELECT * FROM t$audit_log /*+ OPTIONS('incremental-between' = '12,20') */;
 ```
 
+### Batch Incremental between Auto-created Tags
+
+By default, batch incremental read will strictly find the start and end snapshots. But for auto-created tag, the tag may 
+not be created because of data delay. 
+
+For example, assume that the tag for '2024-12-20' is created, then the data of 12-21 
+doesn't be suggested in time, but come with data at 12-22, and the tag '2024-12-22' will actual contains two days data.
+
+When you read the incremental data between tag '2024-12-21' and '2024-12-22', if you actually demand is to get the incremental 
+from the most earlier tag before '2024-12-22' to '2024-12-22', you can set `incremental-auto-tag-start-mode` to allow to 
+find the real start tag. If you set to `earlier-strict`, it will throw an exception if no earlier start tag; If you set
+to `earlier-or-empty`, it will return an empty result set if no earlier start tag.
+
 ## Streaming Query
 
 By default, Streaming read produces the latest snapshot on the table upon first startup,
