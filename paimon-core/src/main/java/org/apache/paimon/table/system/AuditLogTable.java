@@ -25,6 +25,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.BucketEntry;
@@ -184,8 +185,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public Path dataLocation() {
-        return wrapped.dataLocation();
+    public ExternalPathProvider externalPathProvider() {
+        return wrapped.externalPathProvider();
     }
 
     @Override

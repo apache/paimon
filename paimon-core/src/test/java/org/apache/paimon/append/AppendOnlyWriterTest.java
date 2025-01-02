@@ -31,6 +31,7 @@ import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
@@ -524,7 +525,8 @@ public class AppendOnlyWriterTest {
                 CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
                 CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                 CoreOptions.FILE_COMPRESSION.defaultValue(),
-                false);
+                new ExternalPathProvider(),
+                null);
     }
 
     private AppendOnlyWriter createEmptyWriter(long targetFileSize) {

@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
@@ -368,6 +369,11 @@ public class SnapshotReaderTest {
                                 options.toMap(),
                                 ""));
         return FileStoreTableFactory.create(
-                fileIO, tablePath, tableSchema, options, CatalogEnvironment.empty(), tablePath);
+                fileIO,
+                tablePath,
+                tableSchema,
+                options,
+                CatalogEnvironment.empty(),
+                new ExternalPathProvider());
     }
 }

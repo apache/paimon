@@ -23,6 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.FileSource;
@@ -85,7 +86,8 @@ public class RollingFileWriterTest {
                                                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION
                                                                 .defaultValue(),
                                                         CoreOptions.FILE_COMPRESSION.defaultValue(),
-                                                        false)
+                                                        new ExternalPathProvider(),
+                                                        null)
                                                 .newPath(),
                                         SCHEMA,
                                         fileFormat

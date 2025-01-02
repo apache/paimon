@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.IcebergOptions;
@@ -57,7 +58,7 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     private transient KeyValueFileStore lazyStore;
 
     PrimaryKeyFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
-        this(fileIO, path, tableSchema, CatalogEnvironment.empty(), path);
+        this(fileIO, path, tableSchema, CatalogEnvironment.empty(), new ExternalPathProvider());
     }
 
     PrimaryKeyFileStoreTable(
@@ -65,8 +66,8 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
             Path path,
             TableSchema tableSchema,
             CatalogEnvironment catalogEnvironment,
-            Path tableDataPath) {
-        super(fileIO, path, tableSchema, catalogEnvironment, tableDataPath);
+            ExternalPathProvider externalPathProvider) {
+        super(fileIO, path, tableSchema, catalogEnvironment, externalPathProvider);
     }
 
     @Override
@@ -100,7 +101,8 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                             extractor,
                             mfFactory,
                             name(),
-                            catalogEnvironment);
+                            catalogEnvironment,
+                            externalPathProvider);
         }
         return lazyStore;
     }
@@ -191,5 +193,10 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
         }
 
         return callbacks;
+    }
+
+    @Override
+    public ExternalPathProvider externalPathProvider() {
+        return externalPathProvider;
     }
 }

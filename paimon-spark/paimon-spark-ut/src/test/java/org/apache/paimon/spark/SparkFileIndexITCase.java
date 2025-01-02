@@ -28,6 +28,7 @@ import org.apache.paimon.fileindex.FileIndexFormat;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -162,7 +163,7 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         null,
-                        tableRoot);
+                        new ExternalPathProvider());
 
         Table table = fileSystemCatalog.getTable(Identifier.create("db", "T"));
         ReadBuilder readBuilder = table.newReadBuilder();

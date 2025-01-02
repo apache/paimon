@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
@@ -168,7 +169,12 @@ public abstract class ScannerTestBase {
                                 conf.toMap(),
                                 ""));
         return FileStoreTableFactory.create(
-                fileIO, tablePath, tableSchema, conf, CatalogEnvironment.empty(), tablePath);
+                fileIO,
+                tablePath,
+                tableSchema,
+                conf,
+                CatalogEnvironment.empty(),
+                new ExternalPathProvider());
     }
 
     protected List<Split> toSplits(List<DataSplit> dataSplits) {

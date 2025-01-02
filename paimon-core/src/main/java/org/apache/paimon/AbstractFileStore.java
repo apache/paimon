@@ -20,6 +20,7 @@ package org.apache.paimon;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.HashIndexFile;
@@ -82,6 +83,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Nullable private final SegmentsCache<Path> writeManifestCache;
     @Nullable private SegmentsCache<Path> readManifestCache;
     @Nullable private Cache<Path, Snapshot> snapshotCache;
+    private final ExternalPathProvider externalPathProvider;
 
     protected AbstractFileStore(
             FileIO fileIO,
@@ -90,7 +92,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             String tableName,
             CoreOptions options,
             RowType partitionType,
-            CatalogEnvironment catalogEnvironment) {
+            CatalogEnvironment catalogEnvironment,
+            ExternalPathProvider externalPathProvider) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
@@ -101,6 +104,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         this.writeManifestCache =
                 SegmentsCache.create(
                         options.pageSize(), options.writeManifestCache(), Long.MAX_VALUE);
+        this.externalPathProvider = externalPathProvider;
     }
 
     @Override
@@ -120,7 +124,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.fileSuffixIncludeCompression(),
                 options.fileCompression(),
                 options.dataFilePathDirectory(),
-                options.dataPath());
+                externalPathProvider);
     }
 
     @Override

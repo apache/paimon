@@ -20,6 +20,7 @@ package org.apache.paimon;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
@@ -133,7 +134,8 @@ public class TestFileStore extends KeyValueFileStore {
                 keyValueFieldsExtractor,
                 mfFactory,
                 (new Path(root)).getName(),
-                CatalogEnvironment.empty());
+                CatalogEnvironment.empty(),
+                new ExternalPathProvider());
         this.root = root;
         this.fileIO = FileIOFinder.find(new Path(root));
         this.keySerializer = new InternalRowSerializer(keyType);
@@ -798,7 +800,6 @@ public class TestFileStore extends KeyValueFileStore {
             conf.set(CoreOptions.FILE_FORMAT, format);
             conf.set(CoreOptions.MANIFEST_FORMAT, format);
             conf.set(CoreOptions.PATH, root);
-            conf.set(CoreOptions.TABLE_DATA_PATH, root);
             conf.set(CoreOptions.BUCKET, numBuckets);
 
             conf.set(CoreOptions.CHANGELOG_PRODUCER, changelogProducer);

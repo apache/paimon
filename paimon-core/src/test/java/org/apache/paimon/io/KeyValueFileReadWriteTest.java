@@ -28,6 +28,7 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FlushingFileFormat;
 import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.FileStatus;
@@ -238,7 +239,7 @@ public class KeyValueFileReadWriteTest {
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         null,
-                        path);
+                        new ExternalPathProvider());
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         FileIO fileIO = FileIOFinder.find(path);
         Options options = new Options();
@@ -259,7 +260,7 @@ public class KeyValueFileReadWriteTest {
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         null,
-                        path));
+                        new ExternalPathProvider()));
 
         return KeyValueFileWriterFactory.builder(
                         fileIO,

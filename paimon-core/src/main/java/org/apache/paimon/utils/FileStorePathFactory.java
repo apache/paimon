@@ -20,6 +20,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.types.RowType;
@@ -41,7 +42,7 @@ public class FileStorePathFactory {
     // this is the table schema root path
     private final Path root;
     // this is the table data root path
-    private final Path dataRoot;
+    // private final Path dataRoot;
     private final String uuid;
     private final InternalRowPartitionComputer partitionComputer;
     private final String formatIdentifier;
@@ -57,7 +58,8 @@ public class FileStorePathFactory {
     private final AtomicInteger indexManifestCount;
     private final AtomicInteger indexFileCount;
     private final AtomicInteger statsFileCount;
-    private final boolean isExternalPath;
+    // private final boolean externalPathExists;
+    private final ExternalPathProvider externalPathProvider;
 
     public FileStorePathFactory(
             Path root,
@@ -70,7 +72,7 @@ public class FileStorePathFactory {
             boolean fileSuffixIncludeCompression,
             String fileCompression,
             @Nullable String dataFilePathDirectory,
-            Path dataRoot) {
+            ExternalPathProvider externalPathProvider) {
         this.root = root;
         this.dataFilePathDirectory = dataFilePathDirectory;
         this.uuid = UUID.randomUUID().toString();
@@ -88,8 +90,8 @@ public class FileStorePathFactory {
         this.indexManifestCount = new AtomicInteger(0);
         this.indexFileCount = new AtomicInteger(0);
         this.statsFileCount = new AtomicInteger(0);
-        this.dataRoot = dataRoot;
-        this.isExternalPath = !root.equals(dataRoot);
+        this.externalPathProvider = externalPathProvider;
+        // this.externalPathExists = externalPathProvider.externalPathExists();
     }
 
     public Path root() {
@@ -134,11 +136,12 @@ public class FileStorePathFactory {
                 changelogFilePrefix,
                 fileSuffixIncludeCompression,
                 fileCompression,
-                isExternalPath);
+                externalPathProvider,
+                relativeBucketPath(partition, bucket));
     }
 
     public Path bucketPath(BinaryRow partition, int bucket) {
-        return new Path(dataRoot, relativeBucketPath(partition, bucket));
+        return new Path(root, relativeBucketPath(partition, bucket));
     }
 
     public Path relativeBucketPath(BinaryRow partition, int bucket) {
@@ -161,6 +164,7 @@ public class FileStorePathFactory {
                                 partition, "Partition row data is null. This is unexpected.")));
     }
 
+    // @TODO, need to be changed
     public List<Path> getHierarchicalPartitionPath(BinaryRow partition) {
         return PartitionPathUtils.generateHierarchicalPartitionPaths(
                         partitionComputer.generatePartValues(
@@ -168,7 +172,7 @@ public class FileStorePathFactory {
                                         partition,
                                         "Partition binary row is null. This is unexpected.")))
                 .stream()
-                .map(p -> new Path(dataRoot + "/" + p))
+                .map(p -> new Path(root + "/" + p))
                 .collect(Collectors.toList());
     }
 

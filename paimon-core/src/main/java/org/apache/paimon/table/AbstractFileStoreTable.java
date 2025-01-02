@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -87,7 +88,6 @@ import java.util.SortedMap;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
-import static org.apache.paimon.CoreOptions.TABLE_DATA_PATH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Abstract {@link FileStoreTable}. */
@@ -99,7 +99,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     protected final FileIO fileIO;
     protected final Path path;
-    protected final Path tableDataPath;
+
     protected final TableSchema tableSchema;
     protected final CatalogEnvironment catalogEnvironment;
 
@@ -107,12 +107,14 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Nullable protected transient Cache<Path, Snapshot> snapshotCache;
     @Nullable protected transient Cache<String, Statistics> statsCache;
 
+    protected final ExternalPathProvider externalPathProvider;
+
     protected AbstractFileStoreTable(
             FileIO fileIO,
             Path path,
             TableSchema tableSchema,
             CatalogEnvironment catalogEnvironment,
-            Path tableDataPath) {
+            ExternalPathProvider externalPathProvider) {
         this.fileIO = fileIO;
         this.path = path;
         if (!tableSchema.options().containsKey(PATH.key())) {
@@ -122,15 +124,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             tableSchema = tableSchema.copy(newOptions);
         }
 
-        if (!tableSchema.options().containsKey(TABLE_DATA_PATH.key())) {
-            Map<String, String> newOptions = new HashMap<>(tableSchema.options());
-            newOptions.put(TABLE_DATA_PATH.key(), tableDataPath.toString());
-            tableSchema = tableSchema.copy(newOptions);
-        }
-
         this.tableSchema = tableSchema;
         this.catalogEnvironment = catalogEnvironment;
-        this.tableDataPath = tableDataPath;
+        this.externalPathProvider = externalPathProvider;
     }
 
     public String currentBranch() {
@@ -347,9 +343,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         // set path always
         newOptions.set(PATH, path.toString());
 
-        // set tableDataPath always
-        newOptions.set(TABLE_DATA_PATH, tableDataPath.toString());
-
         // set dynamic options with default values
         CoreOptions.setDefaultValues(newOptions);
 
@@ -386,9 +379,17 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         AbstractFileStoreTable copied =
                 newTableSchema.primaryKeys().isEmpty()
                         ? new AppendOnlyFileStoreTable(
-                                fileIO, path, newTableSchema, catalogEnvironment, tableDataPath)
+                                fileIO,
+                                path,
+                                newTableSchema,
+                                catalogEnvironment,
+                                externalPathProvider)
                         : new PrimaryKeyFileStoreTable(
-                                fileIO, path, newTableSchema, catalogEnvironment, tableDataPath);
+                                fileIO,
+                                path,
+                                newTableSchema,
+                                catalogEnvironment,
+                                externalPathProvider);
         if (snapshotCache != null) {
             copied.setSnapshotCache(snapshotCache);
         }
@@ -419,11 +420,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public Path location() {
         return path;
-    }
-
-    @Override
-    public Path dataLocation() {
-        return tableDataPath;
     }
 
     @Override
@@ -762,7 +758,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 branchSchema,
                 new Options(),
                 catalogEnvironment(),
-                tableDataPath);
+                externalPathProvider);
     }
 
     private RollbackHelper rollbackHelper() {
@@ -790,6 +786,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         AbstractFileStoreTable that = (AbstractFileStoreTable) o;
         return Objects.equals(path, that.path)
                 && Objects.equals(tableSchema, that.tableSchema)
-                && Objects.equals(tableDataPath, that.tableDataPath);
+                && Objects.equals(externalPathProvider, that.externalPathProvider);
     }
 }

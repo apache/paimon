@@ -21,6 +21,7 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
@@ -107,7 +108,7 @@ public class ManifestFileTest {
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         null,
-                        path);
+                        new ExternalPathProvider());
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         FileIO fileIO = FileIOFinder.find(path);
         return new ManifestFile.Factory(

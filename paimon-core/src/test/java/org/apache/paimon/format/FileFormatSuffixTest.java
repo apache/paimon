@@ -26,6 +26,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fileindex.FileIndexOptions;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
@@ -73,7 +74,8 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
-                        false);
+                        new ExternalPathProvider(),
+                        null);
         FileFormat fileFormat = FileFormat.fromIdentifier(format, new Options());
         LinkedList<DataFileMeta> toCompact = new LinkedList<>();
         CoreOptions options = new CoreOptions(new HashMap<>());

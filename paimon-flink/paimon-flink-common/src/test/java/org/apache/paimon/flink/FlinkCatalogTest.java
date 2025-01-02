@@ -92,7 +92,6 @@ import java.util.stream.Stream;
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
-import static org.apache.paimon.CoreOptions.TABLE_DATA_PATH;
 import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
@@ -902,13 +901,11 @@ public class FlinkCatalogTest {
                             .getTable(FlinkCatalog.toIdentifier(path))
                             .options();
             tablePath = new Path(options.get(PATH.key()));
-            tableDataPath = new Path(options.get(TABLE_DATA_PATH.key()));
         } catch (org.apache.paimon.catalog.Catalog.TableNotExistException e) {
             throw new RuntimeException(e);
         }
         Map<String, String> options = new HashMap<>(t1.getOptions());
         options.put("path", tablePath.toString());
-        options.put("table.data.path", tableDataPath.toString());
         options.putAll(optionsToAdd);
         optionsToRemove.forEach(options::remove);
         if (t1.getTableKind() == CatalogBaseTable.TableKind.TABLE) {

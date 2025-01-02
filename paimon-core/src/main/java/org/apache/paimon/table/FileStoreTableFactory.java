@@ -19,7 +19,10 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.ExternalFSStrategy;
+import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
@@ -66,9 +69,14 @@ public class FileStoreTableFactory {
                                                         + tablePath
                                                         + ". Please create table first."));
 
-        Path tableDataPath = getTableDataPath(tableSchema, tablePath);
+        ExternalPathProvider externalPathProvider = getExternalPathProvider(tableSchema, tablePath);
         return create(
-                fileIO, tablePath, tableSchema, options, CatalogEnvironment.empty(), tableDataPath);
+                fileIO,
+                tablePath,
+                tableSchema,
+                options,
+                CatalogEnvironment.empty(),
+                externalPathProvider);
     }
 
     private static Path getTableDataPath(TableSchema tableSchema, Path tablePath) {
@@ -80,15 +88,26 @@ public class FileStoreTableFactory {
         return new Path(externalPath, dbAndTablePath);
     }
 
+    private static ExternalPathProvider getExternalPathProvider(
+            TableSchema tableSchema, Path tablePath) {
+        CoreOptions coreOptions = CoreOptions.fromMap(tableSchema.options());
+        String externalPaths = coreOptions.dataFileExternalPaths();
+        ExternalPathStrategy externalPathStrategy = coreOptions.externalPathStrategy();
+        ExternalFSStrategy externalSpecificFSStrategy = coreOptions.externalSpecificFSStrategy();
+        String dbAndTablePath = tablePath.getParent().getName() + "/" + tablePath.getName();
+        return new ExternalPathProvider(
+                externalPaths, externalPathStrategy, externalSpecificFSStrategy, dbAndTablePath);
+    }
+
     public static FileStoreTable create(FileIO fileIO, Path tablePath, TableSchema tableSchema) {
-        Path tableDataPath = getTableDataPath(tableSchema, tablePath);
+        ExternalPathProvider externalPathProvider = getExternalPathProvider(tableSchema, tablePath);
         return create(
                 fileIO,
                 tablePath,
                 tableSchema,
                 new Options(),
                 CatalogEnvironment.empty(),
-                tableDataPath);
+                externalPathProvider);
     }
 
     public static FileStoreTable create(
@@ -96,9 +115,15 @@ public class FileStoreTableFactory {
             Path tablePath,
             TableSchema tableSchema,
             CatalogEnvironment catalogEnvironment) {
-        Path tableDataPath = getTableDataPath(tableSchema, tablePath);
+        // Path tableDataPath = getTableDataPath(tableSchema, tablePath);
+        ExternalPathProvider externalPathProvider = getExternalPathProvider(tableSchema, tablePath);
         return create(
-                fileIO, tablePath, tableSchema, new Options(), catalogEnvironment, tableDataPath);
+                fileIO,
+                tablePath,
+                tableSchema,
+                new Options(),
+                catalogEnvironment,
+                externalPathProvider);
     }
 
     public static FileStoreTable create(
@@ -107,7 +132,7 @@ public class FileStoreTableFactory {
             TableSchema tableSchema,
             Options dynamicOptions,
             CatalogEnvironment catalogEnvironment,
-            Path tableDataPath) {
+            ExternalPathProvider externalPathProvider) {
         FileStoreTable table =
                 createWithoutFallbackBranch(
                         fileIO,
@@ -115,7 +140,7 @@ public class FileStoreTableFactory {
                         tableSchema,
                         dynamicOptions,
                         catalogEnvironment,
-                        tableDataPath);
+                        externalPathProvider);
 
         Options options = new Options(table.options());
         String fallbackBranch = options.get(CoreOptions.SCAN_FALLBACK_BRANCH);
@@ -137,7 +162,7 @@ public class FileStoreTableFactory {
                             schema.get(),
                             branchOptions,
                             catalogEnvironment,
-                            tableDataPath);
+                            externalPathProvider);
             table = new FallbackReadFileStoreTable(table, fallbackTable);
         }
 
@@ -150,13 +175,21 @@ public class FileStoreTableFactory {
             TableSchema tableSchema,
             Options dynamicOptions,
             CatalogEnvironment catalogEnvironment,
-            Path tableDataPath) {
+            ExternalPathProvider externalPathProvider) {
         FileStoreTable table =
                 tableSchema.primaryKeys().isEmpty()
                         ? new AppendOnlyFileStoreTable(
-                                fileIO, tablePath, tableSchema, catalogEnvironment, tableDataPath)
+                                fileIO,
+                                tablePath,
+                                tableSchema,
+                                catalogEnvironment,
+                                externalPathProvider)
                         : new PrimaryKeyFileStoreTable(
-                                fileIO, tablePath, tableSchema, catalogEnvironment, tableDataPath);
+                                fileIO,
+                                tablePath,
+                                tableSchema,
+                                catalogEnvironment,
+                                externalPathProvider);
         return table.copy(dynamicOptions.toMap());
     }
 }

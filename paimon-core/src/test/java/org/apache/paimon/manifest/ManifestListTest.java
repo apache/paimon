@@ -21,6 +21,7 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -111,7 +112,7 @@ public class ManifestListTest {
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         null,
-                        path);
+                        new ExternalPathProvider());
         return new ManifestList.Factory(FileIOFinder.find(path), avro, "zstd", pathFactory, null)
                 .create();
     }

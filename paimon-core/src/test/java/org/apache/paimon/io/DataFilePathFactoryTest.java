@@ -19,6 +19,7 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
 
 import org.junit.jupiter.api.Test;
@@ -41,7 +42,8 @@ public class DataFilePathFactoryTest {
                         CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
-                        false);
+                        new ExternalPathProvider(),
+                        null);
         String uuid = pathFactory.uuid();
 
         for (int i = 0; i < 20; i++) {
@@ -71,7 +73,8 @@ public class DataFilePathFactoryTest {
                         CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
-                        false);
+                        new ExternalPathProvider(),
+                        null);
         String uuid = pathFactory.uuid();
 
         for (int i = 0; i < 20; i++) {

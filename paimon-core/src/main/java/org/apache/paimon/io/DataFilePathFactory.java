@@ -19,6 +19,7 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileEntry;
 
@@ -35,6 +36,7 @@ public class DataFilePathFactory {
     public static final String INDEX_PATH_SUFFIX = ".index";
 
     private final Path parent;
+    private final Path relativePath;
     private final String uuid;
 
     private final AtomicInteger pathCount;
@@ -43,7 +45,7 @@ public class DataFilePathFactory {
     private final String changelogFilePrefix;
     private final boolean fileSuffixIncludeCompression;
     private final String fileCompression;
-    private final boolean isExternalPath;
+    private final ExternalPathProvider externalPathProvider;
 
     public DataFilePathFactory(
             Path parent,
@@ -52,7 +54,8 @@ public class DataFilePathFactory {
             String changelogFilePrefix,
             boolean fileSuffixIncludeCompression,
             String fileCompression,
-            boolean isExternalPath) {
+            ExternalPathProvider externalPathProvider,
+            Path relativePath) {
         this.parent = parent;
         this.uuid = UUID.randomUUID().toString();
         this.pathCount = new AtomicInteger(0);
@@ -61,7 +64,8 @@ public class DataFilePathFactory {
         this.changelogFilePrefix = changelogFilePrefix;
         this.fileSuffixIncludeCompression = fileSuffixIncludeCompression;
         this.fileCompression = fileCompression;
-        this.isExternalPath = isExternalPath;
+        this.externalPathProvider = externalPathProvider;
+        this.relativePath = relativePath;
     }
 
     public Path newPath() {
@@ -77,7 +81,13 @@ public class DataFilePathFactory {
     }
 
     public Path newPath(String prefix) {
-        return new Path(parent, newFileName(prefix)).setExternalPath(isExternalPath);
+        return externalPathProvider
+                .getNextExternalPath()
+                .map(
+                        externalPath ->
+                                new Path(new Path(externalPath, relativePath), newFileName(prefix)))
+                .orElse(new Path(parent, newFileName(prefix)))
+                .setExternalPath(externalPathProvider.externalPathExists());
     }
 
     private String newFileName(String prefix) {
