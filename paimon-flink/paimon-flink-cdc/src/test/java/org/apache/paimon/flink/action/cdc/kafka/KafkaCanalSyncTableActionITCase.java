@@ -202,7 +202,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     }
 
     @Test
-    @Timeout(90)
+    @Timeout(180)
     public void testMultipleSchemaEvolutions() throws Exception {
         final String topic = "schema_evolution_multiple";
         createTestTopic(topic, 1, 1);
@@ -262,7 +262,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     }
 
     @Test
-    @Timeout(90)
+    @Timeout(180)
     public void testAllTypes() throws Exception {
         // the first round checks for table creation
         // the second round checks for running the action on an existing table

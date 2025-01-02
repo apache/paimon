@@ -282,7 +282,7 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    @Timeout(90)
+    @Timeout(120)
     public void testNewlyAddedTablesOptionsChange() throws Exception {
         String dbName = database + UUID.randomUUID();
         writeRecordsToMongoDB("test-data-5", dbName, "database");

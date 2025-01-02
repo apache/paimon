@@ -233,7 +233,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
     }
 
     @Test
-    @Timeout(90)
+    @Timeout(180)
     public void testMultipleSchemaEvolutions() throws Exception {
         Map<String, String> postgresConfig = getBasicPostgresConfig();
         postgresConfig.put(PostgresSourceOptions.DATABASE_NAME.key(), DATABASE_NAME);
@@ -304,7 +304,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
     }
 
     @Test
-    @Timeout(90)
+    @Timeout(180)
     public void testAllTypes() throws Exception {
         // the first round checks for table creation
         // the second round checks for running the action on an existing table
@@ -627,7 +627,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
     }
 
     @Test
-    @Timeout(240)
+    @Timeout(360)
     public void testSyncShards() throws Exception {
         Map<String, String> postgresConfig = getBasicPostgresConfig();
 

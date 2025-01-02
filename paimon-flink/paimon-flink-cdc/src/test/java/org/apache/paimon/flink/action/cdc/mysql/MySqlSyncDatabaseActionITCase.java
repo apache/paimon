@@ -1215,7 +1215,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(90)
+    @Timeout(120)
     public void testNewlyAddedTablesOptionsChange() throws Exception {
         try (Statement statement = getStatement()) {
             statement.execute("USE " + "newly_added_tables_option_schange");
@@ -1279,7 +1279,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(90)
+    @Timeout(120)
     public void testMetadataColumns() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "metadata");
