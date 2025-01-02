@@ -24,13 +24,13 @@ import java.io.IOException;
 import java.util.HashSet;
 import java.util.Set;
 
-/** MockCustomPartitionMarkDoneAction. */
+/** The class is only applicable for {@link CustomPartitionMarkDoneActionTest}. */
 public class MockCustomPartitionMarkDoneAction implements PartitionMarkDoneAction {
 
     private static final Set<String> markedDonePartitions = new HashSet<>();
 
     @Override
-    public void markDone(String partition) throws Exception {
+    public void markDone(String partition) {
         MockCustomPartitionMarkDoneAction.markedDonePartitions.add(partition);
     }
 
