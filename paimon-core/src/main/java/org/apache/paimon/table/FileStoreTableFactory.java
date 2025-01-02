@@ -79,15 +79,6 @@ public class FileStoreTableFactory {
                 externalPathProvider);
     }
 
-    private static Path getTableDataPath(TableSchema tableSchema, Path tablePath) {
-        String externalPath = tableSchema.options().get(CoreOptions.DATA_FILE_EXTERNAL_PATH.key());
-        if (externalPath == null || externalPath.isEmpty()) {
-            return tablePath;
-        }
-        String dbAndTablePath = tablePath.getParent().getName() + "/" + tablePath.getName();
-        return new Path(externalPath, dbAndTablePath);
-    }
-
     private static ExternalPathProvider getExternalPathProvider(
             TableSchema tableSchema, Path tablePath) {
         CoreOptions coreOptions = CoreOptions.fromMap(tableSchema.options());
@@ -115,7 +106,6 @@ public class FileStoreTableFactory {
             Path tablePath,
             TableSchema tableSchema,
             CatalogEnvironment catalogEnvironment) {
-        // Path tableDataPath = getTableDataPath(tableSchema, tablePath);
         ExternalPathProvider externalPathProvider = getExternalPathProvider(tableSchema, tablePath);
         return create(
                 fileIO,

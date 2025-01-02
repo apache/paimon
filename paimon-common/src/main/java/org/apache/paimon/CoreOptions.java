@@ -124,12 +124,6 @@ public class CoreOptions implements Serializable {
                                                     + "if there is no primary key, the full row will be used.")
                                     .build());
 
-    public static final ConfigOption<String> DATA_FILE_EXTERNAL_PATH =
-            key("data-file.external-path")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("The path where the data of this table is currently written.");
-
     public static final ConfigOption<String> DATA_FILE_EXTERNAL_PATHS =
             key("data-file.external-paths")
                     .stringType()
@@ -143,7 +137,7 @@ public class CoreOptions implements Serializable {
                     .enumType(ExternalPathStrategy.class)
                     .defaultValue(ExternalPathStrategy.NONE)
                     .withDescription(
-                            "The strategy of selecting an external path when writing data");
+                            "The strategy of selecting an external path when writing data.");
 
     public static final ConfigOption<ExternalFSStrategy> DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS =
             key("data-file.external-paths.specific-fs")

@@ -1009,10 +1009,22 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>The bytes of types (CHAR, VARCHAR, BINARY, VARBINARY) devote to the zorder sort.</td>
         </tr>
         <tr>
-            <td><h5>data-file.external-path</h5></td>
+            <td><h5>data-file.external-paths</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>The path where the data of this table is currently written.</td>
+            <td>The external paths where the data of this table will be written, multiple elements separated by commas.</td>
+        </tr>
+        <tr>
+            <td><h5>data-file.external-paths.strategy</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td><p>Enum</p></td>
+            <td>The strategy of selecting an external path when writing data.<br /><br />Possible values:<ul><li>"none": Do not choose any external storage, data will still be written to the default warehouse path.</li><li>"specific-fs": Select a specific file system as the external path. Currently supported are S3 and OSS.</li><li>"round-robin": When writing a new file, a path is chosen from data-file.external-paths in turn.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>data-file.external-paths.specific-fs</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td><p>Enum</p></td>
+            <td>The specific file system of the external path when data-file.external-paths.strategy is set to specific-fs.<br /><br />Possible values:"S3": Select S3 as the write path for the external path.</li><li>"OSS": Select OSS as the write path for the external path.</li></ul></td>
         </tr>
     </tbody>
 </table>

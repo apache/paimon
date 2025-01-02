@@ -243,7 +243,7 @@ public class RESTCatalogTest {
         GetTableResponse response = MockRESTMessage.getTableResponse();
         mockResponse(mapper.writeValueAsString(response), 200);
         Table result = mockRestCatalog.getTable(Identifier.create(databaseName, "table"));
-        // catalog will add PATH option
+        // catalog will add path option
         assertEquals(response.getSchema().options().size() + 1, result.options().size());
         verify(mockRestCatalog, times(1)).getDataOrFormatTable(any());
     }

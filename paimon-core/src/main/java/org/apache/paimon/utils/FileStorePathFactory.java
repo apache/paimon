@@ -41,8 +41,6 @@ public class FileStorePathFactory {
 
     // this is the table schema root path
     private final Path root;
-    // this is the table data root path
-    // private final Path dataRoot;
     private final String uuid;
     private final InternalRowPartitionComputer partitionComputer;
     private final String formatIdentifier;
@@ -91,7 +89,6 @@ public class FileStorePathFactory {
         this.indexFileCount = new AtomicInteger(0);
         this.statsFileCount = new AtomicInteger(0);
         this.externalPathProvider = externalPathProvider;
-        // this.externalPathExists = externalPathProvider.externalPathExists();
     }
 
     public Path root() {

@@ -99,7 +99,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     protected final FileIO fileIO;
     protected final Path path;
-
     protected final TableSchema tableSchema;
     protected final CatalogEnvironment catalogEnvironment;
 
@@ -123,7 +122,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             newOptions.put(PATH.key(), path.toString());
             tableSchema = tableSchema.copy(newOptions);
         }
-
         this.tableSchema = tableSchema;
         this.catalogEnvironment = catalogEnvironment;
         this.externalPathProvider = externalPathProvider;
