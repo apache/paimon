@@ -59,7 +59,7 @@ public class FactoryUtil {
 
     /** Discovers a factory using the given factory base class and identifier. */
     @SuppressWarnings("unchecked")
-    public static <T> T matchFactory(
+    public static <T extends Factory> T matchFactory(
             List<T> factories, Function<T, String> identifierFunction, String identifier) {
 
         final List<T> matchingFactories =
