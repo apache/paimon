@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions.ExternalFSStrategy;
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.annotation.VisibleForTesting;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -29,7 +30,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /** Provider for external paths. */
-public class ExternalPathProvider {
+public class ExternalPathProvider implements Serializable {
     private final Map<ExternalFSStrategy, Path> externalPathsMap;
     private final List<Path> externalPathsList;
 
