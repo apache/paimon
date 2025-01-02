@@ -111,7 +111,7 @@ By default, batch incremental read will strictly find the start and end snapshot
 not be created because of data delay. 
 
 For example, assume that the tag for '2024-12-20' is created, then the data of 12-21 
-doesn't be suggested in time, but come with data at 12-22, and the tag '2024-12-22' will actual contains two days data.
+doesn't be ingested in time, but come with data at 12-22, and the tag '2024-12-22' will actual contains two days data.
 
 When you read the incremental data between tag '2024-12-21' and '2024-12-22', if you actually demand is to get the incremental 
 from the most earlier tag before '2024-12-22' to '2024-12-22', you can set `incremental-auto-tag-start-mode` to allow to 
