@@ -213,7 +213,7 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
                         "*",
                         olderThan);
         ImmutableList<Row> actualDryRunDeleteFile = ImmutableList.copyOf(executeSQL(withDryRun));
-        assertThat(actualDryRunDeleteFile).containsOnly(Row.of("4"));
+        assertThat(actualDryRunDeleteFile).containsOnly(Row.of("3"));
 
         String withOlderThan =
                 String.format(
@@ -225,7 +225,7 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
                         olderThan);
         ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(executeSQL(withOlderThan));
 
-        assertThat(actualDeleteFile).containsOnly(Row.of("4"));
+        assertThat(actualDeleteFile).containsOnly(Row.of("3"));
     }
 
     @ParameterizedTest
