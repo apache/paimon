@@ -109,7 +109,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public FileStorePathFactory pathFactory() {
-        return pathFactory(options.fileFormat().getFormatIdentifier());
+        return pathFactory(options.fileFormatString());
     }
 
     protected FileStorePathFactory pathFactory(String format) {

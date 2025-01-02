@@ -19,17 +19,50 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.TraceableFileIO;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
+
+    @Override
+    @BeforeEach
+    public void beforeEachBase() throws Exception {
+        CatalogContext context =
+                CatalogContext.create(
+                        new Path(TraceableFileIO.SCHEME + "://" + tempPath.toString()));
+        Catalog catalog = CatalogFactory.createCatalog(context);
+        Identifier identifier = new Identifier("default", "T");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.INT().notNull())
+                        .partitionKeys("pt")
+                        .primaryKey("pk", "pt")
+                        .options(tableOptions().toMap())
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        table = (FileStoreTable) catalog.getTable(identifier);
+        commitUser = UUID.randomUUID().toString();
+    }
 
     @Override
     protected Options tableOptions() {

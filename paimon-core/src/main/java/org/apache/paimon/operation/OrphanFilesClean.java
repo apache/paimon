@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -33,6 +34,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SerializableConsumer;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -377,9 +379,18 @@ public abstract class OrphanFilesClean implements Serializable {
     }
 
     public static long olderThanMillis(@Nullable String olderThan) {
-        return isNullOrWhitespaceOnly(olderThan)
-                ? System.currentTimeMillis() - TimeUnit.DAYS.toMillis(1)
-                : DateTimeUtils.parseTimestampData(olderThan, 3, TimeZone.getDefault())
-                        .getMillisecond();
+        if (isNullOrWhitespaceOnly(olderThan)) {
+            return System.currentTimeMillis() - TimeUnit.DAYS.toMillis(1);
+        } else {
+            Timestamp parsedTimestampData =
+                    DateTimeUtils.parseTimestampData(olderThan, 3, TimeZone.getDefault());
+            Preconditions.checkArgument(
+                    parsedTimestampData.compareTo(
+                                    Timestamp.fromEpochMillis(System.currentTimeMillis()))
+                            < 0,
+                    "The arg olderThan must be less than now, because dataFiles that are currently being written and not referenced by snapshots will be mistakenly cleaned up.");
+
+            return parsedTimestampData.getMillisecond();
+        }
     }
 }

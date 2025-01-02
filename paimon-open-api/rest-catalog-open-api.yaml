@@ -28,6 +28,21 @@ servers:
   - url: http://localhost:8080
     description: Server URL in Development environment
 paths:
+  /v1/config:
+    get:
+      tags:
+        - config
+      summary: Get Config
+      operationId: getConfig
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigResponse'
+        "500":
+          description: Internal Server Error
   /v1/{prefix}/databases:
     get:
       tags:
@@ -74,6 +89,102 @@ paths:
                 $ref: '#/components/schemas/CreateDatabaseResponse'
         "409":
           description: Resource has exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}:
+    get:
+      tags:
+        - database
+      summary: Get Database
+      operationId: getDatabases
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetDatabaseResponse'
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+    delete:
+      tags:
+        - database
+      summary: Drop Database
+      operationId: dropDatabase
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success, no content
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/properties:
+    post:
+      tags:
+        - database
+      summary: Alter Database
+      operationId: alterDatabase
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlterDatabaseRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlterDatabaseResponse'
+        "404":
+          description: Resource not found
           content:
             application/json:
               schema:
@@ -176,6 +287,81 @@ paths:
     post:
       tags:
         - table
+      summary: Alter table
+      operationId: alterTable
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlterTableRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTableResponse'
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Resource has exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+    delete:
+      tags:
+        - table
+      summary: Drop table
+      operationId: dropTable
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success, no content
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/rename:
+    post:
+      tags:
+        - table
       summary: Rename table
       operationId: renameTable
       parameters:
@@ -206,13 +392,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetTableResponse'
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Resource has exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-    delete:
+  /v1/{prefix}/databases/{database}/tables/{table}/partitions:
+    get:
       tags:
-        - table
-      summary: Drop table
-      operationId: dropTable
+        - partition
+      summary: List partitions
+      operationId: listPartitions
       parameters:
         - name: prefix
           in: path
@@ -224,7 +423,18 @@ paths:
           required: true
           schema:
             type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListPartitionsResponse'
         "404":
           description: Resource not found
           content:
@@ -233,12 +443,11 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/properties:
     post:
       tags:
-        - database
-      summary: Alter Database
-      operationId: alterDatabase
+        - partition
+      summary: Create partition
+      operationId: createPartition
       parameters:
         - name: prefix
           in: path
@@ -246,6 +455,11 @@ paths:
           schema:
             type: string
         - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
           in: path
           required: true
           schema:
@@ -254,46 +468,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AlterDatabaseRequest'
+              $ref: '#/components/schemas/CreatePartitionRequest'
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AlterDatabaseResponse'
-        "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal Server Error
-  /v1/{prefix}/databases/{database}:
-    get:
-      tags:
-        - database
-      summary: Get Database
-      operationId: getDatabases
-      parameters:
-        - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GetDatabaseResponse'
+                $ref: '#/components/schemas/PartitionResponse'
         "404":
           description: Resource not found
           content:
@@ -304,9 +486,9 @@ paths:
           description: Internal Server Error
     delete:
       tags:
-        - database
-      summary: Drop Database
-      operationId: dropDatabase
+        - partition
+      summary: Drop partition
+      operationId: dropPartition
       parameters:
         - name: prefix
           in: path
@@ -318,28 +500,25 @@ paths:
           required: true
           schema:
             type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DropPartitionRequest'
       responses:
+        "200":
+          description: Success, no content
         "404":
           description: Resource not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal Server Error
-  /v1/config:
-    get:
-      tags:
-        - config
-      summary: Get Config
-      operationId: getConfig
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ConfigResponse'
         "500":
           description: Internal Server Error
 components:
@@ -353,6 +532,18 @@ components:
           type: object
           additionalProperties:
             type: string
+    CreatePartitionRequest:
+      type: object
+      properties:
+        identifier:
+          $ref: '#/components/schemas/Identifier'
+        spec:
+          type: object
+    DropPartitionRequest:
+      type: object
+      properties:
+        spec:
+          type: object
     CreateDatabaseResponse:
       type: object
       properties:
@@ -394,9 +585,52 @@ components:
         description:
           type: string
     DataType:
-      anyOf:
-        - type: string
-        - type: object
+      oneOf:
+        - $ref: '#/components/schemas/PrimitiveType'
+        - $ref: '#/components/schemas/ArrayType'
+        - $ref: '#/components/schemas/MultisetType'
+        - $ref: '#/components/schemas/MapType'
+        - $ref: '#/components/schemas/RowType'
+    PrimitiveType:
+      type: string
+    ArrayType:
+      type: object
+      properties:
+        type:
+          type: string
+          pattern: ^ARRAY.*
+          example: ARRAY
+        element:
+          $ref: '#/components/schemas/DataType'
+    MultisetType:
+      type: object
+      properties:
+        type:
+          type: string
+          pattern: ^MULTISET.*
+          example: MULTISET
+        element:
+          $ref: '#/components/schemas/DataType'
+    MapType:
+      type: object
+      properties:
+        type:
+          type: string
+          pattern: ^MAP.*
+          example: MAP
+        key:
+          $ref: '#/components/schemas/DataType'
+        value:
+          $ref: '#/components/schemas/DataType'
+    RowType:
+      type: object
+      properties:
+        type:
+          type: string
+          pattern: ^ROW.*
+          example: ROW
+        fields:
+          $ref: '#/components/schemas/DataField'
     Identifier:
       type: object
       properties:
@@ -437,6 +671,144 @@ components:
           format: int64
         schema:
           $ref: '#/components/schemas/Schema'
+    AlterTableRequest:
+      type: object
+      properties:
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SchemaChange'
+    SchemaChange:
+      anyOf:
+        - $ref: '#/components/schemas/SetOption'
+        - $ref: '#/components/schemas/RemoveOption'
+        - $ref: '#/components/schemas/UpdateComment'
+        - $ref: '#/components/schemas/AddColumn'
+        - $ref: '#/components/schemas/RenameColumn'
+        - $ref: '#/components/schemas/DropColumn'
+        - $ref: '#/components/schemas/UpdateColumnComment'
+        - $ref: '#/components/schemas/UpdateColumnType'
+        - $ref: '#/components/schemas/UpdateColumnPosition'
+        - $ref: '#/components/schemas/UpdateColumnNullability'
+    SetOption:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: ["setOption"]
+        key:
+          type: string
+        value:
+          type: string
+    RemoveOption:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: ["removeOption"]
+        key:
+          type: string
+    UpdateComment:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: ["updateComment"]
+        comment:
+          type: string
+    AddColumn:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: ["addColumn"]
+        fieldNames:
+          type: array
+          items:
+            type: string
+        dataType:
+          $ref: '#/components/schemas/DataType'
+        comment:
+          type: string
+        move:
+          $ref: '#/components/schemas/Move'
+    RenameColumn:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: ["renameColumn"]
+        fieldNames:
+          type: array
+          items:
+            type: string
+        newName:
+          type: string
+    DropColumn:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: ["dropColumn"]
+        fieldNames:
+          type: array
+          items:
+            type: string
+    UpdateColumnComment:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [ "updateColumnComment" ]
+        fieldNames:
+          type: array
+          items:
+            type: string
+        newComment:
+          type: string
+    UpdateColumnType:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [ "updateColumnType" ]
+        fieldNames:
+          type: array
+          items:
+            type: string
+        newDataType:
+          $ref: '#/components/schemas/DataType'
+        keepNullability:
+          type: boolean
+    UpdateColumnPosition:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [ "updateColumnPosition" ]
+        move:
+          $ref: '#/components/schemas/Move'
+    UpdateColumnNullability:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [ "update_column_nullability" ]
+        fieldNames:
+          type: array
+          items:
+            type: string
+        newNullability:
+          type: boolean
+    Move:
+      type: object
+      properties:
+        fieldName:
+          type: string
+        referenceFieldName:
+          type: string
+        type:
+          type: string
     RenameTableRequest:
       type: object
       properties:
@@ -502,7 +874,35 @@ components:
           type: object
           additionalProperties:
             type: string
-
+    ListPartitionsResponse:
+      type: object
+      properties:
+        partitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Partition'
+    PartitionResponse:
+      type: object
+      properties:
+        partition:
+          $ref: '#/components/schemas/Partition'
+    Partition:
+      type: object
+      properties:
+        spec:
+          type: object
+        recordCount:
+          type: integer
+          format: int64
+        fileSizeInBytes:
+          type: integer
+          format: int64
+        fileCount:
+          type: integer
+          format: int64
+        lastFileCreationTime:
+          type: integer
+          format: int64
   securitySchemes:
     BearerAuth:
       type: http

@@ -28,10 +28,10 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.CredentialsProvider;
 import org.apache.paimon.rest.auth.CredentialsProviderFactory;
@@ -39,8 +39,11 @@ import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
+import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreatePartitionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.DropPartitionRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -48,7 +51,9 @@ import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.PartitionResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
@@ -57,10 +62,10 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.paimon.shade.guava30.com.google.common.annotations.VisibleForTesting;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -70,14 +75,18 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 
+import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
+import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
@@ -91,22 +100,21 @@ public class RESTCatalog implements Catalog {
     private final RESTClient client;
     private final ResourcePaths resourcePaths;
     private final AuthSession catalogAuth;
-    private final CatalogContext context;
+    private final Options options;
     private final FileIO fileIO;
 
     private volatile ScheduledExecutorService refreshExecutor = null;
 
-    public RESTCatalog(CatalogContext catalogContext) {
-        Options catalogOptions = catalogContext.options();
-        if (catalogOptions.getOptional(CatalogOptions.WAREHOUSE).isPresent()) {
+    public RESTCatalog(CatalogContext context) {
+        if (context.options().getOptional(CatalogOptions.WAREHOUSE).isPresent()) {
             throw new IllegalArgumentException("Can not config warehouse in RESTCatalog.");
         }
-        String uri = catalogOptions.get(RESTCatalogOptions.URI);
+        String uri = context.options().get(RESTCatalogOptions.URI);
         Optional<Duration> connectTimeout =
-                catalogOptions.getOptional(RESTCatalogOptions.CONNECTION_TIMEOUT);
+                context.options().getOptional(RESTCatalogOptions.CONNECTION_TIMEOUT);
         Optional<Duration> readTimeout =
-                catalogOptions.getOptional(RESTCatalogOptions.READ_TIMEOUT);
-        Integer threadPoolSize = catalogOptions.get(RESTCatalogOptions.THREAD_POOL_SIZE);
+                context.options().getOptional(RESTCatalogOptions.READ_TIMEOUT);
+        Integer threadPoolSize = context.options().get(RESTCatalogOptions.THREAD_POOL_SIZE);
         HttpClientOptions httpClientOptions =
                 new HttpClientOptions(
                         uri,
@@ -116,38 +124,35 @@ public class RESTCatalog implements Catalog {
                         threadPoolSize,
                         DefaultErrorHandler.getInstance());
         this.client = new HttpClient(httpClientOptions);
-        Map<String, String> baseHeader = configHeaders(catalogOptions.toMap());
+        Map<String, String> baseHeader = configHeaders(context.options().toMap());
         CredentialsProvider credentialsProvider =
                 CredentialsProviderFactory.createCredentialsProvider(
-                        catalogOptions, RESTCatalog.class.getClassLoader());
+                        context.options(), RESTCatalog.class.getClassLoader());
         if (credentialsProvider.keepRefreshed()) {
             this.catalogAuth =
                     AuthSession.fromRefreshCredentialsProvider(
                             tokenRefreshExecutor(), baseHeader, credentialsProvider);
-
         } else {
             this.catalogAuth = new AuthSession(baseHeader, credentialsProvider);
         }
         Map<String, String> initHeaders =
                 RESTUtil.merge(
-                        configHeaders(catalogOptions.toMap()), this.catalogAuth.getHeaders());
-        Options options = new Options(fetchOptionsFromServer(initHeaders, initHeaders));
-        this.context =
-                CatalogContext.create(
-                        options, catalogContext.preferIO(), catalogContext.fallbackIO());
+                        configHeaders(context.options().toMap()), this.catalogAuth.getHeaders());
+
+        this.options =
+                new Options(
+                        client.get(ResourcePaths.V1_CONFIG, ConfigResponse.class, initHeaders)
+                                .merge(context.options().toMap()));
         this.resourcePaths =
                 ResourcePaths.forCatalogProperties(options.get(RESTCatalogInternalOptions.PREFIX));
-        this.fileIO = getFileIOFromOptions(context);
-    }
 
-    private static FileIO getFileIOFromOptions(CatalogContext context) {
         try {
-            Options options = context.options();
             String warehouseStr = options.get(CatalogOptions.WAREHOUSE);
-            Path warehousePath = new Path(warehouseStr);
-            CatalogContext contextWithNewOptions =
-                    CatalogContext.create(options, context.preferIO(), context.fallbackIO());
-            return FileIO.get(warehousePath, contextWithNewOptions);
+            this.fileIO =
+                    FileIO.get(
+                            new Path(warehouseStr),
+                            CatalogContext.create(
+                                    options, context.preferIO(), context.fallbackIO()));
         } catch (IOException e) {
             LOG.warn("Can not get FileIO from options.");
             throw new RuntimeException(e);
@@ -156,12 +161,12 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public String warehouse() {
-        return context.options().get(CatalogOptions.WAREHOUSE);
+        return options.get(CatalogOptions.WAREHOUSE);
     }
 
     @Override
     public Map<String, String> options() {
-        return context.options().toMap();
+        return options.toMap();
     }
 
     @Override
@@ -302,7 +307,13 @@ public class RESTCatalog implements Catalog {
     public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
             throws TableNotExistException, TableAlreadyExistException {
         try {
-            renameTable(fromTable, toTable);
+            RenameTableRequest request = new RenameTableRequest(toTable);
+            client.post(
+                    resourcePaths.renameTable(
+                            fromTable.getDatabaseName(), fromTable.getTableName()),
+                    request,
+                    GetTableResponse.class,
+                    headers());
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 throw new TableNotExistException(fromTable);
@@ -318,7 +329,20 @@ public class RESTCatalog implements Catalog {
     public void alterTable(
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
-        throw new UnsupportedOperationException("TODO");
+        try {
+            AlterTableRequest request = new AlterTableRequest(changes);
+            client.post(
+                    resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),
+                    request,
+                    GetTableResponse.class,
+                    headers());
+        } catch (NoSuchResourceException e) {
+            if (!ignoreIfNotExists) {
+                throw new TableNotExistException(identifier);
+            }
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
     }
 
     @Override
@@ -340,22 +364,88 @@ public class RESTCatalog implements Catalog {
     @Override
     public void createPartition(Identifier identifier, Map<String, String> partitionSpec)
             throws TableNotExistException {
-        throw new UnsupportedOperationException();
+        Table table = getTable(identifier);
+        Options options = Options.fromMap(table.options());
+        if (!options.get(METASTORE_PARTITIONED_TABLE)) {
+            return;
+        }
+
+        try {
+            CreatePartitionRequest request = new CreatePartitionRequest(identifier, partitionSpec);
+            client.post(
+                    resourcePaths.partitions(
+                            identifier.getDatabaseName(), identifier.getTableName()),
+                    request,
+                    PartitionResponse.class,
+                    headers());
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
     }
 
     @Override
-    public void dropPartition(Identifier identifier, Map<String, String> partitions)
-            throws TableNotExistException, PartitionNotExistException {}
+    public void dropPartition(Identifier identifier, Map<String, String> partition)
+            throws TableNotExistException, PartitionNotExistException {
+        checkNotSystemTable(identifier, "dropPartition");
+
+        Table table = getTable(identifier);
+        Options options = Options.fromMap(table.options());
+        if (options.get(METASTORE_PARTITIONED_TABLE)) {
+            try {
+                client.delete(
+                        resourcePaths.partitions(
+                                identifier.getDatabaseName(), identifier.getTableName()),
+                        new DropPartitionRequest(partition),
+                        headers());
+            } catch (NoSuchResourceException ignore) {
+                throw new PartitionNotExistException(identifier, partition);
+            } catch (ForbiddenException e) {
+                throw new TableNoPermissionException(identifier, e);
+            }
+        }
+
+        try (BatchTableCommit commit =
+                table.newBatchWriteBuilder().withOverwrite(partition).newCommit()) {
+            commit.commit(Collections.emptyList());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
 
     @Override
-    public List<PartitionEntry> listPartitions(Identifier identifier)
-            throws TableNotExistException {
-        throw new UnsupportedOperationException();
+    public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
+        Table table = getTable(identifier);
+        Options options = Options.fromMap(table.options());
+        if (!options.get(METASTORE_PARTITIONED_TABLE)) {
+            return listPartitionsFromFileSystem(table);
+        }
+
+        ListPartitionsResponse response;
+        try {
+            response =
+                    client.get(
+                            resourcePaths.partitions(
+                                    identifier.getDatabaseName(), identifier.getTableName()),
+                            ListPartitionsResponse.class,
+                            headers());
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+
+        if (response == null || response.getPartitions() == null) {
+            return Collections.emptyList();
+        }
+
+        return response.getPartitions();
     }
 
     @Override
     public boolean caseSensitive() {
-        return context.options().getOptional(CASE_SENSITIVE).orElse(true);
+        return options.getOptional(CASE_SENSITIVE).orElse(true);
     }
 
     @Override
@@ -368,28 +458,23 @@ public class RESTCatalog implements Catalog {
         }
     }
 
-    @VisibleForTesting
-    Map<String, String> fetchOptionsFromServer(
-            Map<String, String> headers, Map<String, String> clientProperties) {
-        ConfigResponse response =
-                client.get(ResourcePaths.V1_CONFIG, ConfigResponse.class, headers);
-        return response.merge(clientProperties);
-    }
-
-    @VisibleForTesting
-    void renameTable(Identifier fromTable, Identifier newIdentifier) {
-        RenameTableRequest request = new RenameTableRequest(newIdentifier);
-        client.post(
-                resourcePaths.table(fromTable.getDatabaseName(), fromTable.getTableName()),
-                request,
-                GetTableResponse.class,
-                headers());
-    }
-
-    @VisibleForTesting
-    Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
+    private Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
         Preconditions.checkArgument(identifier.getSystemTableName() == null);
-        GetTableResponse response = getTableResponse(identifier);
+
+        GetTableResponse response;
+        try {
+            response =
+                    client.get(
+                            resourcePaths.table(
+                                    identifier.getDatabaseName(), identifier.getTableName()),
+                            GetTableResponse.class,
+                            headers());
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+
         FileStoreTable table =
                 FileStoreTableFactory.create(
                         fileIO(),
@@ -408,20 +493,6 @@ public class RESTCatalog implements Catalog {
                             .build();
         }
         return table;
-    }
-
-    protected GetTableResponse getTableResponse(Identifier identifier)
-            throws TableNotExistException {
-        try {
-            return client.get(
-                    resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),
-                    GetTableResponse.class,
-                    headers());
-        } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
-        } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
-        }
     }
 
     private static Map<String, String> configHeaders(Map<String, String> properties) {

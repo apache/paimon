@@ -37,6 +37,7 @@ import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
@@ -124,17 +125,20 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
         CloseableIterator<Row> withoutOlderThanCollect = executeSQL(withoutOlderThan);
         assertThat(ImmutableList.copyOf(withoutOlderThanCollect)).containsOnly(Row.of("0"));
 
+        String olderThan =
+                DateTimeUtils.formatLocalDateTime(
+                        DateTimeUtils.toLocalDateTime(System.currentTimeMillis()), 3);
         String withDryRun =
                 String.format(
-                        "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true)",
-                        database, tableName);
+                        "CALL sys.remove_orphan_files('%s.%s', '%s', true)",
+                        database, tableName, olderThan);
         ImmutableList<Row> actualDryRunDeleteFile = ImmutableList.copyOf(executeSQL(withDryRun));
         assertThat(actualDryRunDeleteFile).containsOnly(Row.of("2"));
 
         String withOlderThan =
                 String.format(
-                        "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59')",
-                        database, tableName);
+                        "CALL sys.remove_orphan_files('%s.%s', '%s')",
+                        database, tableName, olderThan);
         ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(executeSQL(withOlderThan));
 
         assertThat(actualDeleteFile).containsExactlyInAnyOrder(Row.of("2"), Row.of("2"));
@@ -178,17 +182,19 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
         CloseableIterator<Row> withParallelismCollect = executeSQL(withParallelism);
         assertThat(ImmutableList.copyOf(withParallelismCollect)).containsOnly(Row.of("0"));
 
+        String olderThan =
+                DateTimeUtils.formatLocalDateTime(
+                        DateTimeUtils.toLocalDateTime(System.currentTimeMillis()), 3);
         String withDryRun =
                 String.format(
-                        "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true)",
-                        database, "*");
+                        "CALL sys.remove_orphan_files('%s.%s', '%s', true)",
+                        database, "*", olderThan);
         ImmutableList<Row> actualDryRunDeleteFile = ImmutableList.copyOf(executeSQL(withDryRun));
         assertThat(actualDryRunDeleteFile).containsOnly(Row.of("4"));
 
         String withOlderThan =
                 String.format(
-                        "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59')",
-                        database, "*");
+                        "CALL sys.remove_orphan_files('%s.%s', '%s')", database, "*", olderThan);
         ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(executeSQL(withOlderThan));
 
         assertThat(actualDeleteFile).containsOnly(Row.of("4"));
@@ -237,10 +243,13 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
                     false,
                     true);
         }
+
+        String olderThan =
+                DateTimeUtils.formatLocalDateTime(
+                        DateTimeUtils.toLocalDateTime(System.currentTimeMillis()), 3);
         String procedure =
                 String.format(
-                        "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59')",
-                        database, "*");
+                        "CALL sys.remove_orphan_files('%s.%s', '%s')", database, "*", olderThan);
         ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(executeSQL(procedure));
         assertThat(actualDeleteFile).containsOnly(Row.of("4"));
     }
@@ -272,26 +281,29 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
         CloseableIterator<Row> withoutOlderThanCollect = executeSQL(withoutOlderThan);
         assertThat(ImmutableList.copyOf(withoutOlderThanCollect)).containsOnly(Row.of("0"));
 
+        String olderThan =
+                DateTimeUtils.formatLocalDateTime(
+                        DateTimeUtils.toLocalDateTime(System.currentTimeMillis()), 3);
         String withLocalMode =
                 String.format(
-                        "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true, 5, 'local')",
-                        database, tableName);
+                        "CALL sys.remove_orphan_files('%s.%s', '%s', true, 5, 'local')",
+                        database, tableName, olderThan);
         ImmutableList<Row> actualLocalRunDeleteFile =
                 ImmutableList.copyOf(executeSQL(withLocalMode));
         assertThat(actualLocalRunDeleteFile).containsOnly(Row.of("2"));
 
         String withDistributedMode =
                 String.format(
-                        "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true, 5, 'distributed')",
-                        database, tableName);
+                        "CALL sys.remove_orphan_files('%s.%s', '%s', true, 5, 'distributed')",
+                        database, tableName, olderThan);
         ImmutableList<Row> actualDistributedRunDeleteFile =
                 ImmutableList.copyOf(executeSQL(withDistributedMode));
         assertThat(actualDistributedRunDeleteFile).containsOnly(Row.of("2"));
 
         String withInvalidMode =
                 String.format(
-                        "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true, 5, 'unknown')",
-                        database, tableName);
+                        "CALL sys.remove_orphan_files('%s.%s', '%s', true, 5, 'unknown')",
+                        database, tableName, olderThan);
         assertThatCode(() -> executeSQL(withInvalidMode))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Unknown mode");

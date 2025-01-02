@@ -389,6 +389,25 @@ SELECT * FROM T$statistics;
 */
 ```
 
+### Table Indexes Table
+
+You can query the table's index files generated for dynamic bucket table (index_type = HASH) and deletion vectors
+(index_type = DELETION_VECTORS) through indexes table.
+
+```sql
+SELECT * FROM my_table$table_indexes;
+
+/*
++--------------------------------+-------------+--------------------------------+--------------------------------+----------------------+----------------------+--------------------------------+
+|                      partition |      bucket |                     index_type |                      file_name |            file_size |            row_count |                      dv_ranges |
++--------------------------------+-------------+--------------------------------+--------------------------------+----------------------+----------------------+--------------------------------+
+|                   [2024-10-01] |           0 |                           HASH | index-70abfebf-149e-4796-9f... |                   12 |                    3 |                         <NULL> |
+|                   [2024-10-01] |           0 |               DELETION_VECTORS | index-633857e7-cdce-47d2-87... |                   33 |                    1 | [(data-346cb9c8-4032-4d66-a... |
++--------------------------------+-------------+--------------------------------+--------------------------------+----------------------+----------------------+--------------------------------+
+2 rows in set
+*/
+```
+
 ## Global System Table
 
 Global system tables contain the statistical information of all the tables exists in paimon. For convenient of searching, we create a reference system database called `sys`.

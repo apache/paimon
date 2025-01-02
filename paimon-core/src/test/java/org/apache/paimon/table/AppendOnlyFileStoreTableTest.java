@@ -58,6 +58,7 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.parquet.hadoop.ParquetOutputFormat;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -70,7 +71,9 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -79,8 +82,11 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.DATA_FILE_PATH_DIRECTORY;
+import static org.apache.paimon.CoreOptions.FILE_FORMAT;
+import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
 import static org.apache.paimon.CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD;
 import static org.apache.paimon.CoreOptions.METADATA_STATS_MODE;
+import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucket;
 import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucketKeyHashCode;
@@ -720,6 +726,94 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                     assertThat(row.getString(1).toString()).isEqualTo("C");
                     assertThat(row.getLong(2)).isEqualTo(4L);
                 });
+    }
+
+    @Test
+    public void testBitmapIndexResultFilterParquetRowRanges() throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.STRING())
+                        .field("event", DataTypes.STRING())
+                        .field("price", DataTypes.INT())
+                        .build();
+        // in unaware-bucket mode, we split files into splits all the time
+        FileStoreTable table =
+                createUnawareBucketFileStoreTable(
+                        rowType,
+                        options -> {
+                            options.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
+                            options.set(WRITE_ONLY, true);
+                            options.set(
+                                    FileIndexOptions.FILE_INDEX
+                                            + "."
+                                            + BitSliceIndexBitmapFileIndexFactory.BSI_INDEX
+                                            + "."
+                                            + CoreOptions.COLUMNS,
+                                    "price");
+                            options.set(ParquetOutputFormat.BLOCK_SIZE, "1048576");
+                            options.set(
+                                    ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK, "100");
+                            options.set(ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT, "300");
+                        });
+
+        int bound = 300000;
+        Random random = new Random();
+        Map<Integer, Integer> expectedMap = new HashMap<>();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        for (int j = 0; j < 1000000; j++) {
+            int next = random.nextInt(bound);
+            BinaryString uuid = BinaryString.fromString(UUID.randomUUID().toString());
+            expectedMap.compute(next, (key, value) -> value == null ? 1 : value + 1);
+            write.write(GenericRow.of(uuid, uuid, next));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        // test eq
+        for (int i = 0; i < 10; i++) {
+            int key = random.nextInt(bound);
+            Predicate predicate = new PredicateBuilder(rowType).equal(2, key);
+            TableScan.Plan plan = table.newScan().plan();
+            RecordReader<InternalRow> reader =
+                    table.newRead().withFilter(predicate).createReader(plan.splits());
+            AtomicInteger cnt = new AtomicInteger(0);
+            reader.forEachRemaining(
+                    row -> {
+                        cnt.incrementAndGet();
+                        assertThat(row.getInt(2)).isEqualTo(key);
+                    });
+            assertThat(cnt.get()).isEqualTo(expectedMap.getOrDefault(key, 0));
+            reader.close();
+        }
+
+        //  test between
+        for (int i = 0; i < 10; i++) {
+            int max = random.nextInt(bound) + 1;
+            int min = random.nextInt(max);
+            Predicate predicate =
+                    PredicateBuilder.and(
+                            new PredicateBuilder(rowType).greaterOrEqual(2, min),
+                            new PredicateBuilder(rowType).lessOrEqual(2, max));
+            TableScan.Plan plan = table.newScan().plan();
+            RecordReader<InternalRow> reader =
+                    table.newRead().withFilter(predicate).createReader(plan.splits());
+            AtomicInteger cnt = new AtomicInteger(0);
+            reader.forEachRemaining(
+                    row -> {
+                        cnt.addAndGet(1);
+                        assertThat(row.getInt(2)).isGreaterThanOrEqualTo(min);
+                        assertThat(row.getInt(2)).isLessThanOrEqualTo(max);
+                    });
+            Optional<Integer> reduce =
+                    expectedMap.entrySet().stream()
+                            .filter(x -> x.getKey() >= min && x.getKey() <= max)
+                            .map(Map.Entry::getValue)
+                            .reduce(Integer::sum);
+            assertThat(cnt.get()).isEqualTo(reduce.orElse(0));
+            reader.close();
+        }
     }
 
     @Test

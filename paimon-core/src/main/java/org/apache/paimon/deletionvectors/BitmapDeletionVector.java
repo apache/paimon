@@ -21,9 +21,9 @@ package org.apache.paimon.deletionvectors;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import java.io.ByteArrayOutputStream;
-import java.io.DataInput;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.Objects;
 
 /**
@@ -93,10 +93,10 @@ public class BitmapDeletionVector implements DeletionVector {
         }
     }
 
-    public static DeletionVector deserializeFromDataInput(DataInput bis) throws IOException {
-        RoaringBitmap32 roaringBitmap = new RoaringBitmap32();
-        roaringBitmap.deserialize(bis);
-        return new BitmapDeletionVector(roaringBitmap);
+    public static DeletionVector deserializeFromByteBuffer(ByteBuffer buffer) throws IOException {
+        RoaringBitmap32 bitmap = new RoaringBitmap32();
+        bitmap.deserialize(buffer);
+        return new BitmapDeletionVector(bitmap);
     }
 
     private void checkPosition(long position) {

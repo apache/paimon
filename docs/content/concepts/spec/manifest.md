@@ -86,8 +86,9 @@ The data file meta is:
 13. _CREATION_TIME: TIMESTAMP_MILLIS, creation time of this file.
 14. _DELETE_ROW_COUNT: BIGINT, rowCount = addRowCount + deleteRowCount.
 15. _EMBEDDED_FILE_INDEX: BYTES, if data file index is too small, store the index in manifest.
-16. _FILE_SOURCE: TINYINT, indicate whether this file is generated as an APPEND or COMPACT file
-17. _VALUE_STATS_COLS: ARRAY<STRING>, statistical column in metadata 
+16. _FILE_SOURCE: TINYINT, indicate whether this file is generated as an APPEND or COMPACT file.
+17. _VALUE_STATS_COLS: ARRAY<STRING>, statistical column in metadata.
+18. _EXTERNAL_PATH: external path of this file, null if it is in warehouse.
 
 ### Index Manifest
 

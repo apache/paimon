@@ -19,8 +19,11 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
+import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreatePartitionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.DropPartitionRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -29,11 +32,14 @@ import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.PartitionResponse;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.junit.Test;
@@ -43,6 +49,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /** Test for {@link RESTObjectMapper}. */
 public class RESTObjectMapperTest {
@@ -183,5 +190,52 @@ public class RESTObjectMapperTest {
         String responseStr = mapper.writeValueAsString(response);
         ListTablesResponse parseData = mapper.readValue(responseStr, ListTablesResponse.class);
         assertEquals(response.getTables(), parseData.getTables());
+    }
+
+    @Test
+    public void alterTableRequestParseTest() throws Exception {
+        AlterTableRequest request = MockRESTMessage.alterTableRequest();
+        String requestStr = mapper.writeValueAsString(request);
+        AlterTableRequest parseData = mapper.readValue(requestStr, AlterTableRequest.class);
+        assertEquals(parseData.getChanges().size(), parseData.getChanges().size());
+    }
+
+    @Test
+    public void createPartitionRequestParseTest() throws JsonProcessingException {
+        CreatePartitionRequest request = MockRESTMessage.createPartitionRequest("t1");
+        String requestStr = mapper.writeValueAsString(request);
+        CreatePartitionRequest parseData =
+                mapper.readValue(requestStr, CreatePartitionRequest.class);
+        assertEquals(parseData.getIdentifier(), parseData.getIdentifier());
+        assertEquals(parseData.getPartitionSpec().size(), parseData.getPartitionSpec().size());
+    }
+
+    @Test
+    public void dropPartitionRequestParseTest() throws JsonProcessingException {
+        DropPartitionRequest request = MockRESTMessage.dropPartitionRequest();
+        String requestStr = mapper.writeValueAsString(request);
+        DropPartitionRequest parseData = mapper.readValue(requestStr, DropPartitionRequest.class);
+        assertEquals(parseData.getPartitionSpec().size(), parseData.getPartitionSpec().size());
+    }
+
+    @Test
+    public void listPartitionsResponseParseTest() throws Exception {
+        ListPartitionsResponse response = MockRESTMessage.listPartitionsResponse();
+        String responseStr = mapper.writeValueAsString(response);
+        ListPartitionsResponse parseData =
+                mapper.readValue(responseStr, ListPartitionsResponse.class);
+        assertEquals(
+                response.getPartitions().get(0).fileCount(),
+                parseData.getPartitions().get(0).fileCount());
+    }
+
+    @Test
+    public void partitionResponseParseTest() throws Exception {
+        PartitionResponse response = MockRESTMessage.partitionResponse();
+        assertDoesNotThrow(() -> mapper.writeValueAsString(response));
+        assertDoesNotThrow(
+                () ->
+                        mapper.readValue(
+                                mapper.writeValueAsString(response), PartitionResponse.class));
     }
 }
