@@ -18,7 +18,6 @@
 
 package org.apache.parquet.internal.filter2.columnindex;
 
-import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.parquet.filter2.compat.FilterCompat.Filter;
@@ -162,10 +161,7 @@ public class RowRanges {
         return ranges;
     }
 
-    /**
-     * Support using the {@link FileIndexResult} and the deletion vector result to filter the row
-     * ranges.
-     */
+    /** Support using the selected position or the deleted position to filter the row ranges. */
     public static RowRanges create(
             long rowCount,
             long rowIndexOffset,
@@ -173,36 +169,30 @@ public class RowRanges {
             OffsetIndex offsetIndex,
             @Nullable RoaringBitmap32 selection,
             @Nullable RoaringBitmap32 deletion) {
-        int cnt = 0;
         RowRanges ranges = new RowRanges();
         while (pageIndexes.hasNext()) {
             int pageIndex = pageIndexes.nextInt();
             long firstRowIndex = offsetIndex.getFirstRowIndex(pageIndex);
             long lastRowIndex = offsetIndex.getLastRowIndex(pageIndex, rowCount);
 
+            long first = rowIndexOffset + firstRowIndex;
+            long last = rowIndexOffset + lastRowIndex;
             if (selection != null) {
-                RoaringBitmap32 range =
-                        RoaringBitmap32.bitmapOfRange(
-                                rowIndexOffset + firstRowIndex, rowIndexOffset + lastRowIndex + 1);
+                RoaringBitmap32 range = RoaringBitmap32.bitmapOfRange(first, last + 1);
                 if (!RoaringBitmap32.intersects(selection, range)) {
-                    cnt += 1;
                     continue;
                 }
-                firstRowIndex = selection.nextValue((int) (rowIndexOffset + firstRowIndex));
-                lastRowIndex = selection.previousValue((int) (rowIndexOffset + firstRowIndex + 1));
+                firstRowIndex = selection.nextValue((int) first) - rowIndexOffset;
+                lastRowIndex = selection.previousValue((int) (last)) - rowIndexOffset;
             } else if (deletion != null) {
-                RoaringBitmap32 range =
-                        RoaringBitmap32.bitmapOfRange(
-                                rowIndexOffset + firstRowIndex, rowIndexOffset + lastRowIndex + 1);
+                RoaringBitmap32 range = RoaringBitmap32.bitmapOfRange(first, last + 1);
                 if (deletion.contains(range)) {
-                    cnt += 1;
                     continue;
                 }
             }
 
             ranges.add(new Range(firstRowIndex, lastRowIndex));
         }
-        if (cnt > 0) System.out.println("filter row ranges: " + cnt);
         return ranges;
     }
 
@@ -383,15 +373,3 @@ public class RowRanges {
         return ranges.toString();
     }
 }
-
-//read | Best/Avg Time(ms) | Row Rate(K/s) | Per Row(ns)| Relative | filter row groups | filter row ranges
-//--|--|--|--|--|--|--|
-//normal-10000000-800000-788897                 | 16168 / 16287 |  185.6 | 5389.3 |  1.0X | 0 | 0
-//dv-push-down-10000000-800000-788897           | 16020 / 16591 |  187.3 | 5340.0 |  1.0X | 0 | 0
-//index-push-down-10000000-800000-788897        |    819 /  857 | 3662.2 |  273.1 | 19.7X | 0 | 263
-//dv-and-index-push-down-10000000-800000-788897 |    788 / 1123 | 3806.2 |  262.7 | 20.5X | 0 | 263
-//
-//           185.6           5389.3       1.0X
-//           187.3           5340.0       1.0X
-//          3662.2            273.1      19.7X
-//          3806.2            262.7      20.5X

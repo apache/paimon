@@ -60,6 +60,10 @@ public class RoaringBitmap32 {
         return roaringBitmap.contains(x);
     }
 
+    public boolean contains(RoaringBitmap32 contains) {
+        return roaringBitmap.contains(contains.roaringBitmap);
+    }
+
     public boolean isEmpty() {
         return roaringBitmap.isEmpty();
     }
@@ -78,6 +82,14 @@ public class RoaringBitmap32 {
 
     public int last() {
         return roaringBitmap.last();
+    }
+
+    public long nextValue(int fromValue) {
+        return roaringBitmap.nextValue(fromValue);
+    }
+
+    public long previousValue(int fromValue) {
+        return roaringBitmap.previousValue(fromValue);
     }
 
     public RoaringBitmap32 clone() {
@@ -172,5 +184,9 @@ public class RoaringBitmap32 {
 
     public static RoaringBitmap32 andNot(final RoaringBitmap32 x1, final RoaringBitmap32 x2) {
         return new RoaringBitmap32(RoaringBitmap.andNot(x1.roaringBitmap, x2.roaringBitmap));
+    }
+
+    public static boolean intersects(final RoaringBitmap32 x1, final RoaringBitmap32 x2) {
+        return RoaringBitmap.intersects(x1.roaringBitmap, x2.roaringBitmap);
     }
 }

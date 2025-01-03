@@ -864,6 +864,9 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         List<CommitMessage> messages = write.prepareCommit();
         BatchTableCommit commit = writeBuilder.newCommit();
         commit.commit(messages);
+        write.close();
+        commit.close();
+
         write =
                 (BatchTableWrite)
                         writeBuilder
@@ -883,6 +886,8 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         messages = write.prepareCommit();
         commit = writeBuilder.newCommit();
         commit.commit(messages);
+        write.close();
+        commit.close();
 
         PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
         List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
