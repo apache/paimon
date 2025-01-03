@@ -38,9 +38,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -50,7 +48,7 @@ public class PickFilesUtil {
     private static final int READ_FILE_RETRY_NUM = 3;
     private static final int READ_FILE_RETRY_INTERVAL = 5;
 
-    public static Map<FileType, List<Path>> getUsedFilesForLatestSnapshot(FileStoreTable table) {
+    public static List<Path> getUsedFilesForLatestSnapshot(FileStoreTable table) {
         FileStore<?> store = table.store();
         SnapshotManager snapshotManager = store.snapshotManager();
         Snapshot snapshot = snapshotManager.latestSnapshot();
@@ -58,33 +56,31 @@ public class PickFilesUtil {
         SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
         IndexFileHandler indexFileHandler = store.newIndexFileHandler();
 
-        Map<FileType, List<Path>> filesMap = new HashMap<>();
+        List<Path> files = new ArrayList<>();
         if (snapshot != null) {
-            filesMap.computeIfAbsent(FileType.SNAPSHOT_FILE, k -> new ArrayList<>())
-                    .add(snapshotManager.snapshotPath(snapshot.id()));
-            getUsedFilesInternal(
-                    snapshot,
-                    store.pathFactory(),
-                    store.newScan(),
-                    manifestList,
-                    indexFileHandler,
-                    filesMap);
+            files.add(snapshotManager.snapshotPath(snapshot.id()));
+            files.addAll(
+                    getUsedFilesInternal(
+                            snapshot,
+                            store.pathFactory(),
+                            store.newScan(),
+                            manifestList,
+                            indexFileHandler));
         }
         for (long id : schemaManager.listAllIds()) {
-            filesMap.computeIfAbsent(FileType.SCHEMA_FILE, k -> new ArrayList<>())
-                    .add(schemaManager.toSchemaPath(id));
+            files.add(schemaManager.toSchemaPath(id));
         }
-        return filesMap;
+        return files;
     }
 
-    private static void getUsedFilesInternal(
+    private static List<Path> getUsedFilesInternal(
             Snapshot snapshot,
             FileStorePathFactory pathFactory,
             FileStoreScan scan,
             ManifestList manifestList,
-            IndexFileHandler indexFileHandler,
-            Map<FileType, List<Path>> filesMap) {
-        addManifestList(filesMap, snapshot, pathFactory);
+            IndexFileHandler indexFileHandler) {
+        List<Path> files = new ArrayList<>();
+        addManifestList(files, snapshot, pathFactory);
 
         try {
             // try to read manifests
@@ -92,17 +88,16 @@ public class PickFilesUtil {
                     retryReadingFiles(
                             () -> readAllManifestsWithIOException(snapshot, manifestList));
             if (manifestFileMetas == null) {
-                return;
+                return Collections.emptyList();
             }
             List<String> manifestFileName =
                     manifestFileMetas.stream()
                             .map(ManifestFileMeta::fileName)
                             .collect(Collectors.toList());
-            filesMap.computeIfAbsent(FileType.MANIFEST_FILE, k -> new ArrayList<>())
-                    .addAll(
-                            manifestFileName.stream()
-                                    .map(pathFactory::toManifestFilePath)
-                                    .collect(Collectors.toList()));
+            files.addAll(
+                    manifestFileName.stream()
+                            .map(pathFactory::toManifestFilePath)
+                            .collect(Collectors.toList()));
 
             // try to read data files
             List<Path> dataFiles = new ArrayList<>();
@@ -124,52 +119,44 @@ public class PickFilesUtil {
             // deleted. Older files however, are from previous partitions and should not be changed
             // very often.
             Collections.reverse(dataFiles);
-            filesMap.computeIfAbsent(FileType.DATA_FILE, k -> new ArrayList<>()).addAll(dataFiles);
+            files.addAll(dataFiles);
 
             // try to read index files
             String indexManifest = snapshot.indexManifest();
             if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
-                filesMap.computeIfAbsent(FileType.INDEX_FILE, k -> new ArrayList<>())
-                        .add(pathFactory.indexManifestFileFactory().toPath(indexManifest));
+                files.add(pathFactory.indexManifestFileFactory().toPath(indexManifest));
 
                 List<IndexManifestEntry> indexManifestEntries =
                         retryReadingFiles(
                                 () -> indexFileHandler.readManifestWithIOException(indexManifest));
-                if (indexManifestEntries != null) {
-                    indexManifestEntries.stream()
-                            .map(IndexManifestEntry::indexFile)
-                            .map(indexFileHandler::filePath)
-                            .forEach(
-                                    filePath ->
-                                            filesMap.computeIfAbsent(
-                                                            FileType.INDEX_FILE,
-                                                            k -> new ArrayList<>())
-                                                    .add(filePath));
+                if (indexManifestEntries == null) {
+                    return Collections.emptyList();
                 }
+
+                indexManifestEntries.stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .map(indexFileHandler::filePath)
+                        .forEach(files::add);
             }
 
             // add statistic file
             if (snapshot.statistics() != null) {
-                filesMap.computeIfAbsent(FileType.STATISTICS_FILE, k -> new ArrayList<>())
-                        .add(pathFactory.statsFileFactory().toPath(snapshot.statistics()));
+                files.add(pathFactory.statsFileFactory().toPath(snapshot.statistics()));
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+
+        return files;
     }
 
     private static void addManifestList(
-            Map<FileType, List<Path>> filesMap,
-            Snapshot snapshot,
-            FileStorePathFactory pathFactory) {
-        filesMap.computeIfAbsent(FileType.MANIFEST_LIST_FILE, k -> new ArrayList<>())
-                .add(pathFactory.toManifestListPath(snapshot.baseManifestList()));
-        filesMap.get(FileType.MANIFEST_LIST_FILE)
-                .add(pathFactory.toManifestListPath(snapshot.deltaManifestList()));
+            List<Path> used, Snapshot snapshot, FileStorePathFactory pathFactory) {
+        used.add(pathFactory.toManifestListPath(snapshot.baseManifestList()));
+        used.add(pathFactory.toManifestListPath(snapshot.deltaManifestList()));
         String changelogManifestList = snapshot.changelogManifestList();
         if (changelogManifestList != null) {
-            filesMap.computeIfAbsent(FileType.CHANGELOG_MANIFEST_LIST_FILE, k -> new ArrayList<>())
-                    .add(pathFactory.toManifestListPath(changelogManifestList));
+            used.add(pathFactory.toManifestListPath(changelogManifestList));
         }
     }
 

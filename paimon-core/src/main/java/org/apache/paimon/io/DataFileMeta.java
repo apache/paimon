@@ -484,28 +484,6 @@ public class DataFileMeta {
                 externalPath);
     }
 
-    public DataFileMeta copy(String newExternalPath) {
-        return new DataFileMeta(
-                fileName,
-                fileSize,
-                rowCount,
-                minKey,
-                maxKey,
-                keyStats,
-                valueStats,
-                minSequenceNumber,
-                maxSequenceNumber,
-                schemaId,
-                level,
-                extraFiles,
-                creationTime,
-                deleteRowCount,
-                embeddedIndex,
-                fileSource,
-                valueStatsCols,
-                newExternalPath);
-    }
-
     public DataFileMeta copy(byte[] newEmbeddedIndex) {
         return new DataFileMeta(
                 fileName,

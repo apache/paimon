@@ -19,18 +19,12 @@
 package org.apache.paimon.flink.clone;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Catalog.TableNotExistException;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.manifest.ManifestFile;
-import org.apache.paimon.manifest.ManifestFile.ManifestEntryWriter;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.IOUtils;
 
@@ -40,10 +34,7 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /** A Operator to copy files. */
@@ -83,6 +74,18 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
 
         FileIO sourceTableFileIO = sourceCatalog.fileIO();
         FileIO targetTableFileIO = targetCatalog.fileIO();
+
+        Path sourceTableRootPath =
+                srcLocations.computeIfAbsent(
+                        cloneFileInfo.getSourceIdentifier(),
+                        key -> {
+                            try {
+                                return pathOfTable(
+                                        sourceCatalog.getTable(Identifier.fromString(key)));
+                            } catch (Catalog.TableNotExistException e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
         Path targetTableRootPath =
                 targetLocations.computeIfAbsent(
                         cloneFileInfo.getTargetIdentifier(),
@@ -122,14 +125,9 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
         if (LOG.isDebugEnabled()) {
             LOG.debug("Begin copy file from {} to {}.", sourcePath, targetPath);
         }
-
-        if (cloneFileInfo.getFileType() == FileType.MANIFEST_FILE) {
-            copyManifestFile(sourcePath, targetPath, cloneFileInfo);
-        } else {
-            IOUtils.copyBytes(
-                    sourceTableFileIO.newInputStream(sourcePath),
-                    targetTableFileIO.newOutputStream(targetPath, true));
-        }
+        IOUtils.copyBytes(
+                sourceTableFileIO.newInputStream(sourcePath),
+                targetTableFileIO.newOutputStream(targetPath, true));
         if (LOG.isDebugEnabled()) {
             LOG.debug("End copy file from {} to {}.", sourcePath, targetPath);
         }
@@ -139,36 +137,6 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
 
     private Path pathOfTable(Table table) {
         return new Path(table.options().get(CoreOptions.PATH.key()));
-    }
-
-    private void copyManifestFile(Path sourcePath, Path targetPath, CloneFileInfo cloneFileInfo)
-            throws IOException, TableNotExistException {
-        Identifier sourceIdentifier = Identifier.fromString(cloneFileInfo.getSourceIdentifier());
-        FileStoreTable sourceTable = (FileStoreTable) sourceCatalog.getTable(sourceIdentifier);
-        FileStore<?> store = sourceTable.store();
-        ManifestFile manifestFile = store.manifestFileFactory().create();
-
-        List<ManifestEntry> manifestEntries =
-                manifestFile.readWithIOException(sourcePath.getName());
-        List<ManifestEntry> targetManifestEntries = new ArrayList<>(manifestEntries.size());
-
-        // clone job will clone the source path to target warehouse path, so the target external
-        // path is null
-        for (ManifestEntry manifestEntry : manifestEntries) {
-            ManifestEntry newManifestEntry =
-                    new ManifestEntry(
-                            manifestEntry.kind(),
-                            manifestEntry.partition(),
-                            manifestEntry.bucket(),
-                            manifestEntry.totalBuckets(),
-                            manifestEntry.file().copy((String) null));
-            targetManifestEntries.add(newManifestEntry);
-        }
-
-        ManifestEntryWriter manifestEntryWriter =
-                manifestFile.createManifestEntryWriter(targetPath);
-        manifestEntryWriter.write(targetManifestEntries);
-        manifestEntryWriter.close();
     }
 
     @Override

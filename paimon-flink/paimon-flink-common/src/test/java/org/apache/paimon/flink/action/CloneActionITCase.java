@@ -22,7 +22,6 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.clone.FileType;
 import org.apache.paimon.flink.clone.PickFilesUtil;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.FileStoreTable;
@@ -41,7 +40,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
@@ -459,10 +457,7 @@ public class CloneActionITCase extends ActionITCaseBase {
             String targetTableName)
             throws Exception {
         FileStoreTable targetTable = getFileStoreTable(targetWarehouse, targetDb, targetTableName);
-        Map<FileType, List<Path>> filesMap =
-                PickFilesUtil.getUsedFilesForLatestSnapshot(targetTable);
-        List<Path> targetTableFiles =
-                filesMap.values().stream().flatMap(List::stream).collect(Collectors.toList());
+        List<Path> targetTableFiles = PickFilesUtil.getUsedFilesForLatestSnapshot(targetTable);
         List<Pair<Path, Path>> filesPathInfoList =
                 targetTableFiles.stream()
                         .map(
@@ -478,11 +473,8 @@ public class CloneActionITCase extends ActionITCaseBase {
         for (Pair<Path, Path> filesPathInfo : filesPathInfoList) {
             Path sourceTableFile = new Path(tableLocation.toString() + filesPathInfo.getRight());
             assertThat(sourceTable.fileIO().exists(sourceTableFile)).isTrue();
-            // TODO, need to check the manifest file's content
-            if (!filesPathInfo.getLeft().toString().contains("/manifest/manifest-")) {
-                assertThat(targetTable.fileIO().getFileSize(filesPathInfo.getLeft()))
-                        .isEqualTo(sourceTable.fileIO().getFileSize(sourceTableFile));
-            }
+            assertThat(targetTable.fileIO().getFileSize(filesPathInfo.getLeft()))
+                    .isEqualTo(sourceTable.fileIO().getFileSize(sourceTableFile));
         }
     }
 
