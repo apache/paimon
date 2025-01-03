@@ -13,4 +13,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+org.apache.paimon.format.FileStatsExtractingAvroFormatFactory
 org.apache.paimon.mergetree.compact.aggregate.TestCustomAggFactory

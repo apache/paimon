@@ -24,7 +24,6 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cach
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.factories.FactoryUtil.discoverFactories;
 
@@ -40,24 +39,8 @@ public class FormatFactoryUtil {
             ClassLoader classLoader, String identifier) {
         final List<FileFormatFactory> foundFactories = getFactories(classLoader);
 
-        final List<FileFormatFactory> matchingFactories =
-                foundFactories.stream()
-                        .filter(f -> f.identifier().equals(identifier))
-                        .collect(Collectors.toList());
-
-        if (matchingFactories.isEmpty()) {
-            throw new FactoryException(
-                    String.format(
-                            "Could not find any factory for identifier '%s' that implements FileFormatFactory in the classpath.\n\n"
-                                    + "Available factory identifiers are:\n\n"
-                                    + "%s",
-                            identifier,
-                            foundFactories.stream()
-                                    .map(FileFormatFactory::identifier)
-                                    .collect(Collectors.joining("\n"))));
-        }
-
-        return (T) matchingFactories.get(0);
+        return (T)
+                FactoryUtil.matchFactory(foundFactories, FileFormatFactory::identifier, identifier);
     }
 
     private static List<FileFormatFactory> getFactories(ClassLoader classLoader) {
