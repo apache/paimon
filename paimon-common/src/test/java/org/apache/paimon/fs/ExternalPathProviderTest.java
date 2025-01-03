@@ -21,13 +21,15 @@ package org.apache.paimon.fs;
 import org.apache.paimon.CoreOptions.ExternalFSStrategy;
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
 
+/** Test for {@link ExternalPathProvider}. */
 public class ExternalPathProviderTest {
 
     private ExternalPathProvider provider;
@@ -44,24 +46,24 @@ public class ExternalPathProviderTest {
 
     @Test
     public void testInitExternalPaths() {
-        assertTrue(provider.externalPathExists());
-        assertEquals(2, provider.getExternalPathsMap().size());
-        assertEquals(2, provider.getExternalPathsList().size());
+        assertThat(provider.externalPathExists()).isTrue();
+        assertThat(provider.getExternalPathsMap().size()).isEqualTo(2);
+        assertThat(provider.getExternalPathsList().size()).isEqualTo(2);
     }
 
     @Test
     public void testGetNextExternalPathRoundRobin() {
         Optional<Path> path1 = provider.getNextExternalPath();
-        assertTrue(path1.isPresent());
-        assertEquals("s3://bucket2/path2/db/table", path1.get().toString());
+        assertThat(path1.isPresent()).isTrue();
+        assertThat(path1.get().toString()).isEqualTo("s3://bucket2/path2/db/table");
 
         Optional<Path> path2 = provider.getNextExternalPath();
-        assertTrue(path2.isPresent());
-        assertEquals("oss://bucket1/path1/db/table", path2.get().toString());
+        assertThat(path2.isPresent()).isTrue();
+        assertThat(path2.get().toString()).isEqualTo("oss://bucket1/path1/db/table");
 
         Optional<Path> path3 = provider.getNextExternalPath();
-        assertTrue(path3.isPresent());
-        assertEquals("s3://bucket2/path2/db/table", path3.get().toString());
+        assertThat(path3.isPresent()).isTrue();
+        assertThat(path3.get().toString()).isEqualTo("s3://bucket2/path2/db/table");
     }
 
     @Test
@@ -74,8 +76,8 @@ public class ExternalPathProviderTest {
                         "db/table");
 
         Optional<Path> path = provider.getNextExternalPath();
-        assertTrue(path.isPresent());
-        assertEquals("oss://bucket1/path1/db/table", path.get().toString());
+        assertThat(path.isPresent()).isTrue();
+        assertThat(path.get().toString()).isEqualTo("oss://bucket1/path1/db/table");
     }
 
     @Test
@@ -88,20 +90,20 @@ public class ExternalPathProviderTest {
                         "db/table");
 
         Optional<Path> path = provider.getNextExternalPath();
-        assertFalse(path.isPresent());
+        assertThat(path.isPresent()).isFalse();
     }
 
     @Test
     public void testUnsupportedExternalPath() {
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> {
-                    new ExternalPathProvider(
-                            "hdfs://bucket1/path1",
-                            ExternalPathStrategy.ROUND_ROBIN,
-                            ExternalFSStrategy.OSS,
-                            "db/table");
-                });
+        Assertions.assertThatThrownBy(
+                        () -> {
+                            new ExternalPathProvider(
+                                    "hdfs://bucket1/path1",
+                                    ExternalPathStrategy.ROUND_ROBIN,
+                                    ExternalFSStrategy.OSS,
+                                    "db/table");
+                        })
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -113,6 +115,6 @@ public class ExternalPathProviderTest {
                         ExternalFSStrategy.S3,
                         "db/table");
         Optional<Path> path = provider.getNextExternalPath();
-        assertFalse(path.isPresent());
+        assertThat(path.isPresent()).isFalse();
     }
 }
