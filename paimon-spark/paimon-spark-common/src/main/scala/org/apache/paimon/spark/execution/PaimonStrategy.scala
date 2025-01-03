@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.execution
 
-import org.apache.paimon.spark.{SparkCatalog, SparkUtils}
+import org.apache.paimon.spark.{SparkCatalog, SparkGenericCatalog, SparkUtils}
 import org.apache.paimon.spark.catalog.SupportView
 import org.apache.paimon.spark.catalyst.analysis.ResolvedPaimonView
 import org.apache.paimon.spark.catalyst.plans.logical.{CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, PaimonCallCommand, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand}
@@ -124,6 +124,8 @@ case class PaimonStrategy(spark: SparkSession)
         SparkUtils.catalogAndIdentifier(spark, identifier.asJava, catalogManager.currentCatalog)
       catalogAndIdentifier.catalog match {
         case paimonCatalog: SparkCatalog =>
+          Some((paimonCatalog, catalogAndIdentifier.identifier()))
+        case paimonCatalog: SparkGenericCatalog =>
           Some((paimonCatalog, catalogAndIdentifier.identifier()))
         case _ =>
           None
