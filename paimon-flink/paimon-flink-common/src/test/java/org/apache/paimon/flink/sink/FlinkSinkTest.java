@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.operation.KeyValueFileStoreWrite;
@@ -125,6 +126,7 @@ public class FlinkSinkTest {
                 tablePath,
                 tableSchema,
                 options,
-                CatalogEnvironment.empty());
+                CatalogEnvironment.empty(),
+                new ExternalPathProvider());
     }
 }

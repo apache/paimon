@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.types.DataType;
@@ -92,7 +93,8 @@ public class FileStorePathFactoryTest {
                         CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
-                        null);
+                        null,
+                        new ExternalPathProvider());
 
         assertPartition("20211224", 16, pathFactory, "/dt=20211224/hr=16");
         assertPartition("20211224", null, pathFactory, "/dt=20211224/hr=default");
@@ -134,6 +136,7 @@ public class FileStorePathFactoryTest {
                 CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
                 CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                 CoreOptions.FILE_COMPRESSION.defaultValue(),
-                null);
+                null,
+                new ExternalPathProvider());
     }
 }

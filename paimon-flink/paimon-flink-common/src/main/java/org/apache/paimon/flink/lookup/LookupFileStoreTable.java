@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.utils.TableScanUtils;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
@@ -107,6 +108,11 @@ public class LookupFileStoreTable extends DelegatedFileStoreTable {
     public FileStoreTable switchToBranch(String branchName) {
         wrapped.switchToBranch(branchName);
         return this;
+    }
+
+    @Override
+    public ExternalPathProvider externalPathProvider() {
+        return wrapped.externalPathProvider();
     }
 
     private LookupStreamScanMode lookupStreamScanMode(FileStoreTable table, List<String> joinKeys) {

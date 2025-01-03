@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
@@ -151,7 +152,8 @@ public abstract class ManifestFileMetaTestBase {
                                 CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
                                 CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                                 CoreOptions.FILE_COMPRESSION.defaultValue(),
-                                null),
+                                null,
+                                new ExternalPathProvider()),
                         Long.MAX_VALUE,
                         null)
                 .create();

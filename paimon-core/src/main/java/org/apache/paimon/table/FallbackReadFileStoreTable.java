@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.options.Options;
@@ -100,6 +101,11 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         return new FallbackReadFileStoreTable(switchWrappedToBranch(branchName), fallback);
     }
 
+    @Override
+    public ExternalPathProvider externalPathProvider() {
+        return wrapped.externalPathProvider();
+    }
+
     private FileStoreTable switchWrappedToBranch(String branchName) {
         Optional<TableSchema> optionalSchema =
                 wrapped.schemaManager().copyWithBranch(branchName).latest();
@@ -115,7 +121,8 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                 wrapped.location(),
                 branchSchema,
                 new Options(),
-                wrapped.catalogEnvironment());
+                wrapped.catalogEnvironment(),
+                wrapped.externalPathProvider());
     }
 
     private Map<String, String> rewriteFallbackOptions(Map<String, String> options) {

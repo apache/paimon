@@ -20,6 +20,7 @@ package org.apache.paimon.table.system;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -159,6 +160,11 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     @Override
     public Path location() {
         return wrapped.location();
+    }
+
+    @Override
+    public ExternalPathProvider externalPathProvider() {
+        return wrapped.externalPathProvider();
     }
 
     @Override

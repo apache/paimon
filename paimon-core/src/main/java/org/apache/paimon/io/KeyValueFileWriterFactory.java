@@ -95,7 +95,10 @@ public class KeyValueFileWriterFactory {
         return new RollingFileWriter<>(
                 () ->
                         createDataFileWriter(
-                                formatContext.pathFactory(level).newPath(), level, fileSource),
+                                formatContext.pathFactory(level).newPath(),
+                                level,
+                                fileSource,
+                                formatContext.pathFactory(level).isExternalPath()),
                 suggestedFileSize);
     }
 
@@ -105,12 +108,13 @@ public class KeyValueFileWriterFactory {
                         createDataFileWriter(
                                 formatContext.pathFactory(level).newChangelogPath(),
                                 level,
-                                FileSource.APPEND),
+                                FileSource.APPEND,
+                                formatContext.pathFactory(level).isExternalPath()),
                 suggestedFileSize);
     }
 
     private KeyValueDataFileWriter createDataFileWriter(
-            Path path, int level, FileSource fileSource) {
+            Path path, int level, FileSource fileSource, boolean isExternalPath) {
         return formatContext.thinModeEnabled()
                 ? new KeyValueThinDataFileWriterImpl(
                         fileIO,
@@ -125,7 +129,8 @@ public class KeyValueFileWriterFactory {
                         formatContext.compression(level),
                         options,
                         fileSource,
-                        fileIndexOptions)
+                        fileIndexOptions,
+                        isExternalPath)
                 : new KeyValueDataFileWriterImpl(
                         fileIO,
                         formatContext.writerFactory(level),
@@ -139,7 +144,8 @@ public class KeyValueFileWriterFactory {
                         formatContext.compression(level),
                         options,
                         fileSource,
-                        fileIndexOptions);
+                        fileIndexOptions,
+                        isExternalPath);
     }
 
     public void deleteFile(DataFileMeta file) {

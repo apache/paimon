@@ -21,6 +21,7 @@ package org.apache.paimon;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.format.FileFormatDiscover;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
@@ -59,8 +60,17 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
             RowType bucketKeyType,
             RowType rowType,
             String tableName,
-            CatalogEnvironment catalogEnvironment) {
-        super(fileIO, schemaManager, schema, tableName, options, partitionType, catalogEnvironment);
+            CatalogEnvironment catalogEnvironment,
+            ExternalPathProvider externalPathProvider) {
+        super(
+                fileIO,
+                schemaManager,
+                schema,
+                tableName,
+                options,
+                partitionType,
+                catalogEnvironment,
+                externalPathProvider);
         this.bucketKeyType = bucketKeyType;
         this.rowType = rowType;
     }
