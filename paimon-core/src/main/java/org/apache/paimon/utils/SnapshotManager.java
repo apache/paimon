@@ -290,15 +290,11 @@ public class SnapshotManager implements Serializable {
             return earliest - 1;
         }
 
-        while (earliest < latest) {
-            long mid = (earliest + latest + 1) / 2;
-            if (changelogOrSnapshot(mid).timeMillis() < timestampMills) {
-                earliest = mid;
-            } else {
-                latest = mid - 1;
-            }
-        }
-        return earliest;
+        return binarySearch(
+                earliest,
+                latest,
+                id -> changelogOrSnapshot(id).timeMillis() < timestampMills,
+                false);
     }
 
     /**
@@ -316,22 +312,12 @@ public class SnapshotManager implements Serializable {
         if (earliestSnapShot.timeMillis() > timestampMills) {
             return earliestSnapShot;
         }
-        Snapshot finalSnapshot = null;
-        while (earliest <= latest) {
-            long mid = earliest + (latest - earliest) / 2; // Avoid overflow
-            Snapshot snapshot = snapshot(mid);
-            long commitTime = snapshot.timeMillis();
-            if (commitTime > timestampMills) {
-                latest = mid - 1; // Search in the left half
-            } else if (commitTime < timestampMills) {
-                earliest = mid + 1; // Search in the right half
-                finalSnapshot = snapshot;
-            } else {
-                finalSnapshot = snapshot; // Found the exact match
-                break;
-            }
-        }
-        return finalSnapshot;
+
+        Long resultId =
+                binarySearch(
+                        earliest, latest, id -> snapshot(id).timeMillis() <= timestampMills, false);
+
+        return resultId == null ? null : snapshot(resultId);
     }
 
     /**
@@ -349,22 +335,12 @@ public class SnapshotManager implements Serializable {
         if (latestSnapShot.timeMillis() < timestampMills) {
             return null;
         }
-        Snapshot finalSnapshot = null;
-        while (earliest <= latest) {
-            long mid = earliest + (latest - earliest) / 2; // Avoid overflow
-            Snapshot snapshot = snapshot(mid);
-            long commitTime = snapshot.timeMillis();
-            if (commitTime > timestampMills) {
-                latest = mid - 1; // Search in the left half
-                finalSnapshot = snapshot;
-            } else if (commitTime < timestampMills) {
-                earliest = mid + 1; // Search in the right half
-            } else {
-                finalSnapshot = snapshot; // Found the exact match
-                break;
-            }
-        }
-        return finalSnapshot;
+
+        Long resultId =
+                binarySearch(
+                        earliest, latest, id -> snapshot(id).timeMillis() >= timestampMills, true);
+
+        return resultId == null ? null : snapshot(resultId);
     }
 
     public @Nullable Snapshot earlierOrEqualWatermark(long watermark) {
@@ -375,55 +351,21 @@ public class SnapshotManager implements Serializable {
         if (earliest == null || latest == null || snapshot(latest).watermark() == Long.MIN_VALUE) {
             return null;
         }
-        Long earliestWatermark = null;
-        // find the first snapshot with watermark
-        if ((earliestWatermark = snapshot(earliest).watermark()) == null) {
-            while (earliest < latest) {
-                earliest++;
-                earliestWatermark = snapshot(earliest).watermark();
-                if (earliestWatermark != null) {
-                    break;
-                }
-            }
-        }
-        if (earliestWatermark == null) {
+        Long firstValidId = findFirstSnapshotWithWatermark(earliest, latest);
+        if (firstValidId == null) {
             return null;
         }
 
-        if (earliestWatermark >= watermark) {
-            return snapshot(earliest);
-        }
-        Snapshot finalSnapshot = null;
+        Long resultId =
+                binarySearch(
+                        firstValidId,
+                        latest,
+                        id ->
+                                snapshot(id).watermark() != null
+                                        && snapshot(id).watermark() <= watermark,
+                        false);
 
-        while (earliest <= latest) {
-            long mid = earliest + (latest - earliest) / 2; // Avoid overflow
-            Snapshot snapshot = snapshot(mid);
-            Long commitWatermark = snapshot.watermark();
-            if (commitWatermark == null) {
-                // find the first snapshot with watermark
-                while (mid >= earliest) {
-                    mid--;
-                    commitWatermark = snapshot(mid).watermark();
-                    if (commitWatermark != null) {
-                        break;
-                    }
-                }
-            }
-            if (commitWatermark == null) {
-                earliest = mid + 1;
-            } else {
-                if (commitWatermark > watermark) {
-                    latest = mid - 1; // Search in the left half
-                } else if (commitWatermark < watermark) {
-                    earliest = mid + 1; // Search in the right half
-                    finalSnapshot = snapshot;
-                } else {
-                    finalSnapshot = snapshot; // Found the exact match
-                    break;
-                }
-            }
-        }
-        return finalSnapshot;
+        return resultId == null ? null : snapshot(resultId);
     }
 
     public @Nullable Snapshot laterOrEqualWatermark(long watermark) {
@@ -434,55 +376,63 @@ public class SnapshotManager implements Serializable {
         if (earliest == null || latest == null || snapshot(latest).watermark() == Long.MIN_VALUE) {
             return null;
         }
-        Long earliestWatermark = null;
-        // find the first snapshot with watermark
-        if ((earliestWatermark = snapshot(earliest).watermark()) == null) {
-            while (earliest < latest) {
-                earliest++;
-                earliestWatermark = snapshot(earliest).watermark();
-                if (earliestWatermark != null) {
-                    break;
-                }
-            }
-        }
-        if (earliestWatermark == null) {
+
+        Long firstValidId = findFirstSnapshotWithWatermark(earliest, latest);
+        if (firstValidId == null) {
             return null;
         }
 
-        if (earliestWatermark >= watermark) {
-            return snapshot(earliest);
+        if (snapshot(firstValidId).watermark() >= watermark) {
+            return snapshot(firstValidId);
         }
-        Snapshot finalSnapshot = null;
 
+        Long resultId =
+                binarySearch(
+                        earliest,
+                        latest,
+                        id ->
+                                snapshot(id).watermark() != null
+                                        && snapshot(id).watermark() >= watermark,
+                        true);
+
+        return resultId == null ? null : snapshot(resultId);
+    }
+
+    private Long findFirstSnapshotWithWatermark(Long earliest, Long latest) {
         while (earliest <= latest) {
-            long mid = earliest + (latest - earliest) / 2; // Avoid overflow
-            Snapshot snapshot = snapshot(mid);
-            Long commitWatermark = snapshot.watermark();
-            if (commitWatermark == null) {
-                // find the first snapshot with watermark
-                while (mid >= earliest) {
-                    mid--;
-                    commitWatermark = snapshot(mid).watermark();
-                    if (commitWatermark != null) {
-                        break;
-                    }
-                }
+            Long watermark = snapshot(earliest).watermark();
+            if (watermark != null) {
+                return earliest;
             }
-            if (commitWatermark == null) {
-                earliest = mid + 1;
-            } else {
-                if (commitWatermark > watermark) {
-                    latest = mid - 1; // Search in the left half
-                    finalSnapshot = snapshot;
-                } else if (commitWatermark < watermark) {
-                    earliest = mid + 1; // Search in the right half
+            earliest++;
+        }
+        return null;
+    }
+
+    private @Nullable Long binarySearch(
+            Long start,
+            Long end,
+            java.util.function.Predicate<Long> condition,
+            boolean findEarliest) {
+        Long result = null;
+        while (start <= end) {
+            long mid = start + (end - start) / 2;
+            if (condition.test(mid)) {
+                result = mid;
+                if (findEarliest) {
+                    end = mid - 1;
                 } else {
-                    finalSnapshot = snapshot; // Found the exact match
-                    break;
+                    start = mid + 1;
+                }
+            } else {
+                if (findEarliest) {
+                    start = mid + 1;
+                } else {
+                    end = mid - 1;
                 }
             }
         }
-        return finalSnapshot;
+        return result;
     }
 
     public long snapshotCount() throws IOException {
