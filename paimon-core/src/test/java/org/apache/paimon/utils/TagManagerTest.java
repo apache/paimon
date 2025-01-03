@@ -93,7 +93,7 @@ public class TagManagerTest {
                 store.options().tagDefaultTimeRetained(),
                 Collections.emptyList());
         assertThat(tagManager.tagExists("tag")).isTrue();
-        Snapshot snapshot = tagManager.taggedSnapshot("tag");
+        Snapshot snapshot = tagManager.getOrThrow("tag");
         String snapshotJson = snapshot.toJson();
         Assertions.assertTrue(
                 !snapshotJson.contains("tagCreateTime")

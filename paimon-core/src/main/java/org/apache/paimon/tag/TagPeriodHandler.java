@@ -88,6 +88,8 @@ public interface TagPeriodHandler {
 
     LocalDateTime nextTagTime(LocalDateTime time);
 
+    LocalDateTime previousTagTime(LocalDateTime time);
+
     boolean isAutoTag(String tagName);
 
     /** Base implementation of {@link TagPeriodHandler}. */
@@ -125,6 +127,11 @@ public interface TagPeriodHandler {
         @Override
         public LocalDateTime nextTagTime(LocalDateTime time) {
             return time.plus(onePeriod());
+        }
+
+        @Override
+        public LocalDateTime previousTagTime(LocalDateTime time) {
+            return time.minus(onePeriod());
         }
 
         @Override

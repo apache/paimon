@@ -231,7 +231,8 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                         return new IncrementalTagStartingScanner(
                                 snapshotManager,
                                 incrementalBetween.getLeft(),
-                                incrementalBetween.getRight());
+                                incrementalBetween.getRight(),
+                                options);
                     }
                 } else {
                     return new IncrementalTimeStampStartingScanner(

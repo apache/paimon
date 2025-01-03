@@ -133,7 +133,7 @@ public class CreateTagFromTimestampProcedureITCase extends CatalogITCaseBase {
 
         FileStoreTable table = paimonTable("T");
         long earliestCommitTime = table.snapshotManager().earliestSnapshot().timeMillis();
-        long tagSnapshotCommitTime = table.tagManager().taggedSnapshot("tag1").timeMillis();
+        long tagSnapshotCommitTime = table.tagManager().getOrThrow("tag1").timeMillis();
 
         assertThat(tagSnapshotCommitTime < earliestCommitTime).isTrue();
 
