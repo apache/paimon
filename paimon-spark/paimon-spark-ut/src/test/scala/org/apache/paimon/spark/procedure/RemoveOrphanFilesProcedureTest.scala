@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.procedure
 
-import org.apache.paimon.data.Timestamp
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.utils.DateTimeUtils
@@ -61,10 +60,6 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
         orphanFile2ModTime -
           TimeUnit.SECONDS.toMillis(1)),
       3)
-
-    System.out.println("orphanFile2ModTime is : " + orphanFile2ModTime);
-    System.out.println("older_than1 is : " + older_than1)
-    System.out.println("in ut Timestamp.now() is : " + Timestamp.now)
 
     checkAnswer(
       spark.sql(s"CALL sys.remove_orphan_files(table => 'T', older_than => '$older_than1')"),
