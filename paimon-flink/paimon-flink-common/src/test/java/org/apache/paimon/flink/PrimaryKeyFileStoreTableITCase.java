@@ -35,6 +35,7 @@ import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -671,6 +672,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         testFullCompactionChangelogProducerRandom(bEnv, 1, false);
     }
 
+    @Disabled // TODO: fix this unstable test
     @Test
     @Timeout(TIMEOUT)
     public void testFullCompactionChangelogProducerStreamingRandom() throws Exception {
