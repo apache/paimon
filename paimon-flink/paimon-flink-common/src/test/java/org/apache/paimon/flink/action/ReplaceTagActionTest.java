@@ -55,12 +55,12 @@ public class ReplaceTagActionTest extends ActionITCaseBase {
                         () ->
                                 bEnv.executeSql(
                                         "CALL sys.replace_tag(`table` => 'default.T', tag => 'test_tag')"))
-                .hasMessageContaining("Tag name 'test_tag' does not exist.");
+                .hasMessageContaining("Tag 'test_tag' doesn't exist.");
 
         bEnv.executeSql("CALL sys.create_tag(`table` => 'default.T', tag => 'test_tag')");
         assertThat(tagManager.tagExists("test_tag")).isEqualTo(true);
-        assertThat(tagManager.tag("test_tag").trimToSnapshot().id()).isEqualTo(2);
-        assertThat(tagManager.tag("test_tag").getTagTimeRetained()).isEqualTo(null);
+        assertThat(tagManager.getOrThrow("test_tag").id()).isEqualTo(2);
+        assertThat(tagManager.getOrThrow("test_tag").getTagTimeRetained()).isEqualTo(null);
 
         // replace tag with new time_retained
         createAction(
@@ -77,7 +77,7 @@ public class ReplaceTagActionTest extends ActionITCaseBase {
                         "--time_retained",
                         "1 d")
                 .run();
-        assertThat(tagManager.tag("test_tag").getTagTimeRetained().toHours()).isEqualTo(24);
+        assertThat(tagManager.getOrThrow("test_tag").getTagTimeRetained().toHours()).isEqualTo(24);
 
         // replace tag with new snapshot and time_retained
         createAction(
@@ -96,7 +96,7 @@ public class ReplaceTagActionTest extends ActionITCaseBase {
                         "--time_retained",
                         "2 d")
                 .run();
-        assertThat(tagManager.tag("test_tag").trimToSnapshot().id()).isEqualTo(1);
-        assertThat(tagManager.tag("test_tag").getTagTimeRetained().toHours()).isEqualTo(48);
+        assertThat(tagManager.getOrThrow("test_tag").id()).isEqualTo(1);
+        assertThat(tagManager.getOrThrow("test_tag").getTagTimeRetained().toHours()).isEqualTo(48);
     }
 }

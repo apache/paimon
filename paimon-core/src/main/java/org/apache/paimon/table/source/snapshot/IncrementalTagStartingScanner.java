@@ -25,36 +25,27 @@ import org.apache.paimon.utils.TagManager;
 /** {@link StartingScanner} for incremental changes by tag. */
 public class IncrementalTagStartingScanner extends AbstractStartingScanner {
 
-    private final String start;
-    private final String end;
+    private final Snapshot start;
+    private final Snapshot end;
 
     public IncrementalTagStartingScanner(
-            SnapshotManager snapshotManager, String start, String end) {
+            SnapshotManager snapshotManager, String startTagName, String endTagName) {
         super(snapshotManager);
-        this.start = start;
-        this.end = end;
         TagManager tagManager =
                 new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
-        Snapshot startingSnapshot = tagManager.taggedSnapshot(start);
-        if (startingSnapshot != null) {
-            this.startingSnapshotId = startingSnapshot.id();
+        start = tagManager.getOrThrow(startTagName).trimToSnapshot();
+        end = tagManager.getOrThrow(endTagName).trimToSnapshot();
+        if (end.id() <= start.id()) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Tag end %s with snapshot id %s should be larger than tag start %s with snapshot id %s",
+                            endTagName, end.id(), startTagName, start.id()));
         }
+        this.startingSnapshotId = start.id();
     }
 
     @Override
     public Result scan(SnapshotReader reader) {
-        TagManager tagManager =
-                new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
-        Snapshot tag1 = tagManager.taggedSnapshot(start);
-        Snapshot tag2 = tagManager.taggedSnapshot(end);
-
-        if (tag2.id() <= tag1.id()) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Tag end %s with snapshot id %s should be larger than tag start %s with snapshot id %s",
-                            end, tag2.id(), start, tag1.id()));
-        }
-
-        return StartingScanner.fromPlan(reader.withSnapshot(tag2).readIncrementalDiff(tag1));
+        return StartingScanner.fromPlan(reader.withSnapshot(end).readIncrementalDiff(start));
     }
 }

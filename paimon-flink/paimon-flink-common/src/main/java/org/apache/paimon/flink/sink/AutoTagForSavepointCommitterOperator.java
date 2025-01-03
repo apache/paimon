@@ -164,9 +164,8 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
                         commitOperator.getCommitUser(), identifiers);
         for (Snapshot snapshot : snapshotForTags) {
             String tagName = SAVEPOINT_TAG_PREFIX + snapshot.commitIdentifier();
-            if (!tagManager.tagExists(tagName)) {
-                tagManager.createTag(snapshot, tagName, tagTimeRetained, callbacks);
-            }
+            // shouldn't throw exception when tag exists
+            tagManager.createTag(snapshot, tagName, tagTimeRetained, callbacks, true);
         }
     }
 

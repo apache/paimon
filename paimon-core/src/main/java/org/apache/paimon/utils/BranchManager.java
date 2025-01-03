@@ -107,9 +107,7 @@ public class BranchManager {
 
     public void createBranch(String branchName, String tagName) {
         validateBranch(branchName);
-        checkArgument(tagManager.tagExists(tagName), "Tag name '%s' not exists.", tagName);
-
-        Snapshot snapshot = tagManager.taggedSnapshot(tagName);
+        Snapshot snapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
 
         try {
             // Copy the corresponding tag, snapshot and schema files into the branch directory

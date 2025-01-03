@@ -392,7 +392,8 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
                 snapshot1,
                 "non-auto-create-tag-shoule-expire",
                 Duration.ofMillis(500),
-                Collections.emptyList());
+                Collections.emptyList(),
+                false);
 
         Snapshot snapshot2 =
                 new Snapshot(
@@ -416,7 +417,8 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
                 snapshot2,
                 "non-auto-create-tag-shoule-not-expire",
                 Duration.ofDays(1),
-                Collections.emptyList());
+                Collections.emptyList(),
+                false);
 
         // test expire old tag by time-retained
         Thread.sleep(1000);

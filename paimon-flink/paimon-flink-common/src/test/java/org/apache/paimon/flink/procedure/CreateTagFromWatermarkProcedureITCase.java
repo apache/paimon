@@ -147,7 +147,7 @@ public class CreateTagFromWatermarkProcedureITCase extends CatalogITCaseBase {
 
         assertThat(table.snapshotManager().snapshotExists(1)).isFalse();
 
-        Snapshot tagSnapshot1 = table.tagManager().taggedSnapshot("tag1");
+        Snapshot tagSnapshot1 = table.tagManager().getOrThrow("tag1");
 
         long tagsCommitTime = tagSnapshot1.timeMillis();
         long tagsWatermark = tagSnapshot1.watermark();

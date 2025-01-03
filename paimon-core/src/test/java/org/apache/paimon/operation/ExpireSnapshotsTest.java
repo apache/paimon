@@ -151,7 +151,8 @@ public class ExpireSnapshotsTest {
                     snapshot,
                     "tag" + id,
                     store.options().tagDefaultTimeRetained(),
-                    Collections.emptyList());
+                    Collections.emptyList(),
+                    false);
         }
 
         // randomly expire snapshots
