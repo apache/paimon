@@ -29,6 +29,9 @@ import org.apache.paimon.memory.MemorySegmentSource;
 import org.apache.paimon.operation.metrics.CacheMetrics;
 import org.apache.paimon.types.RowType;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
@@ -42,6 +45,7 @@ import static org.apache.paimon.utils.ObjectsFile.readFromIterator;
 /** Cache records to {@link SegmentsCache} by compacted serializer. */
 @ThreadSafe
 public class ObjectsCache<K, V> {
+    protected static final Logger LOG = LoggerFactory.getLogger(ObjectsCache.class);
 
     private final SegmentsCache<K> cache;
     private final ObjectSerializer<V> projectedSerializer;
@@ -83,6 +87,9 @@ public class ObjectsCache<K, V> {
             }
             return readFromSegments(segments, readFilter, readVFilter);
         } else {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("not match cache key {}", key);
+            }
             if (cacheMetrics != null) {
                 cacheMetrics.increaseMissedObject();
             }

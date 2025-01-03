@@ -35,9 +35,13 @@ import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.operation.metrics.ScanStats;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
@@ -79,6 +83,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private Snapshot specifiedSnapshot = null;
     private Filter<Integer> bucketFilter = null;
+    private Collection<Integer> buckets;
     private BiFilter<Integer, Integer> totalAwareBucketFilter = null;
     protected ScanMode scanMode = ScanMode.ALL;
     private Filter<Integer> levelFilter = null;
@@ -127,6 +132,14 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withBucket(int bucket) {
         this.bucketFilter = i -> i == bucket;
+        this.buckets = Collections.singletonList(bucket);
+        return this;
+    }
+
+    @Override
+    public FileStoreScan withBuckets(Collection<Integer> buckets) {
+        this.bucketFilter = buckets::contains;
+        this.buckets = buckets;
         return this;
     }
 
@@ -427,7 +440,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             @Nullable Filter<ManifestEntry> additionalTFilter) {
         List<ManifestEntry> entries =
                 manifestFileFactory
-                        .create()
+                        .create(createPushDownFilter(buckets))
                         .withCacheMetrics(
                                 scanMetrics != null ? scanMetrics.getCacheMetrics() : null)
                         .read(
@@ -469,6 +482,22 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                 ManifestEntrySerializer.partitionGetter();
         Function<InternalRow, Integer> bucketGetter = ManifestEntrySerializer.bucketGetter();
         return row -> manifestCacheFilter.test(partitionGetter.apply(row), bucketGetter.apply(row));
+    }
+
+    /**
+     * Read the corresponding entries based on the current required bucket, but push down into file
+     * format .
+     */
+    private static List<Predicate> createPushDownFilter(Collection<Integer> buckets) {
+        if (buckets == null || buckets.isEmpty()) {
+            return null;
+        }
+        List<Predicate> predicates = new ArrayList<>();
+        PredicateBuilder predicateBuilder =
+                new PredicateBuilder(
+                        RowType.of(new DataType[] {new IntType()}, new String[] {"_BUCKET"}));
+        predicates.add(predicateBuilder.in(0, new ArrayList<>(buckets)));
+        return predicates;
     }
 
     /**

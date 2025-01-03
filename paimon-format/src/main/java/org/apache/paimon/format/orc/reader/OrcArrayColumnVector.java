@@ -42,7 +42,7 @@ public class OrcArrayColumnVector extends AbstractOrcColumnVector
 
     @Override
     public InternalArray getArray(int i) {
-        i = rowMapper(i);
+        // no need call rowMapper(i) here .
         long offset = hiveVector.offsets[i];
         long length = hiveVector.lengths[i];
         return new ColumnarArray(paimonVector, (int) offset, (int) length);

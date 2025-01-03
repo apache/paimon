@@ -37,9 +37,16 @@ public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestE
 
     private final DataFileMetaSerializer dataFileMetaSerializer;
 
+    private static final ManifestEntrySerializer MANIFEST_ENTRY_SERIALIZER =
+            new ManifestEntrySerializer();
+
     public ManifestEntrySerializer() {
         super(ManifestEntry.SCHEMA);
         this.dataFileMetaSerializer = new DataFileMetaSerializer();
+    }
+
+    public static ManifestEntrySerializer getInstance() {
+        return MANIFEST_ENTRY_SERIALIZER;
     }
 
     @Override

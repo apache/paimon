@@ -19,7 +19,7 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.factories.FormatFactoryUtil;
+import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -88,9 +88,15 @@ public abstract class FileFormat {
 
     /** Create a {@link FileFormat} from format identifier and format options. */
     public static FileFormat fromIdentifier(String identifier, FormatContext context) {
-        return FormatFactoryUtil.discoverFactory(
-                        FileFormat.class.getClassLoader(), identifier.toLowerCase())
-                .create(context);
+        if (identifier != null) {
+            identifier = identifier.toLowerCase();
+        }
+        FileFormatFactory fileFormatFactory =
+                FactoryUtil.discoverFactory(
+                        FileFormatFactory.class.getClassLoader(),
+                        FileFormatFactory.class,
+                        identifier);
+        return fileFormatFactory.create(context);
     }
 
     protected Options getIdentifierPrefixOptions(Options options) {

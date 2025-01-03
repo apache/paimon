@@ -46,7 +46,7 @@ public class OrcRowColumnVector extends AbstractOrcColumnVector
 
     @Override
     public ColumnarRow getRow(int i) {
-        i = rowMapper(i);
+        // no need to call rowMapper here .
         return new ColumnarRow(batch, i);
     }
 
