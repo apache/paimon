@@ -114,11 +114,17 @@ public class ExternalPathProvider implements Serializable {
     private Optional<Path> getSpecificFSExternalPath() {
         switch (externalFSStrategy) {
             case S3:
+                if (!externalPathsMap.containsKey(ExternalFSStrategy.S3)) {
+                    return Optional.empty();
+                }
                 return Optional.of(
                         new Path(
                                 externalPathsMap.get(ExternalFSStrategy.S3),
                                 dbAndTableRelativePath));
             case OSS:
+                if (!externalPathsMap.containsKey(ExternalFSStrategy.OSS)) {
+                    return Optional.empty();
+                }
                 return Optional.of(
                         new Path(
                                 externalPathsMap.get(ExternalFSStrategy.OSS),
@@ -136,6 +142,16 @@ public class ExternalPathProvider implements Serializable {
 
     public boolean externalPathExists() {
         return externalPathExists;
+    }
+
+    @VisibleForTesting
+    public Map<ExternalFSStrategy, Path> getExternalPathsMap() {
+        return externalPathsMap;
+    }
+
+    @VisibleForTesting
+    public List<Path> getExternalPathsList() {
+        return externalPathsList;
     }
 
     @Override
