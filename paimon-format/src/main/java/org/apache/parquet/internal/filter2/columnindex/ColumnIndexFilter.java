@@ -72,21 +72,6 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
     @Nullable private final RoaringBitmap32 deletion;
     private RowRanges allRows;
 
-    private ColumnIndexFilter(
-            ColumnIndexStore columnIndexStore,
-            Set<ColumnPath> paths,
-            long rowCount,
-            long rowIndexOffset,
-            @Nullable RoaringBitmap32 selection,
-            @Nullable RoaringBitmap32 deletion) {
-        this.columnIndexStore = columnIndexStore;
-        this.columns = paths;
-        this.rowCount = rowCount;
-        this.rowIndexOffset = rowIndexOffset;
-        this.selection = selection;
-        this.deletion = deletion;
-    }
-
     /**
      * Calculates the row ranges containing the indexes of the rows might match the specified
      * filter.
@@ -142,6 +127,21 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
                         return RowRanges.createSingle(rowCount);
                     }
                 });
+    }
+
+    private ColumnIndexFilter(
+            ColumnIndexStore columnIndexStore,
+            Set<ColumnPath> paths,
+            long rowCount,
+            long rowIndexOffset,
+            @Nullable RoaringBitmap32 selection,
+            @Nullable RoaringBitmap32 deletion) {
+        this.columnIndexStore = columnIndexStore;
+        this.columns = paths;
+        this.rowCount = rowCount;
+        this.rowIndexOffset = rowIndexOffset;
+        this.selection = selection;
+        this.deletion = deletion;
     }
 
     private RowRanges allRows() {

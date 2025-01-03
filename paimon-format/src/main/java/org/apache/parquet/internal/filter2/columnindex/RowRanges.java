@@ -175,6 +175,7 @@ public class RowRanges {
             long firstRowIndex = offsetIndex.getFirstRowIndex(pageIndex);
             long lastRowIndex = offsetIndex.getLastRowIndex(pageIndex, rowCount);
 
+            // using selected position or deletion position to filter or narrow the row ranges
             long first = rowIndexOffset + firstRowIndex;
             long last = rowIndexOffset + lastRowIndex;
             if (selection != null) {
