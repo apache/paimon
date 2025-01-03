@@ -40,6 +40,7 @@ public interface PartitionMarkDoneAction extends Closeable {
     String SUCCESS_FILE = "success-file";
     String DONE_PARTITION = "done-partition";
     String MARK_EVENT = "mark-event";
+    String HTTP_REPORT = "http-report";
     String CUSTOM = "custom";
 
     void markDone(String partition) throws Exception;
@@ -59,6 +60,9 @@ public interface PartitionMarkDoneAction extends Closeable {
                                 case MARK_EVENT:
                                     return new MarkPartitionDoneEventAction(
                                             createPartitionHandler(fileStoreTable, options));
+                                            createMetastoreClient(fileStoreTable, options));
+                                case HTTP_REPORT:
+                                    return new HttpReportMarkDoneAction(fileStoreTable, options);
                                 case CUSTOM:
                                     return generateCustomMarkDoneAction(cl, options);
                                 default:

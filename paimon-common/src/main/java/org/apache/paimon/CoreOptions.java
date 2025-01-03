@@ -1220,7 +1220,10 @@ public class CoreOptions implements Serializable {
                                     .text("3. 'mark-event': mark partition event to metastore.")
                                     .linebreak()
                                     .text(
-                                            "4. 'custom': use policy class to create a mark-partition policy.")
+                                            "4. 'http-report': report partition mark done to remote http server.")
+                                    .linebreak()
+                                    .text(
+                                            "5. 'custom': use policy class to create a mark-partition policy.")
                                     .linebreak()
                                     .text(
                                             "Both can be configured at the same time: 'done-partition,success-file,mark-event,custom'.")
@@ -1233,6 +1236,20 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The partition mark done class for implement"
                                     + " PartitionMarkDoneAction interface. Only work in custom mark-done-action.");
+
+    public static final ConfigOption<String> PARTITION_MARK_DONE_ACTION_URL =
+            key("partition.mark-done-action.url")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Mark done action will reports the partition to the remote http server, This can only be used by http-report partition mark done action.");
+
+    public static final ConfigOption<Duration> PARTITION_MARK_DONE_ACTION_TIMEOUT =
+            key("partition.mark-done-action.timeout")
+                    .durationType()
+                    .defaultValue(Duration.ofSeconds(5))
+                    .withDescription(
+                            "Http client connect timeout, This can only be used by http-report partition mark done action.");
 
     public static final ConfigOption<Boolean> METASTORE_PARTITIONED_TABLE =
             key("metastore.partitioned-table")
@@ -2260,6 +2277,14 @@ public class CoreOptions implements Serializable {
 
     public String partitionTimestampPattern() {
         return options.get(PARTITION_TIMESTAMP_PATTERN);
+    }
+
+    public String httpReportMarkDoneActionUrl() {
+        return options.get(PARTITION_MARK_DONE_ACTION_URL);
+    }
+
+    public Duration httpReportMarkDoneActionTimeout() {
+        return options.get(PARTITION_MARK_DONE_ACTION_TIMEOUT);
     }
 
     public String partitionMarkDoneCustomClass() {
