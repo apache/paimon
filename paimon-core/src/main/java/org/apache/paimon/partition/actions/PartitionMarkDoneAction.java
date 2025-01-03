@@ -60,7 +60,7 @@ public interface PartitionMarkDoneAction extends Closeable {
                                     return new MarkPartitionDoneEventAction(
                                             createMetastoreClient(fileStoreTable, options));
                                 case CUSTOM:
-                                    return getCustomMarkDoneAction(cl, options);
+                                    return generateCustomMarkDoneAction(cl, options);
                                 default:
                                     throw new UnsupportedOperationException(action);
                             }
@@ -68,7 +68,8 @@ public interface PartitionMarkDoneAction extends Closeable {
                 .collect(Collectors.toList());
     }
 
-    static PartitionMarkDoneAction getCustomMarkDoneAction(ClassLoader cl, CoreOptions options) {
+    static PartitionMarkDoneAction generateCustomMarkDoneAction(
+            ClassLoader cl, CoreOptions options) {
         if (StringUtils.isNullOrWhitespaceOnly(options.partitionMarkDoneCustomClass())) {
             throw new IllegalArgumentException(
                     String.format(
