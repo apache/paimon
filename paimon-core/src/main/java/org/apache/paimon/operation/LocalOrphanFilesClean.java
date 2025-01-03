@@ -127,6 +127,11 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                         .collect(Collectors.toList()));
         candidateDeletes.clear();
 
+        // clean empty directory
+        Set<Path> deletedPaths =
+                deleteFiles.stream().map(Path::getParent).collect(Collectors.toSet());
+        cleanEmptyDirectory(deletedPaths);
+
         return new CleanOrphanFilesResult(
                 deleteFiles.size(), deletedFilesLenInBytes.get(), deleteFiles);
     }

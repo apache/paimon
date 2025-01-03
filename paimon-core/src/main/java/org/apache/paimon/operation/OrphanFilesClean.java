@@ -55,13 +55,17 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.TimeZone;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
+import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
+import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
 
 /**
  * To remove the data files and metadata files that are not used by table (so-called "orphan
@@ -91,6 +95,10 @@ public abstract class OrphanFilesClean implements Serializable {
     protected final SerializableConsumer<Path> fileCleaner;
     protected final int partitionKeysNum;
     protected final Path location;
+
+    private static final String THREAD_NAME = "ORPHAN-FILES-CLEAN-THREAD-POOL";
+    private static final ThreadPoolExecutor executorService =
+            createCachedThreadPool(Runtime.getRuntime().availableProcessors(), THREAD_NAME);
 
     public OrphanFilesClean(
             FileStoreTable table, long olderThanMillis, SerializableConsumer<Path> fileCleaner) {
@@ -385,6 +393,29 @@ public abstract class OrphanFilesClean implements Serializable {
                     "The arg olderThan must be less than now, because dataFiles that are currently being written and not referenced by snapshots will be mistakenly cleaned up.");
 
             return parsedTimestampData.getMillisecond();
+        }
+    }
+
+    public void cleanEmptyDirectory(Set<Path> deletedPaths) {
+        if (deletedPaths.isEmpty()) {
+            return;
+        }
+
+        randomlyOnlyExecute(executorService, this::tryDeleteEmptyDirectory, deletedPaths);
+
+        for (int level = 0; level < partitionKeysNum; level++) {
+            Set<Path> parentPaths =
+                    deletedPaths.stream().map(Path::getParent).collect(Collectors.toSet());
+            randomlyOnlyExecute(executorService, this::tryDeleteEmptyDirectory, parentPaths);
+            deletedPaths = new HashSet<>(parentPaths);
+        }
+    }
+
+    private void tryDeleteEmptyDirectory(Path path) {
+        try {
+            fileIO.delete(path, false);
+        } catch (IOException e) {
+            LOG.debug("Failed to delete directory '{}' because it is not empty.", path);
         }
     }
 }
