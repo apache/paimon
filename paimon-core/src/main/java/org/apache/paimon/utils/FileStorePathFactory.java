@@ -56,7 +56,6 @@ public class FileStorePathFactory {
     private final AtomicInteger indexManifestCount;
     private final AtomicInteger indexFileCount;
     private final AtomicInteger statsFileCount;
-    // private final boolean externalPathExists;
     private final ExternalPathProvider externalPathProvider;
 
     public FileStorePathFactory(
