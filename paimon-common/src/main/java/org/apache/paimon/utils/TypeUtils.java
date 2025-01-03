@@ -144,11 +144,13 @@ public class TypeUtils {
                 } else {
                     // Compatible canal-cdc
                     Float f = Float.valueOf(s);
-                    if (f.toString().length() != s.length()) {
-                        throw new NumberFormatException(
-                                s + " cannot be cast to float due to precision loss");
-                    } else {
+                    // Validate precision by comparing the rounded value
+                    if ((double) f == d || Math.abs(f - d) < Math.abs(d * 1e-6)) {
                         return f;
+                    } else {
+                        // Significant precision loss detected
+                        throw new NumberFormatException(
+                                s + " cannot be cast to FLOAT due to precision loss");
                     }
                 }
             case DOUBLE:
