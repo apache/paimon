@@ -92,9 +92,7 @@ public class FileMetaUtils {
                         Collections.emptyList(), Collections.emptyList(), Collections.emptyList()));
     }
 
-    // -----------------------------private method---------------------------------------------
-
-    private static DataFileMeta constructFileMeta(
+    public static DataFileMeta constructFileMeta(
             String format,
             FileStatus fileStatus,
             FileIO fileIO,
@@ -130,6 +128,8 @@ public class FileMetaUtils {
             throw new RuntimeException("error when construct file meta", e);
         }
     }
+
+    // -----------------------------private method---------------------------------------------
 
     private static Path renameFile(
             FileIO fileIO, Path originPath, Path newDir, String format, Map<Path, Path> rollback)

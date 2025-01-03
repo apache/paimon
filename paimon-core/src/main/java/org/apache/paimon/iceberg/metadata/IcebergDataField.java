@@ -20,13 +20,22 @@ package org.apache.paimon.iceberg.metadata;
 
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VarBinaryType;
+import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -64,7 +73,7 @@ public class IcebergDataField {
     @JsonProperty(FIELD_TYPE)
     private final Object type;
 
-    @JsonIgnore private final DataType dataType;
+    @JsonIgnore private DataType dataType;
 
     @JsonProperty(FIELD_DOC)
     private final String doc;
@@ -188,6 +197,89 @@ public class IcebergDataField {
             default:
                 throw new UnsupportedOperationException("Unsupported data type: " + dataType);
         }
+    }
+
+    public DataType getDataType() {
+        if (dataType != null) {
+            return dataType;
+        }
+        String simpleType = type.toString();
+        String delimiter = "(";
+        if (simpleType.contains("[")) {
+            delimiter = "[";
+        }
+        String typePrefix =
+                !simpleType.contains(delimiter)
+                        ? simpleType
+                        : simpleType.substring(0, simpleType.indexOf(delimiter));
+        switch (typePrefix) {
+            case "boolean":
+                dataType = new BooleanType(!required);
+                break;
+            case "int":
+                dataType = new IntType(!required);
+                break;
+            case "long":
+                dataType = new BigIntType(!required);
+                break;
+            case "float":
+                dataType = new FloatType(!required);
+                break;
+            case "double":
+                dataType = new DoubleType(!required);
+                break;
+            case "date":
+                dataType = new DateType(!required);
+                break;
+            case "string":
+                dataType = new VarCharType(!required, VarCharType.MAX_LENGTH);
+                break;
+            case "binary":
+                dataType = new VarBinaryType(!required, VarBinaryType.MAX_LENGTH);
+                break;
+            case "fixed":
+                int fixedLength =
+                        Integer.parseInt(
+                                simpleType.substring(
+                                        simpleType.indexOf("[") + 1, simpleType.indexOf("]")));
+                dataType = new BinaryType(!required, fixedLength);
+                break;
+            case "uuid":
+                // https://iceberg.apache.org/spec/?h=vector#primitive-types
+                // uuid should use 16-byte fixed
+                dataType = new BinaryType(!required, 16);
+                break;
+            case "decimal":
+                int precision =
+                        Integer.parseInt(
+                                simpleType.substring(
+                                        simpleType.indexOf("(") + 1, simpleType.indexOf(",")));
+                int scale =
+                        Integer.parseInt(
+                                simpleType.substring(
+                                        simpleType.indexOf(",") + 2, simpleType.indexOf(")")));
+                dataType = new DecimalType(!required, precision, scale);
+                break;
+            case "timestamp":
+                dataType = new TimestampType(!required, 6);
+                break;
+            case "timestamptz":
+                dataType = new LocalZonedTimestampType(!required, 6);
+                break;
+            case "timestamp_ns": // iceberg v3 format
+                dataType = new TimestampType(!required, 9);
+                break;
+            case "timestamptz_ns": // iceberg v3 format
+                dataType = new LocalZonedTimestampType(!required, 9);
+                break;
+            default:
+                throw new UnsupportedOperationException("Unsupported data type: " + type);
+        }
+        return dataType();
+    }
+
+    public DataField toDatafield() {
+        return new DataField(id, name, getDataType(), doc);
     }
 
     @Override
