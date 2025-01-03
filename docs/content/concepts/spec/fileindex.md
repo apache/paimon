@@ -94,6 +94,17 @@ Content of bloom filter index is simple:
 This class use (64-bits) long hash. Store the num hash function (one integer) and bit set bytes only. Hash bytes type 
 (like varchar, binary, etc.) using xx hash, hash numeric type by [specified number hash](http://web.archive.org/web/20071223173210/http://www.concentric.net/~Ttwang/tech/inthash.htm).
 
+## Column Index Bytes: DynamicBloomFilter
+
+Define `'file-index.dynamic-bloom-filter.columns'`.
+
+Content of dynamic bloom filter index is simple:
+- version 1 byte
+- numBloomFilter 4 bytes int
+- bloomFilterVectorSize 4 bytes int
+- numHashFunctions 4 bytes int
+- bloom filter bytes
+
 ## Column Index Bytes: Bitmap
 
 Define `'file-index.bitmap.columns'`.
