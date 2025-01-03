@@ -19,7 +19,6 @@
 package org.apache.parquet.internal.filter2.columnindex;
 
 import org.apache.paimon.fileindex.FileIndexResult;
-import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.parquet.filter2.compat.FilterCompat.Filter;
@@ -40,13 +39,12 @@ import java.util.Set;
  * column index based filtering. To be used iterate over the matching row indexes to be read from a
  * row-group, retrieve the count of the matching rows or check overlapping of a row index range.
  *
- * <p>Note: The class was copied over to support using {@link FileIndexResult} and deletion vector
- * result to filter or narrow the {@link RowRanges}. Added a new method {@link
- * RowRanges#create(long, long, PrimitiveIterator.OfInt, OffsetIndex, FileIndexResult,
- * RoaringBitmap32)}
+ * <p>Note: The class was copied over to support using selected position and deleted position result
+ * to filter or narrow the {@link RowRanges}. Added a new method {@link RowRanges#create(long, long,
+ * PrimitiveIterator.OfInt, OffsetIndex, RoaringBitmap32, RoaringBitmap32)}
  *
  * @see ColumnIndexFilter#calculateRowRanges(Filter, ColumnIndexStore, Set, long, long,
- *     FileIndexResult, RoaringBitmap32)
+ *     RoaringBitmap32, RoaringBitmap32)
  */
 public class RowRanges {
 
@@ -173,43 +171,38 @@ public class RowRanges {
             long rowIndexOffset,
             PrimitiveIterator.OfInt pageIndexes,
             OffsetIndex offsetIndex,
-            @Nullable FileIndexResult fileIndexResult,
+            @Nullable RoaringBitmap32 selection,
             @Nullable RoaringBitmap32 deletion) {
+        int cnt = 0;
         RowRanges ranges = new RowRanges();
         while (pageIndexes.hasNext()) {
             int pageIndex = pageIndexes.nextInt();
             long firstRowIndex = offsetIndex.getFirstRowIndex(pageIndex);
             long lastRowIndex = offsetIndex.getLastRowIndex(pageIndex, rowCount);
 
-            // using file index result to filter or narrow the row ranges
-            if (fileIndexResult instanceof BitmapIndexResult) {
-                RoaringBitmap32 bitmap = ((BitmapIndexResult) fileIndexResult).get();
+            if (selection != null) {
                 RoaringBitmap32 range =
                         RoaringBitmap32.bitmapOfRange(
                                 rowIndexOffset + firstRowIndex, rowIndexOffset + lastRowIndex + 1);
-                RoaringBitmap32 result = RoaringBitmap32.and(bitmap, range);
-                if (result.isEmpty()) {
+                if (!RoaringBitmap32.intersects(selection, range)) {
+                    cnt += 1;
                     continue;
                 }
-                firstRowIndex = result.first() - rowIndexOffset;
-                lastRowIndex = result.last() - rowIndexOffset;
-            }
-
-            // using deletion vector result to filter or narrow the row ranges
-            if (deletion != null) {
+                firstRowIndex = selection.nextValue((int) (rowIndexOffset + firstRowIndex));
+                lastRowIndex = selection.previousValue((int) (rowIndexOffset + firstRowIndex + 1));
+            } else if (deletion != null) {
                 RoaringBitmap32 range =
                         RoaringBitmap32.bitmapOfRange(
                                 rowIndexOffset + firstRowIndex, rowIndexOffset + lastRowIndex + 1);
-                RoaringBitmap32 result = RoaringBitmap32.andNot(range, deletion);
-                if (result.isEmpty()) {
+                if (deletion.contains(range)) {
+                    cnt += 1;
                     continue;
                 }
-                firstRowIndex = result.first() - rowIndexOffset;
-                lastRowIndex = result.last() - rowIndexOffset;
             }
 
             ranges.add(new Range(firstRowIndex, lastRowIndex));
         }
+        if (cnt > 0) System.out.println("filter row ranges: " + cnt);
         return ranges;
     }
 
@@ -390,3 +383,15 @@ public class RowRanges {
         return ranges.toString();
     }
 }
+
+//read | Best/Avg Time(ms) | Row Rate(K/s) | Per Row(ns)| Relative | filter row groups | filter row ranges
+//--|--|--|--|--|--|--|
+//normal-10000000-800000-788897                 | 16168 / 16287 |  185.6 | 5389.3 |  1.0X | 0 | 0
+//dv-push-down-10000000-800000-788897           | 16020 / 16591 |  187.3 | 5340.0 |  1.0X | 0 | 0
+//index-push-down-10000000-800000-788897        |    819 /  857 | 3662.2 |  273.1 | 19.7X | 0 | 263
+//dv-and-index-push-down-10000000-800000-788897 |    788 / 1123 | 3806.2 |  262.7 | 20.5X | 0 | 263
+//
+//           185.6           5389.3       1.0X
+//           187.3           5340.0       1.0X
+//          3662.2            273.1      19.7X
+//          3806.2            262.7      20.5X

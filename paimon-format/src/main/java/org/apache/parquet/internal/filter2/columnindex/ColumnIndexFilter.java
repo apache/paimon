@@ -18,7 +18,6 @@
 
 package org.apache.parquet.internal.filter2.columnindex;
 
-import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.parquet.filter2.compat.FilterCompat;
@@ -59,7 +58,7 @@ import java.util.function.Function;
  * therefore a {@link MissingOffsetIndexException} will be thrown from any {@code visit} methods if
  * any of the required offset indexes is missing.
  *
- * <p>Note: The class was copied over to support using {@link FileIndexResult} to filter {@link
+ * <p>Note: The class was copied over to support using {@link RoaringBitmap32} to filter {@link
  * RowRanges}.
  */
 public class ColumnIndexFilter implements Visitor<RowRanges> {
@@ -69,9 +68,24 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
     private final Set<ColumnPath> columns;
     private final long rowCount;
     private final long rowIndexOffset;
-    @Nullable private final FileIndexResult fileIndexResult;
+    @Nullable private final RoaringBitmap32 selection;
     @Nullable private final RoaringBitmap32 deletion;
     private RowRanges allRows;
+
+    private ColumnIndexFilter(
+            ColumnIndexStore columnIndexStore,
+            Set<ColumnPath> paths,
+            long rowCount,
+            long rowIndexOffset,
+            @Nullable RoaringBitmap32 selection,
+            @Nullable RoaringBitmap32 deletion) {
+        this.columnIndexStore = columnIndexStore;
+        this.columns = paths;
+        this.rowCount = rowCount;
+        this.rowIndexOffset = rowIndexOffset;
+        this.selection = selection;
+        this.deletion = deletion;
+    }
 
     /**
      * Calculates the row ranges containing the indexes of the rows might match the specified
@@ -84,8 +98,8 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
      *     column has values written in the file
      * @param rowCount the total number of rows in the row-group
      * @param rowIndexOffset the offset of the row-group
-     * @param fileIndexResult the file index result; it will use to filter or narrow the row ranges
-     * @param deletion the deletion vector result; it will use to filter or narrow the row ranges
+     * @param selection the selected position; it will use to filter or narrow the row ranges
+     * @param deletion the deleted position; it will use to filter the row ranges
      * @return the ranges of the possible matching row indexes; the returned ranges will contain all
      *     the rows if any of the required offset index is missing
      */
@@ -95,7 +109,7 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
             Set<ColumnPath> paths,
             long rowCount,
             long rowIndexOffset,
-            @Nullable FileIndexResult fileIndexResult,
+            @Nullable RoaringBitmap32 selection,
             @Nullable RoaringBitmap32 deletion) {
         return filter.accept(
                 new FilterCompat.Visitor<RowRanges>() {
@@ -110,7 +124,7 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
                                                     paths,
                                                     rowCount,
                                                     rowIndexOffset,
-                                                    fileIndexResult,
+                                                    selection,
                                                     deletion));
                         } catch (MissingOffsetIndexException e) {
                             LOGGER.info(e.getMessage());
@@ -128,21 +142,6 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
                         return RowRanges.createSingle(rowCount);
                     }
                 });
-    }
-
-    private ColumnIndexFilter(
-            ColumnIndexStore columnIndexStore,
-            Set<ColumnPath> paths,
-            long rowCount,
-            long rowIndexOffset,
-            @Nullable FileIndexResult fileIndexResult,
-            @Nullable RoaringBitmap32 deletion) {
-        this.columnIndexStore = columnIndexStore;
-        this.columns = paths;
-        this.rowCount = rowCount;
-        this.rowIndexOffset = rowIndexOffset;
-        this.fileIndexResult = fileIndexResult;
-        this.deletion = deletion;
     }
 
     private RowRanges allRows() {
@@ -240,8 +239,7 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
             return allRows();
         }
 
-        return RowRanges.create(
-                rowCount, rowIndexOffset, func.apply(ci), oi, fileIndexResult, deletion);
+        return RowRanges.create(rowCount, rowIndexOffset, func.apply(ci), oi, selection, deletion);
     }
 
     @Override

@@ -222,7 +222,7 @@ public class ParquetFileReader implements Closeable {
     private final List<ColumnIndexStore> blockIndexStores;
     private final List<RowRanges> blockRowRanges;
     private final boolean blocksFiltered;
-    @Nullable private final FileIndexResult fileIndexResult;
+    @Nullable private final RoaringBitmap32 selection;
     @Nullable private final RoaringBitmap32 deletion;
 
     // not final. in some cases, this may be lazily loaded for backward-compat.
@@ -242,8 +242,6 @@ public class ParquetFileReader implements Closeable {
             throws IOException {
         this.converter = new ParquetMetadataConverter(options);
         this.file = (ParquetInputFile) file;
-        this.fileIndexResult = fileIndexResult;
-        this.deletion = deletion;
         this.f = this.file.newStream();
         this.options = options;
         try {
@@ -260,6 +258,16 @@ public class ParquetFileReader implements Closeable {
         if (null != fileDecryptor && fileDecryptor.plaintextFile()) {
             this.fileDecryptor = null; // Plaintext file. No need in decryptor
         }
+
+        RoaringBitmap32 selection = null;
+        if (fileIndexResult instanceof BitmapIndexResult) {
+            selection = ((BitmapIndexResult) fileIndexResult).get();
+        }
+        if (selection != null && deletion != null) {
+            selection = RoaringBitmap32.andNot(selection, deletion);
+        }
+        this.selection = selection;
+        this.deletion = deletion;
 
         try {
             this.blocks = filterRowGroups(footer.getBlocks());
@@ -367,24 +375,8 @@ public class ParquetFileReader implements Closeable {
                 blocks = RowGroupFilter.filterRowGroups(levels, recordFilter, blocks, this);
             }
 
-            if (fileIndexResult instanceof BitmapIndexResult) {
-                RoaringBitmap32 selection = ((BitmapIndexResult) fileIndexResult).get();
-                RoaringBitmap32 result =
-                        deletion == null ? selection : RoaringBitmap32.andNot(selection, deletion);
-                blocks =
-                        blocks.stream()
-                                .filter(
-                                        it -> {
-                                            long rowIndexOffset = it.getRowIndexOffset();
-                                            return result.rangeCardinality(
-                                                            rowIndexOffset,
-                                                            rowIndexOffset + it.getRowCount())
-                                                    > 0;
-                                        })
-                                .collect(Collectors.toList());
-            }
-
-            if (deletion != null) {
+            int size = blocks.size();
+            if (selection != null) {
                 blocks =
                         blocks.stream()
                                 .filter(
@@ -394,10 +386,25 @@ public class ParquetFileReader implements Closeable {
                                                     RoaringBitmap32.bitmapOfRange(
                                                             rowIndexOffset,
                                                             rowIndexOffset + it.getRowCount());
-                                            return !RoaringBitmap32.andNot(range, deletion)
-                                                    .isEmpty();
+                                            return RoaringBitmap32.intersects(selection, range);
                                         })
                                 .collect(Collectors.toList());
+            } else if (deletion != null) {
+                blocks =
+                        blocks.stream()
+                                .filter(
+                                        it -> {
+                                            long rowIndexOffset = it.getRowIndexOffset();
+                                            RoaringBitmap32 range =
+                                                    RoaringBitmap32.bitmapOfRange(
+                                                            rowIndexOffset,
+                                                            rowIndexOffset + it.getRowCount());
+                                            return !deletion.contains(range);
+                                        })
+                                .collect(Collectors.toList());
+            }
+            if (size > blocks.size()) {
+                System.out.println("filter row group: " + (size - blocks.size()));
             }
         }
 
@@ -788,7 +795,7 @@ public class ParquetFileReader implements Closeable {
                             paths.keySet(),
                             blocks.get(blockIndex).getRowCount(),
                             blocks.get(blockIndex).getRowIndexOffset(),
-                            fileIndexResult,
+                            selection,
                             deletion);
             blockRowRanges.set(blockIndex, rowRanges);
         }
