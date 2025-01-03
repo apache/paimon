@@ -87,8 +87,8 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
 
         FileIO fileIO = table.fileIO();
         fileIO.writeFile(orphanFile1, "a", true);
-        Thread.sleep(2000);
         fileIO.writeFile(orphanFile2, "b", true);
+        Thread.sleep(2000);
 
         return table;
     }
@@ -263,6 +263,7 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         // create orphan file in snapshot directory of second branch
         Path orphanFile4 = new Path(table.location(), "branch/branch-br2/snapshot/orphan_file4");
         branchTable.fileIO().writeFile(orphanFile4, "y", true);
+        Thread.sleep(2000);
 
         if (ThreadLocalRandom.current().nextBoolean()) {
             executeSQL(
