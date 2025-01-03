@@ -390,4 +390,33 @@ public abstract class OrphanFilesClean implements Serializable {
             return parsedTimestampData.getMillisecond();
         }
     }
+
+    public void cleanEmptyDirectory(Set<Path> deletedPaths) {
+        if (deletedPaths.isEmpty()) {
+            return;
+        }
+
+        int level = 0;
+        while (level <= partitionKeysNum) {
+            Set<Path> parentPaths = new HashSet<>();
+            for (Path path : deletedPaths) {
+                boolean deleted = tryDeleteEmptyDirectory(path);
+                if (deleted) {
+                    LOG.info("Delete empty directory '{}'.", path);
+                    parentPaths.add(path.getParent());
+                }
+            }
+            deletedPaths = new HashSet<>(parentPaths);
+            level++;
+        }
+    }
+
+    private boolean tryDeleteEmptyDirectory(Path path) {
+        try {
+            return fileIO.delete(path, false);
+        } catch (IOException e) {
+            LOG.debug("Failed to delete directory '{}' because it is not empty.", path);
+            return false;
+        }
+    }
 }

@@ -37,6 +37,7 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.function.Consumer
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 case class SparkOrphanFilesClean(
@@ -49,7 +50,8 @@ case class SparkOrphanFilesClean(
   with SQLConfHelper
   with Logging {
 
-  def doOrphanClean(): (Dataset[(Long, Long)], Dataset[BranchAndManifestFile]) = {
+  def doOrphanClean()
+      : (Dataset[(Long, Long)], (Dataset[BranchAndManifestFile], Dataset[(Long, Long, mutable.HashSet[String])])) = {
     import spark.implicits._
 
     val branches = validBranches()
@@ -137,6 +139,7 @@ case class SparkOrphanFilesClean(
         it =>
           var deletedFilesCount = 0L
           var deletedFilesLenInBytes = 0L
+          val involvedDirectories = new mutable.HashSet[String]()
 
           while (it.hasNext) {
             val fileInfo = it.next();
@@ -145,22 +148,31 @@ case class SparkOrphanFilesClean(
             deletedFilesLenInBytes += fileInfo.getLong(2)
             specifiedFileCleaner.accept(deletedPath)
             logInfo(s"Cleaned file: $pathToClean")
+            involvedDirectories += deletedPath.getParent.toUri.toString
             deletedFilesCount += 1
           }
           logInfo(
             s"Total cleaned files: $deletedFilesCount, Total cleaned files len : $deletedFilesLenInBytes")
-          Iterator.single((deletedFilesCount, deletedFilesLenInBytes))
+          Iterator.single((deletedFilesCount, deletedFilesLenInBytes, involvedDirectories))
       }
+      .cache()
+
+    // clean empty directories
+    val deletedPaths =
+      deleted.flatMap { case (_, _, paths) => paths }.collect().map(new Path(_)).toSet
+    cleanEmptyDirectory(deletedPaths.asJava)
+
+    val deletedResult = deleted.map { case (filesCount, filesLen, _) => (filesCount, filesLen) }
     val finalDeletedDataset =
       if (deletedFilesCountInLocal.get() != 0 || deletedFilesLenInBytesInLocal.get() != 0) {
-        deleted.union(
+        deletedResult.union(
           spark.createDataset(
             Seq((deletedFilesCountInLocal.get(), deletedFilesLenInBytesInLocal.get()))))
       } else {
-        deleted
+        deletedResult
       }
 
-    (finalDeletedDataset, usedManifestFiles)
+    (finalDeletedDataset, (usedManifestFiles, deleted))
   }
 }
 
@@ -230,7 +242,11 @@ object SparkOrphanFilesClean extends SQLConfHelper {
         new CleanOrphanFilesResult(result.getLong(0), result.getLong(1))
       }
     } finally {
-      waitToRelease.foreach(_.unpersist())
+      waitToRelease.foreach {
+        case (usedManifestFiles, deleted) =>
+          usedManifestFiles.unpersist()
+          deleted.unpersist()
+      }
     }
   }
 }
