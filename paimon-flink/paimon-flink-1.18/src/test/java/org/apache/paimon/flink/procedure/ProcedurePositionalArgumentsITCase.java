@@ -540,7 +540,7 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
         assertThat(paimonTable("T").snapshotManager().snapshotCount()).isEqualTo(2L);
 
         Assertions.assertThatThrownBy(() -> sql("CALL sys.replace_tag('default.T', 'test_tag')"))
-                .hasMessageContaining("Tag name 'test_tag' does not exist.");
+                .hasMessageContaining("Tag 'test_tag' doesn't exist.");
 
         sql("CALL sys.create_tag('default.T', 'test_tag')");
         assertThat(sql("select tag_name,snapshot_id,time_retained from `T$tags`"))

@@ -43,7 +43,7 @@ public class StaticFromTagStartingScanner extends ReadPlanStartingScanner {
     public SnapshotReader configure(SnapshotReader snapshotReader) {
         TagManager tagManager =
                 new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
-        Snapshot snapshot = tagManager.taggedSnapshot(tagName);
+        Snapshot snapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
         return snapshotReader.withMode(ScanMode.ALL).withSnapshot(snapshot);
     }
 }

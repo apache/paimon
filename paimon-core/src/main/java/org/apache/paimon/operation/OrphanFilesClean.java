@@ -37,6 +37,7 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SerializableConsumer;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.SupplierWithIOException;
 import org.apache.paimon.utils.TagManager;
 
 import org.slf4j.Logger;
@@ -322,13 +323,13 @@ public abstract class OrphanFilesClean implements Serializable {
      * {@link FileNotFoundException}, return default value. Finally, if retry times reaches the
      * limits, rethrow the IOException.
      */
-    protected static <T> T retryReadingFiles(ReaderWithIOException<T> reader, T defaultValue)
+    protected static <T> T retryReadingFiles(SupplierWithIOException<T> reader, T defaultValue)
             throws IOException {
         int retryNumber = 0;
         IOException caught = null;
         while (retryNumber++ < READ_FILE_RETRY_NUM) {
             try {
-                return reader.read();
+                return reader.get();
             } catch (FileNotFoundException e) {
                 return defaultValue;
             } catch (IOException e) {
@@ -347,13 +348,6 @@ public abstract class OrphanFilesClean implements Serializable {
 
     protected boolean oldEnough(FileStatus status) {
         return status.getModificationTime() < olderThanMillis;
-    }
-
-    /** A helper functional interface for method {@link #retryReadingFiles}. */
-    @FunctionalInterface
-    protected interface ReaderWithIOException<T> {
-
-        T read() throws IOException;
     }
 
     public static SerializableConsumer<Path> createFileCleaner(

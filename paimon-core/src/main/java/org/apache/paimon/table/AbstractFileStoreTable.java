@@ -541,7 +541,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     private Optional<TableSchema> travelToTag(String tagName, Options options) {
-        return travelToSnapshot(tagManager().taggedSnapshot(tagName), options);
+        return travelToSnapshot(tagManager().getOrThrow(tagName).trimToSnapshot(), options);
     }
 
     private Optional<TableSchema> travelToSnapshot(long snapshotId, Options options) {
@@ -633,7 +633,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     private void createTag(String tagName, Snapshot fromSnapshot, @Nullable Duration timeRetained) {
-        tagManager().createTag(fromSnapshot, tagName, timeRetained, store().createTagCallbacks());
+        tagManager()
+                .createTag(
+                        fromSnapshot, tagName, timeRetained, store().createTagCallbacks(), false);
     }
 
     @Override
@@ -689,7 +691,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         TagManager tagManager = tagManager();
         checkArgument(tagManager.tagExists(tagName), "Rollback tag '%s' doesn't exist.", tagName);
 
-        Snapshot taggedSnapshot = tagManager.taggedSnapshot(tagName);
+        Snapshot taggedSnapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
         rollbackHelper().cleanLargerThan(taggedSnapshot);
 
         try {

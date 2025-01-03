@@ -91,9 +91,10 @@ public class TagManagerTest {
                 snapshotManager.snapshot(1),
                 "tag",
                 store.options().tagDefaultTimeRetained(),
-                Collections.emptyList());
+                Collections.emptyList(),
+                false);
         assertThat(tagManager.tagExists("tag")).isTrue();
-        Snapshot snapshot = tagManager.taggedSnapshot("tag");
+        Snapshot snapshot = tagManager.getOrThrow("tag").trimToSnapshot();
         String snapshotJson = snapshot.toJson();
         Assertions.assertTrue(
                 !snapshotJson.contains("tagCreateTime")
@@ -119,7 +120,11 @@ public class TagManagerTest {
         commitData(store, commitIdentifier++, writers);
 
         tagManager.createTag(
-                snapshotManager.snapshot(1), "tag", Duration.ofDays(1), Collections.emptyList());
+                snapshotManager.snapshot(1),
+                "tag",
+                Duration.ofDays(1),
+                Collections.emptyList(),
+                false);
         assertThat(tagManager.tagExists("tag")).isTrue();
         List<Pair<Tag, String>> tags = tagManager.tagObjects();
         Assertions.assertEquals(1, tags.size());

@@ -122,6 +122,6 @@ public class TimeTravelUtil {
         String tagName = options.scanTagName();
         TagManager tagManager =
                 new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
-        return tagManager.taggedSnapshot(tagName);
+        return tagManager.getOrThrow(tagName).trimToSnapshot();
     }
 }

@@ -59,6 +59,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
@@ -227,27 +228,25 @@ public class TagsTable implements ReadonlyTable {
                         && ((LeafPredicate) predicate).literals().get(0) instanceof BinaryString
                         && predicate.visit(LeafPredicateExtractor.INSTANCE).get(TAG_NAME) != null) {
                     String equalValue = ((LeafPredicate) predicate).literals().get(0).toString();
-                    if (tagManager.tagExists(equalValue)) {
-                        predicateMap.put(equalValue, tagManager.tag(equalValue));
-                    }
+                    tagManager.get(equalValue).ifPresent(tag -> predicateMap.put(equalValue, tag));
                 }
 
                 if (predicate instanceof CompoundPredicate) {
                     CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
                     // optimize for IN filter
                     if ((compoundPredicate.function()) instanceof Or) {
+                        List<String> tagNames = new ArrayList<>();
                         InPredicateVisitor.extractInElements(predicate, TAG_NAME)
                                 .ifPresent(
-                                        leafs ->
-                                                leafs.forEach(
-                                                        leaf -> {
-                                                            String leftName = leaf.toString();
-                                                            if (tagManager.tagExists(leftName)) {
-                                                                predicateMap.put(
-                                                                        leftName,
-                                                                        tagManager.tag(leftName));
-                                                            }
-                                                        }));
+                                        e ->
+                                                e.stream()
+                                                        .map(Object::toString)
+                                                        .forEach(tagNames::add));
+                        tagNames.forEach(
+                                name ->
+                                        tagManager
+                                                .get(name)
+                                                .ifPresent(value -> predicateMap.put(name, value)));
                     }
                 }
             }
