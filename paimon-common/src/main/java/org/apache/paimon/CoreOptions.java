@@ -139,15 +139,16 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The strategy of selecting an external path when writing data.");
 
-    public static final ConfigOption<ExternalFSStrategy> DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS =
+    public static final ConfigOption<String> DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS =
             key("data-file.external-paths.specific-fs")
-                    .enumType(ExternalFSStrategy.class)
+                    .stringType()
                     .noDefaultValue()
                     .withDescription(
                             "The specific file system of the external path when "
                                     + DATA_FILE_EXTERNAL_PATHS_STRATEGY.key()
                                     + " is set to "
-                                    + ExternalPathStrategy.SPECIFIC_FS);
+                                    + ExternalPathStrategy.SPECIFIC_FS
+                                    + ", should be the prefix scheme of the external path, now supported are s3 and oss.");
 
     // todo, this path is the table schema path, the name will be changed in the later PR.
     @ExcludeFromDocumentation("Internal use only")
@@ -2215,7 +2216,7 @@ public class CoreOptions implements Serializable {
         return options.get(DATA_FILE_EXTERNAL_PATHS_STRATEGY);
     }
 
-    public ExternalFSStrategy externalSpecificFSStrategy() {
+    public String externalSpecificFSStrategy() {
         return options.get(DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS);
     }
 
@@ -3045,32 +3046,6 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         ExternalPathStrategy(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-    }
-
-    /** Specifies the strategy for selecting specific filesystem storage paths. */
-    public enum ExternalFSStrategy implements DescribedEnum {
-        S3("S3", "Select S3 as the write path for the external path."),
-
-        OSS("OSS", "Select OSS as the write path for the external path.");
-
-        private final String value;
-
-        private final String description;
-
-        ExternalFSStrategy(String value, String description) {
             this.value = value;
             this.description = description;
         }

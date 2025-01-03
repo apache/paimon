@@ -18,7 +18,6 @@
 
 package org.apache.paimon.fs;
 
-import org.apache.paimon.CoreOptions.ExternalFSStrategy;
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.annotation.VisibleForTesting;
 
@@ -32,11 +31,14 @@ import java.util.Optional;
 
 /** Provider for external paths. */
 public class ExternalPathProvider implements Serializable {
-    private final Map<ExternalFSStrategy, Path> externalPathsMap;
+    private static final String S3 = "s3";
+    private static final String OSS = "oss";
+
+    private final Map<String, Path> externalPathsMap;
     private final List<Path> externalPathsList;
 
     private final ExternalPathStrategy externalPathStrategy;
-    private final ExternalFSStrategy externalFSStrategy;
+    private final String externalFSStrategy;
     private int currentIndex;
     private boolean externalPathExists;
     private final String dbAndTableRelativePath;
@@ -53,7 +55,7 @@ public class ExternalPathProvider implements Serializable {
     public ExternalPathProvider(
             String externalPaths,
             ExternalPathStrategy externalPathStrategy,
-            ExternalFSStrategy externalFSStrategy,
+            String externalFSStrategy,
             String dbAndTableRelativePath) {
         this.externalPathsMap = new HashMap<>();
         this.externalPathsList = new ArrayList<>();
@@ -68,14 +70,22 @@ public class ExternalPathProvider implements Serializable {
         if (externalPaths == null) {
             return;
         }
+
+        if (externalPathStrategy != null
+                && externalPathStrategy.equals(ExternalPathStrategy.SPECIFIC_FS)) {
+            if (externalFSStrategy == null) {
+                throw new IllegalArgumentException("external fs strategy should not be null: ");
+            }
+        }
+
         String[] tmpArray = externalPaths.split(",");
         for (String part : tmpArray) {
             String path = part.trim();
-            if (path.toLowerCase().startsWith("oss")) {
-                externalPathsMap.put(ExternalFSStrategy.OSS, new Path(path));
+            if (path.toLowerCase().startsWith(OSS)) {
+                externalPathsMap.put(OSS, new Path(path));
                 externalPathsList.add(new Path(path));
-            } else if (path.toLowerCase().startsWith("s3")) {
-                externalPathsMap.put(ExternalFSStrategy.S3, new Path(path));
+            } else if (path.toLowerCase().startsWith(S3)) {
+                externalPathsMap.put(S3, new Path(path));
                 externalPathsList.add(new Path(path));
             } else {
                 throw new IllegalArgumentException("Unsupported external path: " + path);
@@ -112,23 +122,17 @@ public class ExternalPathProvider implements Serializable {
     }
 
     private Optional<Path> getSpecificFSExternalPath() {
-        switch (externalFSStrategy) {
+        switch (externalFSStrategy.toLowerCase()) {
             case S3:
-                if (!externalPathsMap.containsKey(ExternalFSStrategy.S3)) {
+                if (!externalPathsMap.containsKey(S3)) {
                     return Optional.empty();
                 }
-                return Optional.of(
-                        new Path(
-                                externalPathsMap.get(ExternalFSStrategy.S3),
-                                dbAndTableRelativePath));
+                return Optional.of(new Path(externalPathsMap.get(S3), dbAndTableRelativePath));
             case OSS:
-                if (!externalPathsMap.containsKey(ExternalFSStrategy.OSS)) {
+                if (!externalPathsMap.containsKey(OSS)) {
                     return Optional.empty();
                 }
-                return Optional.of(
-                        new Path(
-                                externalPathsMap.get(ExternalFSStrategy.OSS),
-                                dbAndTableRelativePath));
+                return Optional.of(new Path(externalPathsMap.get(OSS), dbAndTableRelativePath));
             default:
                 throw new IllegalArgumentException(
                         "Unsupported external fs strategy: " + externalFSStrategy);
@@ -145,7 +149,7 @@ public class ExternalPathProvider implements Serializable {
     }
 
     @VisibleForTesting
-    public Map<ExternalFSStrategy, Path> getExternalPathsMap() {
+    public Map<String, Path> getExternalPathsMap() {
         return externalPathsMap;
     }
 
@@ -169,21 +173,22 @@ public class ExternalPathProvider implements Serializable {
                 && externalPathsMap.equals(that.externalPathsMap)
                 && externalPathsList.equals(that.externalPathsList)
                 && externalPathStrategy == that.externalPathStrategy
-                && externalFSStrategy == that.externalFSStrategy
+                && Objects.equals(externalFSStrategy, that.externalFSStrategy)
                 && Objects.equals(dbAndTableRelativePath, that.dbAndTableRelativePath);
     }
 
     @Override
     public String toString() {
         return "ExternalPathProvider{"
-                + " externalPathsMap="
+                + ", externalPathsMap="
                 + externalPathsMap
                 + ", externalPathsList="
                 + externalPathsList
                 + ", externalPathStrategy="
                 + externalPathStrategy
-                + ", externalFSStrategy="
+                + ", externalFSStrategy='"
                 + externalFSStrategy
+                + '\''
                 + ", currentIndex="
                 + currentIndex
                 + ", externalPathExists="

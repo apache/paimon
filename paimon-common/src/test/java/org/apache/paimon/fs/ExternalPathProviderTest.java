@@ -18,7 +18,6 @@
 
 package org.apache.paimon.fs;
 
-import org.apache.paimon.CoreOptions.ExternalFSStrategy;
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 
 import org.assertj.core.api.Assertions;
@@ -31,7 +30,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ExternalPathProvider}. */
 public class ExternalPathProviderTest {
-
     private ExternalPathProvider provider;
 
     @BeforeEach
@@ -72,7 +70,7 @@ public class ExternalPathProviderTest {
                 new ExternalPathProvider(
                         "oss://bucket1/path1,s3://bucket2/path2",
                         ExternalPathStrategy.SPECIFIC_FS,
-                        ExternalFSStrategy.OSS,
+                        "OSS",
                         "db/table");
 
         Optional<Path> path = provider.getNextExternalPath();
@@ -86,7 +84,7 @@ public class ExternalPathProviderTest {
                 new ExternalPathProvider(
                         "oss://bucket1/path1,s3://bucket2/path2",
                         ExternalPathStrategy.NONE,
-                        ExternalFSStrategy.OSS,
+                        "OSS",
                         "db/table");
 
         Optional<Path> path = provider.getNextExternalPath();
@@ -100,7 +98,7 @@ public class ExternalPathProviderTest {
                             new ExternalPathProvider(
                                     "hdfs://bucket1/path1",
                                     ExternalPathStrategy.ROUND_ROBIN,
-                                    ExternalFSStrategy.OSS,
+                                    "oss",
                                     "db/table");
                         })
                 .isInstanceOf(IllegalArgumentException.class);
@@ -110,11 +108,21 @@ public class ExternalPathProviderTest {
     public void testUnsupportedExternalFSStrategy() {
         provider =
                 new ExternalPathProvider(
-                        "oss://bucket1/path1",
-                        ExternalPathStrategy.SPECIFIC_FS,
-                        ExternalFSStrategy.S3,
-                        "db/table");
+                        "oss://bucket1/path1", ExternalPathStrategy.SPECIFIC_FS, "S3", "db/table");
         Optional<Path> path = provider.getNextExternalPath();
         assertThat(path.isPresent()).isFalse();
+    }
+
+    @Test
+    public void testExternalFSStrategyNull() {
+        Assertions.assertThatThrownBy(
+                        () -> {
+                            new ExternalPathProvider(
+                                    "oss://bucket1/path1",
+                                    ExternalPathStrategy.SPECIFIC_FS,
+                                    null,
+                                    "db/table");
+                        })
+                .isInstanceOf(IllegalArgumentException.class);
     }
 }

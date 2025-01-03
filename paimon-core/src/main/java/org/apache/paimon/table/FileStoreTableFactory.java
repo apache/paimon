@@ -19,7 +19,6 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.CoreOptions.ExternalFSStrategy;
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.ExternalPathProvider;
@@ -84,7 +83,7 @@ public class FileStoreTableFactory {
         CoreOptions coreOptions = CoreOptions.fromMap(tableSchema.options());
         String externalPaths = coreOptions.dataFileExternalPaths();
         ExternalPathStrategy externalPathStrategy = coreOptions.externalPathStrategy();
-        ExternalFSStrategy externalSpecificFSStrategy = coreOptions.externalSpecificFSStrategy();
+        String externalSpecificFSStrategy = coreOptions.externalSpecificFSStrategy();
         String dbAndTablePath = tablePath.getParent().getName() + "/" + tablePath.getName();
         return new ExternalPathProvider(
                 externalPaths, externalPathStrategy, externalSpecificFSStrategy, dbAndTablePath);

@@ -1029,8 +1029,8 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
         <tr>
             <td><h5>data-file.external-paths.specific-fs</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
-            <td><p>Enum</p></td>
-            <td>The specific file system of the external path when data-file.external-paths.strategy is set to specific-fs<br /><br />Possible values:<ul><li>"S3": Select S3 as the write path for the external path.</li><li>"OSS": Select OSS as the write path for the external path.</li></ul></td>
+            <td>String</td>
+            <td>The specific file system of the external path when data-file.external-paths.strategy is set to specific-fs, should be the prefix scheme of the external path, now supported are s3 and oss.</td>
         </tr>
     </tbody>
 </table>
