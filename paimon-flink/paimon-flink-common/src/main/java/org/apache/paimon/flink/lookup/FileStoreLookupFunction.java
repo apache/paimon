@@ -28,14 +28,11 @@ import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.OutOfRangeException;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
 
@@ -58,10 +55,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -74,7 +69,6 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_TIME_
 import static org.apache.paimon.flink.query.RemoteTableQuery.isRemoteServiceAvailable;
 import static org.apache.paimon.lookup.RocksDBOptions.LOOKUP_CACHE_ROWS;
 import static org.apache.paimon.lookup.RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL;
-import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 
 /** A lookup {@link TableFunction} for file store. */
@@ -206,7 +200,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             partitionLoader.checkRefresh();
             List<BinaryRow> partitions = partitionLoader.partitions();
             if (!partitions.isEmpty()) {
-                lookupTable.specificPartitionFilter(createSpecificPartFilter(partitions));
+                lookupTable.specificPartitionFilter(partitionLoader.createSpecificPartFilter());
             }
         }
 
@@ -267,33 +261,6 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         return rows;
     }
 
-    private Predicate createSpecificPartFilter(List<BinaryRow> partitions) {
-        Predicate partFilter = null;
-        for (BinaryRow partition : partitions) {
-            if (partFilter == null) {
-                partFilter = createSinglePartFilter(partition);
-            } else {
-                partFilter = PredicateBuilder.or(partFilter, createSinglePartFilter(partition));
-            }
-        }
-        return partFilter;
-    }
-
-    private Predicate createSinglePartFilter(BinaryRow partition) {
-        RowType rowType = table.rowType();
-        List<String> partitionKeys = table.partitionKeys();
-        Object[] partitionSpec =
-                new RowDataToObjectArrayConverter(rowType.project(partitionKeys))
-                        .convert(partition);
-        Map<String, Object> partitionMap = new HashMap<>(partitionSpec.length);
-        for (int i = 0; i < partitionSpec.length; i++) {
-            partitionMap.put(partitionKeys.get(i), partitionSpec[i]);
-        }
-
-        // create partition predicate base on rowType instead of partitionType
-        return createPartitionPredicate(rowType, partitionMap);
-    }
-
     private void reopen() {
         try {
             close();
@@ -321,7 +288,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
             if (partitionChanged) {
                 // reopen with latest partition
-                lookupTable.specificPartitionFilter(createSpecificPartFilter(partitions));
+                lookupTable.specificPartitionFilter(partitionLoader.createSpecificPartFilter());
                 lookupTable.close();
                 lookupTable.open();
                 // no need to refresh the lookup table because it is reopened
