@@ -26,6 +26,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
@@ -35,6 +36,9 @@ import org.apache.paimon.utils.FunctionWithIOException;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -49,6 +53,8 @@ import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping
 
 /** A streaming reader to load data into {@link LookupTable}. */
 public class LookupStreamingReader {
+
+    private static final Logger LOG = LoggerFactory.getLogger(LookupStreamingReader.class);
 
     private final LookupFileStoreTable table;
     private final int[] projection;
@@ -103,6 +109,7 @@ public class LookupStreamingReader {
 
     public RecordReader<InternalRow> nextBatch(boolean useParallelism) throws Exception {
         List<Split> splits = scan.plan().splits();
+        log(splits);
         CoreOptions options = CoreOptions.fromMap(table.options());
         FunctionWithIOException<Split, RecordReader<InternalRow>> readerSupplier =
                 split -> readBuilder.newRead().createReader(split);
@@ -134,6 +141,19 @@ public class LookupStreamingReader {
             reader = reader.filter(cacheRowFilter);
         }
         return reader;
+    }
+
+    private void log(List<Split> splits) {
+        if (splits.isEmpty()) {
+            LOG.info("LookupStreamingReader didn't get splits from {}.", table.name());
+            return;
+        }
+
+        DataSplit dataSplit = (DataSplit) splits.get(0);
+        LOG.info(
+                "LookupStreamingReader get splits from {} with snapshotId {}.",
+                table.name(),
+                dataSplit.snapshotId());
     }
 
     @Nullable

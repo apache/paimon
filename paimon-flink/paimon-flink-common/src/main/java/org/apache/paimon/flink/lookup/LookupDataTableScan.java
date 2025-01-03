@@ -30,6 +30,9 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import static org.apache.paimon.CoreOptions.StartupMode;
@@ -40,6 +43,8 @@ import static org.apache.paimon.flink.lookup.LookupFileStoreTable.LookupStreamSc
  * planning.
  */
 public class LookupDataTableScan extends DataTableStreamScan {
+
+    private static final Logger LOG = LoggerFactory.getLogger(LookupDataTableScan.class);
 
     private final StartupMode startupMode;
     private final LookupStreamScanMode lookupScanMode;
@@ -69,6 +74,7 @@ public class LookupDataTableScan extends DataTableStreamScan {
         if (plan != null) {
             return plan;
         }
+        LOG.info("Dim table found OVERWRITE snapshot {}, reopen.", snapshot.id());
         throw new ReopenException();
     }
 
