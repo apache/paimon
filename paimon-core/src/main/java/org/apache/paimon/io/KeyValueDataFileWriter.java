@@ -91,7 +91,8 @@ public abstract class KeyValueDataFileWriter
             String compression,
             CoreOptions options,
             FileSource fileSource,
-            FileIndexOptions fileIndexOptions) {
+            FileIndexOptions fileIndexOptions,
+            boolean isExternalPath) {
         super(
                 fileIO,
                 factory,
@@ -102,7 +103,8 @@ public abstract class KeyValueDataFileWriter
                 compression,
                 StatsCollectorFactories.createStatsFactories(
                         options, writeRowType.getFieldNames(), keyType.getFieldNames()),
-                options.asyncFileWrite());
+                options.asyncFileWrite(),
+                isExternalPath);
 
         this.keyType = keyType;
         this.valueType = valueType;
@@ -177,7 +179,7 @@ public abstract class KeyValueDataFileWriter
                         ? DataFileIndexWriter.EMPTY_RESULT
                         : dataFileIndexWriter.result();
 
-        String externalPath = path.isExternalPath() ? path.toString() : null;
+        String externalPath = isExternalPath ? path.toString() : null;
         return new DataFileMeta(
                 path.getName(),
                 fileIO.getFileSize(path),

@@ -62,8 +62,6 @@ public class Path implements Comparable<Path>, Serializable {
     /** A hierarchical URI. */
     private URI uri;
 
-    private boolean isExternalPath;
-
     /**
      * Create a new Path based on the child path resolved against the parent path.
      *
@@ -386,14 +384,5 @@ public class Path implements Comparable<Path>, Serializable {
     @Override
     public int compareTo(Path that) {
         return this.uri.compareTo(that.uri);
-    }
-
-    public Path setExternalPath(boolean externalPath) {
-        this.isExternalPath = externalPath;
-        return this;
-    }
-
-    public boolean isExternalPath() {
-        return isExternalPath;
     }
 }

@@ -66,7 +66,8 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             FileIndexOptions fileIndexOptions,
             FileSource fileSource,
             boolean asyncFileWrite,
-            boolean statsDenseStore) {
+            boolean statsDenseStore,
+            boolean isExternalPath) {
         super(
                 fileIO,
                 factory,
@@ -76,7 +77,8 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 simpleStatsExtractor,
                 fileCompression,
                 statsCollectors,
-                asyncFileWrite);
+                asyncFileWrite,
+                isExternalPath);
         this.schemaId = schemaId;
         this.seqNumCounter = seqNumCounter;
         this.statsArraySerializer = new SimpleStatsConverter(writeSchema, statsDenseStore);
@@ -111,7 +113,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 dataFileIndexWriter == null
                         ? DataFileIndexWriter.EMPTY_RESULT
                         : dataFileIndexWriter.result();
-        String externalPath = path.isExternalPath() ? path.toString() : null;
+        String externalPath = isExternalPath ? path.toString() : null;
         return DataFileMeta.forAppend(
                 path.getName(),
                 fileIO.getFileSize(path),

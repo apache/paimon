@@ -106,7 +106,8 @@ public class RollingFileWriterTest {
                                         new FileIndexOptions(),
                                         FileSource.APPEND,
                                         true,
-                                        statsDenseStore),
+                                        statsDenseStore,
+                                        false),
                         TARGET_FILE_SIZE);
     }
 
