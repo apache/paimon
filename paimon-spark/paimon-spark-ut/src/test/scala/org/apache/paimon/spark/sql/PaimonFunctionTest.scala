@@ -97,7 +97,7 @@ class PaimonFunctionTest extends PaimonHiveTestBase {
       Row("spark_catalog.test_hive.myintsum"))
 
     withTable("t") {
-      sql("CREATE TABLE t (id INT)")
+      sql("CREATE TABLE t (id INT) USING paimon")
       sql("INSERT INTO t VALUES (1), (2), (3)")
       checkAnswer(sql("SELECT myIntSum(id) FROM t"), Row(6))
     }
