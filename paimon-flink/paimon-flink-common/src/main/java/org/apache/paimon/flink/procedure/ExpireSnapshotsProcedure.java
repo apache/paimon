@@ -18,18 +18,23 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.table.ExpireSnapshots;
-import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.ParameterUtils;
+import org.apache.paimon.utils.ProcedureUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
-import java.time.Duration;
-import java.util.TimeZone;
+import java.util.HashMap;
+import java.util.Map;
 
 /** A procedure to expire snapshots. */
 public class ExpireSnapshotsProcedure extends ProcedureBase {
@@ -57,7 +62,8 @@ public class ExpireSnapshotsProcedure extends ProcedureBase {
                 @ArgumentHint(
                         name = "max_deletes",
                         type = @DataTypeHint("INTEGER"),
-                        isOptional = true)
+                        isOptional = true),
+                @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
@@ -65,27 +71,21 @@ public class ExpireSnapshotsProcedure extends ProcedureBase {
             Integer retainMax,
             Integer retainMin,
             String olderThanStr,
-            Integer maxDeletes)
+            Integer maxDeletes,
+            String options)
             throws Catalog.TableNotExistException {
-        ExpireSnapshots expireSnapshots = table(tableId).newExpireSnapshots();
-        ExpireConfig.Builder builder = ExpireConfig.builder();
-        if (retainMax != null) {
-            builder.snapshotRetainMax(retainMax);
+        Table table = table(tableId);
+        Map<String, String> dynamicOptions = new HashMap<>();
+        if (!StringUtils.isNullOrWhitespaceOnly(options)) {
+            dynamicOptions.putAll(ParameterUtils.parseCommaSeparatedKeyValues(options));
         }
-        if (retainMin != null) {
-            builder.snapshotRetainMin(retainMin);
-        }
-        if (olderThanStr != null) {
-            builder.snapshotTimeRetain(
-                    Duration.ofMillis(
-                            System.currentTimeMillis()
-                                    - DateTimeUtils.parseTimestampData(
-                                                    olderThanStr, 3, TimeZone.getDefault())
-                                            .getMillisecond()));
-        }
-        if (maxDeletes != null) {
-            builder.snapshotMaxDeletes(maxDeletes);
-        }
+        table = table.copy(dynamicOptions);
+        ExpireSnapshots expireSnapshots = table.newExpireSnapshots();
+
+        CoreOptions tableOptions = ((FileStoreTable) table).store().options();
+        ExpireConfig.Builder builder =
+                ProcedureUtils.fillInSnapshotOptions(
+                        tableOptions, retainMax, retainMin, olderThanStr, maxDeletes);
         return new String[] {expireSnapshots.config(builder.build()).expire() + ""};
     }
 }
