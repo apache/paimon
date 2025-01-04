@@ -20,6 +20,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -409,7 +410,8 @@ public class SnapshotManager implements Serializable {
         return null;
     }
 
-    private @Nullable Long binarySearch(
+    @VisibleForTesting
+    public @Nullable Long binarySearch(
             Long start,
             Long end,
             java.util.function.Predicate<Long> condition,
