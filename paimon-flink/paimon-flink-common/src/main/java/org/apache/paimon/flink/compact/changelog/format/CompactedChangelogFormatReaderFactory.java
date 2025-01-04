@@ -28,6 +28,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -85,6 +86,11 @@ public class CompactedChangelogFormatReaderFactory implements FormatReaderFactor
                     @Override
                     public FileIndexResult fileIndex() {
                         return context.fileIndex();
+                    }
+
+                    @Override
+                    public RoaringBitmap32 deletion() {
+                        return context.deletion();
                     }
                 });
     }

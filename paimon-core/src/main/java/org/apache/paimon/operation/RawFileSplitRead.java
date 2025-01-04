@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
+import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fileindex.FileIndexResult;
@@ -50,6 +51,7 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FormatReaderMapping;
 import org.apache.paimon.utils.FormatReaderMapping.Builder;
 import org.apache.paimon.utils.IOExceptionSupplier;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -208,9 +210,26 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             }
         }
 
+        RoaringBitmap32 deletion = null;
+        DeletionVector deletionVector = dvFactory == null ? null : dvFactory.get();
+        if (deletionVector instanceof BitmapDeletionVector) {
+            deletion = ((BitmapDeletionVector) deletionVector).get();
+        }
+
+        if (deletion != null && fileIndexResult instanceof BitmapIndexResult) {
+            RoaringBitmap32 selection = ((BitmapIndexResult) fileIndexResult).get();
+            if (RoaringBitmap32.andNot(selection, deletion).isEmpty()) {
+                return new EmptyFileRecordReader<>();
+            }
+        }
+
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(
-                        fileIO, dataFilePathFactory.toPath(file), file.fileSize(), fileIndexResult);
+                        fileIO,
+                        dataFilePathFactory.toPath(file),
+                        file.fileSize(),
+                        fileIndexResult,
+                        deletion);
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
                         formatReaderMapping.getReaderFactory(),
@@ -225,7 +244,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                             fileRecordReader, (BitmapIndexResult) fileIndexResult);
         }
 
-        DeletionVector deletionVector = dvFactory == null ? null : dvFactory.get();
         if (deletionVector != null && !deletionVector.isEmpty()) {
             return new ApplyDeletionVectorReader(fileRecordReader, deletionVector);
         }
