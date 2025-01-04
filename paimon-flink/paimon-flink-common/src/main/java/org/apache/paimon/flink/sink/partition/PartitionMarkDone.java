@@ -52,6 +52,7 @@ public class PartitionMarkDone implements PartitionListener {
     private final boolean waitCompaction;
 
     public static Optional<PartitionMarkDone> create(
+            ClassLoader cl,
             boolean isStreaming,
             boolean isRestored,
             OperatorStateStore stateStore,
@@ -75,7 +76,7 @@ public class PartitionMarkDone implements PartitionListener {
                 PartitionMarkDoneTrigger.create(coreOptions, isRestored, stateStore);
 
         List<PartitionMarkDoneAction> actions =
-                PartitionMarkDoneAction.createActions(table, coreOptions);
+                PartitionMarkDoneAction.createActions(cl, table, coreOptions);
 
         // if batch read skip level 0 files, we should wait compaction to mark done
         // otherwise, some data may not be readable, and there might be data delays

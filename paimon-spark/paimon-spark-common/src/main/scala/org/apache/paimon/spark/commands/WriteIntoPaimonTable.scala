@@ -74,7 +74,8 @@ case class WriteIntoPaimonTable(
   private def markDoneIfNeeded(commitMessages: Seq[CommitMessage]): Unit = {
     val coreOptions = table.coreOptions()
     if (coreOptions.toConfiguration.get(CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT)) {
-      val actions = PartitionMarkDoneAction.createActions(table, table.coreOptions())
+      val actions =
+        PartitionMarkDoneAction.createActions(getClass.getClassLoader, table, table.coreOptions())
       val partitionComputer = new InternalRowPartitionComputer(
         coreOptions.partitionDefaultName,
         TypeUtils.project(table.rowType(), table.partitionKeys()),

@@ -64,6 +64,7 @@ public class PartitionListeners implements Closeable {
 
         // partition mark done
         PartitionMarkDone.create(
+                        context.getClass().getClassLoader(),
                         context.streamingCheckpointEnabled(),
                         context.isRestored(),
                         context.stateStore(),

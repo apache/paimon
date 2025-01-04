@@ -1185,8 +1185,19 @@ public class CoreOptions implements Serializable {
                                     .text("3. 'mark-event': mark partition event to metastore.")
                                     .linebreak()
                                     .text(
-                                            "Both can be configured at the same time: 'done-partition,success-file,mark-event'.")
+                                            "4. 'custom': use policy class to create a mark-partition policy.")
+                                    .linebreak()
+                                    .text(
+                                            "Both can be configured at the same time: 'done-partition,success-file,mark-event,custom'.")
                                     .build());
+
+    public static final ConfigOption<String> PARTITION_MARK_DONE_CUSTOM_CLASS =
+            key("partition.mark-done-action.custom.class")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The partition mark done class for implement"
+                                    + " PartitionMarkDoneAction interface. Only work in custom mark-done-action.");
 
     public static final ConfigOption<Boolean> METASTORE_PARTITIONED_TABLE =
             key("metastore.partitioned-table")
@@ -2187,6 +2198,10 @@ public class CoreOptions implements Serializable {
 
     public String partitionTimestampPattern() {
         return options.get(PARTITION_TIMESTAMP_PATTERN);
+    }
+
+    public String partitionMarkDoneCustomClass() {
+        return options.get(PARTITION_MARK_DONE_CUSTOM_CLASS);
     }
 
     public String consumerId() {

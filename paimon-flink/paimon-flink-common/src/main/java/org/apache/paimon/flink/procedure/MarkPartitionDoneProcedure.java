@@ -72,7 +72,8 @@ public class MarkPartitionDoneProcedure extends ProcedureBase {
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         CoreOptions coreOptions = fileStoreTable.coreOptions();
         List<PartitionMarkDoneAction> actions =
-                PartitionMarkDoneAction.createActions(fileStoreTable, coreOptions);
+                PartitionMarkDoneAction.createActions(
+                        procedureContext.getClass().getClassLoader(), fileStoreTable, coreOptions);
 
         List<String> partitionPaths =
                 PartitionPathUtils.generatePartitionPaths(

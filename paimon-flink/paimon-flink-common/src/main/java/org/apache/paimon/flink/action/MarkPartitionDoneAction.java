@@ -54,7 +54,8 @@ public class MarkPartitionDoneAction extends TableActionBase {
     @Override
     public void run() throws Exception {
         List<PartitionMarkDoneAction> actions =
-                PartitionMarkDoneAction.createActions(fileStoreTable, fileStoreTable.coreOptions());
+                PartitionMarkDoneAction.createActions(
+                        getClass().getClassLoader(), fileStoreTable, fileStoreTable.coreOptions());
 
         List<String> partitionPaths =
                 PartitionPathUtils.generatePartitionPaths(
