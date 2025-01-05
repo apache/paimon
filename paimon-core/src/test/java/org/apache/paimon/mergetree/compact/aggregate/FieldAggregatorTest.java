@@ -208,7 +208,7 @@ public class FieldAggregatorTest {
         assertThat(fieldProductAgg.agg(null, 10)).isEqualTo(10);
         assertThat(fieldProductAgg.agg(1, 10)).isEqualTo(10);
         assertThat(fieldProductAgg.retract(10, 5)).isEqualTo(2);
-        assertThat(fieldProductAgg.retract(null, 5)).isEqualTo(5);
+        assertThat(fieldProductAgg.retract(null, 5)).isEqualTo(0);
     }
 
     @Test
@@ -227,7 +227,7 @@ public class FieldAggregatorTest {
         assertThat(fieldProductAgg.agg(null, (byte) 10)).isEqualTo((byte) 10);
         assertThat(fieldProductAgg.agg((byte) 1, (byte) 10)).isEqualTo((byte) 10);
         assertThat(fieldProductAgg.retract((byte) 10, (byte) 5)).isEqualTo((byte) 2);
-        assertThat(fieldProductAgg.retract(null, (byte) 5)).isEqualTo((byte) 5);
+        assertThat(fieldProductAgg.retract(null, (byte) 5)).isEqualTo((byte) 0);
     }
 
     @Test
@@ -237,7 +237,7 @@ public class FieldAggregatorTest {
         assertThat(fieldProductAgg.agg(null, (short) 10)).isEqualTo((short) 10);
         assertThat(fieldProductAgg.agg((short) 1, (short) 10)).isEqualTo((short) 10);
         assertThat(fieldProductAgg.retract((short) 10, (short) 5)).isEqualTo((short) 2);
-        assertThat(fieldProductAgg.retract(null, (short) 5)).isEqualTo((short) 5);
+        assertThat(fieldProductAgg.retract(null, (short) 5)).isEqualTo((short) 0);
     }
 
     @Test
@@ -265,7 +265,7 @@ public class FieldAggregatorTest {
         assertThat(fieldProductAgg.agg(null, 10L)).isEqualTo(10L);
         assertThat(fieldProductAgg.agg(1L, 10L)).isEqualTo(10L);
         assertThat(fieldProductAgg.retract(10L, 5L)).isEqualTo(2L);
-        assertThat(fieldProductAgg.retract(null, 5L)).isEqualTo(5L);
+        assertThat(fieldProductAgg.retract(null, 5L)).isEqualTo(0L);
     }
 
     @Test
@@ -275,7 +275,7 @@ public class FieldAggregatorTest {
         assertThat(fieldProductAgg.agg(null, (float) 10)).isEqualTo((float) 10);
         assertThat(fieldProductAgg.agg((float) 1, (float) 10)).isEqualTo((float) 10);
         assertThat(fieldProductAgg.retract((float) 10, (float) 5)).isEqualTo((float) 2);
-        assertThat(fieldProductAgg.retract(null, (float) 5)).isEqualTo((float) 5);
+        assertThat(fieldProductAgg.retract(null, (float) 5)).isEqualTo((float) 0.2);
     }
 
     @Test
@@ -294,7 +294,7 @@ public class FieldAggregatorTest {
         assertThat(fieldProductAgg.agg(null, (double) 10)).isEqualTo((double) 10);
         assertThat(fieldProductAgg.agg((double) 1, (double) 10)).isEqualTo((double) 10);
         assertThat(fieldProductAgg.retract((double) 10, (double) 5)).isEqualTo((double) 2);
-        assertThat(fieldProductAgg.retract(null, (double) 5)).isEqualTo((double) 5);
+        assertThat(fieldProductAgg.retract(null, (double) 5)).isEqualTo(0.2);
     }
 
     @Test
@@ -313,7 +313,7 @@ public class FieldAggregatorTest {
         assertThat(fieldProductAgg.agg(null, toDecimal(10))).isEqualTo(toDecimal(10));
         assertThat(fieldProductAgg.agg(toDecimal(1), toDecimal(10))).isEqualTo(toDecimal(10));
         assertThat(fieldProductAgg.retract(toDecimal(10), toDecimal(5))).isEqualTo(toDecimal(2));
-        assertThat(fieldProductAgg.retract(null, toDecimal(5))).isEqualTo(toDecimal(5));
+        assertThat(fieldProductAgg.retract(null, toDecimal(5))).isEqualTo(toDecimal(0));
     }
 
     @Test

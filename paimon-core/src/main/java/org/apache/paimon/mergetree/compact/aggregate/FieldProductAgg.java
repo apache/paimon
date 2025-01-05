@@ -89,7 +89,7 @@ public class FieldProductAgg extends FieldAggregator {
         Object product;
 
         if (accumulator == null || inputField == null) {
-            product = (accumulator == null ? inputField : accumulator);
+            product = (accumulator == null ? inverse(inputField) : accumulator);
         } else {
             switch (fieldType.getTypeRoot()) {
                 case DECIMAL:
@@ -131,5 +131,37 @@ public class FieldProductAgg extends FieldAggregator {
             }
         }
         return product;
+    }
+
+    private Object inverse(Object value) {
+        if (value == null) {
+            return null;
+        }
+        switch (fieldType.getTypeRoot()) {
+            case DECIMAL:
+                Decimal decimal = (Decimal) value;
+                return Decimal.fromBigDecimal(
+                        BigDecimal.ONE.divide(decimal.toBigDecimal()),
+                        decimal.precision(),
+                        decimal.scale());
+            case TINYINT:
+                return (byte) ((byte) 1 / (byte) value);
+            case SMALLINT:
+                return (short) ((short) 1 / (short) value);
+            case INTEGER:
+                return 1 / ((int) value);
+            case BIGINT:
+                return 1L / (long) value;
+            case FLOAT:
+                return 1f / (float) value;
+            case DOUBLE:
+                return 1d / (double) value;
+            default:
+                String msg =
+                        String.format(
+                                "type %s not support in %s",
+                                fieldType.getTypeRoot().toString(), this.getClass().getName());
+                throw new IllegalArgumentException(msg);
+        }
     }
 }
