@@ -2208,15 +2208,18 @@ public class CoreOptions implements Serializable {
         return options.get(PARTITION_EXPIRATION_STRATEGY);
     }
 
+    @Nullable
     public String dataFileExternalPaths() {
         return options.get(DATA_FILE_EXTERNAL_PATHS);
     }
 
+    @Nullable
     public ExternalPathStrategy externalPathStrategy() {
         return options.get(DATA_FILE_EXTERNAL_PATHS_STRATEGY);
     }
 
-    public String externalSpecificFSStrategy() {
+    @Nullable
+    public String externalSpecificFS() {
         return options.get(DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS);
     }
 

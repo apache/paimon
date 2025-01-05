@@ -28,42 +28,34 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Random;
 
 /** Provider for external paths. */
-public class ExternalPathProvider implements Serializable {
-    private static final String S3 = "s3";
-    private static final String OSS = "oss";
-
+public class TableExternalPathProvider implements Serializable {
     private final Map<String, Path> externalPathsMap;
     private final List<Path> externalPathsList;
 
     private final ExternalPathStrategy externalPathStrategy;
-    private final String externalFSStrategy;
-    private int currentIndex;
+    private final String externalSpecificFS;
+    private int currentIndex = 0;
     private boolean externalPathExists;
-    private final String dbAndTableRelativePath;
 
-    @VisibleForTesting
-    public ExternalPathProvider() {
-        this.externalPathsMap = new HashMap<>();
-        this.externalPathsList = new ArrayList<>();
-        this.externalPathStrategy = ExternalPathStrategy.NONE;
-        this.externalFSStrategy = null;
-        this.dbAndTableRelativePath = null;
-    }
-
-    public ExternalPathProvider(
+    public TableExternalPathProvider(
             String externalPaths,
             ExternalPathStrategy externalPathStrategy,
-            String externalFSStrategy,
-            String dbAndTableRelativePath) {
+            String externalSpecificFS) {
         this.externalPathsMap = new HashMap<>();
         this.externalPathsList = new ArrayList<>();
         this.externalPathStrategy = externalPathStrategy;
-        this.externalFSStrategy = externalFSStrategy;
-        this.dbAndTableRelativePath = dbAndTableRelativePath;
-        this.currentIndex = 0;
+        if (externalSpecificFS != null) {
+            this.externalSpecificFS = externalSpecificFS.toLowerCase();
+        } else {
+            this.externalSpecificFS = null;
+        }
         initExternalPaths(externalPaths);
+        if (!externalPathsList.isEmpty()) {
+            this.currentIndex = new Random().nextInt(externalPathsList.size());
+        }
     }
 
     private void initExternalPaths(String externalPaths) {
@@ -71,24 +63,27 @@ public class ExternalPathProvider implements Serializable {
             return;
         }
 
-        if (externalPathStrategy != null
-                && externalPathStrategy.equals(ExternalPathStrategy.SPECIFIC_FS)) {
-            if (externalFSStrategy == null) {
-                throw new IllegalArgumentException("external fs strategy should not be null: ");
+        String[] tmpArray = externalPaths.split(",");
+        for (String s : tmpArray) {
+            Path path = new Path(s.trim());
+            String scheme = path.toUri().getScheme();
+            if (scheme == null) {
+                throw new IllegalArgumentException("scheme should not be null: " + path);
             }
+            scheme = scheme.toLowerCase();
+            externalPathsMap.put(scheme, path);
+            externalPathsList.add(path);
         }
 
-        String[] tmpArray = externalPaths.split(",");
-        for (String part : tmpArray) {
-            String path = part.trim();
-            if (path.toLowerCase().startsWith(OSS)) {
-                externalPathsMap.put(OSS, new Path(path));
-                externalPathsList.add(new Path(path));
-            } else if (path.toLowerCase().startsWith(S3)) {
-                externalPathsMap.put(S3, new Path(path));
-                externalPathsList.add(new Path(path));
-            } else {
-                throw new IllegalArgumentException("Unsupported external path: " + path);
+        if (externalPathStrategy != null
+                && externalPathStrategy.equals(ExternalPathStrategy.SPECIFIC_FS)) {
+            if (externalSpecificFS == null) {
+                throw new IllegalArgumentException("external specific fs should not be null: ");
+            }
+
+            if (!externalPathsMap.containsKey(externalSpecificFS)) {
+                throw new IllegalArgumentException(
+                        "external specific fs not found: " + externalSpecificFS);
             }
         }
 
@@ -122,26 +117,15 @@ public class ExternalPathProvider implements Serializable {
     }
 
     private Optional<Path> getSpecificFSExternalPath() {
-        switch (externalFSStrategy.toLowerCase()) {
-            case S3:
-                if (!externalPathsMap.containsKey(S3)) {
-                    return Optional.empty();
-                }
-                return Optional.of(new Path(externalPathsMap.get(S3), dbAndTableRelativePath));
-            case OSS:
-                if (!externalPathsMap.containsKey(OSS)) {
-                    return Optional.empty();
-                }
-                return Optional.of(new Path(externalPathsMap.get(OSS), dbAndTableRelativePath));
-            default:
-                throw new IllegalArgumentException(
-                        "Unsupported external fs strategy: " + externalFSStrategy);
+        if (!externalPathsMap.containsKey(externalSpecificFS)) {
+            return Optional.empty();
         }
+        return Optional.of(externalPathsMap.get(externalSpecificFS));
     }
 
     private Optional<Path> getRoundRobinPath() {
         currentIndex = (currentIndex + 1) % externalPathsList.size();
-        return Optional.of(new Path(externalPathsList.get(currentIndex), dbAndTableRelativePath));
+        return Optional.of(externalPathsList.get(currentIndex));
     }
 
     public boolean externalPathExists() {
@@ -167,35 +151,31 @@ public class ExternalPathProvider implements Serializable {
             return false;
         }
 
-        ExternalPathProvider that = (ExternalPathProvider) o;
+        TableExternalPathProvider that = (TableExternalPathProvider) o;
         return currentIndex == that.currentIndex
                 && externalPathExists == that.externalPathExists
                 && externalPathsMap.equals(that.externalPathsMap)
                 && externalPathsList.equals(that.externalPathsList)
                 && externalPathStrategy == that.externalPathStrategy
-                && Objects.equals(externalFSStrategy, that.externalFSStrategy)
-                && Objects.equals(dbAndTableRelativePath, that.dbAndTableRelativePath);
+                && Objects.equals(externalSpecificFS, that.externalSpecificFS);
     }
 
     @Override
     public String toString() {
         return "ExternalPathProvider{"
-                + ", externalPathsMap="
+                + " externalPathsMap="
                 + externalPathsMap
                 + ", externalPathsList="
                 + externalPathsList
                 + ", externalPathStrategy="
                 + externalPathStrategy
-                + ", externalFSStrategy='"
-                + externalFSStrategy
+                + ", externalSpecificFS='"
+                + externalSpecificFS
                 + '\''
                 + ", currentIndex="
                 + currentIndex
                 + ", externalPathExists="
                 + externalPathExists
-                + ", dbAndTableRelativePath='"
-                + dbAndTableRelativePath
-                + '\''
                 + "}";
     }
 
@@ -205,9 +185,8 @@ public class ExternalPathProvider implements Serializable {
                 externalPathsMap,
                 externalPathsList,
                 externalPathStrategy,
-                externalFSStrategy,
+                externalSpecificFS,
                 currentIndex,
-                externalPathExists,
-                dbAndTableRelativePath);
+                externalPathExists);
     }
 }

@@ -21,13 +21,18 @@ package org.apache.paimon.flink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.utils.BlockingIterator;
+import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Arrays;
@@ -37,9 +42,12 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /** Test case for append-only managed table. */
 public class AppendOnlyTableITCase extends CatalogITCaseBase {
+    @TempDir Path tempExternalPath1;
+    @TempDir Path tempExternalPath2;
 
     @Test
     public void testCreateUnawareBucketTableWithBucketKey() {
@@ -85,6 +93,208 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         rows = batchSql("SELECT data from append_table");
         assertThat(rows.size()).isEqualTo(2);
         assertThat(rows).containsExactlyInAnyOrder(Row.of("AAA"), Row.of("BBB"));
+    }
+
+    @Test
+    public void testReadWriteWithExternalPathRoundRobinStrategy1() {
+        String externalPaths =
+                TraceableFileIO.SCHEME
+                        + "://"
+                        + tempExternalPath1.toString()
+                        + ","
+                        + TraceableFileIO.SCHEME
+                        + "://"
+                        + tempExternalPath2.toString();
+        batchSql(
+                "ALTER TABLE append_table SET ('data-file.external-paths' = '"
+                        + externalPaths
+                        + "')");
+        batchSql(
+                "ALTER TABLE append_table SET ('data-file.external-paths.strategy' = 'round-robin')");
+
+        batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')");
+        List<Row> rows = batchSql("SELECT * FROM append_table");
+        assertThat(rows.size()).isEqualTo(2);
+        assertThat(rows).containsExactlyInAnyOrder(Row.of(1, "AAA"), Row.of(2, "BBB"));
+
+        rows = batchSql("SELECT id FROM append_table");
+        assertThat(rows.size()).isEqualTo(2);
+        assertThat(rows).containsExactlyInAnyOrder(Row.of(1), Row.of(2));
+
+        rows = batchSql("SELECT data from append_table");
+        assertThat(rows.size()).isEqualTo(2);
+        assertThat(rows).containsExactlyInAnyOrder(Row.of("AAA"), Row.of("BBB"));
+
+        batchSql("INSERT INTO append_table VALUES (3, 'CCC')");
+        rows = batchSql("SELECT * FROM append_table");
+        assertThat(rows.size()).isEqualTo(3);
+        assertThat(rows)
+                .containsExactlyInAnyOrder(Row.of(1, "AAA"), Row.of(2, "BBB"), Row.of(3, "CCC"));
+
+        batchSql("INSERT INTO append_table VALUES (4, 'DDD')");
+        rows = batchSql("SELECT * FROM append_table");
+        assertThat(rows.size()).isEqualTo(4);
+        assertThat(rows)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "AAA"), Row.of(2, "BBB"), Row.of(3, "CCC"), Row.of(4, "DDD"));
+
+        TraceableFileIO traceableFileIO = new TraceableFileIO();
+        try {
+            FileStatus[] fileStatuses =
+                    traceableFileIO.listStatus(
+                            new org.apache.paimon.fs.Path(
+                                    tempExternalPath1.toString() + "/bucket-0"));
+            assertThat(fileStatuses.length > 0).isTrue();
+
+            fileStatuses =
+                    traceableFileIO.listStatus(
+                            new org.apache.paimon.fs.Path(
+                                    tempExternalPath2.toString() + "/bucket-0"));
+            assertThat(fileStatuses.length > 0).isTrue();
+        } catch (IOException e) {
+            fail();
+        }
+    }
+
+    @Test
+    public void testReadWriteWithExternalPathRoundRobinStrategy2() {
+        batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')");
+        List<Row> rows = batchSql("SELECT * FROM append_table");
+        assertThat(rows.size()).isEqualTo(2);
+        assertThat(rows).containsExactlyInAnyOrder(Row.of(1, "AAA"), Row.of(2, "BBB"));
+
+        rows = batchSql("SELECT id FROM append_table");
+        assertThat(rows.size()).isEqualTo(2);
+        assertThat(rows).containsExactlyInAnyOrder(Row.of(1), Row.of(2));
+
+        rows = batchSql("SELECT data from append_table");
+        assertThat(rows.size()).isEqualTo(2);
+        assertThat(rows).containsExactlyInAnyOrder(Row.of("AAA"), Row.of("BBB"));
+
+        String externalPaths =
+                TraceableFileIO.SCHEME
+                        + "://"
+                        + tempExternalPath1.toString()
+                        + ","
+                        + TraceableFileIO.SCHEME
+                        + "://"
+                        + tempExternalPath2.toString();
+        batchSql(
+                "ALTER TABLE append_table SET ('data-file.external-paths' = '"
+                        + externalPaths
+                        + "')");
+        batchSql(
+                "ALTER TABLE append_table SET ('data-file.external-paths.strategy' = 'round-robin')");
+
+        batchSql("INSERT INTO append_table VALUES (3, 'CCC')");
+        rows = batchSql("SELECT * FROM append_table");
+        assertThat(rows.size()).isEqualTo(3);
+        assertThat(rows)
+                .containsExactlyInAnyOrder(Row.of(1, "AAA"), Row.of(2, "BBB"), Row.of(3, "CCC"));
+
+        batchSql("INSERT INTO append_table VALUES (4, 'DDD')");
+        rows = batchSql("SELECT * FROM append_table");
+        assertThat(rows.size()).isEqualTo(4);
+        assertThat(rows)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "AAA"), Row.of(2, "BBB"), Row.of(3, "CCC"), Row.of(4, "DDD"));
+    }
+
+    @Test
+    public void testReadWriteWithExternalPathSpecificFSStrategy() {
+        String externalPaths = TraceableFileIO.SCHEME + "://" + tempExternalPath1.toString();
+        batchSql(
+                "ALTER TABLE append_table SET ('data-file.external-paths' = '"
+                        + externalPaths
+                        + "')");
+        batchSql(
+                "ALTER TABLE append_table SET ('data-file.external-paths.strategy' = 'specific-fs')");
+        batchSql(
+                "ALTER TABLE append_table SET ('data-file.external-paths.specific-fs' = 'traceable')");
+
+        batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')");
+        List<Row> rows = batchSql("SELECT * FROM append_table");
+        assertThat(rows.size()).isEqualTo(2);
+        assertThat(rows).containsExactlyInAnyOrder(Row.of(1, "AAA"), Row.of(2, "BBB"));
+
+        rows = batchSql("SELECT id FROM append_table");
+        assertThat(rows.size()).isEqualTo(2);
+        assertThat(rows).containsExactlyInAnyOrder(Row.of(1), Row.of(2));
+
+        rows = batchSql("SELECT data from append_table");
+        assertThat(rows.size()).isEqualTo(2);
+        assertThat(rows).containsExactlyInAnyOrder(Row.of("AAA"), Row.of("BBB"));
+
+        batchSql("INSERT INTO append_table VALUES (3, 'CCC')");
+        rows = batchSql("SELECT * FROM append_table");
+        assertThat(rows.size()).isEqualTo(3);
+        assertThat(rows)
+                .containsExactlyInAnyOrder(Row.of(1, "AAA"), Row.of(2, "BBB"), Row.of(3, "CCC"));
+
+        batchSql("INSERT INTO append_table VALUES (4, 'DDD')");
+        rows = batchSql("SELECT * FROM append_table");
+        assertThat(rows.size()).isEqualTo(4);
+        assertThat(rows)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "AAA"), Row.of(2, "BBB"), Row.of(3, "CCC"), Row.of(4, "DDD"));
+
+        TraceableFileIO traceableFileIO = new TraceableFileIO();
+        try {
+            FileStatus[] fileStatuses =
+                    traceableFileIO.listStatus(
+                            new org.apache.paimon.fs.Path(
+                                    tempExternalPath1.toString() + "/bucket-0"));
+            assertThat(fileStatuses.length > 0).isTrue();
+        } catch (IOException e) {
+            fail();
+        }
+    }
+
+    @Test
+    public void testReadWriteWithExternalPathNoneStrategy() {
+        String externalPaths = TraceableFileIO.SCHEME + "://" + tempExternalPath1.toString();
+        batchSql(
+                "ALTER TABLE append_table SET ('data-file.external-paths' = '"
+                        + externalPaths
+                        + "')");
+        batchSql("ALTER TABLE append_table SET ('data-file.external-paths.strategy' = 'none')");
+
+        batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')");
+        List<Row> rows = batchSql("SELECT * FROM append_table");
+        assertThat(rows.size()).isEqualTo(2);
+        assertThat(rows).containsExactlyInAnyOrder(Row.of(1, "AAA"), Row.of(2, "BBB"));
+
+        rows = batchSql("SELECT id FROM append_table");
+        assertThat(rows.size()).isEqualTo(2);
+        assertThat(rows).containsExactlyInAnyOrder(Row.of(1), Row.of(2));
+
+        rows = batchSql("SELECT data from append_table");
+        assertThat(rows.size()).isEqualTo(2);
+        assertThat(rows).containsExactlyInAnyOrder(Row.of("AAA"), Row.of("BBB"));
+
+        batchSql("INSERT INTO append_table VALUES (3, 'CCC')");
+        rows = batchSql("SELECT * FROM append_table");
+        assertThat(rows.size()).isEqualTo(3);
+        assertThat(rows)
+                .containsExactlyInAnyOrder(Row.of(1, "AAA"), Row.of(2, "BBB"), Row.of(3, "CCC"));
+
+        batchSql("INSERT INTO append_table VALUES (4, 'DDD')");
+        rows = batchSql("SELECT * FROM append_table");
+        assertThat(rows.size()).isEqualTo(4);
+        assertThat(rows)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "AAA"), Row.of(2, "BBB"), Row.of(3, "CCC"), Row.of(4, "DDD"));
+
+        TraceableFileIO traceableFileIO = new TraceableFileIO();
+        try {
+            FileStatus[] fileStatuses =
+                    traceableFileIO.listStatus(
+                            new org.apache.paimon.fs.Path(
+                                    tempExternalPath1.toString() + "/bucket-0"));
+            assertThat(fileStatuses.length).isEqualTo(0);
+        } catch (IOException e) {
+            fail();
+        }
     }
 
     @Test

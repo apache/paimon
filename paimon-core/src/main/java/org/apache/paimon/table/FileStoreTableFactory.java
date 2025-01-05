@@ -19,9 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
@@ -68,36 +66,11 @@ public class FileStoreTableFactory {
                                                         + tablePath
                                                         + ". Please create table first."));
 
-        ExternalPathProvider externalPathProvider = getExternalPathProvider(tableSchema, tablePath);
-        return create(
-                fileIO,
-                tablePath,
-                tableSchema,
-                options,
-                CatalogEnvironment.empty(),
-                externalPathProvider);
-    }
-
-    private static ExternalPathProvider getExternalPathProvider(
-            TableSchema tableSchema, Path tablePath) {
-        CoreOptions coreOptions = CoreOptions.fromMap(tableSchema.options());
-        String externalPaths = coreOptions.dataFileExternalPaths();
-        ExternalPathStrategy externalPathStrategy = coreOptions.externalPathStrategy();
-        String externalSpecificFSStrategy = coreOptions.externalSpecificFSStrategy();
-        String dbAndTablePath = tablePath.getParent().getName() + "/" + tablePath.getName();
-        return new ExternalPathProvider(
-                externalPaths, externalPathStrategy, externalSpecificFSStrategy, dbAndTablePath);
+        return create(fileIO, tablePath, tableSchema, options, CatalogEnvironment.empty());
     }
 
     public static FileStoreTable create(FileIO fileIO, Path tablePath, TableSchema tableSchema) {
-        ExternalPathProvider externalPathProvider = getExternalPathProvider(tableSchema, tablePath);
-        return create(
-                fileIO,
-                tablePath,
-                tableSchema,
-                new Options(),
-                CatalogEnvironment.empty(),
-                externalPathProvider);
+        return create(fileIO, tablePath, tableSchema, new Options(), CatalogEnvironment.empty());
     }
 
     public static FileStoreTable create(
@@ -105,14 +78,7 @@ public class FileStoreTableFactory {
             Path tablePath,
             TableSchema tableSchema,
             CatalogEnvironment catalogEnvironment) {
-        ExternalPathProvider externalPathProvider = getExternalPathProvider(tableSchema, tablePath);
-        return create(
-                fileIO,
-                tablePath,
-                tableSchema,
-                new Options(),
-                catalogEnvironment,
-                externalPathProvider);
+        return create(fileIO, tablePath, tableSchema, new Options(), catalogEnvironment);
     }
 
     public static FileStoreTable create(
@@ -120,16 +86,10 @@ public class FileStoreTableFactory {
             Path tablePath,
             TableSchema tableSchema,
             Options dynamicOptions,
-            CatalogEnvironment catalogEnvironment,
-            ExternalPathProvider externalPathProvider) {
+            CatalogEnvironment catalogEnvironment) {
         FileStoreTable table =
                 createWithoutFallbackBranch(
-                        fileIO,
-                        tablePath,
-                        tableSchema,
-                        dynamicOptions,
-                        catalogEnvironment,
-                        externalPathProvider);
+                        fileIO, tablePath, tableSchema, dynamicOptions, catalogEnvironment);
 
         Options options = new Options(table.options());
         String fallbackBranch = options.get(CoreOptions.SCAN_FALLBACK_BRANCH);
@@ -146,12 +106,7 @@ public class FileStoreTableFactory {
                     fallbackBranch);
             FileStoreTable fallbackTable =
                     createWithoutFallbackBranch(
-                            fileIO,
-                            tablePath,
-                            schema.get(),
-                            branchOptions,
-                            catalogEnvironment,
-                            externalPathProvider);
+                            fileIO, tablePath, schema.get(), branchOptions, catalogEnvironment);
             table = new FallbackReadFileStoreTable(table, fallbackTable);
         }
 
@@ -163,22 +118,13 @@ public class FileStoreTableFactory {
             Path tablePath,
             TableSchema tableSchema,
             Options dynamicOptions,
-            CatalogEnvironment catalogEnvironment,
-            ExternalPathProvider externalPathProvider) {
+            CatalogEnvironment catalogEnvironment) {
         FileStoreTable table =
                 tableSchema.primaryKeys().isEmpty()
                         ? new AppendOnlyFileStoreTable(
-                                fileIO,
-                                tablePath,
-                                tableSchema,
-                                catalogEnvironment,
-                                externalPathProvider)
+                                fileIO, tablePath, tableSchema, catalogEnvironment)
                         : new PrimaryKeyFileStoreTable(
-                                fileIO,
-                                tablePath,
-                                tableSchema,
-                                catalogEnvironment,
-                                externalPathProvider);
+                                fileIO, tablePath, tableSchema, catalogEnvironment);
         return table.copy(dynamicOptions.toMap());
     }
 }

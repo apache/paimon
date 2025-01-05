@@ -18,11 +18,12 @@
 
 package org.apache.paimon;
 
+import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
-import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.TableExternalPathProvider;
 import org.apache.paimon.index.HashIndexFile;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestFile;
@@ -83,7 +84,6 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Nullable private final SegmentsCache<Path> writeManifestCache;
     @Nullable private SegmentsCache<Path> readManifestCache;
     @Nullable private Cache<Path, Snapshot> snapshotCache;
-    private final ExternalPathProvider externalPathProvider;
 
     protected AbstractFileStore(
             FileIO fileIO,
@@ -92,8 +92,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             String tableName,
             CoreOptions options,
             RowType partitionType,
-            CatalogEnvironment catalogEnvironment,
-            ExternalPathProvider externalPathProvider) {
+            CatalogEnvironment catalogEnvironment) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
@@ -104,7 +103,6 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         this.writeManifestCache =
                 SegmentsCache.create(
                         options.pageSize(), options.writeManifestCache(), Long.MAX_VALUE);
-        this.externalPathProvider = externalPathProvider;
     }
 
     @Override
@@ -124,7 +122,15 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.fileSuffixIncludeCompression(),
                 options.fileCompression(),
                 options.dataFilePathDirectory(),
-                externalPathProvider);
+                getExternalPathProvider());
+    }
+
+    private TableExternalPathProvider getExternalPathProvider() {
+        String externalPaths = options.dataFileExternalPaths();
+        ExternalPathStrategy externalPathStrategy = options.externalPathStrategy();
+        String externalSpecificFS = options.externalSpecificFS();
+        return new TableExternalPathProvider(
+                externalPaths, externalPathStrategy, externalSpecificFS);
     }
 
     @Override

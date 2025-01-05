@@ -19,10 +19,11 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.fs.ExternalPathProvider;
+import org.apache.paimon.fs.DataFileExternalPathProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileEntry;
 
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
 import java.util.Optional;
@@ -36,7 +37,6 @@ public class DataFilePathFactory {
     public static final String INDEX_PATH_SUFFIX = ".index";
 
     private final Path parent;
-    private final Path relativePath;
     private final String uuid;
 
     private final AtomicInteger pathCount;
@@ -45,7 +45,7 @@ public class DataFilePathFactory {
     private final String changelogFilePrefix;
     private final boolean fileSuffixIncludeCompression;
     private final String fileCompression;
-    private final ExternalPathProvider externalPathProvider;
+    @Nullable private final DataFileExternalPathProvider dataFileExternalPathProvider;
     private final boolean isExternalPath;
 
     public DataFilePathFactory(
@@ -55,8 +55,7 @@ public class DataFilePathFactory {
             String changelogFilePrefix,
             boolean fileSuffixIncludeCompression,
             String fileCompression,
-            ExternalPathProvider externalPathProvider,
-            Path relativePath) {
+            @Nullable DataFileExternalPathProvider dataFileExternalPathProvider) {
         this.parent = parent;
         this.uuid = UUID.randomUUID().toString();
         this.pathCount = new AtomicInteger(0);
@@ -65,9 +64,12 @@ public class DataFilePathFactory {
         this.changelogFilePrefix = changelogFilePrefix;
         this.fileSuffixIncludeCompression = fileSuffixIncludeCompression;
         this.fileCompression = fileCompression;
-        this.externalPathProvider = externalPathProvider;
-        this.relativePath = relativePath;
-        this.isExternalPath = externalPathProvider.externalPathExists();
+        this.dataFileExternalPathProvider = dataFileExternalPathProvider;
+        if (dataFileExternalPathProvider != null) {
+            this.isExternalPath = dataFileExternalPathProvider.externalPathExists();
+        } else {
+            this.isExternalPath = false;
+        }
     }
 
     public Path newPath() {
@@ -83,12 +85,10 @@ public class DataFilePathFactory {
     }
 
     public Path newPath(String prefix) {
-        return externalPathProvider
-                .getNextExternalPath()
-                .map(
-                        externalPath ->
-                                new Path(new Path(externalPath, relativePath), newFileName(prefix)))
-                .orElse(new Path(parent, newFileName(prefix)));
+        return Optional.ofNullable(dataFileExternalPathProvider)
+                .flatMap(DataFileExternalPathProvider::getNextExternalDataPath)
+                .map(path -> new Path(path, newFileName(prefix)))
+                .orElseGet(() -> new Path(parent, newFileName(prefix)));
     }
 
     private String newFileName(String prefix) {

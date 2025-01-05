@@ -20,8 +20,9 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.fs.ExternalPathProvider;
+import org.apache.paimon.fs.DataFileExternalPathProvider;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.TableExternalPathProvider;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.types.RowType;
 
@@ -56,7 +57,7 @@ public class FileStorePathFactory {
     private final AtomicInteger indexManifestCount;
     private final AtomicInteger indexFileCount;
     private final AtomicInteger statsFileCount;
-    private final ExternalPathProvider externalPathProvider;
+    @Nullable private final TableExternalPathProvider tableExternalPathProvider;
 
     public FileStorePathFactory(
             Path root,
@@ -69,7 +70,7 @@ public class FileStorePathFactory {
             boolean fileSuffixIncludeCompression,
             String fileCompression,
             @Nullable String dataFilePathDirectory,
-            ExternalPathProvider externalPathProvider) {
+            @Nullable TableExternalPathProvider tableExternalPathProvider) {
         this.root = root;
         this.dataFilePathDirectory = dataFilePathDirectory;
         this.uuid = UUID.randomUUID().toString();
@@ -87,7 +88,7 @@ public class FileStorePathFactory {
         this.indexManifestCount = new AtomicInteger(0);
         this.indexFileCount = new AtomicInteger(0);
         this.statsFileCount = new AtomicInteger(0);
-        this.externalPathProvider = externalPathProvider;
+        this.tableExternalPathProvider = tableExternalPathProvider;
     }
 
     public Path root() {
@@ -132,8 +133,13 @@ public class FileStorePathFactory {
                 changelogFilePrefix,
                 fileSuffixIncludeCompression,
                 fileCompression,
-                externalPathProvider,
-                relativeBucketPath(partition, bucket));
+                getDataFileExternalPathProvider(
+                        tableExternalPathProvider, relativeBucketPath(partition, bucket)));
+    }
+
+    private DataFileExternalPathProvider getDataFileExternalPathProvider(
+            TableExternalPathProvider tableExternalPathProvider, Path relativeBucketPath) {
+        return new DataFileExternalPathProvider(tableExternalPathProvider, relativeBucketPath);
     }
 
     public Path bucketPath(BinaryRow partition, int bucket) {

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.object;
 
-import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.schema.TableSchema;
@@ -215,11 +214,6 @@ public interface ObjectTable extends FileStoreTable {
         public ObjectTable switchToBranch(String branchName) {
             return new ObjectTableImpl(
                     wrapped.switchToBranch(branchName), objectFileIO, objectLocation);
-        }
-
-        @Override
-        public ExternalPathProvider externalPathProvider() {
-            return wrapped.externalPathProvider();
         }
     }
 }

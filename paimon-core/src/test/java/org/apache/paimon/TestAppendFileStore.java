@@ -22,7 +22,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.deletionvectors.append.AppendDeletionFileMaintainerHelper;
 import org.apache.paimon.deletionvectors.append.UnawareAppendDeletionFileMaintainer;
-import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
@@ -81,8 +80,7 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
                 bucketType,
                 rowType,
                 tableName,
-                CatalogEnvironment.empty(),
-                new ExternalPathProvider());
+                CatalogEnvironment.empty());
 
         this.fileIO = fileIO;
         this.commitUser = UUID.randomUUID().toString();

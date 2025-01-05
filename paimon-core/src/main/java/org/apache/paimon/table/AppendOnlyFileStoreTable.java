@@ -21,7 +21,6 @@ package org.apache.paimon.table;
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.AppendOnlyIcebergCommitCallback;
@@ -59,16 +58,15 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     private transient AppendOnlyFileStore lazyStore;
 
     AppendOnlyFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
-        this(fileIO, path, tableSchema, CatalogEnvironment.empty(), new ExternalPathProvider());
+        this(fileIO, path, tableSchema, CatalogEnvironment.empty());
     }
 
     AppendOnlyFileStoreTable(
             FileIO fileIO,
             Path path,
             TableSchema tableSchema,
-            CatalogEnvironment catalogEnvironment,
-            ExternalPathProvider externalPathProvider) {
-        super(fileIO, path, tableSchema, catalogEnvironment, externalPathProvider);
+            CatalogEnvironment catalogEnvironment) {
+        super(fileIO, path, tableSchema, catalogEnvironment);
     }
 
     @Override
@@ -84,8 +82,7 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                             tableSchema.logicalBucketKeyType(),
                             tableSchema.logicalRowType(),
                             name(),
-                            catalogEnvironment,
-                            externalPathProvider);
+                            catalogEnvironment);
         }
         return lazyStore;
     }
@@ -175,10 +172,5 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
         }
 
         return callbacks;
-    }
-
-    @Override
-    public ExternalPathProvider externalPathProvider() {
-        return externalPathProvider;
     }
 }
