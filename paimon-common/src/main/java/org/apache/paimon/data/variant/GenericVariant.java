@@ -123,7 +123,7 @@ public final class GenericVariant implements Variant {
         return Objects.hash(Arrays.hashCode(value), Arrays.hashCode(metadata), pos);
     }
 
-    public static Variant fromJson(String json) {
+    public static GenericVariant fromJson(String json) {
         try {
             return GenericVariantBuilder.parseJson(json, false);
         } catch (IOException e) {
@@ -300,9 +300,9 @@ public final class GenericVariant implements Variant {
     /** Variant object field. */
     public static final class ObjectField {
         public final String key;
-        public final Variant value;
+        public final GenericVariant value;
 
-        public ObjectField(String key, Variant value) {
+        public ObjectField(String key, GenericVariant value) {
             this.key = key;
             this.value = value;
         }
@@ -322,7 +322,7 @@ public final class GenericVariant implements Variant {
                     int id = readUnsigned(value, idStart + idSize * index, idSize);
                     int offset = readUnsigned(value, offsetStart + offsetSize * index, offsetSize);
                     String key = getMetadataKey(metadata, id);
-                    Variant v = new GenericVariant(value, metadata, dataStart + offset);
+                    GenericVariant v = new GenericVariant(value, metadata, dataStart + offset);
                     return new ObjectField(key, v);
                 });
     }

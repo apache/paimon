@@ -95,7 +95,8 @@ public class GenericVariantBuilder {
      *
      * @throws IOException if any JSON parsing error happens.
      */
-    public static Variant parseJson(String json, boolean allowDuplicateKeys) throws IOException {
+    public static GenericVariant parseJson(String json, boolean allowDuplicateKeys)
+            throws IOException {
         try (JsonParser parser = new JsonFactory().createParser(json)) {
             parser.nextToken();
             return parseJson(parser, allowDuplicateKeys);
@@ -105,7 +106,7 @@ public class GenericVariantBuilder {
     /**
      * Similar {@link #parseJson(String, boolean)}, but takes a JSON parser instead of string input.
      */
-    public static Variant parseJson(JsonParser parser, boolean allowDuplicateKeys)
+    public static GenericVariant parseJson(JsonParser parser, boolean allowDuplicateKeys)
             throws IOException {
         GenericVariantBuilder builder = new GenericVariantBuilder(allowDuplicateKeys);
         builder.buildJson(parser);
@@ -113,7 +114,7 @@ public class GenericVariantBuilder {
     }
 
     // Build the variant metadata from `dictionaryKeys` and return the variant result.
-    public Variant result() {
+    public GenericVariant result() {
         int numKeys = dictionaryKeys.size();
         // Use long to avoid overflow in accumulating lengths.
         long dictionaryStringSize = 0;

@@ -18,6 +18,15 @@
 
 package org.apache.paimon.data.variant;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -94,5 +103,139 @@ public class GenericVariantTest {
         assertThat(variant.variantGet("$.boolean1")).isEqualTo(true);
         assertThat(variant.variantGet("$.boolean2")).isEqualTo(false);
         assertThat(variant.variantGet("$.nullField")).isNull();
+    }
+
+    @Test
+    public void testShredding() {
+        GenericVariant variant = GenericVariant.fromJson("{\"a\": 1, \"b\": \"hello\"}");
+
+        // Happy path
+        RowType shreddedType1 =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.STRING()},
+                        new String[] {"a", "b"});
+        GenericRow expert1 =
+                GenericRow.of(
+                        variant.metadata(),
+                        null,
+                        GenericRow.of(
+                                GenericRow.of(null, 1),
+                                GenericRow.of(null, BinaryString.fromString("hello"))));
+        testShreddingResult(variant, shreddedType1, expert1);
+
+        // Missing field
+        RowType shreddedType2 =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"a", "c", "b"});
+        GenericRow expert2 =
+                GenericRow.of(
+                        variant.metadata(),
+                        null,
+                        GenericRow.of(
+                                GenericRow.of(null, 1),
+                                GenericRow.of(null, null),
+                                GenericRow.of(null, BinaryString.fromString("hello"))));
+        testShreddingResult(variant, shreddedType2, expert2);
+
+        // "a" is not present in shredding schema
+        RowType shreddedType3 =
+                RowType.of(
+                        new DataType[] {DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"b", "c"});
+        GenericRow expert3 =
+                GenericRow.of(
+                        variant.metadata(),
+                        untypedValue("{\"a\": 1}"),
+                        GenericRow.of(
+                                GenericRow.of(null, BinaryString.fromString("hello")),
+                                GenericRow.of(null, null)));
+        testShreddingResult(variant, shreddedType3, expert3);
+    }
+
+    @Test
+    public void testShreddingAllTypes() {
+        String json =
+                "{\n"
+                        + "  \"c1\": \"Hello, World!\",\n"
+                        + "  \"c2\": 12345678901234,\n"
+                        + "  \"c3\": 1.0123456789012345678901234567890123456789,\n"
+                        + "  \"c4\": 100.99,\n"
+                        + "  \"c5\": true,\n"
+                        + "  \"c6\": null,\n"
+                        + "  \"c7\": {\"street\" : \"Main St\",\"city\" : \"Hangzhou\"},\n"
+                        + "  \"c8\": [1, 2]\n"
+                        + "}\n";
+        GenericVariant variant = GenericVariant.fromJson(json);
+        RowType shreddedType1 =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING(),
+                            DataTypes.BIGINT(),
+                            DataTypes.DOUBLE(),
+                            DataTypes.DECIMAL(5, 2),
+                            DataTypes.BOOLEAN(),
+                            DataTypes.STRING(),
+                            RowType.of(
+                                    new DataType[] {DataTypes.STRING(), DataTypes.STRING()},
+                                    new String[] {"street", "city"}),
+                            DataTypes.ARRAY(DataTypes.INT())
+                        },
+                        new String[] {"c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8"});
+        GenericRow expert1 =
+                GenericRow.of(
+                        variant.metadata(),
+                        null,
+                        GenericRow.of(
+                                GenericRow.of(null, BinaryString.fromString("Hello, World!")),
+                                GenericRow.of(null, 12345678901234L),
+                                GenericRow.of(null, 1.0123456789012345678901234567890123456789D),
+                                GenericRow.of(
+                                        null,
+                                        Decimal.fromBigDecimal(new BigDecimal("100.99"), 5, 2)),
+                                GenericRow.of(null, true),
+                                GenericRow.of(new byte[] {0}, null),
+                                GenericRow.of(
+                                        null,
+                                        GenericRow.of(
+                                                GenericRow.of(
+                                                        null, BinaryString.fromString("Main St")),
+                                                GenericRow.of(
+                                                        null,
+                                                        BinaryString.fromString("Hangzhou")))),
+                                GenericRow.of(
+                                        null,
+                                        new GenericArray(
+                                                new GenericRow[] {
+                                                    GenericRow.of(null, 1), GenericRow.of(null, 2)
+                                                }))));
+        testShreddingResult(variant, shreddedType1, expert1);
+
+        // test no shredding
+        RowType shreddedType2 =
+                RowType.of(new DataType[] {DataTypes.STRING()}, new String[] {"other"});
+        GenericRow expert2 =
+                GenericRow.of(
+                        variant.metadata(),
+                        untypedValue(json),
+                        GenericRow.of(GenericRow.of(null, null)));
+        testShreddingResult(variant, shreddedType2, expert2);
+    }
+
+    private byte[] untypedValue(String input) {
+        return GenericVariant.fromJson(input).value();
+    }
+
+    private void testShreddingResult(
+            GenericVariant variant, RowType shreddedType, InternalRow expected) {
+        RowType shreddingSchema = PaimonShreddingUtils.variantShreddingSchema(shreddedType);
+        VariantSchema variantSchema = PaimonShreddingUtils.buildVariantSchema(shreddingSchema);
+        // test cast shredded
+        InternalRow shredded = PaimonShreddingUtils.castShredded(variant, variantSchema);
+        assertThat(shredded).isEqualTo(expected);
+
+        // test rebuild
+        Variant rebuild = PaimonShreddingUtils.rebuild(shredded, variantSchema);
+        assertThat(variant.toJson()).isEqualTo(rebuild.toJson());
     }
 }
