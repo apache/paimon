@@ -29,6 +29,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -39,7 +40,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
+class RecordLevelExpireWithAggregationTest extends PrimaryKeyTableTestBase {
 
     @Override
     @BeforeEach
@@ -70,20 +71,23 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
         options.set(CoreOptions.BUCKET, 1);
         options.set(CoreOptions.RECORD_LEVEL_EXPIRE_TIME, Duration.ofSeconds(1));
         options.set(CoreOptions.RECORD_LEVEL_TIME_FIELD, "col1");
+        options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.AGGREGATE);
+        options.set(CoreOptions.FIELDS_DEFAULT_AGG_FUNC, "last_non_null_value");
+        options.set("fields.col1.ignore-retract", "true");
         return options;
     }
 
     @Test
     public void test() throws Exception {
         writeCommit(GenericRow.of(1, 1, 1), GenericRow.of(1, 2, 2));
-
-        // can be queried
-        assertThat(query())
-                .containsExactlyInAnyOrder(GenericRow.of(1, 1, 1), GenericRow.of(1, 2, 2));
+        // disordered retract message will generate null fields
+        writeCommit(
+                GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 3, 1),
+                GenericRow.ofKind(RowKind.DELETE, 1, 3, 1));
 
         int currentSecs = (int) (System.currentTimeMillis() / 1000);
-        writeCommit(GenericRow.of(1, 3, currentSecs));
         writeCommit(GenericRow.of(1, 4, currentSecs + 60 * 60));
+
         Thread.sleep(2000);
 
         // no compaction, can be queried
@@ -91,27 +95,22 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
                 .containsExactlyInAnyOrder(
                         GenericRow.of(1, 1, 1),
                         GenericRow.of(1, 2, 2),
-                        GenericRow.of(1, 3, currentSecs),
+                        GenericRow.of(1, 3, null),
                         GenericRow.of(1, 4, currentSecs + 60 * 60));
 
         // compact, expired
         compact(1);
-        assertThat(query()).containsExactlyInAnyOrder(GenericRow.of(1, 4, currentSecs + 60 * 60));
-        assertThat(query(new int[] {2}))
-                .containsExactlyInAnyOrder(GenericRow.of(currentSecs + 60 * 60));
-
-        writeCommit(GenericRow.of(1, 5, null));
-        compact(1);
         assertThat(query())
                 .containsExactlyInAnyOrder(
-                        GenericRow.of(1, 4, currentSecs + 60 * 60), GenericRow.of(1, 5, null));
+                        GenericRow.of(1, 3, null), GenericRow.of(1, 4, currentSecs + 60 * 60));
 
-        writeCommit(GenericRow.of(1, 5, currentSecs + 60 * 60));
-        // compact, merged
+        writeCommit(GenericRow.of(1, 3, currentSecs + 60 * 60));
         compact(1);
+
+        // compact, merged
         assertThat(query())
                 .containsExactlyInAnyOrder(
                         GenericRow.of(1, 4, currentSecs + 60 * 60),
-                        GenericRow.of(1, 5, currentSecs + 60 * 60));
+                        GenericRow.of(1, 3, currentSecs + 60 * 60));
     }
 }
