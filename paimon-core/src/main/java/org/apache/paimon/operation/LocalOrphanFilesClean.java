@@ -52,6 +52,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecuteSequentialReturn;
@@ -128,12 +129,25 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         candidateDeletes.clear();
 
         // clean empty directory
-        Set<Path> deletedPaths =
-                deleteFiles.stream().map(Path::getParent).collect(Collectors.toSet());
-        cleanEmptyDirectory(deletedPaths);
+        cleanEmptyDirectory(deleteFiles);
 
         return new CleanOrphanFilesResult(
                 deleteFiles.size(), deletedFilesLenInBytes.get(), deleteFiles);
+    }
+
+    private void cleanEmptyDirectory(List<Path> deleteFiles) {
+        if (deleteFiles.isEmpty()) {
+            return;
+        }
+        Set<Path> bucketDirectory =
+                deleteFiles.stream()
+                        .map(Path::getParent)
+                        .filter(path -> path.toUri().toString().contains(BUCKET_PATH_PREFIX))
+                        .collect(Collectors.toSet());
+        randomlyOnlyExecute(executor, this::tryDeleteEmptyDirectory, bucketDirectory);
+
+        tryCleanPartitionDirectory(
+                bucketDirectory.stream().map(Path::getParent).collect(Collectors.toSet()));
     }
 
     private void collectWithoutDataFile(

@@ -25,6 +25,7 @@ import org.apache.paimon.manifest.{ManifestEntry, ManifestFile}
 import org.apache.paimon.operation.{CleanOrphanFilesResult, OrphanFilesClean}
 import org.apache.paimon.operation.OrphanFilesClean.retryReadingFiles
 import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX
 import org.apache.paimon.utils.SerializableConsumer
 
 import org.apache.spark.internal.Logging
@@ -157,10 +158,8 @@ case class SparkOrphanFilesClean(
       }
       .cache()
 
-    // clean empty directories
-    val deletedPaths =
-      deleted.flatMap { case (_, _, paths) => paths }.collect().map(new Path(_)).toSet
-    cleanEmptyDirectory(deletedPaths.asJava)
+    // clean empty directory
+    cleanEmptyDirectory(deleted.flatMap { case (_, _, paths) => paths })
 
     val deletedResult = deleted.map { case (filesCount, filesLen, _) => (filesCount, filesLen) }
     val finalDeletedDataset =
@@ -173,6 +172,24 @@ case class SparkOrphanFilesClean(
       }
 
     (finalDeletedDataset, (usedManifestFiles, deleted))
+  }
+
+  private def cleanEmptyDirectory(deletedPaths: Dataset[String]): Unit = {
+    import spark.implicits._
+
+    val partitionDirectory = deletedPaths
+      .filter(_.contains(BUCKET_PATH_PREFIX))
+      .mapPartitions {
+        iter =>
+          iter.map {
+            location =>
+              val path = new Path(location)
+              tryDeleteEmptyDirectory(path)
+              path.getParent.toUri.toString
+          }
+      }
+
+    tryCleanPartitionDirectory(partitionDirectory.collect().map(new Path(_)).toSet.asJava)
   }
 }
 

@@ -66,7 +66,6 @@ import static java.util.Collections.emptyList;
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
-import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
 
 /**
  * To remove the data files and metadata files that are not used by table (so-called "orphan
@@ -399,22 +398,15 @@ public abstract class OrphanFilesClean implements Serializable {
         }
     }
 
-    public void cleanEmptyDirectory(Set<Path> deletedPaths) {
-        if (deletedPaths.isEmpty()) {
-            return;
-        }
-
-        randomlyOnlyExecute(executorService, this::tryDeleteEmptyDirectory, deletedPaths);
-
+    /** Try to clean empty partition directories. */
+    protected void tryCleanPartitionDirectory(Set<Path> deletedPaths) {
         for (int level = 0; level < partitionKeysNum; level++) {
-            Set<Path> parentPaths =
-                    deletedPaths.stream().map(Path::getParent).collect(Collectors.toSet());
-            randomlyOnlyExecute(executorService, this::tryDeleteEmptyDirectory, parentPaths);
-            deletedPaths = new HashSet<>(parentPaths);
+            deletedPaths.forEach(this::tryDeleteEmptyDirectory);
+            deletedPaths = deletedPaths.stream().map(Path::getParent).collect(Collectors.toSet());
         }
     }
 
-    private void tryDeleteEmptyDirectory(Path path) {
+    public void tryDeleteEmptyDirectory(Path path) {
         try {
             fileIO.delete(path, false);
         } catch (IOException e) {
