@@ -52,21 +52,6 @@ public class IncrementalTagStartingScanner extends AbstractStartingScanner {
         return StartingScanner.fromPlan(reader.withSnapshot(end).readIncrementalDiff(start));
     }
 
-    public static IncrementalTagStartingScanner create(
-            SnapshotManager snapshotManager, String startTagName, String endTagName) {
-        TagManager tagManager =
-                new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
-        Snapshot start = tagManager.getOrThrow(startTagName).trimToSnapshot();
-        Snapshot end = tagManager.getOrThrow(endTagName).trimToSnapshot();
-        if (end.id() <= start.id()) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Tag end %s with snapshot id %s should be larger than tag start %s with snapshot id %s",
-                            endTagName, end.id(), startTagName, start.id()));
-        }
-        return new IncrementalTagStartingScanner(snapshotManager, start, end);
-    }
-
     public static AbstractStartingScanner create(
             SnapshotManager snapshotManager, String endTagName, CoreOptions options) {
         TagTimeExtractor extractor = TagTimeExtractor.createForAutoTag(options);

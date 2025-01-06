@@ -313,6 +313,30 @@ public class IncrementalTableTest extends TableTestBase {
     }
 
     @Test
+    public void testIncrementalToTagFirst() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.STRING())
+                        .primaryKey("a")
+                        .option("bucket", "1")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        write(table, GenericRow.of(1, BinaryString.fromString("a")));
+        write(table, GenericRow.of(2, BinaryString.fromString("b")));
+        write(table, GenericRow.of(3, BinaryString.fromString("c")));
+
+        table.createTag("1", 1);
+        table.createTag("3", 2);
+
+        assertThat(read(table, Pair.of(INCREMENTAL_BETWEEN, "1,3")))
+                .containsExactlyInAnyOrder(GenericRow.of(2, BinaryString.fromString("b")));
+    }
+
+    @Test
     public void testIncrementalToAutoTag() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
