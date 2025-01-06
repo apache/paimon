@@ -60,7 +60,7 @@ public class ArrayToStringCastRule extends AbstractCastRule<InternalArray, Binar
                     sb.append(castExecutor.cast(o));
                 }
                 if (i != size - 1) {
-                    sb.append(",");
+                    sb.append(", ");
                 }
             }
             sb.append("]");

@@ -63,7 +63,7 @@ public class RowToStringCastRule extends AbstractCastRule<InternalRow, BinaryStr
                     sb.append(castExecutors[i].cast(field).toString());
                 }
                 if (i != fieldCount - 1) {
-                    sb.append(",");
+                    sb.append(", ");
                 }
             }
             sb.append("}");

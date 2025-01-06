@@ -697,7 +697,7 @@ public class CastExecutorTest {
         compareCastResult(
                 CastExecutors.resolve(arrayType, DataTypes.STRING()),
                 genericArray,
-                BinaryString.fromString("[1,null,2]"));
+                BinaryString.fromString("[1, null, 2]"));
     }
 
     @Test
@@ -712,7 +712,7 @@ public class CastExecutorTest {
         compareCastResult(
                 CastExecutors.resolve(mapType, DataTypes.STRING()),
                 genericMap,
-                BinaryString.fromString("{1->i,2->miss,3->you,4->null}"));
+                BinaryString.fromString("{1 -> i, 2 -> miss, 3 -> you, 4 -> null}"));
     }
 
     @Test
@@ -746,7 +746,7 @@ public class CastExecutorTest {
         compareCastResult(
                 CastExecutors.resolve(rowType, DataTypes.STRING()),
                 row,
-                BinaryString.fromString("{1,{2025-01-06,{1->[1,null,2]},null}}"));
+                BinaryString.fromString("{1, {2025-01-06, {1 -> [1, null, 2]}, null}}"));
     }
 
     @SuppressWarnings("rawtypes")

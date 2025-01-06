@@ -65,7 +65,7 @@ public class MapToStringCastRule extends AbstractCastRule<InternalMap, BinaryStr
                 } else {
                     sb.append(keyCastExecutor.cast(k));
                 }
-                sb.append("->");
+                sb.append(" -> ");
                 Object v = valueGetter.getElementOrNull(valueArray, i);
                 if (v == null) {
                     sb.append("null");
@@ -73,7 +73,7 @@ public class MapToStringCastRule extends AbstractCastRule<InternalMap, BinaryStr
                     sb.append(valueCastExecutor.cast(v));
                 }
                 if (i != size - 1) {
-                    sb.append(",");
+                    sb.append(", ");
                 }
             }
             sb.append("}");
