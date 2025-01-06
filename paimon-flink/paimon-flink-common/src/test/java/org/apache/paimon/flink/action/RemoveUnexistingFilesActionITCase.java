@@ -26,8 +26,8 @@ import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.util.Arrays;
-import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -43,51 +43,44 @@ public class RemoveUnexistingFilesActionITCase extends ActionITCaseBase {
         ListUnexistingFilesTest.prepareRandomlyDeletedTable(
                 warehouse, bucket, numFiles, numDeletes);
 
-        Function<RemoveUnexistingFilesAction, Integer> runAction =
-                action -> {
-                    int cnt = 0;
-                    try (CloseableIterator<String> it =
-                            action.buildDataStream().executeAndCollect()) {
-                        while (it.hasNext()) {
-                            cnt++;
-                            it.next();
-                        }
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                    return cnt;
-                };
-
-        for (int i = 0; i < numPartitions; i++) {
-            RemoveUnexistingFilesAction action =
-                    createAction(
-                            RemoveUnexistingFilesAction.class,
-                            "remove_unexisting_files",
-                            "--warehouse",
-                            warehouse,
-                            "--database",
-                            "mydb",
-                            "--table",
-                            "t",
-                            "--partition",
-                            "pt=" + i,
-                            "--dry_run",
-                            "true");
-            assertThat(runAction.apply(action)).isEqualTo(numDeletes[i]);
-        }
-
         RemoveUnexistingFilesAction action =
                 createAction(
-                        RemoveUnexistingFilesAction.class,
-                        "remove_unexisting_files",
-                        "--warehouse",
-                        warehouse,
-                        "--database",
-                        "mydb",
-                        "--table",
-                        "t");
-        assertThat(runAction.apply(action)).isEqualTo(Arrays.stream(numDeletes).sum());
+                                RemoveUnexistingFilesAction.class,
+                                "remove_unexisting_files",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                "mydb",
+                                "--table",
+                                "t",
+                                "--dry_run",
+                                "true")
+                        .withParallelism(2);
+        int[] actual = new int[numPartitions];
+        Pattern pattern = Pattern.compile("pt=(\\d+?)/");
+        try (CloseableIterator<String> it = action.buildDataStream().executeAndCollect()) {
+            while (it.hasNext()) {
+                String path = it.next();
+                Matcher matcher = pattern.matcher(path);
+                if (matcher.find()) {
+                    actual[Integer.parseInt(matcher.group(1))]++;
+                }
+            }
+        }
+        assertThat(actual).isEqualTo(numDeletes);
 
+        action =
+                createAction(
+                                RemoveUnexistingFilesAction.class,
+                                "remove_unexisting_files",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                "mydb",
+                                "--table",
+                                "t")
+                        .withParallelism(2);
+        action.run();
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql(
                 "CREATE CATALOG mycat WITH (\n"

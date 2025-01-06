@@ -32,19 +32,13 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.paimon.utils.ParameterUtils.getPartitions;
-import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
-
 /**
  * Procedure to remove unexisting data files from manifest entries. See {@link
  * RemoveUnexistingFilesAction} for detailed use cases.
  *
  * <pre><code>
- *  -- remove unexisting data files in all partitions of the table `mydb.myt`
+ *  -- remove unexisting data files in table `mydb.myt`
  *  CALL sys.remove_unexisting_files(`table` => 'mydb.myt')
- *
- *  -- remove unexisting data files only in partitions `pt = 0` and `pt = 1` of the table `mydb.myt`
- *  CALL sys.remove_unexisting_files(`table` => 'mydb.myt', 'partitions' => 'pt=0;pt=1')
  *
  *  -- only check what files will be removed, but not really remove them (dry run)
  *  CALL sys.remove_unexisting_files(`table` => 'mydb.myt', `dry_run` = true)
@@ -60,17 +54,12 @@ public class RemoveUnexistingFilesProcedure extends ProcedureBase {
     @ProcedureHint(
             argument = {
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
-                @ArgumentHint(
-                        name = "partitions",
-                        type = @DataTypeHint("STRING"),
-                        isOptional = true),
                 @ArgumentHint(name = "dry_run", type = @DataTypeHint("BOOLEAN"), isOptional = true),
                 @ArgumentHint(name = "parallelism", type = @DataTypeHint("INT"), isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
             String tableId,
-            @Nullable String partitions,
             @Nullable Boolean dryRun,
             @Nullable Integer parallelism)
             throws Exception {
@@ -80,9 +69,6 @@ public class RemoveUnexistingFilesProcedure extends ProcedureBase {
 
         RemoveUnexistingFilesAction action =
                 new RemoveUnexistingFilesAction(databaseName, tableName, catalog.options());
-        if (!(isNullOrWhitespaceOnly(partitions))) {
-            action.withPartitions(getPartitions(partitions.split(";")));
-        }
         if (Boolean.TRUE.equals(dryRun)) {
             action.dryRun();
         }

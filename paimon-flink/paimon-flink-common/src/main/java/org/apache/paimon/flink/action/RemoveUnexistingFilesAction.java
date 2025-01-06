@@ -27,7 +27,6 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.operation.ListUnexistingFiles;
-import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -82,18 +81,12 @@ public class RemoveUnexistingFilesAction extends TableActionBase {
     private static final OutputTag<String> RESULT_SIDE_OUTPUT =
             new OutputTag<>("result-side-output", BasicTypeInfo.STRING_TYPE_INFO);
 
-    @Nullable private List<Map<String, String>> partitions = null;
     private boolean dryRun = false;
     @Nullable private Integer parallelism = null;
 
     public RemoveUnexistingFilesAction(
             String databaseName, String tableName, Map<String, String> catalogConfig) {
         super(databaseName, tableName, catalogConfig);
-    }
-
-    public RemoveUnexistingFilesAction withPartitions(List<Map<String, String>> partitions) {
-        this.partitions = partitions;
-        return this;
     }
 
     public RemoveUnexistingFilesAction dryRun() {
@@ -113,16 +106,7 @@ public class RemoveUnexistingFilesAction extends TableActionBase {
 
     public DataStream<String> buildDataStream() throws Exception {
         FileStoreTable fileStoreTable = (FileStoreTable) table;
-        List<BinaryRow> binaryPartitions;
-        if (partitions == null) {
-            binaryPartitions = ((FileStoreTable) table).newScan().listPartitions();
-        } else {
-            binaryPartitions =
-                    PartitionPredicate.createBinaryPartitions(
-                            partitions,
-                            fileStoreTable.schema().logicalPartitionType(),
-                            fileStoreTable.coreOptions().partitionDefaultName());
-        }
+        List<BinaryRow> binaryPartitions = ((FileStoreTable) table).newScan().listPartitions();
 
         SingleOutputStreamOperator<byte[]> source =
                 env.fromData(

@@ -27,8 +27,8 @@ import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.util.Arrays;
-import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -55,32 +55,24 @@ public class RemoveUnexistingFilesProcedureITCase extends AbstractTestBase {
                         + ")");
         tEnv.executeSql("USE CATALOG mycat");
 
-        Function<String, Integer> runProcedure =
-                sql -> {
-                    int cnt = 0;
-                    try (CloseableIterator<Row> it = tEnv.executeSql(sql).collect()) {
-                        while (it.hasNext()) {
-                            cnt++;
-                            it.next();
-                        }
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                    return cnt;
-                };
-
-        for (int i = 0; i < numPartitions; i++) {
-            assertThat(
-                            runProcedure.apply(
-                                    "CALL sys.remove_unexisting_files(`table` => 'mydb.t', `partitions` => 'pt = "
-                                            + i
-                                            + "', `dry_run` => true)"))
-                    .isEqualTo(numDeletes[i]);
+        int[] actual = new int[numPartitions];
+        Pattern pattern = Pattern.compile("pt=(\\d+?)/");
+        try (CloseableIterator<Row> it =
+                tEnv.executeSql(
+                                "CALL sys.remove_unexisting_files(`table` => 'mydb.t', `dry_run` => true, `parallelism` => 2)")
+                        .collect()) {
+            while (it.hasNext()) {
+                Row row = it.next();
+                Matcher matcher = pattern.matcher(row.getField(0).toString());
+                if (matcher.find()) {
+                    actual[Integer.parseInt(matcher.group(1))]++;
+                }
+            }
         }
+        assertThat(actual).isEqualTo(numDeletes);
 
-        assertThat(runProcedure.apply("CALL sys.remove_unexisting_files(`table` => 'mydb.t')"))
-                .isEqualTo(Arrays.stream(numDeletes).sum());
-
+        tEnv.executeSql("CALL sys.remove_unexisting_files(`table` => 'mydb.t', `parallelism` => 2)")
+                .await();
         try (CloseableIterator<Row> it =
                 tEnv.executeSql("SELECT pt, CAST(COUNT(*) AS INT) FROM mydb.t GROUP BY pt")
                         .collect()) {

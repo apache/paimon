@@ -40,10 +40,6 @@ public class RemoveUnexistingFilesActionFactory implements ActionFactory {
                         params.getRequired(TABLE),
                         catalogConfigMap(params));
 
-        if (params.has(PARTITION)) {
-            action.withPartitions(getPartitions(params));
-        }
-
         if (params.has(DRY_RUN) && Boolean.parseBoolean(params.get(DRY_RUN))) {
             action.dryRun();
         }
