@@ -41,7 +41,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
-import static org.apache.paimon.CoreOptions.INCREMENTAL_TO;
+import static org.apache.paimon.CoreOptions.INCREMENTAL_TO_AUTO_TAG;
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -360,11 +360,11 @@ public class IncrementalTableTest extends TableTestBase {
 
         assertThat(tagManager.allTagNames()).containsOnly("2024-12-01", "2024-12-02", "2024-12-04");
 
-        assertThat(read(table, Pair.of(INCREMENTAL_TO, "2024-12-01"))).isEmpty();
-        assertThat(read(table, Pair.of(INCREMENTAL_TO, "2024-12-02")))
+        assertThat(read(table, Pair.of(INCREMENTAL_TO_AUTO_TAG, "2024-12-01"))).isEmpty();
+        assertThat(read(table, Pair.of(INCREMENTAL_TO_AUTO_TAG, "2024-12-02")))
                 .containsExactly(GenericRow.of(2, BinaryString.fromString("b")));
-        assertThat(read(table, Pair.of(INCREMENTAL_TO, "2024-12-03"))).isEmpty();
-        assertThat(read(table, Pair.of(INCREMENTAL_TO, "2024-12-04")))
+        assertThat(read(table, Pair.of(INCREMENTAL_TO_AUTO_TAG, "2024-12-03"))).isEmpty();
+        assertThat(read(table, Pair.of(INCREMENTAL_TO_AUTO_TAG, "2024-12-04")))
                 .containsExactly(GenericRow.of(3, BinaryString.fromString("c")));
     }
 

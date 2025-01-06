@@ -73,7 +73,7 @@ public class IncrementalTagStartingScanner extends AbstractStartingScanner {
         checkNotNull(
                 extractor,
                 "Table's tag creation mode doesn't support '%s' scan mode.",
-                CoreOptions.StartupMode.INCREMENTAL_TO_AUTO_TAG);
+                CoreOptions.INCREMENTAL_TO_AUTO_TAG);
         TagPeriodHandler periodHandler = TagPeriodHandler.create(options);
         checkArgument(
                 periodHandler.isAutoTag(endTagName),

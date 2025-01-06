@@ -26,6 +26,7 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousCompactorStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotFullStartingScanner;
@@ -199,7 +200,6 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                         : new StaticFromSnapshotStartingScanner(snapshotManager, scanSnapshotId);
             case INCREMENTAL:
                 checkArgument(!isStreaming, "Cannot read incremental in streaming mode.");
-                Pair<String, String> incrementalBetween = options.incrementalBetween();
                 CoreOptions.IncrementalBetweenScanMode scanType =
                         options.incrementalBetweenScanMode();
                 ScanMode scanMode;
@@ -220,7 +220,10 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                         throw new UnsupportedOperationException(
                                 "Unknown incremental scan type " + scanType.name());
                 }
-                if (options.toMap().get(CoreOptions.INCREMENTAL_BETWEEN.key()) != null) {
+
+                Options conf = options.toConfiguration();
+                if (conf.contains(CoreOptions.INCREMENTAL_BETWEEN)) {
+                    Pair<String, String> incrementalBetween = options.incrementalBetween();
                     try {
                         return new IncrementalStartingScanner(
                                 snapshotManager,
@@ -233,17 +236,19 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                                 incrementalBetween.getLeft(),
                                 incrementalBetween.getRight());
                     }
-                } else {
+                } else if (conf.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)) {
+                    Pair<String, String> incrementalBetween = options.incrementalBetween();
                     return new IncrementalTimeStampStartingScanner(
                             snapshotManager,
                             Long.parseLong(incrementalBetween.getLeft()),
                             Long.parseLong(incrementalBetween.getRight()),
                             scanMode);
+                } else if (conf.contains(CoreOptions.INCREMENTAL_TO_AUTO_TAG)) {
+                    String endTag = options.incrementalToAutoTag();
+                    return IncrementalTagStartingScanner.create(snapshotManager, endTag, options);
+                } else {
+                    throw new UnsupportedOperationException("Unknown incremental read mode.");
                 }
-            case INCREMENTAL_TO_AUTO_TAG:
-                checkArgument(!isStreaming, "Cannot read incremental in streaming mode.");
-                String endTag = options.incrementalTo();
-                return IncrementalTagStartingScanner.create(snapshotManager, endTag, options);
             default:
                 throw new UnsupportedOperationException(
                         "Unknown startup mode " + startupMode.name());

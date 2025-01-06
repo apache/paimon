@@ -1080,8 +1080,8 @@ public class CoreOptions implements Serializable {
                             "Read incremental changes between start timestamp (exclusive) and end timestamp, "
                                     + "for example, 't1,t2' means changes between timestamp t1 and timestamp t2.");
 
-    public static final ConfigOption<String> INCREMENTAL_TO =
-            key("incremental-to")
+    public static final ConfigOption<String> INCREMENTAL_TO_AUTO_TAG =
+            key("incremental-to-auto-tag")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
@@ -2126,8 +2126,8 @@ public class CoreOptions implements Serializable {
         return options.get(INCREMENTAL_BETWEEN_SCAN_MODE);
     }
 
-    public String incrementalTo() {
-        return options.get(INCREMENTAL_TO);
+    public String incrementalToAutoTag() {
+        return options.get(INCREMENTAL_TO_AUTO_TAG);
     }
 
     public Integer scanManifestParallelism() {
@@ -2481,12 +2481,7 @@ public class CoreOptions implements Serializable {
 
         INCREMENTAL(
                 "incremental",
-                "Read incremental changes between start and end snapshot or timestamp."),
-
-        INCREMENTAL_TO_AUTO_TAG(
-                "incremental-to-auto-tag",
-                "Specify an auto-created tag, then try to find an earlier auto-created tag to read incremental changes. "
-                        + "If specified tag is the first auto-created tag or doesn't exist, the result is empty.");
+                "Read incremental changes between start and end snapshot or timestamp.");
 
         private final String value;
         private final String description;
@@ -2768,13 +2763,10 @@ public class CoreOptions implements Serializable {
         }
 
         if ((options.contains(INCREMENTAL_BETWEEN_TIMESTAMP)
-                        || options.contains(INCREMENTAL_BETWEEN))
+                        || options.contains(INCREMENTAL_BETWEEN)
+                        || options.contains(INCREMENTAL_TO_AUTO_TAG))
                 && !options.contains(SCAN_MODE)) {
             options.set(SCAN_MODE, StartupMode.INCREMENTAL);
-        }
-
-        if (options.contains(INCREMENTAL_TO) && !options.contains(SCAN_MODE)) {
-            options.set(SCAN_MODE, StartupMode.INCREMENTAL_TO_AUTO_TAG);
         }
     }
 
