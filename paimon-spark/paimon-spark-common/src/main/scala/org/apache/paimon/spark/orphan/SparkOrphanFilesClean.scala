@@ -52,7 +52,7 @@ case class SparkOrphanFilesClean(
   with Logging {
 
   def doOrphanClean()
-      : (Dataset[(Long, Long)], (Dataset[BranchAndManifestFile], Dataset[(Long, Long, mutable.HashSet[String])])) = {
+      : (Dataset[(Long, Long)], (Dataset[BranchAndManifestFile], Dataset[(Long, Long, Set[String])])) = {
     import spark.implicits._
 
     val branches = validBranches()
@@ -154,7 +154,7 @@ case class SparkOrphanFilesClean(
           }
           logInfo(
             s"Total cleaned files: $deletedFilesCount, Total cleaned files len : $deletedFilesLenInBytes")
-          Iterator.single((deletedFilesCount, deletedFilesLenInBytes, involvedDirectories))
+          Iterator.single((deletedFilesCount, deletedFilesLenInBytes, involvedDirectories.toSet))
       }
       .cache()
 
