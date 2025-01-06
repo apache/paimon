@@ -1085,7 +1085,7 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Used for \"incremental-to-auto-tag\" to specify the auto-created tag to reading incremental changes.");
+                            "Used to specify the auto-created tag to reading incremental changes.");
 
     public static final ConfigOption<Boolean> END_INPUT_CHECK_PARTITION_EXPIRE =
             key("end-input.check-partition-expire")
