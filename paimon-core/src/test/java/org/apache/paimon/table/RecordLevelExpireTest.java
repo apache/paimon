@@ -38,6 +38,7 @@ import java.time.Duration;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
 
@@ -54,7 +55,7 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
                 Schema.newBuilder()
                         .column("pt", DataTypes.INT())
                         .column("pk", DataTypes.INT())
-                        .column("col1", DataTypes.INT().notNull())
+                        .column("col1", DataTypes.INT())
                         .partitionKeys("pt")
                         .primaryKey("pk", "pt")
                         .options(tableOptions().toMap())
@@ -99,5 +100,14 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
         assertThat(query()).containsExactlyInAnyOrder(GenericRow.of(1, 4, currentSecs + 60 * 60));
         assertThat(query(new int[] {2}))
                 .containsExactlyInAnyOrder(GenericRow.of(currentSecs + 60 * 60));
+
+        writeCommit(GenericRow.of(1, 5, null));
+        assertThat(query())
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 4, currentSecs + 60 * 60), GenericRow.of(1, 5, null));
+
+        // null time field for record-level expire is not supported yet.
+        assertThatThrownBy(() -> compact(1))
+                .hasMessageContaining("Time field for record-level expire should not be null.");
     }
 }

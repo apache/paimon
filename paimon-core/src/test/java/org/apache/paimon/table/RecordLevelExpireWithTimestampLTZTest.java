@@ -46,7 +46,7 @@ class RecordLevelExpireWithTimestampLTZTest extends RecordLevelExpireWithTimesta
                 Schema.newBuilder()
                         .column("pt", DataTypes.INT())
                         .column("pk", DataTypes.INT())
-                        .column("col1", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE().notNull())
+                        .column("col1", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE())
                         .partitionKeys("pt")
                         .primaryKey("pk", "pt")
                         .options(tableOptions().toMap())
