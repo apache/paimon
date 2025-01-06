@@ -57,7 +57,7 @@ public class IcebergManifestEntrySerializer extends ObjectSerializer<IcebergMani
 
     public IcebergManifestEntry fromRow(InternalRow row, IcebergManifestFileMeta meta) {
         IcebergManifestEntry.Status status = IcebergManifestEntry.Status.fromId(row.getInt(0));
-        long snapshotId = !row.isNullAt(1) ? row.getLong(1) : meta.addedSnapshotId();
+        long snapshotId = row.isNullAt(1) ? meta.addedSnapshotId() : row.getLong(1);
         long sequenceNumber = getOrInherit(row, meta, 2, status);
         long fileSequenceNumber = getOrInherit(row, meta, 3, status);
 

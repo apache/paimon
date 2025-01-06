@@ -203,6 +203,11 @@ public class IcebergDataField {
         if (dataType != null) {
             return dataType;
         }
+        dataType = getDataTypeFromType();
+        return dataType();
+    }
+
+    public DataType getDataTypeFromType() {
         String simpleType = type.toString();
         String delimiter = "(";
         if (simpleType.contains("[")) {
@@ -214,41 +219,31 @@ public class IcebergDataField {
                         : simpleType.substring(0, simpleType.indexOf(delimiter));
         switch (typePrefix) {
             case "boolean":
-                dataType = new BooleanType(!required);
-                break;
+                return new BooleanType(!required);
             case "int":
-                dataType = new IntType(!required);
-                break;
+                return new IntType(!required);
             case "long":
-                dataType = new BigIntType(!required);
-                break;
+                return new BigIntType(!required);
             case "float":
-                dataType = new FloatType(!required);
-                break;
+                return new FloatType(!required);
             case "double":
-                dataType = new DoubleType(!required);
-                break;
+                return new DoubleType(!required);
             case "date":
-                dataType = new DateType(!required);
-                break;
+                return new DateType(!required);
             case "string":
-                dataType = new VarCharType(!required, VarCharType.MAX_LENGTH);
-                break;
+                return new VarCharType(!required, VarCharType.MAX_LENGTH);
             case "binary":
-                dataType = new VarBinaryType(!required, VarBinaryType.MAX_LENGTH);
-                break;
+                return new VarBinaryType(!required, VarBinaryType.MAX_LENGTH);
             case "fixed":
                 int fixedLength =
                         Integer.parseInt(
                                 simpleType.substring(
                                         simpleType.indexOf("[") + 1, simpleType.indexOf("]")));
-                dataType = new BinaryType(!required, fixedLength);
-                break;
+                return new BinaryType(!required, fixedLength);
             case "uuid":
                 // https://iceberg.apache.org/spec/?h=vector#primitive-types
                 // uuid should use 16-byte fixed
-                dataType = new BinaryType(!required, 16);
-                break;
+                return new BinaryType(!required, 16);
             case "decimal":
                 int precision =
                         Integer.parseInt(
@@ -258,24 +253,18 @@ public class IcebergDataField {
                         Integer.parseInt(
                                 simpleType.substring(
                                         simpleType.indexOf(",") + 2, simpleType.indexOf(")")));
-                dataType = new DecimalType(!required, precision, scale);
-                break;
+                return new DecimalType(!required, precision, scale);
             case "timestamp":
-                dataType = new TimestampType(!required, 6);
-                break;
+                return new TimestampType(!required, 6);
             case "timestamptz":
-                dataType = new LocalZonedTimestampType(!required, 6);
-                break;
+                return new LocalZonedTimestampType(!required, 6);
             case "timestamp_ns": // iceberg v3 format
-                dataType = new TimestampType(!required, 9);
-                break;
+                return new TimestampType(!required, 9);
             case "timestamptz_ns": // iceberg v3 format
-                dataType = new LocalZonedTimestampType(!required, 9);
-                break;
+                return new LocalZonedTimestampType(!required, 9);
             default:
                 throw new UnsupportedOperationException("Unsupported data type: " + type);
         }
-        return dataType();
     }
 
     public DataField toDatafield() {

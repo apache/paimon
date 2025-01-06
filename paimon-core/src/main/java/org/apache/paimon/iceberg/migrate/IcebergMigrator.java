@@ -315,7 +315,8 @@ public class IcebergMigrator implements Migrator {
             status = fileIO.getFileStatus(new Path(icebergDataFileMeta.filePath()));
         } catch (IOException e) {
             throw new RuntimeException(
-                    "error when get file status. file path is " + icebergDataFileMeta.filePath());
+                    "error when get file status. file path is " + icebergDataFileMeta.filePath(),
+                    e);
         }
         String format = icebergDataFileMeta.fileFormat();
         return FileMetaUtils.constructFileMeta(format, status, fileIO, table, dir, rollback);

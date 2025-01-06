@@ -91,9 +91,7 @@ public class IcebergMigrateHadoopMetadata implements IcebergMigrateMetadata {
                 fileIO.deleteDirectoryQuietly(tablePath);
             }
         } catch (IOException e) {
-            LOG.warn(
-                    "exception occurred when deleting origin table, exception message:{}",
-                    e.getMessage());
+            LOG.warn("exception occurred when deleting origin table.", e);
         }
     }
 
@@ -105,7 +103,8 @@ public class IcebergMigrateHadoopMetadata implements IcebergMigrateMetadata {
         } catch (IOException e) {
             throw new RuntimeException(
                     "read iceberg version-hint.text failed. Iceberg metadata path: "
-                            + icebergMetaPathFactory.metadataDirectory());
+                            + icebergMetaPathFactory.metadataDirectory(),
+                    e);
         }
     }
 }
