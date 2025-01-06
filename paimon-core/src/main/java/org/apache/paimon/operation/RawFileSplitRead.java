@@ -222,11 +222,12 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         ? new LazyField<>(() -> ((BitmapDeletionVector) deletionVector).get())
                         : null;
 
-        LazyField<RoaringBitmap32> selection = fileIndex;
+        BitmapIndexResult selection = fileIndex;
         if (fileIndex != null && deletion != null) {
             selection =
-                    new LazyField<>(() -> RoaringBitmap32.andNot(fileIndex.get(), deletion.get()));
-            if (selection.get().isEmpty()) {
+                    new BitmapIndexResult(
+                            () -> RoaringBitmap32.andNot(fileIndex.get(), deletion.get()));
+            if (!selection.remain()) {
                 return new EmptyFileRecordReader<>();
             }
         }
