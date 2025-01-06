@@ -21,7 +21,6 @@ package org.apache.paimon.format;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
@@ -32,17 +31,14 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
     private final FileIO fileIO;
     private final Path file;
     private final long fileSize;
-    @Nullable private final LazyField<RoaringBitmap32> selection;
+    @Nullable private final RoaringBitmap32 selection;
 
     public FormatReaderContext(FileIO fileIO, Path file, long fileSize) {
         this(fileIO, file, fileSize, null);
     }
 
     public FormatReaderContext(
-            FileIO fileIO,
-            Path file,
-            long fileSize,
-            @Nullable LazyField<RoaringBitmap32> selection) {
+            FileIO fileIO, Path file, long fileSize, @Nullable RoaringBitmap32 selection) {
         this.fileIO = fileIO;
         this.file = file;
         this.fileSize = fileSize;
@@ -66,7 +62,7 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
 
     @Nullable
     @Override
-    public LazyField<RoaringBitmap32> selection() {
+    public RoaringBitmap32 selection() {
         return selection;
     }
 }

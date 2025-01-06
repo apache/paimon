@@ -18,7 +18,6 @@
 
 package org.apache.parquet.internal.filter2.columnindex;
 
-import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.parquet.filter2.compat.FilterCompat;
@@ -59,7 +58,7 @@ import java.util.function.Function;
  * therefore a {@link MissingOffsetIndexException} will be thrown from any {@code visit} methods if
  * any of the required offset indexes is missing.
  *
- * <p>Note: The class was copied over to support using selected position to filter {@link
+ * <p>Note: The class was copied over to support using {@link RoaringBitmap32} to filter {@link
  * RowRanges}.
  */
 public class ColumnIndexFilter implements Visitor<RowRanges> {
@@ -69,7 +68,7 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
     private final Set<ColumnPath> columns;
     private final long rowCount;
     private final long rowIndexOffset;
-    @Nullable private final LazyField<RoaringBitmap32> selection;
+    @Nullable private final RoaringBitmap32 selection;
     private RowRanges allRows;
 
     /**
@@ -93,7 +92,7 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
             Set<ColumnPath> paths,
             long rowCount,
             long rowIndexOffset,
-            @Nullable LazyField<RoaringBitmap32> selection) {
+            @Nullable RoaringBitmap32 selection) {
         return filter.accept(
                 new FilterCompat.Visitor<RowRanges>() {
                     @Override
@@ -131,7 +130,7 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
             Set<ColumnPath> paths,
             long rowCount,
             long rowIndexOffset,
-            @Nullable LazyField<RoaringBitmap32> selection) {
+            @Nullable RoaringBitmap32 selection) {
         this.columnIndexStore = columnIndexStore;
         this.columns = paths;
         this.rowCount = rowCount;

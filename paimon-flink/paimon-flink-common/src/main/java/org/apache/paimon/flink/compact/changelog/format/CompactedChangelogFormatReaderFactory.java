@@ -27,7 +27,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.reader.FileRecordReader;
-import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import java.io.EOFException;
@@ -84,7 +83,7 @@ public class CompactedChangelogFormatReaderFactory implements FormatReaderFactor
                     }
 
                     @Override
-                    public LazyField<RoaringBitmap32> selection() {
+                    public RoaringBitmap32 selection() {
                         return context.selection();
                     }
                 });

@@ -18,7 +18,6 @@
 
 package org.apache.parquet.internal.filter2.columnindex;
 
-import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.parquet.filter2.compat.FilterCompat.Filter;
@@ -41,9 +40,10 @@ import java.util.Set;
  *
  * <p>Note: The class was copied over to support using selected position to filter or narrow the
  * {@link RowRanges}. Added a new method {@link RowRanges#create(long, long,
- * PrimitiveIterator.OfInt, OffsetIndex, LazyField)}
+ * PrimitiveIterator.OfInt, OffsetIndex, RoaringBitmap32)}
  *
- * @see ColumnIndexFilter#calculateRowRanges(Filter, ColumnIndexStore, Set, long, long, LazyField)
+ * @see ColumnIndexFilter#calculateRowRanges(Filter, ColumnIndexStore, Set, long, long,
+ *     RoaringBitmap32)
  */
 public class RowRanges {
 
@@ -167,7 +167,7 @@ public class RowRanges {
             long rowIndexOffset,
             PrimitiveIterator.OfInt pageIndexes,
             OffsetIndex offsetIndex,
-            @Nullable LazyField<RoaringBitmap32> selection) {
+            @Nullable RoaringBitmap32 selection) {
         RowRanges ranges = new RowRanges();
         while (pageIndexes.hasNext()) {
             int pageIndex = pageIndexes.nextInt();
@@ -178,12 +178,11 @@ public class RowRanges {
             if (selection != null) {
                 long first = rowIndexOffset + firstRowIndex;
                 long last = rowIndexOffset + lastRowIndex;
-                RoaringBitmap32 result = selection.get();
-                if (!result.intersects(first, last + 1)) {
+                if (!selection.intersects(first, last + 1)) {
                     continue;
                 }
-                firstRowIndex = result.nextValue((int) first) - rowIndexOffset;
-                lastRowIndex = result.previousValue((int) (last)) - rowIndexOffset;
+                firstRowIndex = selection.nextValue((int) first) - rowIndexOffset;
+                lastRowIndex = selection.previousValue((int) (last)) - rowIndexOffset;
             }
 
             ranges.add(new Range(firstRowIndex, lastRowIndex));

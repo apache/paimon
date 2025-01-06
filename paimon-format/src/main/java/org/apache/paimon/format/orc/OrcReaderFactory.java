@@ -35,7 +35,6 @@ import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
-import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Pool;
 import org.apache.paimon.utils.RoaringBitmap32;
@@ -260,7 +259,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             org.apache.paimon.fs.Path path,
             long splitStart,
             long splitLength,
-            @Nullable LazyField<RoaringBitmap32> selection,
+            @Nullable RoaringBitmap32 selection,
             boolean deletionVectorsEnabled)
             throws IOException {
         org.apache.orc.Reader orcReader = createReader(conf, fileIO, path, selection);
@@ -344,7 +343,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             org.apache.hadoop.conf.Configuration conf,
             FileIO fileIO,
             org.apache.paimon.fs.Path path,
-            @Nullable LazyField<RoaringBitmap32> selection)
+            @Nullable RoaringBitmap32 selection)
             throws IOException {
         // open ORC file and create reader
         org.apache.hadoop.fs.Path hPath = new org.apache.hadoop.fs.Path(path.toUri());

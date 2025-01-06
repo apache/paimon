@@ -22,7 +22,6 @@ import org.apache.paimon.format.parquet.ParquetInputFile;
 import org.apache.paimon.format.parquet.ParquetInputStream;
 import org.apache.paimon.fs.FileRange;
 import org.apache.paimon.fs.VectoredReadable;
-import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.hadoop.fs.Path;
@@ -221,7 +220,7 @@ public class ParquetFileReader implements Closeable {
     private final List<ColumnIndexStore> blockIndexStores;
     private final List<RowRanges> blockRowRanges;
     private final boolean blocksFiltered;
-    @Nullable private final LazyField<RoaringBitmap32> selection;
+    @Nullable private final RoaringBitmap32 selection;
 
     // not final. in some cases, this may be lazily loaded for backward-compat.
     private ParquetMetadata footer;
@@ -233,9 +232,7 @@ public class ParquetFileReader implements Closeable {
     private InternalFileDecryptor fileDecryptor;
 
     public ParquetFileReader(
-            InputFile file,
-            ParquetReadOptions options,
-            @Nullable LazyField<RoaringBitmap32> selection)
+            InputFile file, ParquetReadOptions options, @Nullable RoaringBitmap32 selection)
             throws IOException {
         this.converter = new ParquetMetadataConverter(options);
         this.file = (ParquetInputFile) file;
@@ -368,12 +365,9 @@ public class ParquetFileReader implements Closeable {
                         blocks.stream()
                                 .filter(
                                         it ->
-                                                selection
-                                                        .get()
-                                                        .intersects(
-                                                                it.getRowIndexOffset(),
-                                                                it.getRowIndexOffset()
-                                                                        + it.getRowCount()))
+                                                selection.intersects(
+                                                        it.getRowIndexOffset(),
+                                                        it.getRowIndexOffset() + it.getRowCount()))
                                 .collect(Collectors.toList());
             }
         }

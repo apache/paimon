@@ -51,7 +51,6 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FormatReaderMapping;
 import org.apache.paimon.utils.FormatReaderMapping.Builder;
 import org.apache.paimon.utils.IOExceptionSupplier;
-import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.slf4j.Logger;
@@ -211,23 +210,20 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             }
         }
 
-        BitmapIndexResult fileIndex =
-                fileIndexResult instanceof BitmapIndexResult
-                        ? ((BitmapIndexResult) fileIndexResult)
-                        : null;
+        RoaringBitmap32 selection = null;
+        if (fileIndexResult instanceof BitmapIndexResult) {
+            selection = ((BitmapIndexResult) fileIndexResult).get();
+        }
 
+        RoaringBitmap32 deletion = null;
         DeletionVector deletionVector = dvFactory == null ? null : dvFactory.get();
-        LazyField<RoaringBitmap32> deletion =
-                deletionVector instanceof BitmapDeletionVector
-                        ? new LazyField<>(() -> ((BitmapDeletionVector) deletionVector).get())
-                        : null;
+        if (deletionVector instanceof BitmapDeletionVector) {
+            deletion = ((BitmapDeletionVector) deletionVector).get();
+        }
 
-        BitmapIndexResult selection = fileIndex;
-        if (fileIndex != null && deletion != null) {
-            selection =
-                    new BitmapIndexResult(
-                            () -> RoaringBitmap32.andNot(fileIndex.get(), deletion.get()));
-            if (!selection.remain()) {
+        if (deletion != null && selection != null) {
+            selection = RoaringBitmap32.andNot(selection, deletion);
+            if (selection.isEmpty()) {
                 return new EmptyFileRecordReader<>();
             }
         }
