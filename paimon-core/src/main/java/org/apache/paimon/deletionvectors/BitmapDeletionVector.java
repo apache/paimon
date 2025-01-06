@@ -94,7 +94,7 @@ public class BitmapDeletionVector implements DeletionVector {
     }
 
     /**
-     * <p>Note: the result is read only, do not call any modify operation outside.
+     * Note: the result is read only, do not call any modify operation outside.
      *
      * @return the deleted position
      */
