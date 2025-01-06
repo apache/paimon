@@ -984,9 +984,12 @@ public class FlinkCatalogTest {
                 options.put(SCAN_FILE_CREATION_TIME_MILLIS.key(), System.currentTimeMillis() + "");
             } else if (mode == CoreOptions.StartupMode.INCREMENTAL) {
                 options.put("incremental-between", "2,5");
+            } else if (mode == CoreOptions.StartupMode.INCREMENTAL_TO_AUTO_TAG) {
+                options.put("incremental-to", "2024-12-01");
             }
 
-            if (isStreaming && mode == CoreOptions.StartupMode.INCREMENTAL) {
+            if (isStreaming && mode == CoreOptions.StartupMode.INCREMENTAL
+                    || mode == CoreOptions.StartupMode.INCREMENTAL_TO_AUTO_TAG) {
                 continue;
             }
             allOptions.add(options);
