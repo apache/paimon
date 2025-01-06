@@ -23,7 +23,6 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.MockRESTMessage;
 import org.apache.paimon.rest.RESTCatalogFactory;
-import org.apache.paimon.rest.RESTCatalogInternalOptions;
 import org.apache.paimon.rest.RESTCatalogOptions;
 import org.apache.paimon.rest.RESTObjectMapper;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
@@ -33,8 +32,6 @@ import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
-import okhttp3.mockwebserver.MockResponse;
-import okhttp3.mockwebserver.MockWebServer;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.catalog.Catalog;
@@ -66,7 +63,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 public class FlinkRESTCatalogTest {
     private final ObjectMapper mapper = RESTObjectMapper.create();
     private final ObjectPath path1 = new ObjectPath("db1", "t1");
-    private MockWebServer mockWebServer;
+    private MockRESTCatalogServer mockRESTCatalogServer;
     private String serverUrl;
     private String warehouse;
     private Catalog catalog;
@@ -75,9 +72,9 @@ public class FlinkRESTCatalogTest {
 
     @Before
     public void beforeEach() throws IOException {
-        mockWebServer = new MockWebServer();
-        mockWebServer.start();
-        serverUrl = mockWebServer.url("").toString();
+        mockRESTCatalogServer = new MockRESTCatalogServer(warehouse);
+        mockRESTCatalogServer.start();
+        serverUrl = mockRESTCatalogServer.getUrl();
         Options options = new Options();
         options.set(RESTCatalogOptions.URI, serverUrl);
         String initToken = "init_token";
@@ -86,7 +83,6 @@ public class FlinkRESTCatalogTest {
         warehouse = new File(temporaryFolder.newFolder(), UUID.randomUUID().toString()).toString();
         options.set(LOG_SYSTEM_AUTO_REGISTER, true);
         options.set(CatalogOptions.METASTORE, RESTCatalogFactory.IDENTIFIER);
-        mockConfig(warehouse);
         GetDatabaseResponse response =
                 MockRESTMessage.getDatabaseResponse(
                         org.apache.paimon.catalog.Catalog.DEFAULT_DATABASE);
@@ -100,7 +96,7 @@ public class FlinkRESTCatalogTest {
 
     @After
     public void tearDown() throws IOException {
-        mockWebServer.shutdown();
+        mockRESTCatalogServer.shutdown();
     }
 
     @Test
@@ -149,21 +145,5 @@ public class FlinkRESTCatalogTest {
                                                         DataTypes.STRING(), DataTypes.INT()))))),
                 Collections.emptyList(),
                 null);
-    }
-
-    private void mockConfig(String warehouseStr) {
-        String mockResponse =
-                String.format(
-                        "{\"defaults\": {\"%s\": \"%s\", \"%s\": \"%s\"}}",
-                        RESTCatalogInternalOptions.PREFIX.key(),
-                        "prefix",
-                        CatalogOptions.WAREHOUSE.key(),
-                        warehouseStr);
-        mockResponse(mockResponse, 200);
-    }
-
-    private void mockResponse(String mockContent, int httpCode) {
-        MockResponse mockResponse = MockRESTMessage.mockResponse(mockContent, httpCode);
-        mockWebServer.enqueue(mockResponse);
     }
 }
