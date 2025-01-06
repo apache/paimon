@@ -221,8 +221,10 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             deletion = ((BitmapDeletionVector) deletionVector).get();
         }
 
-        if (deletion != null && selection != null) {
-            selection = RoaringBitmap32.andNot(selection, deletion);
+        if (selection != null) {
+            if (deletion != null) {
+                selection = RoaringBitmap32.andNot(selection, deletion);
+            }
             if (selection.isEmpty()) {
                 return new EmptyFileRecordReader<>();
             }
