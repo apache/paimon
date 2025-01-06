@@ -33,15 +33,14 @@ import org.apache.paimon.types.TimestampType;
 import javax.annotation.Nullable;
 
 import java.time.Duration;
+import java.util.Optional;
 import java.util.function.Function;
-
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A factory to create {@link RecordReader} expires records by time. */
 public class RecordLevelExpire {
 
     private final int expireTime;
-    private final Function<InternalRow, Integer> fieldGetter;
+    private final Function<InternalRow, Optional<Integer>> fieldGetter;
 
     @Nullable
     public static RecordLevelExpire create(CoreOptions options, RowType rowType) {
@@ -65,11 +64,13 @@ public class RecordLevelExpire {
         }
 
         DataType dataType = rowType.getField(timeFieldName).type();
-        Function<InternalRow, Integer> fieldGetter = createFieldGetter(dataType, fieldIndex);
+        Function<InternalRow, Optional<Integer>> fieldGetter =
+                createFieldGetter(dataType, fieldIndex);
         return new RecordLevelExpire((int) expireTime.getSeconds(), fieldGetter);
     }
 
-    private RecordLevelExpire(int expireTime, Function<InternalRow, Integer> fieldGetter) {
+    private RecordLevelExpire(
+            int expireTime, Function<InternalRow, Optional<Integer>> fieldGetter) {
         this.expireTime = expireTime;
         this.fieldGetter = fieldGetter;
     }
@@ -80,26 +81,46 @@ public class RecordLevelExpire {
 
     private RecordReader<KeyValue> wrap(RecordReader<KeyValue> reader) {
         int currentTime = (int) (System.currentTimeMillis() / 1000);
-        return reader.filter(kv -> currentTime <= fieldGetter.apply(kv.value()) + expireTime);
+        return reader.filter(
+                keyValue ->
+                        fieldGetter
+                                .apply(keyValue.value())
+                                .map(integer -> currentTime <= integer + expireTime)
+                                .orElse(true));
     }
 
-    private static Function<InternalRow, Integer> createFieldGetter(
+    private static Function<InternalRow, Optional<Integer>> createFieldGetter(
             DataType dataType, int fieldIndex) {
-        final Function<InternalRow, Integer> fieldGetter;
+        final Function<InternalRow, Optional<Integer>> fieldGetter;
         if (dataType instanceof IntType) {
-            fieldGetter = row -> row.getInt(fieldIndex);
+            fieldGetter =
+                    row ->
+                            row.isNullAt(fieldIndex)
+                                    ? Optional.empty()
+                                    : Optional.of(row.getInt(fieldIndex));
         } else if (dataType instanceof BigIntType) {
             fieldGetter =
                     row -> {
+                        if (row.isNullAt(fieldIndex)) {
+                            return Optional.empty();
+                        }
                         long value = row.getLong(fieldIndex);
                         // If it is milliseconds, convert it to seconds.
-                        return (int) (value >= 1_000_000_000_000L ? value / 1000 : value);
+                        return Optional.of(
+                                (int) (value >= 1_000_000_000_000L ? value / 1000 : value));
                     };
         } else if (dataType instanceof TimestampType
                 || dataType instanceof LocalZonedTimestampType) {
             int precision = DataTypeChecks.getPrecision(dataType);
             fieldGetter =
-                    row -> (int) (row.getTimestamp(fieldIndex, precision).getMillisecond() / 1000);
+                    row ->
+                            row.isNullAt(fieldIndex)
+                                    ? Optional.empty()
+                                    : Optional.of(
+                                            (int)
+                                                    (row.getTimestamp(fieldIndex, precision)
+                                                                    .getMillisecond()
+                                                            / 1000));
         } else {
             throw new IllegalArgumentException(
                     String.format(
@@ -107,11 +128,6 @@ public class RecordLevelExpire {
                             dataType));
         }
 
-        return row -> {
-            checkArgument(
-                    !row.isNullAt(fieldIndex),
-                    "Time field for record-level expire should not be null.");
-            return fieldGetter.apply(row);
-        };
+        return fieldGetter;
     }
 }
