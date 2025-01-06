@@ -115,12 +115,12 @@ and ingested with data for 12/04. Now if you want to query the incremental chang
 of 12/03 is not created, you will use `incremental-between` with '2024-12-01,2024-12-02', '2024-12-02,2024-12-03' and 
 '2024-12-03,2024-12-04' respectively, then you will get an error that the tag '2024-12-03' doesn't exist.
 
-We introduced a new option `incremental-to` for this scenario. You can only specify the end tag, and Paimon will find an earlier
-tag and return changes between them. If the tag doesn't exist or the earlier tag doesn't exist, return empty. 
+We introduced a new option `incremental-to-auto-tag` for this scenario. You can only specify the end tag, and Paimon will 
+find an earlier tag and return changes between them. If the tag doesn't exist or the earlier tag doesn't exist, return empty. 
 
-For example, when you query 'incremental-to=2024-12-01' or 'incremental-to=2024-12-03', the result is empty; Query 
-'incremental-to=2024-12-02', the result is change between 12/01 and 12/02; Query 'incremental-to=2024-12-04', the result 
-is change between 12/02 and 12/04.
+For example, when you query 'incremental-to-auto-tag=2024-12-01' or 'incremental-to-auto-tag=2024-12-03', the result is 
+empty; Query 'incremental-to-auto-tag=2024-12-02', the result is change between 12/01 and 12/02; Query 'incremental-to-auto-tag=2024-12-04', 
+the result is change between 12/02 and 12/04.
 
 ## Streaming Query
 
