@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 abstract class RecordLevelExpireWithTimestampBaseTest extends PrimaryKeyTableTestBase {
 
@@ -61,5 +62,13 @@ abstract class RecordLevelExpireWithTimestampBaseTest extends PrimaryKeyTableTes
         // compact, expired
         compact(1);
         assertThat(query(new int[] {0, 1})).containsExactlyInAnyOrder(GenericRow.of(1, 3));
+
+        writeCommit(GenericRow.of(1, 5, null));
+        assertThat(query(new int[] {0, 1}))
+                .containsExactlyInAnyOrder(GenericRow.of(1, 3), GenericRow.of(1, 5));
+
+        // null time field for record-level expire is not supported yet.
+        assertThatThrownBy(() -> compact(1))
+                .hasMessageContaining("Time field for record-level expire should not be null.");
     }
 }

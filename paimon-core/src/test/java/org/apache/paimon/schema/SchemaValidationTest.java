@@ -36,6 +36,7 @@ import java.util.Map;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.schema.SchemaValidation.validateTableSchema;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -110,8 +111,7 @@ class SchemaValidationTest {
         Map<String, String> options = new HashMap<>(2);
         options.put(CoreOptions.RECORD_LEVEL_TIME_FIELD.key(), "f0");
         options.put(CoreOptions.RECORD_LEVEL_EXPIRE_TIME.key(), "1 m");
-        assertThatThrownBy(() -> validateTableSchemaExec(options))
-                .hasMessageContaining("Time field f0 for record-level expire should be not null");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
 
         options.put(CoreOptions.RECORD_LEVEL_TIME_FIELD.key(), "f10");
         assertThatThrownBy(() -> validateTableSchemaExec(options))

@@ -203,12 +203,6 @@ public class SchemaValidation {
                                 "The record level time field type should be one of INT, BIGINT, or TIMESTAMP, but field type is %s.",
                                 dataType));
             }
-            if (dataType.isNullable()) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "Time field %s for record-level expire should be not null.",
-                                recordLevelTimeField));
-            }
         }
 
         if (options.mergeEngine() == MergeEngine.FIRST_ROW) {
