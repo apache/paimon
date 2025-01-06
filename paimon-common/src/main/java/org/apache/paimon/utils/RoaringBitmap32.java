@@ -60,10 +60,6 @@ public class RoaringBitmap32 {
         return roaringBitmap.contains(x);
     }
 
-    public boolean contains(RoaringBitmap32 contains) {
-        return roaringBitmap.contains(contains.roaringBitmap);
-    }
-
     public boolean isEmpty() {
         return roaringBitmap.isEmpty();
     }
