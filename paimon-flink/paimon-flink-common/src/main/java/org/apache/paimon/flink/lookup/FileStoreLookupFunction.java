@@ -166,11 +166,6 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         LOG.info("Creating lookup table for {}.", table.name());
         if (options.get(LOOKUP_CACHE_MODE) == LookupCacheMode.AUTO
                 && new HashSet<>(table.primaryKeys()).equals(new HashSet<>(joinKeys))) {
-            String message =
-                    String.format(
-                            "{}={} and primary keys equal to join keys, trying to create PrimaryKeyPartialLookupTable.",
-                            LOOKUP_CACHE_MODE.key(),
-                            LookupCacheMode.AUTO);
             if (isRemoteServiceAvailable(storeTable)) {
                 this.lookupTable =
                         PrimaryKeyPartialLookupTable.createRemoteTable(
