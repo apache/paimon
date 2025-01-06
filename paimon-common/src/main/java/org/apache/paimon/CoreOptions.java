@@ -124,6 +124,33 @@ public class CoreOptions implements Serializable {
                                                     + "if there is no primary key, the full row will be used.")
                                     .build());
 
+    public static final ConfigOption<String> DATA_FILE_EXTERNAL_PATHS =
+            key("data-file.external-paths")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The external paths where the data of this table will be written, "
+                                    + "multiple elements separated by commas.");
+
+    public static final ConfigOption<ExternalPathStrategy> DATA_FILE_EXTERNAL_PATHS_STRATEGY =
+            key("data-file.external-paths.strategy")
+                    .enumType(ExternalPathStrategy.class)
+                    .defaultValue(ExternalPathStrategy.NONE)
+                    .withDescription(
+                            "The strategy of selecting an external path when writing data.");
+
+    public static final ConfigOption<String> DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS =
+            key("data-file.external-paths.specific-fs")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The specific file system of the external path when "
+                                    + DATA_FILE_EXTERNAL_PATHS_STRATEGY.key()
+                                    + " is set to "
+                                    + ExternalPathStrategy.SPECIFIC_FS
+                                    + ", should be the prefix scheme of the external path, now supported are s3 and oss.");
+
+    // todo, this path is the table schema path, the name will be changed in the later PR.
     @ExcludeFromDocumentation("Internal use only")
     public static final ConfigOption<String> PATH =
             key("path")
@@ -2181,6 +2208,21 @@ public class CoreOptions implements Serializable {
         return options.get(PARTITION_EXPIRATION_STRATEGY);
     }
 
+    @Nullable
+    public String dataFileExternalPaths() {
+        return options.get(DATA_FILE_EXTERNAL_PATHS);
+    }
+
+    @Nullable
+    public ExternalPathStrategy externalPathStrategy() {
+        return options.get(DATA_FILE_EXTERNAL_PATHS_STRATEGY);
+    }
+
+    @Nullable
+    public String externalSpecificFS() {
+        return options.get(DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS);
+    }
+
     public String partitionTimestampFormatter() {
         return options.get(PARTITION_TIMESTAMP_FORMATTER);
     }
@@ -2973,6 +3015,40 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         PartitionExpireStrategy(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Specifies the strategy for selecting external storage paths. */
+    public enum ExternalPathStrategy implements DescribedEnum {
+        NONE(
+                "none",
+                "Do not choose any external storage, data will still be written to the default warehouse path."),
+
+        SPECIFIC_FS(
+                "specific-fs",
+                "Select a specific file system as the external path. Currently supported are S3 and OSS."),
+
+        ROUND_ROBIN(
+                "round-robin",
+                "When writing a new file, a path is chosen from data-file.external-paths in turn.");
+
+        private final String value;
+
+        private final String description;
+
+        ExternalPathStrategy(String value, String description) {
             this.value = value;
             this.description = description;
         }

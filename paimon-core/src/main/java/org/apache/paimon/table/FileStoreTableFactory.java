@@ -65,6 +65,7 @@ public class FileStoreTableFactory {
                                                 "Schema file not found in location "
                                                         + tablePath
                                                         + ". Please create table first."));
+
         return create(fileIO, tablePath, tableSchema, options, CatalogEnvironment.empty());
     }
 

@@ -23,7 +23,9 @@ import org.apache.paimon.flink.action.CompactAction;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.fs.local.LocalFileIOLoader;
 import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.core.execution.JobClient;
@@ -67,10 +69,14 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     // ------------------------------------------------------------------------
     private String path;
     private Map<String, String> tableDefaultProperties;
+    private String externalPath1;
+    private String externalPath2;
 
     @BeforeEach
     public void before() throws IOException {
         path = getTempDirPath();
+        externalPath1 = getTempDirPath();
+        externalPath2 = getTempDirPath();
 
         ThreadLocalRandom random = ThreadLocalRandom.current();
         tableDefaultProperties = new HashMap<>();
@@ -206,6 +212,112 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     @Timeout(TIMEOUT)
     public void testLookupChangelog() throws Exception {
         innerTestChangelogProducing(Collections.singletonList("'changelog-producer' = 'lookup'"));
+    }
+
+    @Test
+    public void testTableReadWriteWithExternalPathRoundRobin() throws Exception {
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(ThreadLocalRandom.current().nextInt(900) + 100)
+                        .parallelism(1)
+                        .build();
+
+        sEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
+        sEnv.executeSql("USE CATALOG testCatalog");
+        String externalPaths =
+                TraceableFileIO.SCHEME
+                        + "://"
+                        + externalPath1.toString()
+                        + ","
+                        + LocalFileIOLoader.SCHEME
+                        + "://"
+                        + externalPath2.toString();
+        sEnv.executeSql(
+                "CREATE TABLE T2 ( k INT, v STRING, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( "
+                        + "'bucket' = '1',"
+                        + "'data-file.external-paths' = '"
+                        + externalPaths
+                        + "',"
+                        + "'data-file.external-paths.strategy' = 'round-robin'"
+                        + ")");
+
+        CloseableIterator<Row> it = collect(sEnv.executeSql("SELECT * FROM T2"));
+
+        // insert data
+        sEnv.executeSql("INSERT INTO T2 VALUES (1, 'A')").await();
+        // read initial data
+        List<String> actual = new ArrayList<>();
+        for (int i = 0; i < 1; i++) {
+            actual.add(it.next().toString());
+        }
+        assertThat(actual).containsExactlyInAnyOrder("+I[1, A]");
+
+        // insert data
+        sEnv.executeSql("INSERT INTO T2 VALUES (2, 'B')").await();
+
+        for (int i = 0; i < 1; i++) {
+            actual.add(it.next().toString());
+        }
+
+        // insert data
+        sEnv.executeSql("INSERT INTO T2 VALUES (3, 'C')").await();
+
+        for (int i = 0; i < 1; i++) {
+            actual.add(it.next().toString());
+        }
+
+        assertThat(actual).containsExactlyInAnyOrder("+I[1, A]", "+I[2, B]", "+I[3, C]");
+    }
+
+    @Test
+    public void testTableReadWriteWithExternalPathSpecificFS() throws Exception {
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(ThreadLocalRandom.current().nextInt(900) + 100)
+                        .parallelism(1)
+                        .build();
+
+        sEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
+        sEnv.executeSql("USE CATALOG testCatalog");
+        String externalPaths =
+                TraceableFileIO.SCHEME
+                        + "://"
+                        + externalPath1.toString()
+                        + ","
+                        + "fake://"
+                        + externalPath2.toString();
+        sEnv.executeSql(
+                "CREATE TABLE T2 ( k INT, v STRING, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( "
+                        + "'bucket' = '1',"
+                        + "'data-file.external-paths' = '"
+                        + externalPaths
+                        + "',"
+                        + "'data-file.external-paths.strategy' = 'specific-fs',"
+                        + "'data-file.external-paths.specific-fs' = 'traceable'"
+                        + ")");
+
+        CloseableIterator<Row> it = collect(sEnv.executeSql("SELECT * FROM T2"));
+
+        // insert data
+        sEnv.executeSql("INSERT INTO T2 VALUES (1, 'A')").await();
+        // read initial data
+        List<String> actual = new ArrayList<>();
+        for (int i = 0; i < 1; i++) {
+            actual.add(it.next().toString());
+        }
+        assertThat(actual).containsExactlyInAnyOrder("+I[1, A]");
+
+        // insert data
+        sEnv.executeSql("INSERT INTO T2 VALUES (2, 'B'), (3, 'C')").await();
+
+        for (int i = 0; i < 2; i++) {
+            actual.add(it.next().toString());
+        }
+        assertThat(actual).containsExactlyInAnyOrder("+I[1, A]", "+I[2, B]", "+I[3, C]");
     }
 
     @Test

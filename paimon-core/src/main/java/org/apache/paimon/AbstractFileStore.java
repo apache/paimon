@@ -18,10 +18,12 @@
 
 package org.apache.paimon;
 
+import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.TableExternalPathProvider;
 import org.apache.paimon.index.HashIndexFile;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestFile;
@@ -119,7 +121,16 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.legacyPartitionName(),
                 options.fileSuffixIncludeCompression(),
                 options.fileCompression(),
-                options.dataFilePathDirectory());
+                options.dataFilePathDirectory(),
+                getExternalPathProvider());
+    }
+
+    private TableExternalPathProvider getExternalPathProvider() {
+        String externalPaths = options.dataFileExternalPaths();
+        ExternalPathStrategy externalPathStrategy = options.externalPathStrategy();
+        String externalSpecificFS = options.externalSpecificFS();
+        return new TableExternalPathProvider(
+                externalPaths, externalPathStrategy, externalSpecificFS);
     }
 
     @Override

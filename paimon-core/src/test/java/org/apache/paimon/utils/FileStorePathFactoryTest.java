@@ -92,6 +92,7 @@ public class FileStorePathFactoryTest {
                         CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null,
                         null);
 
         assertPartition("20211224", 16, pathFactory, "/dt=20211224/hr=16");
@@ -134,6 +135,7 @@ public class FileStorePathFactoryTest {
                 CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
                 CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                 CoreOptions.FILE_COMPRESSION.defaultValue(),
+                null,
                 null);
     }
 }
