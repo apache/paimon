@@ -228,7 +228,7 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                                 Long.parseLong(incrementalBetween.getRight()),
                                 scanMode);
                     } catch (NumberFormatException e) {
-                        return new IncrementalTagStartingScanner(
+                        return IncrementalTagStartingScanner.create(
                                 snapshotManager,
                                 incrementalBetween.getLeft(),
                                 incrementalBetween.getRight());
@@ -240,6 +240,10 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                             Long.parseLong(incrementalBetween.getRight()),
                             scanMode);
                 }
+            case INCREMENTAL_TO_AUTO_TAG:
+                checkArgument(!isStreaming, "Cannot read incremental in streaming mode.");
+                String endTag = options.incrementalTo();
+                return IncrementalTagStartingScanner.create(snapshotManager, endTag, options);
             default:
                 throw new UnsupportedOperationException(
                         "Unknown startup mode " + startupMode.name());

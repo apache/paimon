@@ -20,18 +20,28 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.TagManager;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
+import static org.apache.paimon.CoreOptions.INCREMENTAL_TO;
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -300,5 +310,65 @@ public class IncrementalTableTest extends TableTestBase {
 
         assertThat(read(table, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG2")))
                 .containsExactlyInAnyOrder(GenericRow.of(1, 1, 2));
+    }
+
+    @Test
+    public void testIncrementalToAutoTag() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.STRING())
+                        .primaryKey("a")
+                        .option("bucket", "1")
+                        .option("tag.automatic-creation", "watermark")
+                        .option("tag.creation-period", "daily")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TagManager tagManager = table.tagManager();
+
+        write.write(GenericRow.of(1, BinaryString.fromString("a")));
+        List<CommitMessage> commitMessages = write.prepareCommit(false, 0);
+        commit.commit(
+                new ManifestCommittable(
+                        0,
+                        utcMills("2024-12-02T10:00:00"),
+                        Collections.emptyMap(),
+                        commitMessages));
+
+        write.write(GenericRow.of(2, BinaryString.fromString("b")));
+        commitMessages = write.prepareCommit(false, 1);
+        commit.commit(
+                new ManifestCommittable(
+                        1,
+                        utcMills("2024-12-03T10:00:00"),
+                        Collections.emptyMap(),
+                        commitMessages));
+
+        write.write(GenericRow.of(3, BinaryString.fromString("c")));
+        commitMessages = write.prepareCommit(false, 2);
+        commit.commit(
+                new ManifestCommittable(
+                        2,
+                        utcMills("2024-12-05T10:00:00"),
+                        Collections.emptyMap(),
+                        commitMessages));
+
+        assertThat(tagManager.allTagNames()).containsOnly("2024-12-01", "2024-12-02", "2024-12-04");
+
+        assertThat(read(table, Pair.of(INCREMENTAL_TO, "2024-12-01"))).isEmpty();
+        assertThat(read(table, Pair.of(INCREMENTAL_TO, "2024-12-02")))
+                .containsExactly(GenericRow.of(2, BinaryString.fromString("b")));
+        assertThat(read(table, Pair.of(INCREMENTAL_TO, "2024-12-03"))).isEmpty();
+        assertThat(read(table, Pair.of(INCREMENTAL_TO, "2024-12-04")))
+                .containsExactly(GenericRow.of(3, BinaryString.fromString("c")));
+    }
+
+    private static long utcMills(String timestamp) {
+        return Timestamp.fromLocalDateTime(LocalDateTime.parse(timestamp)).getMillisecond();
     }
 }
