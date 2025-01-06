@@ -168,6 +168,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 this.lookupTable =
                         PrimaryKeyPartialLookupTable.createRemoteTable(
                                 storeTable, projection, joinKeys);
+                LOG.info(
+                        "Created lookup table for {}. Type is PrimaryKeyPartialLookupTable with remote service.",
+                        table.name());
             } else {
                 try {
                     this.lookupTable =
@@ -177,6 +180,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                                     path,
                                     joinKeys,
                                     getRequireCachedBucketIds());
+                    LOG.info(
+                            "Created lookup table for {}. Type is PrimaryKeyPartialLookupTable with LocalQueryExecutor.",
+                            table.name());
                 } catch (UnsupportedOperationException ignore2) {
                 }
             }
@@ -193,6 +199,10 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                             joinKeys,
                             getRequireCachedBucketIds());
             this.lookupTable = FullCacheLookupTable.create(context, options.get(LOOKUP_CACHE_ROWS));
+            LOG.info(
+                    "Created lookup table for {}. Type is {}.",
+                    table.name(),
+                    lookupTable.getClass().getSimpleName());
         }
 
         if (partitionLoader != null) {
