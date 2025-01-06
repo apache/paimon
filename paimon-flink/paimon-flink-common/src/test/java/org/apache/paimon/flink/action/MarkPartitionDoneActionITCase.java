@@ -20,7 +20,9 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.flink.sink.partition.MockCustomPartitionMarkDoneAction;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.partition.actions.PartitionMarkDoneAction;
 import org.apache.paimon.partition.file.SuccessFile;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
@@ -36,8 +38,11 @@ import org.junit.jupiter.params.provider.MethodSource;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION;
+import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_CUSTOM_CLASS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link MarkPartitionDoneAction}. */
@@ -103,7 +108,7 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @MethodSource("testArguments")
-    public void testDropPartitionWithMultiplePartitionKey(boolean hasPk, String invoker)
+    public void testPartitionMarkDoneWithMultiplePartitionKey(boolean hasPk, String invoker)
             throws Exception {
         FileStoreTable table = prepareTable(hasPk);
 
@@ -149,7 +154,72 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
         assertThat(successFile2).isNotNull();
     }
 
+    @ParameterizedTest
+    @MethodSource("testArguments")
+    public void testCustomPartitionMarkDoneAction(boolean hasPk, String invoker) throws Exception {
+
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                PARTITION_MARK_DONE_ACTION.key(),
+                PartitionMarkDoneAction.SUCCESS_FILE + "," + PartitionMarkDoneAction.CUSTOM);
+        options.put(
+                PARTITION_MARK_DONE_CUSTOM_CLASS.key(),
+                MockCustomPartitionMarkDoneAction.class.getName());
+
+        FileStoreTable table = prepareTable(hasPk, options);
+
+        switch (invoker) {
+            case "action":
+                createAction(
+                                MarkPartitionDoneAction.class,
+                                "mark_partition_done",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--partition",
+                                "partKey0=0,partKey1=1",
+                                "--partition",
+                                "partKey0=1,partKey1=0")
+                        .run();
+                break;
+            case "procedure_indexed":
+                executeSQL(
+                        String.format(
+                                "CALL sys.mark_partition_done('%s.%s', 'partKey0=0,partKey1=1;partKey0=1,partKey1=0')",
+                                database, tableName));
+                break;
+            case "procedure_named":
+                executeSQL(
+                        String.format(
+                                "CALL sys.mark_partition_done(`table` => '%s.%s', partitions => 'partKey0=0,partKey1=1;partKey0=1,partKey1=0')",
+                                database, tableName));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
+        }
+
+        Path successPath1 = new Path(table.location(), "partKey0=0/partKey1=1/_SUCCESS");
+        SuccessFile successFile1 = SuccessFile.safelyFromPath(table.fileIO(), successPath1);
+        assertThat(successFile1).isNotNull();
+
+        Path successPath2 = new Path(table.location(), "partKey0=1/partKey1=0/_SUCCESS");
+        SuccessFile successFile2 = SuccessFile.safelyFromPath(table.fileIO(), successPath2);
+        assertThat(successFile2).isNotNull();
+
+        assertThat(MockCustomPartitionMarkDoneAction.getMarkedDonePartitions())
+                .containsExactlyInAnyOrder("partKey0=0/partKey1=1/", "partKey0=1/partKey1=0/");
+    }
+
     private FileStoreTable prepareTable(boolean hasPk) throws Exception {
+        return prepareTable(hasPk, Collections.emptyMap());
+    }
+
+    private FileStoreTable prepareTable(boolean hasPk, Map<String, String> options)
+            throws Exception {
+
         FileStoreTable table =
                 createFileStoreTable(
                         ROW_TYPE,
@@ -158,7 +228,7 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
                                 ? Arrays.asList("partKey0", "partKey1", "dt")
                                 : Collections.emptyList(),
                         hasPk ? Collections.emptyList() : Collections.singletonList("dt"),
-                        new HashMap<>());
+                        options);
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamWriteBuilder streamWriteBuilder =
                 table.newStreamWriteBuilder().withCommitUser(commitUser);
