@@ -391,14 +391,14 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 groupByPartFiles(plan.files(FileKind.DELETE));
         Map<BinaryRow, Map<Integer, List<DataFileMeta>>> dataFiles =
                 groupByPartFiles(plan.files(FileKind.ADD));
-
-        return toChangesPlan(true, plan, plan.snapshot().id() - 1, beforeFiles, dataFiles);
+        Snapshot beforeSnapshot = snapshotManager.snapshot(plan.snapshot().id() - 1);
+        return toChangesPlan(true, plan, beforeSnapshot, beforeFiles, dataFiles);
     }
 
     private Plan toChangesPlan(
             boolean isStreaming,
             FileStoreScan.Plan plan,
-            long beforeSnapshotId,
+            Snapshot beforeSnapshot,
             Map<BinaryRow, Map<Integer, List<DataFileMeta>>> beforeFiles,
             Map<BinaryRow, Map<Integer, List<DataFileMeta>>> dataFiles) {
         Snapshot snapshot = plan.snapshot();
@@ -416,7 +416,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
         Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> beforDeletionIndexFilesMap =
                 deletionVectors
                         ? indexFileHandler.scan(
-                                beforeSnapshotId, DELETION_VECTORS_INDEX, beforeFiles.keySet())
+                                beforeSnapshot, DELETION_VECTORS_INDEX, beforeFiles.keySet())
                         : Collections.emptyMap();
         Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> deletionIndexFilesMap =
                 deletionVectors
@@ -476,7 +476,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 groupByPartFiles(plan.files(FileKind.ADD));
         Map<BinaryRow, Map<Integer, List<DataFileMeta>>> beforeFiles =
                 groupByPartFiles(scan.withSnapshot(before).plan().files(FileKind.ADD));
-        return toChangesPlan(false, plan, before.id(), beforeFiles, dataFiles);
+        return toChangesPlan(false, plan, before, beforeFiles, dataFiles);
     }
 
     private RecordComparator partitionComparator() {
