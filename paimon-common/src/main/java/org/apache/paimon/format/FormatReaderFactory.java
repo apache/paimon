@@ -23,6 +23,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
@@ -44,6 +45,6 @@ public interface FormatReaderFactory {
         long fileSize();
 
         @Nullable
-        RoaringBitmap32 selection();
+        LazyField<RoaringBitmap32> selection();
     }
 }
