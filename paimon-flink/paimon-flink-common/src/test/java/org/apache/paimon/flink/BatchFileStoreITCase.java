@@ -300,6 +300,32 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testIncrementBetweenReadWithSnapshotExpiration() throws Exception {
+        String tableName = "T";
+        batchSql(String.format("INSERT INTO %s VALUES (1, 11, 111), (2, 22, 222)", tableName));
+
+        paimonTable(tableName).createTag("tag1", 1);
+
+        batchSql(String.format("INSERT INTO %s VALUES (3, 33, 333)", tableName));
+        paimonTable(tableName).createTag("tag2", 2);
+
+        // expire snapshot 1
+        Map<String, String> expireOptions = new HashMap<>();
+        expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
+        expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
+        FileStoreTable table = (FileStoreTable) paimonTable(tableName);
+        table.copy(expireOptions).newCommit("").expireSnapshots();
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
+
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT * FROM %s /*+ OPTIONS('incremental-between' = 'tag1,tag2', 'deletion-vectors.enabled' = 'true') */",
+                                        tableName)))
+                .containsExactlyInAnyOrder(Row.of(3, 33, 333));
+    }
+
+    @Test
     public void testSortSpillMerge() {
         sql(
                 "CREATE TABLE IF NOT EXISTS KT (a INT PRIMARY KEY NOT ENFORCED, b STRING) WITH ('sort-spill-threshold'='2')");
