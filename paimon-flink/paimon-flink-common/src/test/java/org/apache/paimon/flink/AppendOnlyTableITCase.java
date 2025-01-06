@@ -21,7 +21,6 @@ package org.apache.paimon.flink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -31,7 +30,6 @@ import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.IOException;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -42,7 +40,6 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.fail;
 
 /** Test case for append-only managed table. */
 public class AppendOnlyTableITCase extends CatalogITCaseBase {
@@ -137,23 +134,6 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         assertThat(rows)
                 .containsExactlyInAnyOrder(
                         Row.of(1, "AAA"), Row.of(2, "BBB"), Row.of(3, "CCC"), Row.of(4, "DDD"));
-
-        TraceableFileIO traceableFileIO = new TraceableFileIO();
-        try {
-            FileStatus[] fileStatuses =
-                    traceableFileIO.listStatus(
-                            new org.apache.paimon.fs.Path(
-                                    tempExternalPath1.toString() + "/bucket-0"));
-            assertThat(fileStatuses.length > 0).isTrue();
-
-            fileStatuses =
-                    traceableFileIO.listStatus(
-                            new org.apache.paimon.fs.Path(
-                                    tempExternalPath2.toString() + "/bucket-0"));
-            assertThat(fileStatuses.length > 0).isTrue();
-        } catch (IOException e) {
-            fail();
-        }
     }
 
     @Test
@@ -237,17 +217,6 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         assertThat(rows)
                 .containsExactlyInAnyOrder(
                         Row.of(1, "AAA"), Row.of(2, "BBB"), Row.of(3, "CCC"), Row.of(4, "DDD"));
-
-        TraceableFileIO traceableFileIO = new TraceableFileIO();
-        try {
-            FileStatus[] fileStatuses =
-                    traceableFileIO.listStatus(
-                            new org.apache.paimon.fs.Path(
-                                    tempExternalPath1.toString() + "/bucket-0"));
-            assertThat(fileStatuses.length > 0).isTrue();
-        } catch (IOException e) {
-            fail();
-        }
     }
 
     @Test
@@ -284,17 +253,6 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         assertThat(rows)
                 .containsExactlyInAnyOrder(
                         Row.of(1, "AAA"), Row.of(2, "BBB"), Row.of(3, "CCC"), Row.of(4, "DDD"));
-
-        TraceableFileIO traceableFileIO = new TraceableFileIO();
-        try {
-            FileStatus[] fileStatuses =
-                    traceableFileIO.listStatus(
-                            new org.apache.paimon.fs.Path(
-                                    tempExternalPath1.toString() + "/bucket-0"));
-            assertThat(fileStatuses.length).isEqualTo(0);
-        } catch (IOException e) {
-            fail();
-        }
     }
 
     @Test

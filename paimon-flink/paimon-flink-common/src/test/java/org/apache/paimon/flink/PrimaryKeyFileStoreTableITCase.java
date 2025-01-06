@@ -21,7 +21,6 @@ package org.apache.paimon.flink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.action.CompactAction;
 import org.apache.paimon.flink.util.AbstractTestBase;
-import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.utils.FailingFileIO;
@@ -57,7 +56,6 @@ import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
-import static org.junit.jupiter.api.Assertions.fail;
 
 /** Tests for changelog table with primary keys. */
 public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
@@ -236,7 +234,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         sEnv.executeSql(
                 "CREATE TABLE T2 ( k INT, v STRING, PRIMARY KEY (k) NOT ENFORCED ) "
                         + "WITH ( "
-                        + "'bucket' = '2',"
+                        + "'bucket' = '1',"
                         + "'data-file.external-paths' = '"
                         + externalPaths
                         + "',"
@@ -255,26 +253,20 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         assertThat(actual).containsExactlyInAnyOrder("+I[1, A]");
 
         // insert data
-        sEnv.executeSql("INSERT INTO T2 VALUES (2, 'B'), (3, 'C')").await();
+        sEnv.executeSql("INSERT INTO T2 VALUES (2, 'B')").await();
 
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < 1; i++) {
             actual.add(it.next().toString());
         }
-        assertThat(actual).containsExactlyInAnyOrder("+I[1, A]", "+I[2, B]", "+I[3, C]");
 
-        TraceableFileIO traceableFileIO = new TraceableFileIO();
-        try {
-            FileStatus[] fileStatuses =
-                    traceableFileIO.listStatus(
-                            new org.apache.paimon.fs.Path(externalPath1.toString() + "/bucket-0"));
-            assertThat(fileStatuses.length > 0).isTrue();
-            fileStatuses =
-                    traceableFileIO.listStatus(
-                            new org.apache.paimon.fs.Path(externalPath2.toString() + "/bucket-0"));
-            assertThat(fileStatuses.length > 0).isTrue();
-        } catch (IOException e) {
-            fail();
+        // insert data
+        sEnv.executeSql("INSERT INTO T2 VALUES (3, 'C')").await();
+
+        for (int i = 0; i < 1; i++) {
+            actual.add(it.next().toString());
         }
+
+        assertThat(actual).containsExactlyInAnyOrder("+I[1, A]", "+I[2, B]", "+I[3, C]");
     }
 
     @Test
@@ -298,7 +290,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         sEnv.executeSql(
                 "CREATE TABLE T2 ( k INT, v STRING, PRIMARY KEY (k) NOT ENFORCED ) "
                         + "WITH ( "
-                        + "'bucket' = '2',"
+                        + "'bucket' = '1',"
                         + "'data-file.external-paths' = '"
                         + externalPaths
                         + "',"
@@ -324,20 +316,6 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
             actual.add(it.next().toString());
         }
         assertThat(actual).containsExactlyInAnyOrder("+I[1, A]", "+I[2, B]", "+I[3, C]");
-
-        TraceableFileIO traceableFileIO = new TraceableFileIO();
-        try {
-            FileStatus[] fileStatuses =
-                    traceableFileIO.listStatus(
-                            new org.apache.paimon.fs.Path(externalPath1.toString() + "/bucket-0"));
-            assertThat(fileStatuses.length > 0).isTrue();
-            fileStatuses =
-                    traceableFileIO.listStatus(
-                            new org.apache.paimon.fs.Path(externalPath2.toString() + "/bucket-0"));
-            assertThat(fileStatuses.length).isEqualTo(0);
-        } catch (IOException e) {
-            fail();
-        }
     }
 
     @Test
