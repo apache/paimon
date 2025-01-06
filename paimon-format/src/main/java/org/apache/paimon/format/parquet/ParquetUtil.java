@@ -81,7 +81,6 @@ public class ParquetUtil {
         return new ParquetFileReader(
                 ParquetInputFile.fromPath(fileIO, path),
                 ParquetReadOptions.builder().build(),
-                null,
                 null);
     }
 

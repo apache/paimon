@@ -69,7 +69,6 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
     private final long rowCount;
     private final long rowIndexOffset;
     @Nullable private final RoaringBitmap32 selection;
-    @Nullable private final RoaringBitmap32 deletion;
     private RowRanges allRows;
 
     /**
@@ -84,7 +83,6 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
      * @param rowCount the total number of rows in the row-group
      * @param rowIndexOffset the offset of the row-group
      * @param selection the selected position; it will use to filter or narrow the row ranges
-     * @param deletion the deleted position; it will use to filter the row ranges
      * @return the ranges of the possible matching row indexes; the returned ranges will contain all
      *     the rows if any of the required offset index is missing
      */
@@ -94,8 +92,7 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
             Set<ColumnPath> paths,
             long rowCount,
             long rowIndexOffset,
-            @Nullable RoaringBitmap32 selection,
-            @Nullable RoaringBitmap32 deletion) {
+            @Nullable RoaringBitmap32 selection) {
         return filter.accept(
                 new FilterCompat.Visitor<RowRanges>() {
                     @Override
@@ -109,8 +106,7 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
                                                     paths,
                                                     rowCount,
                                                     rowIndexOffset,
-                                                    selection,
-                                                    deletion));
+                                                    selection));
                         } catch (MissingOffsetIndexException e) {
                             LOGGER.info(e.getMessage());
                             return RowRanges.createSingle(rowCount);
@@ -134,14 +130,12 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
             Set<ColumnPath> paths,
             long rowCount,
             long rowIndexOffset,
-            @Nullable RoaringBitmap32 selection,
-            @Nullable RoaringBitmap32 deletion) {
+            @Nullable RoaringBitmap32 selection) {
         this.columnIndexStore = columnIndexStore;
         this.columns = paths;
         this.rowCount = rowCount;
         this.rowIndexOffset = rowIndexOffset;
         this.selection = selection;
-        this.deletion = deletion;
     }
 
     private RowRanges allRows() {
@@ -239,7 +233,7 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
             return allRows();
         }
 
-        return RowRanges.create(rowCount, rowIndexOffset, func.apply(ci), oi, selection, deletion);
+        return RowRanges.create(rowCount, rowIndexOffset, func.apply(ci), oi, selection);
     }
 
     @Override

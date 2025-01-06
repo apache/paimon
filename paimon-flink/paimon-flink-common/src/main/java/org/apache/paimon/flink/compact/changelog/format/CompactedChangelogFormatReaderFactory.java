@@ -86,11 +86,6 @@ public class CompactedChangelogFormatReaderFactory implements FormatReaderFactor
                     public RoaringBitmap32 selection() {
                         return context.selection();
                     }
-
-                    @Override
-                    public RoaringBitmap32 deletion() {
-                        return context.deletion();
-                    }
                 });
     }
 

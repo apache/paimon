@@ -45,8 +45,5 @@ public interface FormatReaderFactory {
 
         @Nullable
         RoaringBitmap32 selection();
-
-        @Nullable
-        RoaringBitmap32 deletion();
     }
 }

@@ -32,23 +32,17 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
     private final Path file;
     private final long fileSize;
     @Nullable private final RoaringBitmap32 selection;
-    @Nullable private final RoaringBitmap32 deletion;
 
     public FormatReaderContext(FileIO fileIO, Path file, long fileSize) {
-        this(fileIO, file, fileSize, null, null);
+        this(fileIO, file, fileSize, null);
     }
 
     public FormatReaderContext(
-            FileIO fileIO,
-            Path file,
-            long fileSize,
-            @Nullable RoaringBitmap32 selection,
-            @Nullable RoaringBitmap32 deletion) {
+            FileIO fileIO, Path file, long fileSize, @Nullable RoaringBitmap32 selection) {
         this.fileIO = fileIO;
         this.file = file;
         this.fileSize = fileSize;
         this.selection = selection;
-        this.deletion = deletion;
     }
 
     @Override
@@ -70,11 +64,5 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
     @Override
     public RoaringBitmap32 selection() {
         return selection;
-    }
-
-    @Nullable
-    @Override
-    public RoaringBitmap32 deletion() {
-        return deletion;
     }
 }

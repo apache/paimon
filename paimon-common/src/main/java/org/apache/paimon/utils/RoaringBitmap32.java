@@ -88,10 +88,6 @@ public class RoaringBitmap32 {
         return roaringBitmap.intersects(minimum, supremum);
     }
 
-    public boolean contains(long minimum, long supremum) {
-        return roaringBitmap.contains(minimum, supremum);
-    }
-
     public RoaringBitmap32 clone() {
         return new RoaringBitmap32(roaringBitmap.clone());
     }

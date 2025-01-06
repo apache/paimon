@@ -38,12 +38,12 @@ import java.util.Set;
  * column index based filtering. To be used iterate over the matching row indexes to be read from a
  * row-group, retrieve the count of the matching rows or check overlapping of a row index range.
  *
- * <p>Note: The class was copied over to support using selected position and deleted position result
- * to filter or narrow the {@link RowRanges}. Added a new method {@link RowRanges#create(long, long,
- * PrimitiveIterator.OfInt, OffsetIndex, RoaringBitmap32, RoaringBitmap32)}
+ * <p>Note: The class was copied over to support using selected position to filter or narrow the
+ * {@link RowRanges}. Added a new method {@link RowRanges#create(long, long,
+ * PrimitiveIterator.OfInt, OffsetIndex, RoaringBitmap32)}
  *
  * @see ColumnIndexFilter#calculateRowRanges(Filter, ColumnIndexStore, Set, long, long,
- *     RoaringBitmap32, RoaringBitmap32)
+ *     RoaringBitmap32)
  */
 public class RowRanges {
 
@@ -161,33 +161,28 @@ public class RowRanges {
         return ranges;
     }
 
-    /** Support using the selected position or the deleted position to filter the row ranges. */
+    /** Support using the selected position to filter or narrow the row ranges. */
     public static RowRanges create(
             long rowCount,
             long rowIndexOffset,
             PrimitiveIterator.OfInt pageIndexes,
             OffsetIndex offsetIndex,
-            @Nullable RoaringBitmap32 selection,
-            @Nullable RoaringBitmap32 deletion) {
+            @Nullable RoaringBitmap32 selection) {
         RowRanges ranges = new RowRanges();
         while (pageIndexes.hasNext()) {
             int pageIndex = pageIndexes.nextInt();
             long firstRowIndex = offsetIndex.getFirstRowIndex(pageIndex);
             long lastRowIndex = offsetIndex.getLastRowIndex(pageIndex, rowCount);
 
-            // using selected position or deleted position to filter or narrow the row ranges
-            long first = rowIndexOffset + firstRowIndex;
-            long last = rowIndexOffset + lastRowIndex;
+            // using selected position to filter or narrow the row ranges
             if (selection != null) {
+                long first = rowIndexOffset + firstRowIndex;
+                long last = rowIndexOffset + lastRowIndex;
                 if (!selection.intersects(first, last + 1)) {
                     continue;
                 }
                 firstRowIndex = selection.nextValue((int) first) - rowIndexOffset;
                 lastRowIndex = selection.previousValue((int) (last)) - rowIndexOffset;
-            } else if (deletion != null) {
-                if (deletion.contains(first, last + 1)) {
-                    continue;
-                }
             }
 
             ranges.add(new Range(firstRowIndex, lastRowIndex));

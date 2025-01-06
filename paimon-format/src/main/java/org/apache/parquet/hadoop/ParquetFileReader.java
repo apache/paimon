@@ -221,7 +221,6 @@ public class ParquetFileReader implements Closeable {
     private final List<RowRanges> blockRowRanges;
     private final boolean blocksFiltered;
     @Nullable private final RoaringBitmap32 selection;
-    @Nullable private final RoaringBitmap32 deletion;
 
     // not final. in some cases, this may be lazily loaded for backward-compat.
     private ParquetMetadata footer;
@@ -233,17 +232,13 @@ public class ParquetFileReader implements Closeable {
     private InternalFileDecryptor fileDecryptor;
 
     public ParquetFileReader(
-            InputFile file,
-            ParquetReadOptions options,
-            @Nullable RoaringBitmap32 selection,
-            @Nullable RoaringBitmap32 deletion)
+            InputFile file, ParquetReadOptions options, @Nullable RoaringBitmap32 selection)
             throws IOException {
         this.converter = new ParquetMetadataConverter(options);
         this.file = (ParquetInputFile) file;
         this.f = this.file.newStream();
         this.options = options;
         this.selection = selection;
-        this.deletion = deletion;
         try {
             this.footer = readFooter(file, options, f, converter);
         } catch (Exception e) {
@@ -371,15 +366,6 @@ public class ParquetFileReader implements Closeable {
                                 .filter(
                                         it ->
                                                 selection.intersects(
-                                                        it.getRowIndexOffset(),
-                                                        it.getRowIndexOffset() + it.getRowCount()))
-                                .collect(Collectors.toList());
-            } else if (deletion != null) {
-                blocks =
-                        blocks.stream()
-                                .filter(
-                                        it ->
-                                                !deletion.contains(
                                                         it.getRowIndexOffset(),
                                                         it.getRowIndexOffset() + it.getRowCount()))
                                 .collect(Collectors.toList());
@@ -773,8 +759,7 @@ public class ParquetFileReader implements Closeable {
                             paths.keySet(),
                             blocks.get(blockIndex).getRowCount(),
                             blocks.get(blockIndex).getRowIndexOffset(),
-                            selection,
-                            deletion);
+                            selection);
             blockRowRanges.set(blockIndex, rowRanges);
         }
         return rowRanges;
