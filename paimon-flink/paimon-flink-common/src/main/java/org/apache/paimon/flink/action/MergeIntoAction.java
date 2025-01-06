@@ -23,6 +23,7 @@ import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.api.Table;
@@ -76,6 +77,8 @@ import static org.apache.paimon.utils.ParameterUtils.parseCommaSeparatedKeyValue
 public class MergeIntoAction extends TableActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(MergeIntoAction.class);
+
+    public static final String IDENTIFIER_QUOTE = "`";
 
     // primary keys of target table
     private final List<String> primaryKeys;
@@ -333,7 +336,7 @@ public class MergeIntoAction extends TableActionBase {
         String query =
                 String.format(
                         "SELECT %s FROM %s INNER JOIN %s ON %s %s",
-                        String.join(",", project),
+                        String.join(",", normalizeFieldName(project)),
                         escapedTargetName(),
                         escapedSourceName(),
                         mergeCondition,
@@ -377,7 +380,7 @@ public class MergeIntoAction extends TableActionBase {
         String query =
                 String.format(
                         "SELECT %s FROM %s WHERE NOT EXISTS (SELECT * FROM %s WHERE %s) %s",
-                        String.join(",", project),
+                        String.join(",", normalizeFieldName(project)),
                         escapedTargetName(),
                         escapedSourceName(),
                         mergeCondition,
@@ -408,7 +411,7 @@ public class MergeIntoAction extends TableActionBase {
         String query =
                 String.format(
                         "SELECT %s FROM %s INNER JOIN %s ON %s %s",
-                        String.join(",", project),
+                        String.join(",", normalizeFieldName(project)),
                         escapedTargetName(),
                         escapedSourceName(),
                         mergeCondition,
@@ -430,7 +433,7 @@ public class MergeIntoAction extends TableActionBase {
         String query =
                 String.format(
                         "SELECT %s FROM %s WHERE NOT EXISTS (SELECT * FROM %s WHERE %s) %s",
-                        String.join(",", targetFieldNames),
+                        String.join(",", normalizeFieldName(targetFieldNames)),
                         escapedTargetName(),
                         escapedSourceName(),
                         mergeCondition,
@@ -518,5 +521,30 @@ public class MergeIntoAction extends TableActionBase {
         return Arrays.stream(sourceTable.split("\\."))
                 .map(s -> String.format("`%s`", s))
                 .collect(Collectors.joining("."));
+    }
+
+    private List<String> normalizeFieldName(List<String> fieldNames) {
+        return fieldNames.stream().map(this::normalizeFieldName).collect(Collectors.toList());
+    }
+
+    private String normalizeFieldName(String fieldName) {
+        if (StringUtils.isNullOrWhitespaceOnly(fieldName) || fieldName.endsWith(IDENTIFIER_QUOTE)) {
+            return fieldName;
+        }
+
+        String[] splitFieldNames = fieldName.split("\\.");
+        if (!targetFieldNames.contains(splitFieldNames[splitFieldNames.length - 1])) {
+            return fieldName;
+        }
+
+        return String.join(
+                ".",
+                Arrays.stream(splitFieldNames)
+                        .map(
+                                part ->
+                                        part.endsWith(IDENTIFIER_QUOTE)
+                                                ? part
+                                                : IDENTIFIER_QUOTE + part + IDENTIFIER_QUOTE)
+                        .toArray(String[]::new));
     }
 }
