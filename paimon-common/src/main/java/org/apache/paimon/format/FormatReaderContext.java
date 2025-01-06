@@ -18,10 +18,10 @@
 
 package org.apache.paimon.format;
 
-import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
 
@@ -31,18 +31,18 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
     private final FileIO fileIO;
     private final Path file;
     private final long fileSize;
-    @Nullable private final FileIndexResult fileIndexResult;
+    @Nullable private final RoaringBitmap32 selection;
 
     public FormatReaderContext(FileIO fileIO, Path file, long fileSize) {
         this(fileIO, file, fileSize, null);
     }
 
     public FormatReaderContext(
-            FileIO fileIO, Path file, long fileSize, @Nullable FileIndexResult fileIndexResult) {
+            FileIO fileIO, Path file, long fileSize, @Nullable RoaringBitmap32 selection) {
         this.fileIO = fileIO;
         this.file = file;
         this.fileSize = fileSize;
-        this.fileIndexResult = fileIndexResult;
+        this.selection = selection;
     }
 
     @Override
@@ -62,7 +62,7 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
 
     @Nullable
     @Override
-    public FileIndexResult fileIndex() {
-        return fileIndexResult;
+    public RoaringBitmap32 selection() {
+        return selection;
     }
 }
