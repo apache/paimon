@@ -93,23 +93,24 @@ public class KeyValueFileWriterFactory {
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(
             int level, FileSource fileSource) {
         return new RollingFileWriter<>(
-                () ->
-                        createDataFileWriter(
-                                formatContext.pathFactory(level).newPath(),
-                                level,
-                                fileSource,
-                                formatContext.pathFactory(level).isExternalPath()),
+                () -> {
+                    DataFilePathFactory pathFactory = formatContext.pathFactory(level);
+                    return createDataFileWriter(
+                            pathFactory.newPath(), level, fileSource, pathFactory.isExternalPath());
+                },
                 suggestedFileSize);
     }
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingChangelogFileWriter(int level) {
         return new RollingFileWriter<>(
-                () ->
-                        createDataFileWriter(
-                                formatContext.pathFactory(level).newChangelogPath(),
-                                level,
-                                FileSource.APPEND,
-                                formatContext.pathFactory(level).isExternalPath()),
+                () -> {
+                    DataFilePathFactory pathFactory = formatContext.pathFactory(level);
+                    return createDataFileWriter(
+                            pathFactory.newChangelogPath(),
+                            level,
+                            FileSource.APPEND,
+                            pathFactory.isExternalPath());
+                },
                 suggestedFileSize);
     }
 

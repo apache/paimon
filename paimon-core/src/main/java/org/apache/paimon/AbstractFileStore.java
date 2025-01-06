@@ -23,7 +23,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.TableExternalPathProvider;
 import org.apache.paimon.index.HashIndexFile;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestFile;
@@ -65,6 +64,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Base {@link FileStore} implementation.
@@ -122,15 +123,42 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.fileSuffixIncludeCompression(),
                 options.fileCompression(),
                 options.dataFilePathDirectory(),
-                getExternalPathProvider());
+                createExternalPaths());
     }
 
-    private TableExternalPathProvider getExternalPathProvider() {
+    private List<Path> createExternalPaths() {
         String externalPaths = options.dataFileExternalPaths();
-        ExternalPathStrategy externalPathStrategy = options.externalPathStrategy();
-        String externalSpecificFS = options.externalSpecificFS();
-        return new TableExternalPathProvider(
-                externalPaths, externalPathStrategy, externalSpecificFS);
+        ExternalPathStrategy strategy = options.externalPathStrategy();
+        if (externalPaths == null
+                || externalPaths.isEmpty()
+                || strategy == ExternalPathStrategy.NONE) {
+            return Collections.emptyList();
+        }
+
+        String specificFS = options.externalSpecificFS();
+
+        List<Path> paths = new ArrayList<>();
+        for (String pathString : externalPaths.split(",")) {
+            Path path = new Path(pathString.trim());
+            String scheme = path.toUri().getScheme();
+            if (scheme == null) {
+                throw new IllegalArgumentException("scheme should not be null: " + path);
+            }
+
+            if (strategy == ExternalPathStrategy.SPECIFIC_FS) {
+                checkArgument(
+                        specificFS != null,
+                        "External path specificFS should not be null when strategy is specificFS.");
+                if (scheme.equalsIgnoreCase(specificFS)) {
+                    paths.add(path);
+                }
+            } else {
+                paths.add(path);
+            }
+        }
+
+        checkArgument(!paths.isEmpty(), "External paths should not be empty");
+        return paths;
     }
 
     @Override

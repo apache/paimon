@@ -59,9 +59,8 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
             @Nullable SimpleStatsExtractor simpleStatsExtractor,
             String compression,
             SimpleColStatsCollector.Factory[] statsCollectors,
-            boolean asyncWrite,
-            boolean isExternalPath) {
-        super(fileIO, factory, path, converter, compression, asyncWrite, isExternalPath);
+            boolean asyncWrite) {
+        super(fileIO, factory, path, converter, compression, asyncWrite);
         this.simpleStatsExtractor = simpleStatsExtractor;
         if (this.simpleStatsExtractor == null) {
             this.simpleStatsCollector = new SimpleStatsCollector(writeSchema, statsCollectors);

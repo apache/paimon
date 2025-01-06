@@ -66,6 +66,7 @@ public abstract class KeyValueDataFileWriter
     private final int level;
 
     private final SimpleStatsConverter keyStatsConverter;
+    private final boolean isExternalPath;
     private final SimpleStatsConverter valueStatsConverter;
     private final InternalRowSerializer keySerializer;
     private final FileSource fileSource;
@@ -103,8 +104,7 @@ public abstract class KeyValueDataFileWriter
                 compression,
                 StatsCollectorFactories.createStatsFactories(
                         options, writeRowType.getFieldNames(), keyType.getFieldNames()),
-                options.asyncFileWrite(),
-                isExternalPath);
+                options.asyncFileWrite());
 
         this.keyType = keyType;
         this.valueType = valueType;
@@ -112,6 +112,7 @@ public abstract class KeyValueDataFileWriter
         this.level = level;
 
         this.keyStatsConverter = new SimpleStatsConverter(keyType);
+        this.isExternalPath = isExternalPath;
         this.valueStatsConverter = new SimpleStatsConverter(valueType, options.statsDenseStore());
         this.keySerializer = new InternalRowSerializer(keyType);
         this.fileSource = fileSource;

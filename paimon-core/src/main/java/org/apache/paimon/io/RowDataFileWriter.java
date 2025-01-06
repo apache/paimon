@@ -49,6 +49,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
 
     private final long schemaId;
     private final LongCounter seqNumCounter;
+    private final boolean isExternalPath;
     private final SimpleStatsConverter statsArraySerializer;
     @Nullable private final DataFileIndexWriter dataFileIndexWriter;
     private final FileSource fileSource;
@@ -77,10 +78,10 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 simpleStatsExtractor,
                 fileCompression,
                 statsCollectors,
-                asyncFileWrite,
-                isExternalPath);
+                asyncFileWrite);
         this.schemaId = schemaId;
         this.seqNumCounter = seqNumCounter;
+        this.isExternalPath = isExternalPath;
         this.statsArraySerializer = new SimpleStatsConverter(writeSchema, statsDenseStore);
         this.dataFileIndexWriter =
                 DataFileIndexWriter.create(

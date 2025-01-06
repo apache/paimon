@@ -54,7 +54,6 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
 
     private long recordCount;
     protected boolean closed;
-    protected boolean isExternalPath;
 
     public SingleFileWriter(
             FileIO fileIO,
@@ -62,8 +61,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             Path path,
             Function<T, InternalRow> converter,
             String compression,
-            boolean asyncWrite,
-            boolean isExternalPath) {
+            boolean asyncWrite) {
         this.fileIO = fileIO;
         this.path = path;
         this.converter = converter;
@@ -86,7 +84,6 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
 
         this.recordCount = 0;
         this.closed = false;
-        this.isExternalPath = isExternalPath;
     }
 
     public Path path() {

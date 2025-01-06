@@ -2213,7 +2213,6 @@ public class CoreOptions implements Serializable {
         return options.get(DATA_FILE_EXTERNAL_PATHS);
     }
 
-    @Nullable
     public ExternalPathStrategy externalPathStrategy() {
         return options.get(DATA_FILE_EXTERNAL_PATHS_STRATEGY);
     }
