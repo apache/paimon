@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.fs.local.LocalFileIOLoader;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -99,7 +100,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
                         + "://"
                         + tempExternalPath1.toString()
                         + ","
-                        + TraceableFileIO.SCHEME
+                        + LocalFileIOLoader.SCHEME
                         + "://"
                         + tempExternalPath2.toString();
         batchSql(
@@ -156,7 +157,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
                         + "://"
                         + tempExternalPath1.toString()
                         + ","
-                        + TraceableFileIO.SCHEME
+                        + LocalFileIOLoader.SCHEME
                         + "://"
                         + tempExternalPath2.toString();
         batchSql(

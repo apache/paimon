@@ -23,6 +23,7 @@ import org.apache.paimon.flink.action.CompactAction;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.fs.local.LocalFileIOLoader;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -228,7 +229,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                         + "://"
                         + externalPath1.toString()
                         + ","
-                        + TraceableFileIO.SCHEME
+                        + LocalFileIOLoader.SCHEME
                         + "://"
                         + externalPath2.toString();
         sEnv.executeSql(

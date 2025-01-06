@@ -54,6 +54,7 @@ import org.apache.flink.types.Row;
 import org.apache.flink.util.CollectionUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -87,6 +88,7 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bExeEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildQuery;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildQueryWithTableOptions;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildSimpleQuery;
+import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.checkExternalFileStorePath;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.checkFileStorePath;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.createTable;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.createTemporaryTable;
@@ -113,6 +115,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
     private final Map<String, String> staticPartitionOverwrite =
             Collections.singletonMap(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "false");
+
+    @TempDir public static java.nio.file.Path externalPath1;
 
     @BeforeEach
     public void setUp() {
@@ -149,6 +153,120 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 "('Euro', 119, '2022-01-02')");
 
         checkFileStorePath(table, Arrays.asList("dt=2022-01-01", "dt=2022-01-02"));
+
+        testBatchRead(buildSimpleQuery(table), initialRecords);
+
+        insertOverwritePartition(
+                table, "PARTITION (dt = '2022-01-02')", "('Euro', 100)", "('Yen', 1)");
+
+        // batch read to check partition refresh
+        testBatchRead(
+                buildQuery(table, "*", "WHERE dt IN ('2022-01-02')"),
+                Arrays.asList(
+                        // part = 2022-01-02
+                        changelogRow("+I", "Euro", 100L, "2022-01-02"),
+                        changelogRow("+I", "Yen", 1L, "2022-01-02")));
+
+        // test partition filter
+        List<Row> expectedPartitionRecords =
+                Arrays.asList(
+                        changelogRow("+I", "Yen", 1L, "2022-01-01"),
+                        changelogRow("+I", "Euro", 114L, "2022-01-01"),
+                        changelogRow("+I", "US Dollar", 114L, "2022-01-01"));
+
+        testBatchRead(buildQuery(table, "*", "WHERE dt <> '2022-01-02'"), expectedPartitionRecords);
+
+        testBatchRead(
+                buildQuery(table, "*", "WHERE dt IN ('2022-01-01')"), expectedPartitionRecords);
+
+        // test field filter
+        testBatchRead(
+                buildQuery(table, "*", "WHERE rate >= 100"),
+                Arrays.asList(
+                        changelogRow("+I", "US Dollar", 114L, "2022-01-01"),
+                        changelogRow("+I", "Euro", 114L, "2022-01-01"),
+                        changelogRow("+I", "Euro", 100L, "2022-01-02")));
+
+        // test partition and field filter
+        testBatchRead(
+                buildQuery(table, "*", "WHERE dt = '2022-01-02' AND rate >= 100"),
+                Collections.singletonList(changelogRow("+I", "Euro", 100L, "2022-01-02")));
+
+        // test projection
+        testBatchRead(
+                buildQuery(table, "dt", ""),
+                Arrays.asList(
+                        changelogRow("+I", "2022-01-01"),
+                        changelogRow("+I", "2022-01-01"),
+                        changelogRow("+I", "2022-01-01"),
+                        changelogRow("+I", "2022-01-02"),
+                        changelogRow("+I", "2022-01-02")));
+
+        testBatchRead(
+                buildQuery(table, "dt, currency, rate", ""),
+                Arrays.asList(
+                        changelogRow("+I", "2022-01-01", "US Dollar", 114L),
+                        changelogRow("+I", "2022-01-01", "Yen", 1L),
+                        changelogRow("+I", "2022-01-01", "Euro", 114L),
+                        changelogRow("+I", "2022-01-02", "Euro", 100L),
+                        changelogRow("+I", "2022-01-02", "Yen", 1L)));
+
+        // test projection and filter
+        testBatchRead(
+                buildQuery(table, "currency, dt", "WHERE rate = 114"),
+                Arrays.asList(
+                        changelogRow("+I", "US Dollar", "2022-01-01"),
+                        changelogRow("+I", "Euro", "2022-01-01")));
+    }
+
+    @Test
+    public void testBatchReadWriteWithPartitionedRecordsWithPkWithExternalPathRoundRobinStrategy()
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), "file://" + externalPath1.toString());
+        options.put(CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(), "ROUND-ROBIN");
+        checkExternalPathTestResult(options, externalPath1.toString());
+    }
+
+    @Test
+    public void testBatchReadWriteWithPartitionedRecordsWithPkWithExternalPathSpecificFStrategy()
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), "file://" + externalPath1.toString());
+        options.put(CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(), "specific-fs");
+        options.put(CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS.key(), "file");
+        checkExternalPathTestResult(options, externalPath1.toString());
+    }
+
+    public void checkExternalPathTestResult(Map<String, String> options, String externalPath)
+            throws Exception {
+        List<Row> initialRecords =
+                Arrays.asList(
+                        // part = 2022-01-01
+                        changelogRow("+I", "US Dollar", 114L, "2022-01-01"),
+                        changelogRow("+I", "Yen", 1L, "2022-01-01"),
+                        changelogRow("+I", "Euro", 114L, "2022-01-01"),
+                        // part = 2022-01-02
+                        changelogRow("+I", "Euro", 119L, "2022-01-02"));
+
+        String table =
+                createTable(
+                        Arrays.asList("currency STRING", "rate BIGINT", "dt String"),
+                        Arrays.asList("currency", "dt"),
+                        Collections.emptyList(),
+                        Collections.singletonList("dt"),
+                        options);
+
+        insertInto(
+                table,
+                "('US Dollar', 114, '2022-01-01')",
+                "('Yen', 1, '2022-01-01')",
+                "('Euro', 114, '2022-01-01')",
+                "('Euro', 119, '2022-01-02')");
+
+        checkExternalFileStorePath(Arrays.asList("dt=2022-01-01", "dt=2022-01-02"), externalPath);
 
         testBatchRead(buildSimpleQuery(table), initialRecords);
 
