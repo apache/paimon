@@ -27,6 +27,7 @@ import org.apache.paimon.rest.RESTCatalogInternalOptions;
 import org.apache.paimon.rest.RESTCatalogOptions;
 import org.apache.paimon.rest.RESTObjectMapper;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
@@ -34,39 +35,37 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
+import org.apache.flink.table.api.DataTypes;
+import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.catalog.Catalog;
-import org.apache.flink.table.catalog.IntervalFreshness;
+import org.apache.flink.table.catalog.CatalogTable;
+import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.catalog.ResolvedCatalogTable;
+import org.apache.flink.table.catalog.ResolvedSchema;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
+import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
+/** Test for {@link FlinkCatalog} when catalog type is RESTCatalog. */
 public class FlinkRESTCatalogTest {
-    private static final String TESTING_LOG_STORE = "testing";
-
-    private final ObjectPath path1 = new ObjectPath("db1", "t1");
-    private final ObjectPath path3 = new ObjectPath("db1", "t2");
-
-    private final ObjectPath tableInDefaultDb = new ObjectPath("default", "t1");
-
-    private final ObjectPath tableInDefaultDb1 = new ObjectPath("default-db", "t1");
-    private final ObjectPath nonExistDbPath = ObjectPath.fromString("non.exist");
-    private final ObjectPath nonExistObjectPath = ObjectPath.fromString("db1.nonexist");
-
-    private static final String DEFINITION_QUERY = "SELECT id, region, county FROM T";
-
-    private static final IntervalFreshness FRESHNESS = IntervalFreshness.ofMinute("3");
     private final ObjectMapper mapper = RESTObjectMapper.create();
+    private final ObjectPath path1 = new ObjectPath("db1", "t1");
     private MockWebServer mockWebServer;
     private String serverUrl;
     private String warehouse;
@@ -114,6 +113,44 @@ public class FlinkRESTCatalogTest {
         assertEquals(name, result.get(0));
     }
 
+    @Test
+    public void testCreateTable() throws Exception {
+        GetTableResponse response = MockRESTMessage.getTableResponse();
+        mockResponse(mapper.writeValueAsString(response), 200);
+        CatalogTable table = this.createTable(ImmutableMap.of());
+        assertDoesNotThrow(() -> catalog.createTable(path1, table, false));
+    }
+
+    private CatalogTable createTable(Map<String, String> options) {
+        ResolvedSchema resolvedSchema = this.createSchema();
+        CatalogTable origin =
+                CatalogTable.of(
+                        Schema.newBuilder().fromResolvedSchema(resolvedSchema).build(),
+                        "test comment",
+                        Collections.emptyList(),
+                        options);
+        return new ResolvedCatalogTable(origin, resolvedSchema);
+    }
+
+    private ResolvedSchema createSchema() {
+        return new ResolvedSchema(
+                Arrays.asList(
+                        Column.physical("first", DataTypes.STRING()),
+                        Column.physical("second", DataTypes.INT()),
+                        Column.physical("third", DataTypes.STRING()),
+                        Column.physical(
+                                "four",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD("f1", DataTypes.STRING()),
+                                        DataTypes.FIELD("f2", DataTypes.INT()),
+                                        DataTypes.FIELD(
+                                                "f3",
+                                                DataTypes.MAP(
+                                                        DataTypes.STRING(), DataTypes.INT()))))),
+                Collections.emptyList(),
+                null);
+    }
+
     private void mockConfig(String warehouseStr) {
         String mockResponse =
                 String.format(
@@ -125,12 +162,8 @@ public class FlinkRESTCatalogTest {
         mockResponse(mockResponse, 200);
     }
 
-    private void mockResponse(String mockResponse, int httpCode) {
-        MockResponse mockResponseObj =
-                new MockResponse()
-                        .setResponseCode(httpCode)
-                        .setBody(mockResponse)
-                        .addHeader("Content-Type", "application/json");
-        mockWebServer.enqueue(mockResponseObj);
+    private void mockResponse(String mockContent, int httpCode) {
+        MockResponse mockResponse = MockRESTMessage.mockResponse(mockContent, httpCode);
+        mockWebServer.enqueue(mockResponse);
     }
 }

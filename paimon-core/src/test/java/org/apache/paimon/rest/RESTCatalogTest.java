@@ -440,13 +440,9 @@ public class RESTCatalogTest {
         assertEquals(partitionEntries.size(), 0);
     }
 
-    private void mockResponse(String mockResponse, int httpCode) {
-        MockResponse mockResponseObj =
-                new MockResponse()
-                        .setResponseCode(httpCode)
-                        .setBody(mockResponse)
-                        .addHeader("Content-Type", "application/json");
-        mockWebServer.enqueue(mockResponseObj);
+    private void mockResponse(String mockContent, int httpCode) {
+        MockResponse mockResponse = MockRESTMessage.mockResponse(mockContent, httpCode);
+        mockWebServer.enqueue(mockResponse);
     }
 
     private void mockConfig(String warehouseStr) {
