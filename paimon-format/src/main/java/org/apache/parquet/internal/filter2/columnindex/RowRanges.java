@@ -175,19 +175,17 @@ public class RowRanges {
             long firstRowIndex = offsetIndex.getFirstRowIndex(pageIndex);
             long lastRowIndex = offsetIndex.getLastRowIndex(pageIndex, rowCount);
 
-            // using selected position or deletion position to filter or narrow the row ranges
+            // using selected position or deleted position to filter or narrow the row ranges
             long first = rowIndexOffset + firstRowIndex;
             long last = rowIndexOffset + lastRowIndex;
             if (selection != null) {
-                RoaringBitmap32 range = RoaringBitmap32.bitmapOfRange(first, last + 1);
-                if (!RoaringBitmap32.intersects(selection, range)) {
+                if (!selection.intersects(first, last + 1)) {
                     continue;
                 }
                 firstRowIndex = selection.nextValue((int) first) - rowIndexOffset;
                 lastRowIndex = selection.previousValue((int) (last)) - rowIndexOffset;
             } else if (deletion != null) {
-                RoaringBitmap32 range = RoaringBitmap32.bitmapOfRange(first, last + 1);
-                if (deletion.contains(range)) {
+                if (deletion.contains(first, last + 1)) {
                     continue;
                 }
             }

@@ -72,10 +72,6 @@ public class RoaringBitmap32 {
         return roaringBitmap.getLongCardinality();
     }
 
-    public long rangeCardinality(long start, long end) {
-        return roaringBitmap.rangeCardinality(start, end);
-    }
-
     public int first() {
         return roaringBitmap.first();
     }
@@ -90,6 +86,14 @@ public class RoaringBitmap32 {
 
     public long previousValue(int fromValue) {
         return roaringBitmap.previousValue(fromValue);
+    }
+
+    public boolean intersects(long minimum, long supremum) {
+        return roaringBitmap.intersects(minimum, supremum);
+    }
+
+    public boolean contains(long minimum, long supremum) {
+        return roaringBitmap.contains(minimum, supremum);
     }
 
     public RoaringBitmap32 clone() {
@@ -154,10 +158,6 @@ public class RoaringBitmap32 {
         return roaringBitmap32;
     }
 
-    public static RoaringBitmap32 bitmapOfRange(long min, long max) {
-        return new RoaringBitmap32(RoaringBitmap.bitmapOfRange(min, max));
-    }
-
     public static RoaringBitmap32 and(final RoaringBitmap32 x1, final RoaringBitmap32 x2) {
         return new RoaringBitmap32(RoaringBitmap.and(x1.roaringBitmap, x2.roaringBitmap));
     }
@@ -184,9 +184,5 @@ public class RoaringBitmap32 {
 
     public static RoaringBitmap32 andNot(final RoaringBitmap32 x1, final RoaringBitmap32 x2) {
         return new RoaringBitmap32(RoaringBitmap.andNot(x1.roaringBitmap, x2.roaringBitmap));
-    }
-
-    public static boolean intersects(final RoaringBitmap32 x1, final RoaringBitmap32 x2) {
-        return RoaringBitmap.intersects(x1.roaringBitmap, x2.roaringBitmap);
     }
 }

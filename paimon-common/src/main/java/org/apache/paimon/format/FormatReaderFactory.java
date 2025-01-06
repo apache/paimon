@@ -19,7 +19,6 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordReader;
@@ -45,7 +44,7 @@ public interface FormatReaderFactory {
         long fileSize();
 
         @Nullable
-        FileIndexResult fileIndex();
+        RoaringBitmap32 selection();
 
         @Nullable
         RoaringBitmap32 deletion();

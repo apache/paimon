@@ -210,15 +210,20 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             }
         }
 
+        RoaringBitmap32 selection = null;
+        if (fileIndexResult instanceof BitmapIndexResult) {
+            selection = ((BitmapIndexResult) fileIndexResult).get();
+        }
+
         RoaringBitmap32 deletion = null;
         DeletionVector deletionVector = dvFactory == null ? null : dvFactory.get();
         if (deletionVector instanceof BitmapDeletionVector) {
             deletion = ((BitmapDeletionVector) deletionVector).get();
         }
 
-        if (deletion != null && fileIndexResult instanceof BitmapIndexResult) {
-            RoaringBitmap32 selection = ((BitmapIndexResult) fileIndexResult).get();
-            if (RoaringBitmap32.andNot(selection, deletion).isEmpty()) {
+        if (deletion != null && selection != null) {
+            selection = RoaringBitmap32.andNot(selection, deletion);
+            if (selection.isEmpty()) {
                 return new EmptyFileRecordReader<>();
             }
         }
@@ -228,7 +233,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         fileIO,
                         dataFilePathFactory.toPath(file),
                         file.fileSize(),
-                        fileIndexResult,
+                        selection,
                         deletion);
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(

@@ -18,8 +18,6 @@
 
 package org.apache.parquet.hadoop;
 
-import org.apache.paimon.fileindex.FileIndexResult;
-import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.format.parquet.ParquetInputFile;
 import org.apache.paimon.format.parquet.ParquetInputStream;
 import org.apache.paimon.fs.FileRange;
@@ -237,13 +235,15 @@ public class ParquetFileReader implements Closeable {
     public ParquetFileReader(
             InputFile file,
             ParquetReadOptions options,
-            @Nullable FileIndexResult fileIndexResult,
+            @Nullable RoaringBitmap32 selection,
             @Nullable RoaringBitmap32 deletion)
             throws IOException {
         this.converter = new ParquetMetadataConverter(options);
         this.file = (ParquetInputFile) file;
         this.f = this.file.newStream();
         this.options = options;
+        this.selection = selection;
+        this.deletion = deletion;
         try {
             this.footer = readFooter(file, options, f, converter);
         } catch (Exception e) {
@@ -258,16 +258,6 @@ public class ParquetFileReader implements Closeable {
         if (null != fileDecryptor && fileDecryptor.plaintextFile()) {
             this.fileDecryptor = null; // Plaintext file. No need in decryptor
         }
-
-        RoaringBitmap32 selection = null;
-        if (fileIndexResult instanceof BitmapIndexResult) {
-            selection = ((BitmapIndexResult) fileIndexResult).get();
-        }
-        if (selection != null && deletion != null) {
-            selection = RoaringBitmap32.andNot(selection, deletion);
-        }
-        this.selection = selection;
-        this.deletion = deletion;
 
         try {
             this.blocks = filterRowGroups(footer.getBlocks());
@@ -379,27 +369,19 @@ public class ParquetFileReader implements Closeable {
                 blocks =
                         blocks.stream()
                                 .filter(
-                                        it -> {
-                                            long rowIndexOffset = it.getRowIndexOffset();
-                                            RoaringBitmap32 range =
-                                                    RoaringBitmap32.bitmapOfRange(
-                                                            rowIndexOffset,
-                                                            rowIndexOffset + it.getRowCount());
-                                            return RoaringBitmap32.intersects(selection, range);
-                                        })
+                                        it ->
+                                                selection.intersects(
+                                                        it.getRowIndexOffset(),
+                                                        it.getRowIndexOffset() + it.getRowCount()))
                                 .collect(Collectors.toList());
             } else if (deletion != null) {
                 blocks =
                         blocks.stream()
                                 .filter(
-                                        it -> {
-                                            long rowIndexOffset = it.getRowIndexOffset();
-                                            RoaringBitmap32 range =
-                                                    RoaringBitmap32.bitmapOfRange(
-                                                            rowIndexOffset,
-                                                            rowIndexOffset + it.getRowCount());
-                                            return !deletion.contains(range);
-                                        })
+                                        it ->
+                                                !deletion.contains(
+                                                        it.getRowIndexOffset(),
+                                                        it.getRowIndexOffset() + it.getRowCount()))
                                 .collect(Collectors.toList());
             }
         }

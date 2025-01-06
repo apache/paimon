@@ -18,7 +18,6 @@
 
 package org.apache.paimon.format;
 
-import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
@@ -32,7 +31,7 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
     private final FileIO fileIO;
     private final Path file;
     private final long fileSize;
-    @Nullable private final FileIndexResult fileIndexResult;
+    @Nullable private final RoaringBitmap32 selection;
     @Nullable private final RoaringBitmap32 deletion;
 
     public FormatReaderContext(FileIO fileIO, Path file, long fileSize) {
@@ -43,12 +42,12 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
             FileIO fileIO,
             Path file,
             long fileSize,
-            @Nullable FileIndexResult fileIndexResult,
+            @Nullable RoaringBitmap32 selection,
             @Nullable RoaringBitmap32 deletion) {
         this.fileIO = fileIO;
         this.file = file;
         this.fileSize = fileSize;
-        this.fileIndexResult = fileIndexResult;
+        this.selection = selection;
         this.deletion = deletion;
     }
 
@@ -69,8 +68,8 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
 
     @Nullable
     @Override
-    public FileIndexResult fileIndex() {
-        return fileIndexResult;
+    public RoaringBitmap32 selection() {
+        return selection;
     }
 
     @Nullable
