@@ -177,6 +177,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         public void close() throws IOException {
             in.close();
         }
+
         /**
          * Positions the stream to the given location. In contrast to {@link #seek(long)}, this
          * method will always issue a "seek" command to the dfs and may not replace it by {@link
@@ -190,6 +191,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         public void forceSeek(long seekPos) throws IOException {
             in.seek(seekPos);
         }
+
         /**
          * Skips over a given amount of bytes in the stream.
          *
