@@ -110,6 +110,22 @@ public class MapType extends DataType {
     }
 
     @Override
+    public boolean equalsIgnoreFieldId(DataType o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        if (!super.equals(o)) {
+            return false;
+        }
+        MapType mapType = (MapType) o;
+        return keyType.equalsIgnoreFieldId(mapType.keyType)
+                && valueType.equalsIgnoreFieldId(mapType.valueType);
+    }
+
+    @Override
     public boolean isPrunedFrom(Object o) {
         if (this == o) {
             return true;

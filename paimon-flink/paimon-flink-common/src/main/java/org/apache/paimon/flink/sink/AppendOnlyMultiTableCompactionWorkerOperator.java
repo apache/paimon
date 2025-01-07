@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
 import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.compact.UnawareBucketCompactor;
 import org.apache.paimon.options.Options;
@@ -56,7 +57,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
             LoggerFactory.getLogger(AppendOnlyMultiTableCompactionWorkerOperator.class);
 
     private final String commitUser;
-    private final Catalog.Loader catalogLoader;
+    private final CatalogLoader catalogLoader;
 
     // support multi table compaction
     private transient Map<Identifier, UnawareBucketCompactor> compactorContainer;
@@ -67,7 +68,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
 
     private AppendOnlyMultiTableCompactionWorkerOperator(
             StreamOperatorParameters<MultiTableCommittable> parameters,
-            Catalog.Loader catalogLoader,
+            CatalogLoader catalogLoader,
             String commitUser,
             Options options) {
         super(parameters, options);
@@ -188,9 +189,9 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
                     MultiTableUnawareAppendCompactionTask, MultiTableCommittable> {
 
         private final String commitUser;
-        private final Catalog.Loader catalogLoader;
+        private final CatalogLoader catalogLoader;
 
-        public Factory(Catalog.Loader catalogLoader, String commitUser, Options options) {
+        public Factory(CatalogLoader catalogLoader, String commitUser, Options options) {
             super(options);
             this.commitUser = commitUser;
             this.catalogLoader = catalogLoader;

@@ -83,8 +83,11 @@ public class BlockWriter {
 
     public MemorySlice finish() throws IOException {
         if (positions.isEmpty()) {
-            throw new IllegalStateException();
+            // Do not use alignment mode, as it is impossible to calculate how many records are
+            // inside when reading
+            aligned = false;
         }
+
         if (aligned) {
             block.writeInt(alignedSize);
         } else {

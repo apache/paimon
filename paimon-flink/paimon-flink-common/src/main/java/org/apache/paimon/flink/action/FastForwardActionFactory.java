@@ -18,9 +18,6 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.flink.api.java.tuple.Tuple3;
-
-import java.util.Map;
 import java.util.Optional;
 
 /** Factory to create {@link FastForwardAction}. */
@@ -37,15 +34,12 @@ public class FastForwardActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        checkRequiredArgument(params, BRANCH_NAME);
-
-        Tuple3<String, String, String> tablePath = getTablePath(params);
-        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
-        String branchName = params.get(BRANCH_NAME);
-
         FastForwardAction action =
                 new FastForwardAction(
-                        tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig, branchName);
+                        params.getRequired(DATABASE),
+                        params.getRequired(TABLE),
+                        catalogConfigMap(params),
+                        params.getRequired(BRANCH_NAME));
         return Optional.of(action);
     }
 

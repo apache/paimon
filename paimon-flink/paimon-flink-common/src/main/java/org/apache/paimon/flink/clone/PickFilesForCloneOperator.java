@@ -123,7 +123,11 @@ public class PickFilesForCloneOperator extends AbstractStreamOperator<CloneFileI
         for (Path file : files) {
             Path relativePath = getPathExcludeTableRoot(file, sourceTableRoot);
             result.add(
-                    new CloneFileInfo(relativePath.toString(), sourceIdentifier, targetIdentifier));
+                    new CloneFileInfo(
+                            file.toUri().toString(),
+                            relativePath.toString(),
+                            sourceIdentifier,
+                            targetIdentifier));
         }
         return result;
     }

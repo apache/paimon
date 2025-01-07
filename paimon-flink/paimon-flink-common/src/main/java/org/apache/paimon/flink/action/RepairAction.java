@@ -29,8 +29,8 @@ public class RepairAction extends ActionBase {
 
     private final String identifier;
 
-    public RepairAction(String warehouse, String identifier, Map<String, String> catalogConfig) {
-        super(warehouse, catalogConfig);
+    public RepairAction(String identifier, Map<String, String> catalogConfig) {
+        super(catalogConfig);
         this.identifier = identifier;
     }
 

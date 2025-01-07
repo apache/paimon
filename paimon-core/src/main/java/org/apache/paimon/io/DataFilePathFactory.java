@@ -19,10 +19,14 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.FileEntry;
 
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -41,6 +45,7 @@ public class DataFilePathFactory {
     private final String changelogFilePrefix;
     private final boolean fileSuffixIncludeCompression;
     private final String fileCompression;
+    @Nullable private final ExternalPathProvider externalPathProvider;
 
     public DataFilePathFactory(
             Path parent,
@@ -48,7 +53,8 @@ public class DataFilePathFactory {
             String dataFilePrefix,
             String changelogFilePrefix,
             boolean fileSuffixIncludeCompression,
-            String fileCompression) {
+            String fileCompression,
+            @Nullable ExternalPathProvider externalPathProvider) {
         this.parent = parent;
         this.uuid = UUID.randomUUID().toString();
         this.pathCount = new AtomicInteger(0);
@@ -57,6 +63,7 @@ public class DataFilePathFactory {
         this.changelogFilePrefix = changelogFilePrefix;
         this.fileSuffixIncludeCompression = fileSuffixIncludeCompression;
         this.fileCompression = fileCompression;
+        this.externalPathProvider = externalPathProvider;
     }
 
     public Path newPath() {
@@ -67,24 +74,40 @@ public class DataFilePathFactory {
         return newPath(changelogFilePrefix);
     }
 
-    private Path newPath(String prefix) {
+    public String newChangelogFileName() {
+        return newFileName(changelogFilePrefix);
+    }
+
+    public Path newPath(String prefix) {
+        String fileName = newFileName(prefix);
+        if (externalPathProvider != null) {
+            return externalPathProvider.getNextExternalDataPath(fileName);
+        }
+        return new Path(parent, fileName);
+    }
+
+    private String newFileName(String prefix) {
         String extension;
         if (fileSuffixIncludeCompression) {
             extension = "." + fileCompression + "." + formatIdentifier;
         } else {
             extension = "." + formatIdentifier;
         }
-        String name = prefix + uuid + "-" + pathCount.getAndIncrement() + extension;
-        return new Path(parent, name);
+        return prefix + uuid + "-" + pathCount.getAndIncrement() + extension;
     }
 
-    public Path toPath(String fileName) {
-        return new Path(parent + "/" + fileName);
+    public Path toPath(DataFileMeta file) {
+        return file.externalPath().map(Path::new).orElse(new Path(parent, file.fileName()));
     }
 
-    @VisibleForTesting
-    public String uuid() {
-        return uuid;
+    public Path toPath(FileEntry file) {
+        return Optional.ofNullable(file.externalPath())
+                .map(Path::new)
+                .orElse(new Path(parent, file.fileName()));
+    }
+
+    public Path toAlignedPath(String fileName, DataFileMeta aligned) {
+        return new Path(aligned.externalPathDir().map(Path::new).orElse(parent), fileName);
     }
 
     public static Path dataFileToFileIndexPath(Path dataFilePath) {
@@ -117,5 +140,14 @@ public class DataFilePathFactory {
         }
 
         return fileName.substring(index + 1);
+    }
+
+    public boolean isExternalPath() {
+        return externalPathProvider != null;
+    }
+
+    @VisibleForTesting
+    String uuid() {
+        return uuid;
     }
 }

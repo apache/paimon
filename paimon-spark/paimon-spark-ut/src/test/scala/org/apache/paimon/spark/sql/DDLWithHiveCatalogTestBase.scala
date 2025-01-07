@@ -18,11 +18,12 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.fs.Path
 import org.apache.paimon.hive.HiveMetastoreClient
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.table.FileStoreTable
 
-import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.{AnalysisException, Row, SparkSession}
 import org.junit.jupiter.api.Assertions
 
 abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
@@ -194,6 +195,46 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
     }
   }
 
+  test("Paimon DDL with hive catalog: alter database's properties") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        spark.sql(s"USE $catalogName")
+        val databaseName = "paimon_db"
+        withDatabase(databaseName) {
+          spark.sql(s"CREATE DATABASE $databaseName WITH DBPROPERTIES ('k1' = 'v1', 'k2' = 'v2')")
+          var props = getDatabaseProps(databaseName)
+          Assertions.assertEquals(props("k1"), "v1")
+          Assertions.assertEquals(props("k2"), "v2")
+          spark.sql(s"ALTER DATABASE $databaseName SET DBPROPERTIES ('k1' = 'v11', 'k2' = 'v22')")
+          props = getDatabaseProps(databaseName)
+          Assertions.assertEquals(props("k1"), "v11")
+          Assertions.assertEquals(props("k2"), "v22")
+        }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: alter database location") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        spark.sql(s"USE $catalogName")
+        val databaseName = "paimon_db"
+        withDatabase(databaseName) {
+          spark.sql(s"CREATE DATABASE $databaseName WITH DBPROPERTIES ('k1' = 'v1', 'k2' = 'v2')")
+          withTempDir {
+            dBLocation =>
+              try {
+                spark.sql(
+                  s"ALTER DATABASE $databaseName SET LOCATION '${dBLocation.getCanonicalPath}'")
+              } catch {
+                case e: AnalysisException =>
+                  Assertions.assertTrue(
+                    e.getMessage.contains("does not support altering database location"))
+              }
+          }
+        }
+    }
+  }
+
   test("Paimon DDL with hive catalog: set default database") {
     var reusedSpark = spark
 
@@ -256,43 +297,64 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
   test("Paimon DDL with hive catalog: sync partitions to HMS") {
     Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
       catalogName =>
-        val dbName = "default"
-        val tblName = "t"
-        spark.sql(s"USE $catalogName.$dbName")
-        withTable(tblName) {
-          spark.sql(s"""
-                       |CREATE TABLE $tblName (id INT, pt INT)
-                       |USING PAIMON
-                       |TBLPROPERTIES ('metastore.partitioned-table' = 'true')
-                       |PARTITIONED BY (pt)
-                       |""".stripMargin)
+        Seq("", "data").foreach {
+          dataFilePathDir =>
+            val dbName = "default"
+            val tblName = "t"
+            spark.sql(s"USE $catalogName.$dbName")
+            withTable(tblName) {
+              spark.sql(s"""
+                           |CREATE TABLE $tblName (id INT, pt INT)
+                           |USING PAIMON
+                           |TBLPROPERTIES (
+                           |${if (dataFilePathDir.isEmpty) ""
+                          else s"'data-file.path-directory' = '$dataFilePathDir',"}
+                           |'metastore.partitioned-table' = 'true'
+                           |)
+                           |PARTITIONED BY (pt)
+                           |""".stripMargin)
 
-          val metastoreClient = loadTable(dbName, tblName)
-            .catalogEnvironment()
-            .metastoreClientFactory()
-            .create()
-            .asInstanceOf[HiveMetastoreClient]
-            .client()
+              val table = loadTable(dbName, tblName)
+              val metastoreClient = table
+                .catalogEnvironment()
+                .metastoreClientFactory()
+                .create()
+                .asInstanceOf[HiveMetastoreClient]
+                .client()
+              val fileIO = table.fileIO()
 
-          spark.sql(s"INSERT INTO $tblName VALUES (1, 1), (2, 2), (3, 3)")
-          // check partitions in paimon
-          checkAnswer(
-            spark.sql(s"show partitions $tblName"),
-            Seq(Row("pt=1"), Row("pt=2"), Row("pt=3")))
-          // check partitions in HMS
-          assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 3)
+              def containsDir(root: Path, targets: Array[String]): Boolean = {
+                targets.forall(fileIO.listDirectories(root).map(_.getPath.getName).contains)
+              }
 
-          spark.sql(s"INSERT INTO $tblName VALUES (4, 3), (5, 4)")
-          checkAnswer(
-            spark.sql(s"show partitions $tblName"),
-            Seq(Row("pt=1"), Row("pt=2"), Row("pt=3"), Row("pt=4")))
-          assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 4)
+              spark.sql(s"INSERT INTO $tblName VALUES (1, 1), (2, 2), (3, 3)")
+              // check partitions in paimon
+              checkAnswer(
+                spark.sql(s"show partitions $tblName"),
+                Seq(Row("pt=1"), Row("pt=2"), Row("pt=3")))
+              // check partitions in HMS
+              assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 3)
+              // check partitions in filesystem
+              if (dataFilePathDir.isEmpty) {
+                assert(containsDir(table.location(), Array("pt=1", "pt=2", "pt=3")))
+              } else {
+                assert(!containsDir(table.location(), Array("pt=1", "pt=2", "pt=3")))
+                assert(
+                  containsDir(new Path(table.location(), "data"), Array("pt=1", "pt=2", "pt=3")))
+              }
 
-          spark.sql(s"ALTER TABLE $tblName DROP PARTITION (pt=1)")
-          checkAnswer(
-            spark.sql(s"show partitions $tblName"),
-            Seq(Row("pt=2"), Row("pt=3"), Row("pt=4")))
-          assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 3)
+              spark.sql(s"INSERT INTO $tblName VALUES (4, 3), (5, 4)")
+              checkAnswer(
+                spark.sql(s"show partitions $tblName"),
+                Seq(Row("pt=1"), Row("pt=2"), Row("pt=3"), Row("pt=4")))
+              assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 4)
+
+              spark.sql(s"ALTER TABLE $tblName DROP PARTITION (pt=1)")
+              checkAnswer(
+                spark.sql(s"show partitions $tblName"),
+                Seq(Row("pt=2"), Row("pt=3"), Row("pt=4")))
+              assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 3)
+            }
         }
     }
   }
@@ -326,13 +388,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 spark.sql(
                   s"CREATE TABLE external_tbl (id INT) USING paimon LOCATION '$expertTbLocation'")
                 checkAnswer(spark.sql("SELECT * FROM external_tbl"), Row(1))
-                assert(
-                  loadTable("paimon_db", "external_tbl")
-                    .location()
-                    .toString
-                    .split(':')
-                    .apply(1)
-                    .equals(expertTbLocation))
+                assert(getActualTableLocation("paimon_db", "external_tbl").equals(expertTbLocation))
 
                 // create managed table
                 spark.sql(s"CREATE TABLE managed_tbl (id INT) USING paimon")
@@ -373,12 +429,8 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 spark.sql("ALTER TABLE external_tbl RENAME TO external_tbl_renamed")
                 checkAnswer(spark.sql("SELECT * FROM external_tbl_renamed"), Row(1))
                 assert(
-                  loadTable("paimon_db", "external_tbl_renamed")
-                    .location()
-                    .toString
-                    .split(':')
-                    .apply(1)
-                    .equals(expertTbLocation))
+                  getActualTableLocation("paimon_db", "external_tbl_renamed").equals(
+                    expertTbLocation))
 
                 // create managed table
                 spark.sql(s"CREATE TABLE managed_tbl (id INT) USING paimon")
@@ -389,12 +441,180 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 spark.sql("ALTER TABLE managed_tbl RENAME TO managed_tbl_renamed")
                 checkAnswer(spark.sql("SELECT * FROM managed_tbl_renamed"), Row(1))
                 assert(
-                  !loadTable("paimon_db", "managed_tbl_renamed")
-                    .location()
-                    .toString
-                    .split(':')
-                    .apply(1)
-                    .equals(managedTbLocation.toString))
+                  !getActualTableLocation("paimon_db", "managed_tbl_renamed").equals(
+                    managedTbLocation.toString))
+              }
+            }
+        }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: create external table without schema") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        spark.sql(s"USE $catalogName")
+        withTempDir {
+          tbLocation =>
+            withDatabase("paimon_db") {
+              spark.sql(s"CREATE DATABASE IF NOT EXISTS paimon_db")
+              spark.sql(s"USE paimon_db")
+              withTable("t1", "t2", "t3", "t4", "t5") {
+                val expertTbLocation = tbLocation.getCanonicalPath
+                spark.sql(s"""
+                             |CREATE TABLE t1 (id INT, pt INT) USING paimon
+                             |PARTITIONED BY (pt)
+                             |TBLPROPERTIES('primary-key' = 'id', 'k1' = 'v1')
+                             |LOCATION '$expertTbLocation'
+                             |""".stripMargin)
+                spark.sql("INSERT INTO t1 VALUES (1, 1)")
+
+                // create table without schema
+                spark.sql(s"CREATE TABLE t2 USING paimon LOCATION '$expertTbLocation'")
+                checkAnswer(spark.sql("SELECT * FROM t2"), Row(1, 1))
+                assert(getActualTableLocation("paimon_db", "t2").equals(expertTbLocation))
+
+                // create table with wrong schema
+                intercept[Exception] {
+                  spark.sql(
+                    s"CREATE TABLE t3 (fake_col INT) USING paimon LOCATION '$expertTbLocation'")
+                }
+
+                // create table with exists props
+                spark.sql(
+                  s"CREATE TABLE t4 USING paimon TBLPROPERTIES ('k1' = 'v1') LOCATION '$expertTbLocation'")
+                checkAnswer(spark.sql("SELECT * FROM t4"), Row(1, 1))
+                assert(getActualTableLocation("paimon_db", "t4").equals(expertTbLocation))
+
+                // create table with new props
+                intercept[Exception] {
+                  spark.sql(
+                    s"CREATE TABLE t5 USING paimon TBLPROPERTIES ('k2' = 'v2') LOCATION '$expertTbLocation'")
+                }
+              }
+            }
+        }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: create external table with schema evolution") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        spark.sql(s"USE $catalogName")
+        withTempDir {
+          tbLocation =>
+            withDatabase("paimon_db") {
+              spark.sql(s"CREATE DATABASE IF NOT EXISTS paimon_db")
+              spark.sql(s"USE paimon_db")
+              withTable("t1", "t2") {
+                val expertTbLocation = tbLocation.getCanonicalPath
+                spark.sql(
+                  s"""
+                     |CREATE TABLE t1 (a INT, b INT, c STRUCT<f1: INT, f2: INT, f3: INT>) USING paimon
+                     |LOCATION '$expertTbLocation'
+                     |""".stripMargin)
+                spark.sql("INSERT INTO t1 VALUES (1, 1, STRUCT(1, 1, 1))")
+                spark.sql("ALTER TABLE t1 DROP COLUMN b")
+                spark.sql("ALTER TABLE t1 ADD COLUMN b INT")
+                spark.sql("ALTER TABLE t1 DROP COLUMN c.f2")
+                spark.sql("ALTER TABLE t1 ADD COLUMN c.f2 INT")
+                spark.sql("INSERT INTO t1 VALUES (2, STRUCT(1, 1, 1), 1)")
+                checkAnswer(
+                  spark.sql("SELECT * FROM t1 ORDER by a"),
+                  Seq(Row(1, Row(1, 1, null), null), Row(2, Row(1, 1, 1), 1)))
+
+                spark.sql(
+                  s"""
+                     |CREATE TABLE t2 (a INT, c STRUCT<f1: INT, f3: INT, f2: INT>, b INT) USING paimon
+                     |LOCATION '$expertTbLocation'
+                     |""".stripMargin)
+                checkAnswer(
+                  spark.sql("SELECT * FROM t2 ORDER by a"),
+                  Seq(Row(1, Row(1, 1, null), null), Row(2, Row(1, 1, 1), 1)))
+
+                // create table with wrong schema
+                intercept[Exception] {
+                  spark.sql(
+                    s"""
+                       |CREATE TABLE t3 (a INT, b INT, c STRUCT<f1: INT, f3: INT, f2: INT>) USING paimon
+                       |LOCATION '$expertTbLocation'
+                       |""".stripMargin)
+                }
+
+                intercept[Exception] {
+                  spark.sql(
+                    s"""
+                       |CREATE TABLE t4 (a INT, c STRUCT<f1: INT, f2: INT, f3: INT>, b INT) USING paimon
+                       |LOCATION '$expertTbLocation'
+                       |""".stripMargin)
+                }
+              }
+            }
+        }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: create external table on managed table location") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        spark.sql(s"USE $catalogName")
+        withDatabase("paimon_db") {
+          spark.sql(s"CREATE DATABASE IF NOT EXISTS paimon_db")
+          spark.sql(s"USE paimon_db")
+          withTable("external_tbl", "managed_tbl") {
+            spark.sql(s"CREATE TABLE managed_tbl (id INT) USING paimon")
+            spark.sql("INSERT INTO managed_tbl VALUES (1)")
+            checkAnswer(spark.sql("SELECT * FROM managed_tbl"), Row(1))
+
+            val tablePath = loadTable("paimon_db", "managed_tbl").location().toString
+            spark.sql(s"CREATE TABLE external_tbl (id INT) USING paimon LOCATION '$tablePath'")
+            checkAnswer(spark.sql("SELECT * FROM external_tbl"), Row(1))
+            assert(loadTable("paimon_db", "external_tbl").location().toString.equals(tablePath))
+          }
+        }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: case sensitive") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        Seq(false, true).foreach {
+          caseSensitive =>
+            withSparkSQLConf("spark.sql.caseSensitive" -> caseSensitive.toString) {
+              spark.sql(s"USE $catalogName")
+              withDatabase("paimon_case_sensitive_DB") {
+                spark.sql(s"CREATE DATABASE paimon_case_sensitive_DB")
+
+                // check create db
+                // note: db name is always lower case in hive
+                intercept[Exception](spark.sql("CREATE DATABASE paimon_case_sensitive_db"))
+
+                spark.sql(s"USE paimon_case_sensitive_DB")
+                withTable("tT", "tt") {
+                  spark.sql("CREATE TABLE tT (aA INT) USING paimon")
+                  spark.sql("INSERT INTO tT VALUES 1")
+
+                  // check select
+                  checkAnswer(spark.sql("SELECT aA FROM tT"), Row(1))
+                  if (caseSensitive) {
+                    intercept[Exception](spark.sql(s"SELECT aa FROM tT"))
+                  } else {
+                    checkAnswer(spark.sql("SELECT aa FROM tT"), Row(1))
+                  }
+
+                  // check alter table rename
+                  // note: table name is always lower case in hive
+                  intercept[Exception](spark.sql(s"ALTER TABLE tT RENAME TO tt"))
+
+                  // check alter table rename column
+                  // note: col name can be upper case in hive
+                  if (caseSensitive) {
+                    spark.sql("ALTER TABLE tT RENAME COLUMN aA TO aa")
+                    checkAnswer(spark.sql("SELECT aa FROM tT"), Row(1))
+                    intercept[Exception](spark.sql(s"SELECT aA FROM tT"))
+                  } else {
+                    intercept[Exception](spark.sql("ALTER TABLE tT RENAME COLUMN aA TO aa"))
+                  }
+                }
               }
             }
         }
@@ -444,5 +664,9 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
       .map { case Array(key, value) => (key, value) }
       .toMap
     tableProps("path").split(":")(1)
+  }
+
+  def getActualTableLocation(dbName: String, tblName: String): String = {
+    loadTable(dbName, tblName).location().toString.split(':').apply(1)
   }
 }

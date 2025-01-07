@@ -18,9 +18,13 @@
 
 package org.apache.paimon.rest;
 
+import java.util.StringJoiner;
+
 /** Resource paths for REST catalog. */
 public class ResourcePaths {
-    public static final String V1_CONFIG = "/api/v1/config";
+
+    public static final String V1_CONFIG = "/v1/config";
+    private static final StringJoiner SLASH = new StringJoiner("/");
 
     public static ResourcePaths forCatalogProperties(String prefix) {
         return new ResourcePaths(prefix);
@@ -30,5 +34,63 @@ public class ResourcePaths {
 
     public ResourcePaths(String prefix) {
         this.prefix = prefix;
+    }
+
+    public String databases() {
+        return SLASH.add("v1").add(prefix).add("databases").toString();
+    }
+
+    public String database(String databaseName) {
+        return SLASH.add("v1").add(prefix).add("databases").add(databaseName).toString();
+    }
+
+    public String databaseProperties(String databaseName) {
+        return SLASH.add("v1")
+                .add(prefix)
+                .add("databases")
+                .add(databaseName)
+                .add("properties")
+                .toString();
+    }
+
+    public String tables(String databaseName) {
+        return SLASH.add("v1")
+                .add(prefix)
+                .add("databases")
+                .add(databaseName)
+                .add("tables")
+                .toString();
+    }
+
+    public String table(String databaseName, String tableName) {
+        return SLASH.add("v1")
+                .add(prefix)
+                .add("databases")
+                .add(databaseName)
+                .add("tables")
+                .add(tableName)
+                .toString();
+    }
+
+    public String renameTable(String databaseName, String tableName) {
+        return SLASH.add("v1")
+                .add(prefix)
+                .add("databases")
+                .add(databaseName)
+                .add("tables")
+                .add(tableName)
+                .add("rename")
+                .toString();
+    }
+
+    public String partitions(String databaseName, String tableName) {
+        return SLASH.add("v1")
+                .add(prefix)
+                .add("databases")
+                .add(databaseName)
+                .add("tables")
+                .add(tableName)
+                .add("partitions")
+                .toString();
     }
 }

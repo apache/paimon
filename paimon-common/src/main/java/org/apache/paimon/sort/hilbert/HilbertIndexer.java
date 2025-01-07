@@ -45,6 +45,7 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.ConvertBinaryUtil;
 
 import org.davidmoten.hilbert.HilbertCurve;
@@ -257,6 +258,11 @@ public class HilbertIndexer implements Serializable {
                 Object o = fieldGetter.getFieldOrNull(row);
                 return o == null ? PRIMITIVE_EMPTY : ((Timestamp) o).getMillisecond();
             };
+        }
+
+        @Override
+        public HProcessFunction visit(VariantType variantType) {
+            throw new RuntimeException("Unsupported type");
         }
 
         @Override

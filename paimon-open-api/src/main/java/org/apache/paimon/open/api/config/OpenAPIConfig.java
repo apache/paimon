@@ -21,12 +21,16 @@ package org.apache.paimon.open.api.config;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.info.License;
+import io.swagger.v3.oas.models.responses.ApiResponses;
+import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.servers.Server;
+import org.springdoc.core.customizers.OpenApiCustomiser;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 /** Config for OpenAPI. */
@@ -53,8 +57,42 @@ public class OpenAPIConfig {
                         .version("1.0")
                         .description("This API exposes endpoints to RESTCatalog.")
                         .license(mitLicense);
+        SecurityRequirement securityRequirement = new SecurityRequirement();
+        securityRequirement.addList("BearerAuth");
         List<Server> servers = new ArrayList<>();
         servers.add(server);
-        return new OpenAPI().info(info).servers(servers);
+        return new OpenAPI().info(info).servers(servers).addSecurityItem(securityRequirement);
+    }
+
+    /** Sort response alphabetically. So the api generate will in same order everytime. */
+    @Bean
+    public OpenApiCustomiser sortResponseAlphabetically() {
+        return openApi -> {
+            openApi.getPaths()
+                    .values()
+                    .forEach(
+                            path ->
+                                    path.readOperations()
+                                            .forEach(
+                                                    operation -> {
+                                                        ApiResponses responses =
+                                                                operation.getResponses();
+                                                        if (responses != null) {
+                                                            ApiResponses sortedResponses =
+                                                                    new ApiResponses();
+                                                            List<String> keys =
+                                                                    new ArrayList<>(
+                                                                            responses.keySet());
+                                                            keys.sort(Comparator.naturalOrder());
+
+                                                            for (String key : keys) {
+                                                                sortedResponses.addApiResponse(
+                                                                        key, responses.get(key));
+                                                            }
+
+                                                            operation.setResponses(sortedResponses);
+                                                        }
+                                                    }));
+        };
     }
 }

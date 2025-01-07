@@ -19,11 +19,15 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.action.CloneAction;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /** Clone Procedure. */
 public class CloneProcedure extends ProcedureBase {
@@ -31,7 +35,10 @@ public class CloneProcedure extends ProcedureBase {
 
     @ProcedureHint(
             argument = {
-                @ArgumentHint(name = "warehouse", type = @DataTypeHint("STRING")),
+                @ArgumentHint(
+                        name = "warehouse",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
                 @ArgumentHint(name = "database", type = @DataTypeHint("STRING"), isOptional = true),
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING"), isOptional = true),
                 @ArgumentHint(
@@ -65,16 +72,28 @@ public class CloneProcedure extends ProcedureBase {
             String targetCatalogConfigStr,
             Integer parallelismStr)
             throws Exception {
+        Map<String, String> sourceCatalogConfig =
+                new HashMap<>(optionalConfigMap(sourceCatalogConfigStr));
+        if (!StringUtils.isNullOrWhitespaceOnly(warehouse)
+                && !sourceCatalogConfig.containsKey("warehouse")) {
+            sourceCatalogConfig.put("warehouse", warehouse);
+        }
+
+        Map<String, String> targetCatalogConfig =
+                new HashMap<>(optionalConfigMap(targetCatalogConfigStr));
+        if (!StringUtils.isNullOrWhitespaceOnly(warehouse)
+                && !targetCatalogConfig.containsKey("warehouse")) {
+            targetCatalogConfig.put("warehouse", targetWarehouse);
+        }
+
         CloneAction cloneAction =
                 new CloneAction(
-                        warehouse,
                         database,
                         tableName,
-                        optionalConfigMap(sourceCatalogConfigStr),
-                        targetWarehouse,
+                        sourceCatalogConfig,
                         targetDatabase,
                         targetTableName,
-                        optionalConfigMap(targetCatalogConfigStr),
+                        targetCatalogConfig,
                         parallelismStr == null ? null : Integer.toString(parallelismStr));
         return execute(procedureContext, cloneAction, "Clone Job");
     }

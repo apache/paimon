@@ -18,16 +18,17 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.catalyst.analysis.ResolvedPartitionSpec
 import org.apache.spark.sql.catalyst.catalog.ExternalCatalogUtils.escapePathName
-import org.apache.spark.sql.catalyst.expressions.{Attribute, ToPrettyString}
-import org.apache.spark.sql.catalyst.expressions.Literal
+import org.apache.spark.sql.catalyst.expressions.{Attribute, Cast, Literal, ToPrettyString}
 import org.apache.spark.sql.connector.catalog.{Identifier, SupportsPartitionManagement, TableCatalog}
 import org.apache.spark.sql.connector.catalog.PaimonCatalogImplicits._
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Implicits._
+import org.apache.spark.sql.types.StringType
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
@@ -77,7 +78,9 @@ case class PaimonShowTablePartitionCommand(
     for (i <- 0 until len) {
       val dataType = partitionSchema(i).dataType
       val partValueUTF8String =
-        ToPrettyString(Literal(row.get(i, dataType), dataType), Some(timeZoneId)).eval(null)
+        Compatibility
+          .cast(Literal(row.get(i, dataType), dataType), StringType, Some(timeZoneId))
+          .eval(null)
       val partValueStr = if (partValueUTF8String == null) "null" else partValueUTF8String.toString
       partitions(i) = escapePathName(partitionSchema(i).name) + "=" + escapePathName(partValueStr)
     }

@@ -51,7 +51,7 @@ public class DataTableSource extends BaseDataTableSource {
                 null,
                 null,
                 null,
-                false);
+                null);
     }
 
     public DataTableSource(
@@ -64,7 +64,7 @@ public class DataTableSource extends BaseDataTableSource {
             @Nullable int[][] projectFields,
             @Nullable Long limit,
             @Nullable WatermarkStrategy<RowData> watermarkStrategy,
-            boolean isBatchCountStar) {
+            @Nullable Long countPushed) {
         super(
                 tableIdentifier,
                 table,
@@ -75,7 +75,7 @@ public class DataTableSource extends BaseDataTableSource {
                 projectFields,
                 limit,
                 watermarkStrategy,
-                isBatchCountStar);
+                countPushed);
     }
 
     @Override
@@ -90,7 +90,7 @@ public class DataTableSource extends BaseDataTableSource {
                 projectFields,
                 limit,
                 watermarkStrategy,
-                isBatchCountStar);
+                countPushed);
     }
 
     @Override

@@ -24,13 +24,13 @@ import org.apache.paimon.spark.catalog.SupportView
 import org.apache.paimon.view.View
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.analysis.{GetColumnByOrdinal, UnresolvedRelation}
-import org.apache.spark.sql.catalyst.expressions.{Alias, UpCast}
+import org.apache.spark.sql.catalyst.analysis.{GetColumnByOrdinal, UnresolvedRelation, UnresolvedTableOrView}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, UpCast}
 import org.apache.spark.sql.catalyst.parser.ParseException
 import org.apache.spark.sql.catalyst.parser.extensions.{CurrentOrigin, Origin}
-import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, Project, SubqueryAlias}
+import org.apache.spark.sql.catalyst.plans.logical.{LeafNode, LogicalPlan, Project, SubqueryAlias}
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.connector.catalog.PaimonLookupCatalog
+import org.apache.spark.sql.connector.catalog.{Identifier, PaimonLookupCatalog}
 
 case class PaimonViewResolver(spark: SparkSession)
   extends Rule[LogicalPlan]
@@ -43,6 +43,15 @@ case class PaimonViewResolver(spark: SparkSession)
       try {
         val view = catalog.loadView(ident)
         createViewRelation(parts, view)
+      } catch {
+        case _: ViewNotExistException =>
+          u
+      }
+
+    case u @ UnresolvedTableOrView(CatalogAndIdentifier(catalog: SupportView, ident), _, _) =>
+      try {
+        catalog.loadView(ident)
+        ResolvedPaimonView(catalog, ident)
       } catch {
         case _: ViewNotExistException =>
           u
@@ -82,4 +91,8 @@ case class PaimonViewResolver(spark: SparkSession)
         throw new RuntimeException("Failed to parse view text: " + viewText)
     }
   }
+}
+
+case class ResolvedPaimonView(catalog: SupportView, identifier: Identifier) extends LeafNode {
+  override def output: Seq[Attribute] = Nil
 }

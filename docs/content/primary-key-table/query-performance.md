@@ -34,7 +34,7 @@ For Merge On Read table, the most important thing you should pay attention to is
 the concurrency of reading data.
 
 For MOW (Deletion Vectors) or COW table or [Read Optimized]({{< ref "concepts/system-tables#read-optimized-table" >}}) table,
-There is no limit to the concurrency of reading data, and they can also utilize some filtering conditions for non-primary-key columns.
+there is no limit to the concurrency of reading data, and they can also utilize some filtering conditions for non-primary-key columns.
 
 ## Data Skipping By Primary Key Filter
 

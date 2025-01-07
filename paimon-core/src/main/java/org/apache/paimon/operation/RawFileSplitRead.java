@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
+import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fileindex.FileIndexResult;
@@ -46,10 +47,11 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.BulkFormatMapping;
-import org.apache.paimon.utils.BulkFormatMapping.BulkFormatMappingBuilder;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.FormatReaderMapping;
+import org.apache.paimon.utils.FormatReaderMapping.Builder;
 import org.apache.paimon.utils.IOExceptionSupplier;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -75,7 +77,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final TableSchema schema;
     private final FileFormatDiscover formatDiscover;
     private final FileStorePathFactory pathFactory;
-    private final Map<FormatKey, BulkFormatMapping> bulkFormatMappings;
+    private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final boolean fileIndexReadEnabled;
 
     private RowType readRowType;
@@ -94,7 +96,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         this.schema = schema;
         this.formatDiscover = formatDiscover;
         this.pathFactory = pathFactory;
-        this.bulkFormatMappings = new HashMap<>();
+        this.formatReaderMappings = new HashMap<>();
         this.fileIndexReadEnabled = fileIndexReadEnabled;
         this.readRowType = rowType;
     }
@@ -150,26 +152,25 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
 
         List<DataField> readTableFields = readRowType.getFields();
-        BulkFormatMappingBuilder bulkFormatMappingBuilder =
-                new BulkFormatMappingBuilder(
-                        formatDiscover, readTableFields, TableSchema::fields, filters);
+        Builder formatReaderMappingBuilder =
+                new Builder(formatDiscover, readTableFields, TableSchema::fields, filters);
 
         for (int i = 0; i < files.size(); i++) {
             DataFileMeta file = files.get(i);
             String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
             long schemaId = file.schemaId();
 
-            Supplier<BulkFormatMapping> formatSupplier =
+            Supplier<FormatReaderMapping> formatSupplier =
                     () ->
-                            bulkFormatMappingBuilder.build(
+                            formatReaderMappingBuilder.build(
                                     formatIdentifier,
                                     schema,
                                     schemaId == schema.id()
                                             ? schema
                                             : schemaManager.schema(schemaId));
 
-            BulkFormatMapping bulkFormatMapping =
-                    bulkFormatMappings.computeIfAbsent(
+            FormatReaderMapping formatReaderMapping =
+                    formatReaderMappings.computeIfAbsent(
                             new FormatKey(file.schemaId(), formatIdentifier),
                             key -> formatSupplier.get());
 
@@ -181,7 +182,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                                     partition,
                                     file,
                                     dataFilePathFactory,
-                                    bulkFormatMapping,
+                                    formatReaderMapping,
                                     dvFactory));
         }
 
@@ -192,7 +193,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             BinaryRow partition,
             DataFileMeta file,
             DataFilePathFactory dataFilePathFactory,
-            BulkFormatMapping bulkFormatMapping,
+            FormatReaderMapping formatReaderMapping,
             IOExceptionSupplier<DeletionVector> dvFactory)
             throws IOException {
         FileIndexResult fileIndexResult = null;
@@ -200,8 +201,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             fileIndexResult =
                     FileIndexEvaluator.evaluate(
                             fileIO,
-                            bulkFormatMapping.getDataSchema(),
-                            bulkFormatMapping.getDataFilters(),
+                            formatReaderMapping.getDataSchema(),
+                            formatReaderMapping.getDataFilters(),
                             dataFilePathFactory,
                             file);
             if (!fileIndexResult.remain()) {
@@ -209,19 +210,36 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             }
         }
 
+        RoaringBitmap32 selection = null;
+        if (fileIndexResult instanceof BitmapIndexResult) {
+            selection = ((BitmapIndexResult) fileIndexResult).get();
+        }
+
+        RoaringBitmap32 deletion = null;
+        DeletionVector deletionVector = dvFactory == null ? null : dvFactory.get();
+        if (deletionVector instanceof BitmapDeletionVector) {
+            deletion = ((BitmapDeletionVector) deletionVector).get();
+        }
+
+        if (selection != null) {
+            if (deletion != null) {
+                selection = RoaringBitmap32.andNot(selection, deletion);
+            }
+            if (selection.isEmpty()) {
+                return new EmptyFileRecordReader<>();
+            }
+        }
+
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(
-                        fileIO,
-                        dataFilePathFactory.toPath(file.fileName()),
-                        file.fileSize(),
-                        fileIndexResult);
+                        fileIO, dataFilePathFactory.toPath(file), file.fileSize(), selection);
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
-                        bulkFormatMapping.getReaderFactory(),
+                        formatReaderMapping.getReaderFactory(),
                         formatReaderContext,
-                        bulkFormatMapping.getIndexMapping(),
-                        bulkFormatMapping.getCastMapping(),
-                        PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
+                        formatReaderMapping.getIndexMapping(),
+                        formatReaderMapping.getCastMapping(),
+                        PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition));
 
         if (fileIndexResult instanceof BitmapIndexResult) {
             fileRecordReader =
@@ -229,7 +247,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                             fileRecordReader, (BitmapIndexResult) fileIndexResult);
         }
 
-        DeletionVector deletionVector = dvFactory == null ? null : dvFactory.get();
         if (deletionVector != null && !deletionVector.isEmpty()) {
             return new ApplyDeletionVectorReader(fileRecordReader, deletionVector);
         }

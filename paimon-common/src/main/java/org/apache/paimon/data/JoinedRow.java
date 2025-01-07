@@ -19,6 +19,7 @@
 package org.apache.paimon.data;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.RowKind;
 
 import javax.annotation.Nullable;
@@ -221,6 +222,15 @@ public class JoinedRow implements InternalRow {
             return row1.getBinary(pos);
         } else {
             return row2.getBinary(pos - row1.getFieldCount());
+        }
+    }
+
+    @Override
+    public Variant getVariant(int pos) {
+        if (pos < row1.getFieldCount()) {
+            return row1.getVariant(pos);
+        } else {
+            return row2.getVariant(pos - row1.getFieldCount());
         }
     }
 

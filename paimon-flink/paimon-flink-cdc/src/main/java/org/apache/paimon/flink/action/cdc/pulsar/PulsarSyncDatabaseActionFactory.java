@@ -40,7 +40,7 @@ public class PulsarSyncDatabaseActionFactory
 
     @Override
     public PulsarSyncDatabaseAction createAction() {
-        return new PulsarSyncDatabaseAction(warehouse, database, catalogConfig, cdcSourceConfig);
+        return new PulsarSyncDatabaseAction(database, catalogConfig, cdcSourceConfig);
     }
 
     @Override

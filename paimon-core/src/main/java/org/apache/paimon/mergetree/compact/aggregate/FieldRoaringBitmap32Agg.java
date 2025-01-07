@@ -22,6 +22,7 @@ import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 
 /** roaring bitmap aggregate a field of a row. */
 public class FieldRoaringBitmap32Agg extends FieldAggregator {
@@ -43,8 +44,8 @@ public class FieldRoaringBitmap32Agg extends FieldAggregator {
         }
 
         try {
-            roaringBitmapAcc.deserialize((byte[]) accumulator);
-            roaringBitmapInput.deserialize((byte[]) inputField);
+            roaringBitmapAcc.deserialize(ByteBuffer.wrap((byte[]) accumulator));
+            roaringBitmapInput.deserialize(ByteBuffer.wrap((byte[]) inputField));
             roaringBitmapAcc.or(roaringBitmapInput);
             return roaringBitmapAcc.serialize();
         } catch (IOException e) {

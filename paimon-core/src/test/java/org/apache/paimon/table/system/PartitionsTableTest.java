@@ -85,27 +85,27 @@ public class PartitionsTableTest extends TableTestBase {
     @Test
     public void testPartitionRecordCount() throws Exception {
         List<InternalRow> expectedRow = new ArrayList<>();
-        expectedRow.add(GenericRow.of(BinaryString.fromString("[1]"), 2L));
-        expectedRow.add(GenericRow.of(BinaryString.fromString("[2]"), 1L));
-        expectedRow.add(GenericRow.of(BinaryString.fromString("[3]"), 1L));
+        expectedRow.add(GenericRow.of(BinaryString.fromString("{1}"), 2L));
+        expectedRow.add(GenericRow.of(BinaryString.fromString("{2}"), 1L));
+        expectedRow.add(GenericRow.of(BinaryString.fromString("{3}"), 1L));
 
         // Only read partition and record count, record size may not stable.
-        List<InternalRow> result = read(partitionsTable, new int[][] {{0}, {1}});
+        List<InternalRow> result = read(partitionsTable, new int[] {0, 1});
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
     }
 
     @Test
     public void testPartitionTimeTravel() throws Exception {
         List<InternalRow> expectedRow = new ArrayList<>();
-        expectedRow.add(GenericRow.of(BinaryString.fromString("[1]"), 1L));
-        expectedRow.add(GenericRow.of(BinaryString.fromString("[3]"), 1L));
+        expectedRow.add(GenericRow.of(BinaryString.fromString("{1}"), 1L));
+        expectedRow.add(GenericRow.of(BinaryString.fromString("{3}"), 1L));
 
         // Only read partition and record count, record size may not stable.
         List<InternalRow> result =
                 read(
                         partitionsTable.copy(
                                 Collections.singletonMap(CoreOptions.SCAN_VERSION.key(), "1")),
-                        new int[][] {{0}, {1}});
+                        new int[] {0, 1});
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
     }
 
@@ -113,11 +113,11 @@ public class PartitionsTableTest extends TableTestBase {
     public void testPartitionValue() throws Exception {
         write(table, GenericRow.of(2, 1, 3), GenericRow.of(3, 1, 4));
         List<InternalRow> expectedRow = new ArrayList<>();
-        expectedRow.add(GenericRow.of(BinaryString.fromString("[1]"), 4L, 3L));
-        expectedRow.add(GenericRow.of(BinaryString.fromString("[2]"), 1L, 1L));
-        expectedRow.add(GenericRow.of(BinaryString.fromString("[3]"), 1L, 1L));
+        expectedRow.add(GenericRow.of(BinaryString.fromString("{1}"), 4L, 3L));
+        expectedRow.add(GenericRow.of(BinaryString.fromString("{2}"), 1L, 1L));
+        expectedRow.add(GenericRow.of(BinaryString.fromString("{3}"), 1L, 1L));
 
-        List<InternalRow> result = read(partitionsTable, new int[][] {{0}, {1}, {3}});
+        List<InternalRow> result = read(partitionsTable, new int[] {0, 1, 3});
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
     }
 }

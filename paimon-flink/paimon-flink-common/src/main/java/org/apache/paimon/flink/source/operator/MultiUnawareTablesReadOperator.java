@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source.operator;
 
 import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.PartitionEntry;
@@ -44,7 +45,7 @@ import java.util.stream.Collectors;
 /**
  * The operator is used for historical partition compaction. It reads {@link
  * MultiTableUnawareAppendCompactionTask} received from the preceding {@link
- * CombinedUnawareBatchSourceFunction} and filter partitions which is not historical.
+ * CombinedUnawareBatchSource} and filter partitions which is not historical.
  */
 public class MultiUnawareTablesReadOperator
         extends AbstractStreamOperator<MultiTableUnawareAppendCompactionTask>
@@ -54,12 +55,11 @@ public class MultiUnawareTablesReadOperator
 
     private static final Logger LOG = LoggerFactory.getLogger(MultiUnawareTablesReadOperator.class);
 
-    private final Catalog.Loader catalogLoader;
+    private final CatalogLoader catalogLoader;
 
     private final Duration partitionIdleTime;
 
-    public MultiUnawareTablesReadOperator(
-            Catalog.Loader catalogLoader, Duration partitionIdleTime) {
+    public MultiUnawareTablesReadOperator(CatalogLoader catalogLoader, Duration partitionIdleTime) {
         this.catalogLoader = catalogLoader;
         this.partitionIdleTime = partitionIdleTime;
     }

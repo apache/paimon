@@ -160,6 +160,10 @@ public abstract class TableTestBase {
         }
     }
 
+    public void dropTableDefault() throws Exception {
+        catalog.dropTable(identifier(), true);
+    }
+
     protected List<InternalRow> read(Table table, Pair<ConfigOption<?>, String>... dynamicOptions)
             throws Exception {
         return read(table, null, dynamicOptions);
@@ -167,7 +171,7 @@ public abstract class TableTestBase {
 
     protected List<InternalRow> read(
             Table table,
-            @Nullable int[][] projection,
+            @Nullable int[] projection,
             Pair<ConfigOption<?>, String>... dynamicOptions)
             throws Exception {
         Map<String, String> options = new HashMap<>();

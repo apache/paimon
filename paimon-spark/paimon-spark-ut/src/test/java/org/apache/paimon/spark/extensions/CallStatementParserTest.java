@@ -80,13 +80,36 @@ public class CallStatementParserTest {
     }
 
     @Test
+    public void testDelegateUnsupportedProcedure() {
+        assertThatThrownBy(() -> parser.parsePlan("CALL cat.d.t()"))
+                .isInstanceOf(ParseException.class)
+                .satisfies(
+                        exception -> {
+                            ParseException parseException = (ParseException) exception;
+                            assertThat(parseException.getErrorClass())
+                                    .isEqualTo("PARSE_SYNTAX_ERROR");
+                            assertThat(parseException.getMessageParameters().get("error"))
+                                    .isEqualTo("'CALL'");
+                        });
+    }
+
+    @Test
+    public void testCallWithBackticks() throws ParseException {
+        PaimonCallStatement call =
+                (PaimonCallStatement) parser.parsePlan("CALL cat.`sys`.`rollback`()");
+        assertThat(JavaConverters.seqAsJavaList(call.name()))
+                .isEqualTo(Arrays.asList("cat", "sys", "rollback"));
+        assertThat(call.args().size()).isEqualTo(0);
+    }
+
+    @Test
     public void testCallWithNamedArguments() throws ParseException {
         PaimonCallStatement callStatement =
                 (PaimonCallStatement)
                         parser.parsePlan(
-                                "CALL catalog.system.named_args_func(arg1 => 1, arg2 => 'test', arg3 => true)");
+                                "CALL catalog.sys.rollback(arg1 => 1, arg2 => 'test', arg3 => true)");
         assertThat(JavaConverters.seqAsJavaList(callStatement.name()))
-                .isEqualTo(Arrays.asList("catalog", "system", "named_args_func"));
+                .isEqualTo(Arrays.asList("catalog", "sys", "rollback"));
         assertThat(callStatement.args().size()).isEqualTo(3);
         assertArgument(callStatement, 0, "arg1", 1, DataTypes.IntegerType);
         assertArgument(callStatement, 1, "arg2", "test", DataTypes.StringType);
@@ -98,11 +121,11 @@ public class CallStatementParserTest {
         PaimonCallStatement callStatement =
                 (PaimonCallStatement)
                         parser.parsePlan(
-                                "CALL catalog.system.positional_args_func(1, '${spark.sql.extensions}', 2L, true, 3.0D, 4"
+                                "CALL catalog.sys.rollback(1, '${spark.sql.extensions}', 2L, true, 3.0D, 4"
                                         + ".0e1,500e-1BD, "
                                         + "TIMESTAMP '2017-02-03T10:37:30.00Z')");
         assertThat(JavaConverters.seqAsJavaList(callStatement.name()))
-                .isEqualTo(Arrays.asList("catalog", "system", "positional_args_func"));
+                .isEqualTo(Arrays.asList("catalog", "sys", "rollback"));
         assertThat(callStatement.args().size()).isEqualTo(8);
         assertArgument(callStatement, 0, 1, DataTypes.IntegerType);
         assertArgument(
@@ -127,9 +150,9 @@ public class CallStatementParserTest {
     public void testCallWithMixedArguments() throws ParseException {
         PaimonCallStatement callStatement =
                 (PaimonCallStatement)
-                        parser.parsePlan("CALL catalog.system.mixed_function(arg1 => 1, 'test')");
+                        parser.parsePlan("CALL catalog.sys.rollback(arg1 => 1, 'test')");
         assertThat(JavaConverters.seqAsJavaList(callStatement.name()))
-                .isEqualTo(Arrays.asList("catalog", "system", "mixed_function"));
+                .isEqualTo(Arrays.asList("catalog", "sys", "rollback"));
         assertThat(callStatement.args().size()).isEqualTo(2);
         assertArgument(callStatement, 0, "arg1", 1, DataTypes.IntegerType);
         assertArgument(callStatement, 1, "test", DataTypes.StringType);
@@ -137,9 +160,9 @@ public class CallStatementParserTest {
 
     @Test
     public void testCallWithParseException() {
-        assertThatThrownBy(() -> parser.parsePlan("CALL catalog.system func abc"))
+        assertThatThrownBy(() -> parser.parsePlan("CALL catalog.sys.rollback abc"))
                 .isInstanceOf(PaimonParseException.class)
-                .hasMessageContaining("missing '(' at 'func'");
+                .hasMessageContaining("missing '(' at 'abc'");
     }
 
     private void assertArgument(

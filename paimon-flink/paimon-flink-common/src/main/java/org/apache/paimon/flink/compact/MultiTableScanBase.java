@@ -20,18 +20,18 @@ package org.apache.paimon.flink.compact;
 
 import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.Split;
 
-import org.apache.flink.streaming.api.functions.source.SourceFunction;
+import org.apache.flink.api.connector.source.ReaderOutput;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.shouldCompactTable;
@@ -57,22 +57,19 @@ public abstract class MultiTableScanBase<T> implements AutoCloseable {
 
     protected transient Catalog catalog;
 
-    protected AtomicBoolean isRunning;
     protected boolean isStreaming;
 
     public MultiTableScanBase(
-            Catalog.Loader catalogLoader,
+            CatalogLoader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,
-            boolean isStreaming,
-            AtomicBoolean isRunning) {
+            boolean isStreaming) {
         catalog = catalogLoader.load();
 
         this.includingPattern = includingPattern;
         this.excludingPattern = excludingPattern;
         this.databasePattern = databasePattern;
-        this.isRunning = isRunning;
         this.isStreaming = isStreaming;
     }
 
@@ -104,13 +101,9 @@ public abstract class MultiTableScanBase<T> implements AutoCloseable {
         }
     }
 
-    public ScanResult scanTable(SourceFunction.SourceContext<T> ctx)
+    public ScanResult scanTable(ReaderOutput<T> ctx)
             throws Catalog.TableNotExistException, Catalog.DatabaseNotExistException {
         try {
-            if (!isRunning.get()) {
-                return ScanResult.FINISHED;
-            }
-
             updateTableMap();
             List<T> tasks = doScan();
 

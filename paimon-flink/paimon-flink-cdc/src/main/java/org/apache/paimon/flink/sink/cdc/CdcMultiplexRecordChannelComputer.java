@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
@@ -38,13 +39,13 @@ public class CdcMultiplexRecordChannelComputer implements ChannelComputer<CdcMul
             LoggerFactory.getLogger(CdcMultiplexRecordChannelComputer.class);
 
     private static final long serialVersionUID = 1L;
-    private final Catalog.Loader catalogLoader;
+    private final CatalogLoader catalogLoader;
 
     private transient int numChannels;
 
     private Map<Identifier, CdcRecordChannelComputer> channelComputers;
 
-    public CdcMultiplexRecordChannelComputer(Catalog.Loader catalogLoader) {
+    public CdcMultiplexRecordChannelComputer(CatalogLoader catalogLoader) {
         this.catalogLoader = catalogLoader;
     }
 

@@ -151,7 +151,7 @@ FROM SG;
 ## Aggregation For Partial Update
 
 You can specify aggregation function for the input field, all the functions in the
-[Aggregation]({{< ref "primary-key-table/merge-engine#aggregation" >}}) are supported.
+[Aggregation]({{< ref "primary-key-table/merge-engine/aggregation" >}}) are supported.
 
 See example:
 

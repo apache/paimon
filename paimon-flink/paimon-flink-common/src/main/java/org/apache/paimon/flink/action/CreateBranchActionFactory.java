@@ -18,9 +18,6 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.flink.api.java.tuple.Tuple3;
-
-import java.util.Map;
 import java.util.Optional;
 
 /** Factory to create {@link CreateBranchAction}. */
@@ -38,26 +35,13 @@ public class CreateBranchActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        checkRequiredArgument(params, BRANCH_NAME);
-
-        Tuple3<String, String, String> tablePath = getTablePath(params);
-        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
-
-        String tagName = null;
-        if (params.has(TAG_NAME)) {
-            tagName = params.get(TAG_NAME);
-        }
-
-        String branchName = params.get(BRANCH_NAME);
-
         CreateBranchAction action =
                 new CreateBranchAction(
-                        tablePath.f0,
-                        tablePath.f1,
-                        tablePath.f2,
-                        catalogConfig,
-                        branchName,
-                        tagName);
+                        params.getRequired(DATABASE),
+                        params.getRequired(TABLE),
+                        catalogConfigMap(params),
+                        params.getRequired(BRANCH_NAME),
+                        params.get(TAG_NAME));
         return Optional.of(action);
     }
 

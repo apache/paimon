@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
@@ -28,8 +29,8 @@ import org.apache.flink.util.Collector;
 public class CaseSensitiveUtils {
 
     public static DataStream<CdcRecord> cdcRecordConvert(
-            Catalog.Loader catalogLoader, DataStream<CdcRecord> input) {
-        if (allowUpperCase(catalogLoader)) {
+            CatalogLoader catalogLoader, DataStream<CdcRecord> input) {
+        if (caseSensitive(catalogLoader)) {
             return input;
         }
 
@@ -46,8 +47,8 @@ public class CaseSensitiveUtils {
     }
 
     public static DataStream<CdcMultiplexRecord> cdcMultiplexRecordConvert(
-            Catalog.Loader catalogLoader, DataStream<CdcMultiplexRecord> input) {
-        if (allowUpperCase(catalogLoader)) {
+            CatalogLoader catalogLoader, DataStream<CdcMultiplexRecord> input) {
+        if (caseSensitive(catalogLoader)) {
             return input;
         }
 
@@ -65,9 +66,9 @@ public class CaseSensitiveUtils {
                 .name("Case-insensitive Convert");
     }
 
-    private static boolean allowUpperCase(Catalog.Loader catalogLoader) {
+    private static boolean caseSensitive(CatalogLoader catalogLoader) {
         try (Catalog catalog = catalogLoader.load()) {
-            return catalog.allowUpperCase();
+            return catalog.caseSensitive();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

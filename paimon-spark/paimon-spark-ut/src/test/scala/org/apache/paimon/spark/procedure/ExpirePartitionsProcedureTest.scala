@@ -551,4 +551,69 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
       }
     }
   }
+
+  test("Paimon Procedure: expire partitions with default num") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql(
+            s"""
+               |CREATE TABLE T (k STRING, pt STRING)
+               |TBLPROPERTIES ('primary-key'='k,pt', 'bucket'='1', 'partition.expiration-max-num'='2')
+               |PARTITIONED BY (pt)
+               |""".stripMargin)
+          val location = loadTable("T").location().toString
+
+          val inputData = MemoryStream[(String, String)]
+          val stream = inputData
+            .toDS()
+            .toDF("k", "pt")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], _: Long) =>
+                batch.write.format("paimon").mode("append").save(location)
+            }
+            .start()
+
+          val query = () => spark.sql("SELECT * FROM T")
+
+          try {
+            // snapshot-1
+            inputData.addData(("a", "2024-06-01"))
+            stream.processAllAvailable()
+
+            // snapshot-2
+            inputData.addData(("b", "2024-06-02"))
+            stream.processAllAvailable()
+
+            // snapshot-3
+            inputData.addData(("c", "2024-06-03"))
+            stream.processAllAvailable()
+
+            // This partition never expires.
+            inputData.addData(("Never-expire", "9999-09-09"))
+            stream.processAllAvailable()
+
+            checkAnswer(
+              query(),
+              Row("a", "2024-06-01") :: Row("b", "2024-06-02") :: Row("c", "2024-06-03") :: Row(
+                "Never-expire",
+                "9999-09-09") :: Nil)
+            // call expire_partitions.
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.expire_partitions(table => 'test.T', expiration_time => '1 d'" +
+                  ", timestamp_formatter => 'yyyy-MM-dd')"),
+              Row("pt=2024-06-01") :: Row("pt=2024-06-02") :: Nil
+            )
+
+            checkAnswer(query(), Row("c", "2024-06-03") :: Row("Never-expire", "9999-09-09") :: Nil)
+
+          } finally {
+            stream.stop()
+          }
+      }
+    }
+  }
 }

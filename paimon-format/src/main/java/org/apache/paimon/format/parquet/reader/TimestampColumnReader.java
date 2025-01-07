@@ -36,8 +36,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Timestamp {@link ColumnReader}. We only support INT96 bytes now, julianDay(4) + nanosOfDay(8).
- * See https://github.com/apache/parquet-format/blob/master/DataTypes.md#timestamp TIMESTAMP_MILLIS
- * and TIMESTAMP_MICROS are the deprecated ConvertedType.
+ * See <a
+ * href="https://github.com/apache/parquet-format/blob/master/LogicalTypes.md#timestamp">Parquet
+ * Timestamp</a> TIMESTAMP_MILLIS and TIMESTAMP_MICROS are the deprecated ConvertedType.
  */
 public class TimestampColumnReader extends AbstractColumnReader<WritableTimestampVector> {
 

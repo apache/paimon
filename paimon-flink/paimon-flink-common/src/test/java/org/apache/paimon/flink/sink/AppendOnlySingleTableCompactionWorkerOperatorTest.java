@@ -160,8 +160,7 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
             List<DataFileMeta> fileMetas =
                     ((CommitMessageImpl) commitMessage).compactIncrement().compactAfter();
             for (DataFileMeta fileMeta : fileMetas) {
-                Assertions.assertThat(
-                                localFileIO.exists(dataFilePathFactory.toPath(fileMeta.fileName())))
+                Assertions.assertThat(localFileIO.exists(dataFilePathFactory.toPath(fileMeta)))
                         .isTrue();
             }
             if (i++ > 2) {
@@ -188,9 +187,7 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
                 List<DataFileMeta> fileMetas =
                         ((CommitMessageImpl) commitMessage).compactIncrement().compactAfter();
                 for (DataFileMeta fileMeta : fileMetas) {
-                    Assertions.assertThat(
-                                    localFileIO.exists(
-                                            dataFilePathFactory.toPath(fileMeta.fileName())))
+                    Assertions.assertThat(localFileIO.exists(dataFilePathFactory.toPath(fileMeta)))
                             .isFalse();
                 }
             } catch (Exception e) {

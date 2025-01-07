@@ -26,8 +26,6 @@ public class CreateTagFromWatermarkActionFactory implements ActionFactory {
 
     public static final String IDENTIFIER = "create_tag_from_watermark";
 
-    private static final String TABLE = "table";
-
     private static final String TAG = "tag";
 
     private static final String WATERMARK = "watermark";
@@ -41,16 +39,19 @@ public class CreateTagFromWatermarkActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        String warehouse = params.get(WAREHOUSE);
-        String table = params.get(TABLE);
         String tag = params.get(TAG);
         Long watermark = Long.parseLong(params.get(WATERMARK));
         String timeRetained = params.get(TIME_RETAINED);
-        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
+        Map<String, String> catalogConfig = catalogConfigMap(params);
 
         CreateTagFromWatermarkAction createTagFromWatermarkAction =
                 new CreateTagFromWatermarkAction(
-                        warehouse, table, tag, watermark, timeRetained, catalogConfig);
+                        params.getRequired(DATABASE),
+                        params.getRequired(TABLE),
+                        tag,
+                        watermark,
+                        timeRetained,
+                        catalogConfig);
         return Optional.of(createTagFromWatermarkAction);
     }
 
@@ -62,7 +63,8 @@ public class CreateTagFromWatermarkActionFactory implements ActionFactory {
         System.out.println("Syntax:");
         System.out.println(
                 "  create_tag_from_watermark --warehouse <warehouse_path> "
-                        + "--table <database.table_name> "
+                        + "--database <database_name>"
+                        + "--table <table_name> "
                         + "--tag <tag> "
                         + "--watermark <watermark> "
                         + "[--timeRetained <duration>] "

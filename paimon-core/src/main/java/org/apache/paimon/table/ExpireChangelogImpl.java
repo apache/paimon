@@ -21,7 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
-import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.utils.Preconditions;
@@ -147,7 +147,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
                 LOG.debug("Ready to delete changelog files from changelog #" + id);
             }
             Changelog changelog = snapshotManager.longLivedChangelog(id);
-            Predicate<ManifestEntry> skipper;
+            Predicate<ExpireFileEntry> skipper;
             try {
                 skipper = changelogDeletion.createDataFileSkipperForTags(taggedSnapshots, id);
             } catch (Exception e) {

@@ -56,6 +56,6 @@ Records within a data file are sorted by their primary keys. Within a sorted run
 
 {{< img src="/img/sorted-runs.png">}}
 
-As you can see, different sorted runs may have overlapping primary key ranges, and may even contain the same primary key. When querying the LSM tree, all sorted runs must be combined and all records with the same primary key must be merged according to the user-specified [merge engine]({{< ref "primary-key-table/merge-engine/overview" >}}) and the timestamp of each record.
+As you can see, different sorted runs may have overlapped primary key ranges, and may even contain the same primary key. When querying the LSM tree, all sorted runs must be combined and all records with the same primary key must be merged according to the user-specified [merge engine]({{< ref "primary-key-table/merge-engine/overview" >}}) and the timestamp of each record.
 
 New records written into the LSM tree will be first buffered in memory. When the memory buffer is full, all records in memory will be sorted and flushed to disk. A new sorted run is now created.

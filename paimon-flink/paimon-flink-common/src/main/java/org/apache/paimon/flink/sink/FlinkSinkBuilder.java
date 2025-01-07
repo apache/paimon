@@ -265,6 +265,16 @@ public class FlinkSinkBuilder {
     }
 
     protected DataStreamSink<?> buildForFixedBucket(DataStream<InternalRow> input) {
+        int bucketNums = table.bucketSpec().getNumBuckets();
+        if (parallelism == null
+                && bucketNums < input.getParallelism()
+                && table.partitionKeys().isEmpty()) {
+            // For non-partitioned table, if the bucketNums is less than job parallelism.
+            LOG.warn(
+                    "For non-partitioned table, if bucketNums is less than the parallelism of inputOperator,"
+                            + " then the parallelism of writerOperator will be set to bucketNums.");
+            parallelism = bucketNums;
+        }
         DataStream<InternalRow> partitioned =
                 partition(
                         input,

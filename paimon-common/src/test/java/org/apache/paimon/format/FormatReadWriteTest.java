@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format;
 
+import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
@@ -27,6 +28,7 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -36,6 +38,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VariantType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -70,7 +73,7 @@ public abstract class FormatReadWriteTest {
     @BeforeEach
     public void beforeEach() {
         this.fileIO = LocalFileIO.create();
-        this.file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+        this.file = new Path(new Path(tempPath.toUri()), UUID.randomUUID() + "." + formatType);
     }
 
     protected abstract FileFormat fileFormat();
@@ -169,6 +172,71 @@ public abstract class FormatReadWriteTest {
         }
 
         assertThat(result).containsExactly(GenericRow.of(GenericRow.of(10, 12)));
+    }
+
+    @Test
+    public void testReadWriteVariant() throws IOException {
+        FileFormat format = fileFormat();
+        // todo: support other format types
+        if (!format.getFormatIdentifier().equals("parquet")) {
+            return;
+        }
+
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false);
+                FormatWriter writer = format.createWriterFactory(writeType).create(out, "zstd")) {
+            writer.addElement(
+                    GenericRow.of(GenericVariant.fromJson("{\"age\":35,\"city\":\"Chicago\"}")));
+        }
+
+        List<InternalRow> result = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(writeType)
+                        .createReader(
+                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+            InternalRowSerializer serializer = new InternalRowSerializer(writeType);
+            reader.forEachRemaining(row -> result.add(serializer.copy(row)));
+        }
+
+        assertThat(result.get(0).getVariant(0).toJson())
+                .isEqualTo("{\"age\":35,\"city\":\"Chicago\"}");
+    }
+
+    @Test
+    public void testReadWriteVariantList() throws IOException {
+        FileFormat format = fileFormat();
+        // todo: support other format types
+        if (!format.getFormatIdentifier().equals("parquet")) {
+            return;
+        }
+
+        RowType writeType = DataTypes.ROW(new ArrayType(true, new VariantType()));
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false);
+                FormatWriter writer = format.createWriterFactory(writeType).create(out, "zstd")) {
+            writer.addElement(
+                    GenericRow.of(
+                            new GenericArray(
+                                    new Object[] {
+                                        GenericVariant.fromJson(
+                                                "{\"age\":35,\"city\":\"Chicago\"}"),
+                                        GenericVariant.fromJson("{\"age\":45,\"city\":\"Beijing\"}")
+                                    })));
+        }
+
+        List<InternalRow> result = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(writeType)
+                        .createReader(
+                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+            InternalRowSerializer serializer = new InternalRowSerializer(writeType);
+            reader.forEachRemaining(row -> result.add(serializer.copy(row)));
+        }
+        InternalRow internalRow = result.get(0);
+        BinaryArray array = (BinaryArray) internalRow.getArray(0);
+        assertThat(array.getVariant(0).toJson()).isEqualTo("{\"age\":35,\"city\":\"Chicago\"}");
+        assertThat(array.getVariant(1).toJson()).isEqualTo("{\"age\":45,\"city\":\"Beijing\"}");
     }
 
     private RowType rowTypeForFullTypesTest() {

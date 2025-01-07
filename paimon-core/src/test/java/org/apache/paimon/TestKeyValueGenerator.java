@@ -95,10 +95,12 @@ public class TestKeyValueGenerator {
     public static final RowType KEY_TYPE =
             RowType.of(
                     new DataField(
-                            2 + SpecialFields.KEY_FIELD_ID_START, "key_shopId", new IntType(false)),
+                            2 + SpecialFields.KEY_FIELD_ID_START,
+                            SpecialFields.KEY_FIELD_PREFIX + "shopId",
+                            new IntType(false)),
                     new DataField(
                             3 + SpecialFields.KEY_FIELD_ID_START,
-                            "key_orderId",
+                            SpecialFields.KEY_FIELD_PREFIX + "orderId",
                             new BigIntType(false)));
 
     public static final InternalRowSerializer DEFAULT_ROW_SERIALIZER =
@@ -281,7 +283,7 @@ public class TestKeyValueGenerator {
     public static List<String> getPrimaryKeys(GeneratorMode mode) {
         List<String> trimmedPk =
                 KEY_TYPE.getFieldNames().stream()
-                        .map(f -> f.replaceFirst("key_", ""))
+                        .map(f -> f.replaceFirst(SpecialFields.KEY_FIELD_PREFIX, ""))
                         .collect(Collectors.toList());
         if (mode != NON_PARTITIONED) {
             trimmedPk = new ArrayList<>(trimmedPk);
@@ -394,7 +396,7 @@ public class TestKeyValueGenerator {
                             f ->
                                     new DataField(
                                             f.id() + SpecialFields.KEY_FIELD_ID_START,
-                                            "key_" + f.name(),
+                                            SpecialFields.KEY_FIELD_PREFIX + f.name(),
                                             f.type(),
                                             f.description()))
                     .collect(Collectors.toList());

@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
@@ -33,6 +34,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VariantType;
 
 import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.io.api.RecordConsumer;
@@ -127,6 +129,8 @@ public class ParquetRowDataWriter {
                         ((MultisetType) t).getElementType(), new IntType(false), groupType);
             } else if (t instanceof RowType && type instanceof GroupType) {
                 return new RowWriter((RowType) t, groupType);
+            } else if (t instanceof VariantType && type instanceof GroupType) {
+                return new VariantWriter();
             } else {
                 throw new UnsupportedOperationException("Unsupported type: " + type);
             }
@@ -539,6 +543,30 @@ public class ParquetRowDataWriter {
             recordConsumer.startGroup();
             InternalRow rowData = arrayData.getRow(ordinal, fieldWriters.length);
             write(rowData);
+            recordConsumer.endGroup();
+        }
+    }
+
+    private class VariantWriter implements FieldWriter {
+
+        @Override
+        public void write(InternalRow row, int ordinal) {
+            writeVariant(row.getVariant(ordinal));
+        }
+
+        @Override
+        public void write(InternalArray arrayData, int ordinal) {
+            writeVariant(arrayData.getVariant(ordinal));
+        }
+
+        private void writeVariant(Variant variant) {
+            recordConsumer.startGroup();
+            recordConsumer.startField(Variant.VALUE, 0);
+            recordConsumer.addBinary(Binary.fromReusedByteArray(variant.value()));
+            recordConsumer.endField(Variant.VALUE, 0);
+            recordConsumer.startField(Variant.METADATA, 1);
+            recordConsumer.addBinary(Binary.fromReusedByteArray(variant.metadata()));
+            recordConsumer.endField(Variant.METADATA, 1);
             recordConsumer.endGroup();
         }
     }

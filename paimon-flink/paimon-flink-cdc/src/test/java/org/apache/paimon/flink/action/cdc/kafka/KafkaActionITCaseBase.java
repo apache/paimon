@@ -28,21 +28,17 @@ import org.apache.flink.util.DockerImageVersions;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
-import org.apache.kafka.clients.admin.TopicDescription;
-import org.apache.kafka.clients.admin.TopicListing;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
-import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
@@ -60,17 +56,12 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.Timer;
-import java.util.TimerTask;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
-import java.util.stream.Collectors;
 
 /** Base test class for Kafka synchronization. */
 public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
@@ -87,9 +78,6 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
     protected static KafkaProducer<String, String> kafkaProducer;
     private static KafkaConsumer<String, String> kafkaConsumer;
     private static AdminClient adminClient;
-
-    // Timer for scheduling logging task if the test hangs
-    private final Timer loggingTimer = new Timer("Debug Logging Timer");
 
     @RegisterExtension
     @Order(1)
@@ -164,91 +152,15 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
         adminClient.close();
     }
 
-    @BeforeEach
-    public void setup() {
-        // Probe Kafka broker status per 30 seconds
-        scheduleTimeoutLogger(
-                Duration.ofSeconds(30),
-                () -> {
-                    // List all non-internal topics
-                    final Map<String, TopicDescription> topicDescriptions =
-                            describeExternalTopics();
-                    LOG.info("Current existing topics: {}", topicDescriptions.keySet());
-
-                    // Log status of topics
-                    logTopicPartitionStatus(topicDescriptions);
-                });
-    }
-
     @AfterEach
     public void after() throws Exception {
         super.after();
-        // Cancel timer for debug logging
-        cancelTimeoutLogger();
         // Delete topics for avoid reusing topics of Kafka cluster
         deleteTopics();
     }
 
     private void deleteTopics() throws ExecutionException, InterruptedException {
         adminClient.deleteTopics(adminClient.listTopics().names().get()).all().get();
-    }
-
-    // ------------------------ For Debug Logging Purpose ----------------------------------
-
-    private void scheduleTimeoutLogger(Duration period, Runnable loggingAction) {
-        TimerTask timeoutLoggerTask =
-                new TimerTask() {
-                    @Override
-                    public void run() {
-                        try {
-                            loggingAction.run();
-                        } catch (Exception e) {
-                            throw new RuntimeException("Failed to execute logging action", e);
-                        }
-                    }
-                };
-        loggingTimer.schedule(timeoutLoggerTask, 0L, period.toMillis());
-    }
-
-    private void cancelTimeoutLogger() {
-        loggingTimer.cancel();
-    }
-
-    private Map<String, TopicDescription> describeExternalTopics() {
-        try {
-            final List<String> topics =
-                    adminClient.listTopics().listings().get().stream()
-                            .filter(listing -> !listing.isInternal())
-                            .map(TopicListing::name)
-                            .collect(Collectors.toList());
-            return adminClient.describeTopics(topics).allTopicNames().get();
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to list Kafka topics", e);
-        }
-    }
-
-    private synchronized void logTopicPartitionStatus(
-            Map<String, TopicDescription> topicDescriptions) {
-        List<TopicPartition> partitions = new ArrayList<>();
-        topicDescriptions.forEach(
-                (topic, description) ->
-                        description
-                                .partitions()
-                                .forEach(
-                                        tpInfo ->
-                                                partitions.add(
-                                                        new TopicPartition(
-                                                                topic, tpInfo.partition()))));
-        final Map<TopicPartition, Long> beginningOffsets =
-                kafkaConsumer.beginningOffsets(partitions);
-        final Map<TopicPartition, Long> endOffsets = kafkaConsumer.endOffsets(partitions);
-        partitions.forEach(
-                partition ->
-                        LOG.info(
-                                "TopicPartition \"{}\": starting offset: {}, stopping offset: {}",
-                                partition,
-                                beginningOffsets.get(partition),
-                                endOffsets.get(partition)));
     }
 
     public static Properties getStandardProps() {

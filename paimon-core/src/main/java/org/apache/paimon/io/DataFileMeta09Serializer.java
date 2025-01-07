@@ -139,6 +139,7 @@ public class DataFileMeta09Serializer implements Serializable {
                 row.isNullAt(13) ? null : row.getLong(13),
                 row.isNullAt(14) ? null : row.getBinary(14),
                 row.isNullAt(15) ? null : FileSource.fromByteValue(row.getByte(15)),
+                null,
                 null);
     }
 }

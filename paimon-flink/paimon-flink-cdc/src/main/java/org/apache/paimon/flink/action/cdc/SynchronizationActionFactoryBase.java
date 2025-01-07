@@ -25,6 +25,8 @@ import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /** Base {@link ActionFactory} for table/database synchronizing job. */
 public abstract class SynchronizationActionFactoryBase<T extends SynchronizationActionBase>
         implements ActionFactory {
@@ -38,8 +40,11 @@ public abstract class SynchronizationActionFactoryBase<T extends Synchronization
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        checkRequiredArgument(params, cdcConfigIdentifier());
-        this.catalogConfig = optionalConfigMap(params, CATALOG_CONF);
+        checkArgument(
+                params.has(cdcConfigIdentifier()),
+                "Argument '%s' is required. Run '<action> --help' for help.",
+                cdcConfigIdentifier());
+        this.catalogConfig = catalogConfigMap(params);
         this.cdcSourceConfig = optionalConfigMap(params, cdcConfigIdentifier());
 
         T action = createAction();

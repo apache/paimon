@@ -1006,4 +1006,43 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
         iterator.close();
     }
+
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testLookupMaxTwoPt0(LookupCacheMode mode) throws Exception {
+        sql(
+                "CREATE TABLE PARTITIONED_DIM (pt STRING, i INT, v INT)"
+                        + "PARTITIONED BY (`pt`) WITH ("
+                        + "'lookup.dynamic-partition' = 'max_two_pt()', "
+                        + "'lookup.dynamic-partition.refresh-interval' = '1 ms', "
+                        + "'lookup.cache' = '%s', "
+                        + "'continuous.discovery-interval'='1 ms')",
+                mode);
+
+        String query =
+                "SELECT D.pt, T.i, D.v FROM T LEFT JOIN PARTITIONED_DIM for SYSTEM_TIME AS OF T.proctime AS D ON T.i = D.i";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO PARTITIONED_DIM VALUES ('2024-10-01', 1, 1), ('2024-10-01', 2, 2)");
+        Thread.sleep(500); // wait refresh
+        sql("INSERT INTO T VALUES (1)");
+        List<Row> result = iterator.collect(1);
+        assertThat(result).containsExactlyInAnyOrder(Row.of("2024-10-01", 1, 1));
+
+        sql("INSERT INTO PARTITIONED_DIM VALUES ('2024-10-02', 2, 2)");
+        Thread.sleep(500); // wait refresh
+        sql("INSERT INTO T VALUES (2)");
+        result = iterator.collect(2);
+        assertThat(result)
+                .containsExactlyInAnyOrder(Row.of("2024-10-01", 2, 2), Row.of("2024-10-02", 2, 2));
+
+        sql("ALTER TABLE PARTITIONED_DIM DROP PARTITION (pt = '2024-10-01')");
+        Thread.sleep(500); // wait refresh
+        sql("INSERT INTO T VALUES (1), (2)");
+        result = iterator.collect(2);
+        assertThat(result)
+                .containsExactlyInAnyOrder(Row.of(null, 1, null), Row.of("2024-10-02", 2, 2));
+
+        iterator.close();
+    }
 }

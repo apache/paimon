@@ -96,8 +96,7 @@ ALTER TABLE my_table RENAME c0 TO c1;
 
 ## Dropping Columns
 
-The following SQL drops two columns `c1` and `c2` from table `my_table`. In hive catalog, you need to ensure disable `hive.metastore.disallow.incompatible.col.type.changes` in your hive server,
-otherwise this operation may fail, throws an exception like `The following columns have types incompatible with the existing columns in their respective positions`.
+The following SQL drops two columns `c1` and `c2` from table `my_table`.
 
 ```sql
 ALTER TABLE my_table DROP (c1, c2);
@@ -106,6 +105,14 @@ ALTER TABLE my_table DROP (c1, c2);
 {{< hint info >}}
 To drop a column in a row type, see [Changing Column Type](#changing-column-type).
 {{< /hint >}}
+
+In hive catalog, you need to ensure:
+
+1. disable `hive.metastore.disallow.incompatible.col.type.changes` in your hive server
+2. or set `hadoop.hive.metastore.disallow.incompatible.col.type.changes=false` in your paimon catalog.
+
+Otherwise this operation may fail, throws an exception like `The following columns have types incompatible with the
+existing columns in their respective positions`.
 
 ## Dropping Partitions
 
@@ -226,4 +233,20 @@ The following SQL modifies the watermark strategy to `ts - INTERVAL '2' HOUR`.
 
 ```sql
 ALTER TABLE my_table MODIFY WATERMARK FOR ts AS ts - INTERVAL '2' HOUR
+```
+
+# ALTER DATABASE
+
+The following SQL sets one or more properties in the specified database. If a particular property is already set in the database, override the old value with the new one.
+
+```sql
+ALTER DATABASE [catalog_name.]db_name SET (key1=val1, key2=val2, ...)
+```
+
+## Altering Database Location
+
+The following SQL changes location of database `my_database` to `file:/temp/my_database`.
+
+```sql
+ALTER DATABASE my_database SET ('location' =  'file:/temp/my_database')
 ```

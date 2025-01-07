@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.compact;
 
-import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
@@ -32,7 +32,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -48,19 +47,12 @@ public class MultiAwareBucketTableScan extends MultiTableScanBase<Tuple2<Split, 
     protected transient Map<Identifier, StreamTableScan> scansMap;
 
     public MultiAwareBucketTableScan(
-            Catalog.Loader catalogLoader,
+            CatalogLoader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,
-            boolean isStreaming,
-            AtomicBoolean isRunning) {
-        super(
-                catalogLoader,
-                includingPattern,
-                excludingPattern,
-                databasePattern,
-                isStreaming,
-                isRunning);
+            boolean isStreaming) {
+        super(catalogLoader, includingPattern, excludingPattern, databasePattern, isStreaming);
         tablesMap = new HashMap<>();
         scansMap = new HashMap<>();
     }

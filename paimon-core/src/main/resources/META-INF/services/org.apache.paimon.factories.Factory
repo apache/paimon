@@ -37,3 +37,5 @@ org.apache.paimon.mergetree.compact.aggregate.factory.FieldRoaringBitmap64AggFac
 org.apache.paimon.mergetree.compact.aggregate.factory.FieldSumAggFactory
 org.apache.paimon.mergetree.compact.aggregate.factory.FieldThetaSketchAggFactory
 org.apache.paimon.rest.RESTCatalogFactory
+org.apache.paimon.rest.auth.BearTokenCredentialsProviderFactory
+org.apache.paimon.rest.auth.BearTokenFileCredentialsProviderFactory

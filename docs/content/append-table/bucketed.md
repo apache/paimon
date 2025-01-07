@@ -196,4 +196,4 @@ The `spark.sql.sources.v2.bucketing.enabled` config is used to enable bucketing 
 Spark will recognize the specific distribution reported by a V2 data source through SupportsReportPartitioning, and
 will try to avoid shuffle if necessary.
 
-The costly join shuffle will be avoided if two tables have same bucketing strategy and same number of buckets.
+The costly join shuffle will be avoided if two tables have the same bucketing strategy and same number of buckets.

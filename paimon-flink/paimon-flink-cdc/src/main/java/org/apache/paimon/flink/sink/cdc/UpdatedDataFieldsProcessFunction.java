@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -53,7 +53,7 @@ public class UpdatedDataFieldsProcessFunction
     private Set<FieldIdentifier> latestFields;
 
     public UpdatedDataFieldsProcessFunction(
-            SchemaManager schemaManager, Identifier identifier, Catalog.Loader catalogLoader) {
+            SchemaManager schemaManager, Identifier identifier, CatalogLoader catalogLoader) {
         super(catalogLoader);
         this.schemaManager = schemaManager;
         this.identifier = identifier;
@@ -77,7 +77,7 @@ public class UpdatedDataFieldsProcessFunction
                 extractSchemaChanges(schemaManager, actualUpdatedDataFields)) {
             applySchemaChange(schemaManager, schemaChange, identifier);
         }
-        /**
+        /*
          * Here, actualUpdatedDataFields cannot be used to update latestFields because there is a
          * non-SchemaChange.AddColumn scenario. Otherwise, the previously existing fields cannot be
          * modified again.

@@ -72,13 +72,8 @@ public class BinlogTable extends AuditLogTable {
         List<DataField> fields = new ArrayList<>();
         fields.add(SpecialFields.ROW_KIND);
         for (DataField field : wrapped.rowType().getFields()) {
-            DataField newField =
-                    new DataField(
-                            field.id(),
-                            field.name(),
-                            new ArrayType(field.type().nullable()), // convert to nullable
-                            field.description());
-            fields.add(newField);
+            // convert to nullable
+            fields.add(field.newType(new ArrayType(field.type().nullable())));
         }
         return new RowType(fields);
     }
@@ -100,16 +95,29 @@ public class BinlogTable extends AuditLogTable {
         }
 
         @Override
+        public InnerTableRead withReadType(RowType readType) {
+            List<DataField> fields = new ArrayList<>();
+            for (DataField field : readType.getFields()) {
+                if (field.name().equals(SpecialFields.ROW_KIND.name())) {
+                    fields.add(field);
+                } else {
+                    fields.add(field.newType(((ArrayType) field.type()).getElementType()));
+                }
+            }
+            return super.withReadType(readType.copy(fields));
+        }
+
+        @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
             DataSplit dataSplit = (DataSplit) split;
+            InternalRow.FieldGetter[] fieldGetters = wrapped.rowType().fieldGetters();
+
             if (dataSplit.isStreaming()) {
                 return new PackChangelogReader(
                         dataRead.createReader(split),
                         (row1, row2) ->
                                 new AuditLogRow(
-                                        readProjection,
-                                        convertToArray(
-                                                row1, row2, wrapped.rowType().fieldGetters())),
+                                        readProjection, convertToArray(row1, row2, fieldGetters)),
                         wrapped.rowType());
             } else {
                 return dataRead.createReader(split)
@@ -117,10 +125,7 @@ public class BinlogTable extends AuditLogTable {
                                 (row) ->
                                         new AuditLogRow(
                                                 readProjection,
-                                                convertToArray(
-                                                        row,
-                                                        null,
-                                                        wrapped.rowType().fieldGetters())));
+                                                convertToArray(row, null, fieldGetters)));
             }
         }
 

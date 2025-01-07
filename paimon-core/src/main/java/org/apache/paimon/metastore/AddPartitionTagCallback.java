@@ -49,7 +49,7 @@ public class AddPartitionTagCallback implements TagCallback {
         LinkedHashMap<String, String> partitionSpec = new LinkedHashMap<>();
         partitionSpec.put(partitionField, tagName);
         try {
-            client.deletePartition(partitionSpec);
+            client.dropPartition(partitionSpec);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

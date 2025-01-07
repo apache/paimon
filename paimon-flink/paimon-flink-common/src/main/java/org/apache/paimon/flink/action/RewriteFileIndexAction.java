@@ -29,9 +29,8 @@ public class RewriteFileIndexAction extends ActionBase {
 
     private String identifier;
 
-    public RewriteFileIndexAction(
-            String warehouse, String identifier, Map<String, String> catalogConfig) {
-        super(warehouse, catalogConfig);
+    public RewriteFileIndexAction(String identifier, Map<String, String> catalogConfig) {
+        super(catalogConfig);
         this.identifier = identifier;
     }
 

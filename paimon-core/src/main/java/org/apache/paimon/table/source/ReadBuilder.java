@@ -27,7 +27,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 
 import java.io.Serializable;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -124,18 +123,6 @@ public interface ReadBuilder extends Serializable {
      * #withReadType(RowType)} instead.
      */
     ReadBuilder withProjection(int[] projection);
-
-    /** Apply projection to the reader, only support top level projection. */
-    @Deprecated
-    default ReadBuilder withProjection(int[][] projection) {
-        if (projection == null) {
-            return this;
-        }
-        if (Arrays.stream(projection).anyMatch(arr -> arr.length > 1)) {
-            throw new IllegalStateException("Not support nested projection");
-        }
-        return withProjection(Arrays.stream(projection).mapToInt(arr -> arr[0]).toArray());
-    }
 
     /** the row number pushed down. */
     ReadBuilder withLimit(int limit);

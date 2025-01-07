@@ -428,6 +428,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         List<ManifestEntry> entries =
                 manifestFileFactory
                         .create()
+                        .withCacheMetrics(
+                                scanMetrics != null ? scanMetrics.getCacheMetrics() : null)
                         .read(
                                 manifest.fileName(),
                                 manifest.fileSize(),

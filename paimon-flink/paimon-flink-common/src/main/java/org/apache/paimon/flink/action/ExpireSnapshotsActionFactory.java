@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.action;
 
-import java.util.Map;
 import java.util.Optional;
 
 /** Factory to create {@link ExpireSnapshotsAction}. */
@@ -40,10 +39,6 @@ public class ExpireSnapshotsActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        String warehouse = params.get(WAREHOUSE);
-        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
-        String identifier = params.get(IDENTIFIER_KEY);
-
         Integer retainMax =
                 params.has(RETAIN_MAX) ? Integer.parseInt(params.get(RETAIN_MAX)) : null;
         Integer retainMin =
@@ -54,9 +49,9 @@ public class ExpireSnapshotsActionFactory implements ActionFactory {
 
         ExpireSnapshotsAction action =
                 new ExpireSnapshotsAction(
-                        warehouse,
-                        identifier,
-                        catalogConfig,
+                        params.getRequired(DATABASE),
+                        params.getRequired(TABLE),
+                        catalogConfigMap(params),
                         retainMax,
                         retainMin,
                         olderThan,
@@ -72,6 +67,6 @@ public class ExpireSnapshotsActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  expire_snapshots --warehouse <warehouse_path> --identifier <database.table> --retain_max <max> --retain_min <min> --older_than <older_than> --max_delete <max_delete>");
+                "  expire_snapshots --warehouse <warehouse_path> --database <database> --table <table> --retain_max <max> --retain_min <min> --older_than <older_than> --max_delete <max_delete>");
     }
 }

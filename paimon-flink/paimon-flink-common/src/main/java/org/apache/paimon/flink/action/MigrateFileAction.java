@@ -36,14 +36,13 @@ public class MigrateFileAction extends ActionBase {
 
     public MigrateFileAction(
             String connector,
-            String warehouse,
             String sourceTable,
             String targetTable,
             boolean deleteOrigin,
             Map<String, String> catalogConfig,
             String tableProperties,
             Integer parallelism) {
-        super(warehouse, catalogConfig);
+        super(catalogConfig);
         this.connector = connector;
         this.sourceTable = sourceTable;
         this.targetTable = targetTable;

@@ -77,18 +77,11 @@ public class PostgresSyncTableAction extends SyncTableActionBase {
     private JdbcSchemasInfo postgresSchemasInfo;
 
     public PostgresSyncTableAction(
-            String warehouse,
             String database,
             String table,
             Map<String, String> catalogConfig,
             Map<String, String> postgresConfig) {
-        super(
-                warehouse,
-                database,
-                table,
-                catalogConfig,
-                postgresConfig,
-                SyncJobHandler.SourceType.POSTGRES);
+        super(database, table, catalogConfig, postgresConfig, SyncJobHandler.SourceType.POSTGRES);
     }
 
     @Override

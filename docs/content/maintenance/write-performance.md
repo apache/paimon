@@ -28,7 +28,7 @@ under the License.
 
 Paimon's write performance is closely related to checkpoint, so if you need greater write throughput:
 
-1. Flink Configuration (`'flink-conf.yaml'` or `SET` in SQL): Increase the checkpoint interval
+1. Flink Configuration (`'flink-conf.yaml'/'config.yaml'` or `SET` in SQL): Increase the checkpoint interval
    (`'execution.checkpointing.interval'`), increase max concurrent checkpoints to 3
    (`'execution.checkpointing.max-concurrent-checkpoints'`), or just use batch mode.
 2. Increase `write-buffer-size`.

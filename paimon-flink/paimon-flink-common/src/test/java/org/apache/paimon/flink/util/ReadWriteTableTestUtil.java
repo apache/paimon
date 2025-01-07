@@ -273,6 +273,22 @@ public class ReadWriteTableTestUtil {
                         });
     }
 
+    public static void checkExternalFileStorePath(List<String> partitionSpec, String externalPath) {
+        // check data file path
+        if (partitionSpec.isEmpty()) {
+            partitionSpec = Collections.singletonList("");
+        }
+        partitionSpec.stream()
+                .map(str -> str.replaceAll(",", "/"))
+                .map(str -> str.replaceAll("null", "__DEFAULT_PARTITION__"))
+                .forEach(
+                        partition -> {
+                            assertThat(Paths.get(externalPath, partition)).exists();
+                            // at least exists bucket-0
+                            assertThat(Paths.get(externalPath, partition, "bucket-0")).exists();
+                        });
+    }
+
     public static void testBatchRead(String query, List<Row> expected) throws Exception {
         CloseableIterator<Row> resultItr = bEnv.executeSql(query).collect();
         try (BlockingIterator<Row, Row> iterator = BlockingIterator.of(resultItr)) {

@@ -83,7 +83,7 @@ redundant bytes:                  var bytes (for compatibility with later versio
 BODY:                             column index bytes + column index bytes + column index bytes + .......
 </pre>
 
-## Column Index Bytes: BloomFilter
+## Index: BloomFilter 
 
 Define `'file-index.bloom-filter.columns'`.
 
@@ -94,7 +94,7 @@ Content of bloom filter index is simple:
 This class use (64-bits) long hash. Store the num hash function (one integer) and bit set bytes only. Hash bytes type 
 (like varchar, binary, etc.) using xx hash, hash numeric type by [specified number hash](http://web.archive.org/web/20071223173210/http://www.concentric.net/~Ttwang/tech/inthash.htm).
 
-## Column Index Bytes: Bitmap
+## Index: Bitmap
 
 Define `'file-index.bitmap.columns'`.
 
@@ -137,7 +137,7 @@ offset:                        4 bytes int (when it is negative, it represents t
 
 Integer are all BIT_ENDIAN.
 
-## Column Index Bytes: Bit-Slice Index Bitmap
+## Index: Bit-Slice Index Bitmap
 
 BSI file index is a numeric range index, used to accelerate range query, it can use with bitmap index.
 

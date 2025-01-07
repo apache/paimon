@@ -397,10 +397,17 @@ you also need to set some (or all) of the following table options when creating 
 You can use Hive Catalog to connect AWS Glue metastore, you can use set `'metadata.iceberg.hive-client-class'` to
 `'com.amazonaws.glue.catalog.metastore.AWSCatalogMetastoreClient'`.
 
+> **Note:** You can use this [repo](https://github.com/promotedai/aws-glue-data-catalog-client-for-apache-hive-metastore) to build the required jar, include it in your path and configure the AWSCatalogMetastoreClient.
 ## AWS Athena
 
 AWS Athena may use old manifest reader to read Iceberg manifest by names, we should let Paimon producing legacy Iceberg
 manifest list file, you can enable: `'metadata.iceberg.manifest-legacy-version'`.
+
+## DuckDB
+
+Duckdb may rely on files placed in the `root/data` directory, while Paimon is usually placed directly in the `root`
+directory, so you can configure this parameter for the table to achieve compatibility:
+`'data-file.path-directory' = 'data'`.
 
 ## Trino Iceberg
 
@@ -502,27 +509,6 @@ Paimon Iceberg compatibility currently supports the following data types.
 
 ## Table Options
 
-<table class="table table-bordered">
-    <thead>
-    <tr>
-      <th class="text-left" style="width: 20%">Option</th>
-      <th class="text-left" style="width: 5%">Default</th>
-      <th class="text-left" style="width: 10%">Type</th>
-      <th class="text-left" style="width: 60%">Description</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><h5>metadata.iceberg.compaction.min.file-num</h5></td>
-      <td style="word-wrap: break-word;">10</td>
-      <td>Integer</td>
-      <td>Minimum number of Iceberg metadata files to trigger metadata compaction.</td>
-    </tr>
-    <tr>
-      <td><h5>metadata.iceberg.compaction.max.file-num</h5></td>
-      <td style="word-wrap: break-word;">50</td>
-      <td>Integer</td>
-      <td>If number of small Iceberg metadata files exceeds this limit, always trigger metadata compaction regardless of their total size.</td>
-    </tr>
-    </tbody>
-</table>
+Options for Iceberg Compatibility.
+
+{{< generated/iceberg_configuration >}}

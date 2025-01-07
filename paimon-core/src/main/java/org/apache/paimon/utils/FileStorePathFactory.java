@@ -20,10 +20,12 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.types.RowType;
 
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
 import java.util.List;
@@ -37,6 +39,7 @@ public class FileStorePathFactory {
 
     public static final String BUCKET_PATH_PREFIX = "bucket-";
 
+    // this is the table schema root path
     private final Path root;
     private final String uuid;
     private final InternalRowPartitionComputer partitionComputer;
@@ -46,11 +49,14 @@ public class FileStorePathFactory {
     private final boolean fileSuffixIncludeCompression;
     private final String fileCompression;
 
+    @Nullable private final String dataFilePathDirectory;
+
     private final AtomicInteger manifestFileCount;
     private final AtomicInteger manifestListCount;
     private final AtomicInteger indexManifestCount;
     private final AtomicInteger indexFileCount;
     private final AtomicInteger statsFileCount;
+    private final List<Path> externalPaths;
 
     public FileStorePathFactory(
             Path root,
@@ -61,8 +67,11 @@ public class FileStorePathFactory {
             String changelogFilePrefix,
             boolean legacyPartitionName,
             boolean fileSuffixIncludeCompression,
-            String fileCompression) {
+            String fileCompression,
+            @Nullable String dataFilePathDirectory,
+            List<Path> externalPaths) {
         this.root = root;
+        this.dataFilePathDirectory = dataFilePathDirectory;
         this.uuid = UUID.randomUUID().toString();
 
         this.partitionComputer =
@@ -78,6 +87,7 @@ public class FileStorePathFactory {
         this.indexManifestCount = new AtomicInteger(0);
         this.indexFileCount = new AtomicInteger(0);
         this.statsFileCount = new AtomicInteger(0);
+        this.externalPaths = externalPaths;
     }
 
     public Path root() {
@@ -121,20 +131,33 @@ public class FileStorePathFactory {
                 dataFilePrefix,
                 changelogFilePrefix,
                 fileSuffixIncludeCompression,
-                fileCompression);
+                fileCompression,
+                createExternalPathProvider(partition, bucket));
+    }
+
+    @Nullable
+    private ExternalPathProvider createExternalPathProvider(BinaryRow partition, int bucket) {
+        if (externalPaths == null || externalPaths.isEmpty()) {
+            return null;
+        }
+
+        return new ExternalPathProvider(externalPaths, relativeBucketPath(partition, bucket));
     }
 
     public Path bucketPath(BinaryRow partition, int bucket) {
-        return new Path(root + "/" + relativePartitionAndBucketPath(partition, bucket));
+        return new Path(root, relativeBucketPath(partition, bucket));
     }
 
-    public Path relativePartitionAndBucketPath(BinaryRow partition, int bucket) {
+    public Path relativeBucketPath(BinaryRow partition, int bucket) {
+        Path relativeBucketPath = new Path(BUCKET_PATH_PREFIX + bucket);
         String partitionPath = getPartitionString(partition);
-        String fullPath =
-                partitionPath.isEmpty()
-                        ? BUCKET_PATH_PREFIX + bucket
-                        : partitionPath + "/" + BUCKET_PATH_PREFIX + bucket;
-        return new Path(fullPath);
+        if (!partitionPath.isEmpty()) {
+            relativeBucketPath = new Path(partitionPath, relativeBucketPath);
+        }
+        if (dataFilePathDirectory != null) {
+            relativeBucketPath = new Path(dataFilePathDirectory, relativeBucketPath);
+        }
+        return relativeBucketPath;
     }
 
     /** IMPORTANT: This method is NOT THREAD SAFE. */
@@ -145,6 +168,7 @@ public class FileStorePathFactory {
                                 partition, "Partition row data is null. This is unexpected.")));
     }
 
+    // @TODO, need to be changed
     public List<Path> getHierarchicalPartitionPath(BinaryRow partition) {
         return PartitionPathUtils.generateHierarchicalPartitionPaths(
                         partitionComputer.generatePartValues(

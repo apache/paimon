@@ -117,22 +117,58 @@ class PushDownAggregatesTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
     }
   }
 
-  test("Push down aggregate - primary table") {
-    withTable("T") {
-      spark.sql("CREATE TABLE T (c1 INT, c2 STRING) TBLPROPERTIES ('primary-key' = 'c1')")
-      runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(0) :: Nil, 2)
-      spark.sql("INSERT INTO T VALUES(1, 'x'), (2, 'x'), (3, 'x'), (3, 'x')")
-      runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(3) :: Nil, 2)
-    }
+  test("Push down aggregate - primary key table with deletion vector") {
+    Seq(true, false).foreach(
+      deletionVectorsEnabled => {
+        withTable("T") {
+          spark.sql(s"""
+                       |CREATE TABLE T (c1 INT, c2 STRING)
+                       |TBLPROPERTIES (
+                       |'primary-key' = 'c1',
+                       |'deletion-vectors.enabled' = $deletionVectorsEnabled
+                       |)
+                       |""".stripMargin)
+          runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(0) :: Nil, 0)
+
+          spark.sql("INSERT INTO T VALUES(1, 'x'), (2, 'x'), (3, 'x'), (3, 'x')")
+          runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(3) :: Nil, 0)
+
+          spark.sql("INSERT INTO T VALUES(1, 'x_1')")
+          if (deletionVectorsEnabled) {
+            runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(3) :: Nil, 0)
+          } else {
+            runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(3) :: Nil, 2)
+          }
+        }
+      })
   }
 
-  test("Push down aggregate - enable deletion vector") {
-    withTable("T") {
-      spark.sql(
-        "CREATE TABLE T (c1 INT, c2 STRING) TBLPROPERTIES('deletion-vectors.enabled' = 'true')")
-      runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(0) :: Nil, 2)
-      spark.sql("INSERT INTO T VALUES(1, 'x'), (2, 'x'), (3, 'x'), (3, 'x')")
-      runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(4) :: Nil, 2)
-    }
+  test("Push down aggregate - table with deletion vector") {
+    Seq(true, false).foreach(
+      deletionVectorsEnabled => {
+        Seq(true, false).foreach(
+          primaryKeyTable => {
+            withTable("T") {
+              sql(s"""
+                     |CREATE TABLE T (id INT)
+                     |TBLPROPERTIES (
+                     | 'deletion-vectors.enabled' = $deletionVectorsEnabled,
+                     | '${if (primaryKeyTable) "primary-key" else "bucket-key"}' = 'id',
+                     | 'bucket' = '1'
+                     |)
+                     |""".stripMargin)
+
+              sql("INSERT INTO T SELECT id FROM range (0, 5000)")
+              runAndCheckAggregate("SELECT COUNT(*) FROM T", Seq(Row(5000)), 0)
+
+              sql("DELETE FROM T WHERE id > 100 and id <= 400")
+              if (deletionVectorsEnabled || !primaryKeyTable) {
+                runAndCheckAggregate("SELECT COUNT(*) FROM T", Seq(Row(4700)), 0)
+              } else {
+                runAndCheckAggregate("SELECT COUNT(*) FROM T", Seq(Row(4700)), 2)
+              }
+            }
+          })
+      })
   }
 }

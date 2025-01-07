@@ -34,12 +34,11 @@ public class MigrateTableAction extends ActionBase {
 
     public MigrateTableAction(
             String connector,
-            String warehouse,
             String hiveTableFullName,
             Map<String, String> catalogConfig,
             String tableProperties,
             Integer parallelism) {
-        super(warehouse, catalogConfig);
+        super(catalogConfig);
         this.connector = connector;
         this.hiveTableFullName = hiveTableFullName;
         this.tableProperties = tableProperties;

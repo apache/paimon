@@ -27,8 +27,12 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.metastore.MetastoreClient;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -54,6 +58,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -61,9 +66,11 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
+import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
 import static org.apache.paimon.CoreOptions.PARTITION_TIMESTAMP_FORMATTER;
+import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -75,10 +82,52 @@ public class PartitionExpireTest {
 
     private Path path;
     private FileStoreTable table;
+    private List<LinkedHashMap<String, String>> deletedPartitions;
 
     @BeforeEach
     public void beforeEach() {
         path = new Path(tempDir.toUri());
+    }
+
+    private void newTable() {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Options options = new Options();
+        options.set(PATH, path.toString());
+        Path tablePath = CoreOptions.path(options);
+        String branchName = CoreOptions.branch(options.toMap());
+        TableSchema tableSchema = new SchemaManager(fileIO, tablePath, branchName).latest().get();
+        deletedPartitions = new ArrayList<>();
+        MetastoreClient.Factory factory =
+                () ->
+                        new MetastoreClient() {
+                            @Override
+                            public void addPartition(LinkedHashMap<String, String> partition) {}
+
+                            @Override
+                            public void addPartitions(
+                                    List<LinkedHashMap<String, String>> partitions) {}
+
+                            @Override
+                            public void dropPartition(LinkedHashMap<String, String> partition) {
+                                deletedPartitions.add(partition);
+                            }
+
+                            @Override
+                            public void dropPartitions(
+                                    List<LinkedHashMap<String, String>> partitions) {
+                                deletedPartitions.addAll(partitions);
+                            }
+
+                            @Override
+                            public void markPartitionDone(LinkedHashMap<String, String> partition) {
+                                throw new UnsupportedOperationException();
+                            }
+
+                            @Override
+                            public void close() {}
+                        };
+        CatalogEnvironment env = new CatalogEnvironment(null, null, Lock.emptyFactory(), factory);
+        table = FileStoreTableFactory.create(fileIO, path, tableSchema, env);
     }
 
     @Test
@@ -108,7 +157,7 @@ public class PartitionExpireTest {
                         emptyList(),
                         Collections.emptyMap(),
                         ""));
-        table = FileStoreTableFactory.create(LocalFileIO.create(), path);
+        newTable();
         write("20230101", "11");
         write("abcd", "12");
         write("20230101", "12");
@@ -129,9 +178,9 @@ public class PartitionExpireTest {
                         RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
                         singletonList("f0"),
                         emptyList(),
-                        Collections.emptyMap(),
+                        Collections.singletonMap(METASTORE_PARTITIONED_TABLE.key(), "true"),
                         ""));
-        table = FileStoreTableFactory.create(LocalFileIO.create(), path);
+        newTable();
 
         write("20230101", "11");
         write("20230101", "12");
@@ -156,6 +205,12 @@ public class PartitionExpireTest {
 
         expire.expire(date(8), Long.MAX_VALUE);
         assertThat(read()).isEmpty();
+
+        assertThat(deletedPartitions)
+                .containsExactlyInAnyOrder(
+                        new LinkedHashMap<>(Collections.singletonMap("f0", "20230101")),
+                        new LinkedHashMap<>(Collections.singletonMap("f0", "20230103")),
+                        new LinkedHashMap<>(Collections.singletonMap("f0", "20230105")));
     }
 
     @Test
@@ -169,7 +224,7 @@ public class PartitionExpireTest {
                         Collections.emptyMap(),
                         ""));
 
-        table = FileStoreTableFactory.create(LocalFileIO.create(), path);
+        newTable();
         // disable compaction and snapshot expiration
         table = table.copy(Collections.singletonMap(WRITE_ONLY.key(), "true"));
         String commitUser = UUID.randomUUID().toString();
@@ -243,7 +298,7 @@ public class PartitionExpireTest {
                         emptyList(),
                         Collections.emptyMap(),
                         ""));
-        table = FileStoreTableFactory.create(LocalFileIO.create(), path);
+        newTable();
         table = newExpireTable();
 
         List<CommitMessage> commitMessages = write("20230101", "11");

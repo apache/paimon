@@ -46,11 +46,7 @@ public class MongoDBSyncTableActionFactory extends SyncTableActionFactoryBase {
     @Override
     public SyncTableActionBase createAction() {
         return new MongoDBSyncTableAction(
-                this.tablePath.f0,
-                this.tablePath.f1,
-                this.tablePath.f2,
-                this.catalogConfig,
-                this.cdcSourceConfig);
+                database, table, this.catalogConfig, this.cdcSourceConfig);
     }
 
     @Override

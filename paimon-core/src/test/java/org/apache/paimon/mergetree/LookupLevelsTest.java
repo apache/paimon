@@ -41,6 +41,7 @@ import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.SchemaEvolutionTableTestBase;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -79,7 +80,9 @@ public class LookupLevelsTest {
 
     private final Comparator<InternalRow> comparator = Comparator.comparingInt(o -> o.getInt(0));
 
-    private final RowType keyType = DataTypes.ROW(DataTypes.FIELD(0, "_key", DataTypes.INT()));
+    private final RowType keyType =
+            DataTypes.ROW(
+                    DataTypes.FIELD(SpecialFields.KEY_FIELD_ID_START, "_KEY_key", DataTypes.INT()));
     private final RowType rowType =
             DataTypes.ROW(
                     DataTypes.FIELD(0, "key", DataTypes.INT()),
@@ -269,10 +272,7 @@ public class LookupLevelsTest {
                 comparator,
                 keyType,
                 new LookupLevels.KeyValueProcessor(rowType),
-                file ->
-                        createReaderFactory()
-                                .createRecordReader(
-                                        0, file.fileName(), file.fileSize(), file.level()),
+                file -> createReaderFactory().createRecordReader(file),
                 file -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
                 new HashLookupStoreFactory(
                         new CacheManager(MemorySize.ofMebiBytes(1)),

@@ -30,6 +30,7 @@ import org.apache.paimon.data.serializer.InternalArraySerializer;
 import org.apache.paimon.data.serializer.InternalMapSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.Serializer;
+import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
@@ -179,6 +180,13 @@ public class EqualiserCodeGeneratorTest {
                                 GenericRow.of(31, BinaryString.fromString("32")),
                                 GenericRow.of(31, BinaryString.fromString("33"))),
                         new InternalRowSerializer(DataTypes.INT(), DataTypes.VARCHAR(2))));
+        TEST_DATA.put(
+                DataTypeRoot.VARIANT,
+                new GeneratedData(
+                        DataTypes.VARIANT(),
+                        Pair.of(
+                                GenericVariant.fromJson("{\"age\":27,\"city\":\"Beijing\"}"),
+                                GenericVariant.fromJson("{\"age\":27,\"city\":\"Hangzhou\"}"))));
     }
 
     @ParameterizedTest

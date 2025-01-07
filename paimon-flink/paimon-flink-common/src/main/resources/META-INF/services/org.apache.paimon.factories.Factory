@@ -61,6 +61,7 @@ org.apache.paimon.flink.procedure.MergeIntoProcedure
 org.apache.paimon.flink.procedure.ResetConsumerProcedure
 org.apache.paimon.flink.procedure.RollbackToProcedure
 org.apache.paimon.flink.procedure.RollbackToTimestampProcedure
+org.apache.paimon.flink.procedure.RollbackToWatermarkProcedure
 org.apache.paimon.flink.procedure.MigrateTableProcedure
 org.apache.paimon.flink.procedure.MigrateDatabaseProcedure
 org.apache.paimon.flink.procedure.MigrateFileProcedure
@@ -68,6 +69,7 @@ org.apache.paimon.flink.procedure.RemoveOrphanFilesProcedure
 org.apache.paimon.flink.procedure.QueryServiceProcedure
 org.apache.paimon.flink.procedure.ExpireSnapshotsProcedure
 org.apache.paimon.flink.procedure.ExpirePartitionsProcedure
+org.apache.paimon.flink.procedure.PurgeFilesProcedure
 org.apache.paimon.flink.procedure.privilege.InitFileBasedPrivilegeProcedure
 org.apache.paimon.flink.procedure.privilege.CreatePrivilegedUserProcedure
 org.apache.paimon.flink.procedure.privilege.DropPrivilegedUserProcedure

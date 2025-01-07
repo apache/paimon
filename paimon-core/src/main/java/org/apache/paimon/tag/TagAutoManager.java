@@ -52,6 +52,7 @@ public class TagAutoManager {
             TagManager tagManager,
             TagDeletion tagDeletion,
             List<TagCallback> callbacks) {
+
         TagTimeExtractor extractor = TagTimeExtractor.createForAutoTag(options);
 
         return new TagAutoManager(

@@ -21,11 +21,14 @@ package org.apache.paimon.casting;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.DataTypes;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -56,6 +59,9 @@ public class CastExecutors {
                 .addRule(TimeToStringCastRule.INSTANCE)
                 .addRule(DateToStringCastRule.INSTANCE)
                 .addRule(StringToStringCastRule.INSTANCE)
+                .addRule(ArrayToStringCastRule.INSTANCE)
+                .addRule(MapToStringCastRule.INSTANCE)
+                .addRule(RowToStringCastRule.INSTANCE)
                 // From string rules
                 .addRule(StringToBooleanCastRule.INSTANCE)
                 .addRule(StringToDecimalCastRule.INSTANCE)
@@ -96,8 +102,71 @@ public class CastExecutors {
         return rule.create(inputType, outputType);
     }
 
+    /** Resolve a {@link CastExecutor} for the provided input type to StringType. */
+    public static CastExecutor<?, ?> resolveToString(DataType inputType) {
+        CastExecutor<?, ?> castExecutor = resolve(inputType, DataTypes.STRING());
+        if (castExecutor == null) {
+            throw new UnsupportedOperationException(
+                    "Cast " + inputType + " to StringType is not supported.");
+        }
+        return castExecutor;
+    }
+
     public static CastExecutor<?, ?> identityCastExecutor() {
         return IDENTITY_CAST_EXECUTOR;
+    }
+
+    /**
+     * If a field type is modified, pushing down a filter of it is dangerous. This method tries to
+     * cast the literals of filter to its original type. It only cast the literals when the CastRule
+     * is in whitelist. Otherwise, return Optional.empty().
+     */
+    public static Optional<List<Object>> castLiteralsWithEvolution(
+            List<Object> literals, DataType predicateType, DataType dataType) {
+        if (predicateType.equalsIgnoreNullable(dataType)) {
+            return Optional.of(literals);
+        }
+
+        CastRule<?, ?> castRule = INSTANCE.internalResolve(predicateType, dataType);
+        if (castRule == null) {
+            return Optional.empty();
+        }
+
+        if (castRule instanceof NumericPrimitiveCastRule) {
+            // Ignore float literals because pushing down float filter result is unpredictable.
+            // For example, (double) 0.1F in Java is 0.10000000149011612.
+
+            if (predicateType.is(DataTypeFamily.INTEGER_NUMERIC)
+                    && dataType.is(DataTypeFamily.INTEGER_NUMERIC)) {
+                // Ignore input scale < output scale because of overflow.
+                // For example, alter 383 from INT to TINYINT, the query result is (byte) 383 ==
+                // 127. If we push down filter f = 127, 383 will be filtered out mistakenly.
+
+                if (integerScaleLargerThan(predicateType.getTypeRoot(), dataType.getTypeRoot())) {
+                    CastExecutor<Number, Number> castExecutor =
+                            (CastExecutor<Number, Number>) castRule.create(predicateType, dataType);
+                    List<Object> newLiterals = new ArrayList<>(literals.size());
+                    for (Object literal : literals) {
+                        Number literalNumber = (Number) literal;
+                        Number newLiteralNumber = castExecutor.cast(literalNumber);
+                        // Ignore if any literal is overflowed.
+                        if (newLiteralNumber.longValue() != literalNumber.longValue()) {
+                            return Optional.empty();
+                        }
+                        newLiterals.add(newLiteralNumber);
+                    }
+                    return Optional.of(newLiterals);
+                }
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    private static boolean integerScaleLargerThan(DataTypeRoot a, DataTypeRoot b) {
+        return (a == DataTypeRoot.SMALLINT && b == DataTypeRoot.TINYINT)
+                || (a == DataTypeRoot.INTEGER && b != DataTypeRoot.BIGINT)
+                || a == DataTypeRoot.BIGINT;
     }
 
     // Map<Target family or root, Map<Input family or root, rule>>

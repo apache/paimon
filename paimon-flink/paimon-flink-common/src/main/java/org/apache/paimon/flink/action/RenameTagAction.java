@@ -28,13 +28,12 @@ public class RenameTagAction extends TableActionBase {
     private final String targetTagName;
 
     public RenameTagAction(
-            String warehouse,
             String databaseName,
             String tableName,
             Map<String, String> catalogConfig,
             String tagName,
             String targetTagName) {
-        super(warehouse, databaseName, tableName, catalogConfig);
+        super(databaseName, tableName, catalogConfig);
         this.tagName = tagName;
         this.targetTagName = targetTagName;
     }

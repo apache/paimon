@@ -27,17 +27,10 @@ import java.util.Map;
 public class PulsarSyncTableAction extends MessageQueueSyncTableActionBase {
 
     public PulsarSyncTableAction(
-            String warehouse,
             String database,
             String table,
             Map<String, String> catalogConfig,
             Map<String, String> pulsarConfig) {
-        super(
-                warehouse,
-                database,
-                table,
-                catalogConfig,
-                pulsarConfig,
-                SyncJobHandler.SourceType.PULSAR);
+        super(database, table, catalogConfig, pulsarConfig, SyncJobHandler.SourceType.PULSAR);
     }
 }

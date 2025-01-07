@@ -126,7 +126,7 @@ public class UnawareBucketCompactionTopoBuilder {
                 new BucketUnawareCompactSource(
                         table, isContinuous, scanInterval, partitionPredicate);
 
-        return BucketUnawareCompactSource.buildSource(env, source, isContinuous, tableIdentifier);
+        return BucketUnawareCompactSource.buildSource(env, source, tableIdentifier);
     }
 
     private void sinkFromSource(DataStreamSource<UnawareAppendCompactionTask> input) {

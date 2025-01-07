@@ -20,6 +20,7 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestBase
 
+import org.apache.spark.SparkConf
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types.DecimalType
 import org.junit.jupiter.api.Assertions
@@ -27,6 +28,11 @@ import org.junit.jupiter.api.Assertions
 import java.sql.{Date, Timestamp}
 
 class DataFrameWriteTest extends PaimonSparkTestBase {
+
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.sql.catalog.paimon.cache-enabled", "false")
+  }
+
   import testImplicits._
 
   test("Paimon: DataFrameWrite.saveAsTable") {

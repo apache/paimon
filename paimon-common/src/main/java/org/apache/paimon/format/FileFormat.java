@@ -19,6 +19,7 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.factories.FormatFactoryUtil;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -32,7 +33,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.ServiceLoader;
 
 /**
  * Factory class which creates reader and writer factories for specific file format.
@@ -88,26 +88,9 @@ public abstract class FileFormat {
 
     /** Create a {@link FileFormat} from format identifier and format options. */
     public static FileFormat fromIdentifier(String identifier, FormatContext context) {
-        return fromIdentifier(identifier, context, FileFormat.class.getClassLoader())
-                .orElseThrow(
-                        () ->
-                                new RuntimeException(
-                                        String.format(
-                                                "Could not find a FileFormatFactory implementation class for %s format",
-                                                identifier)));
-    }
-
-    private static Optional<FileFormat> fromIdentifier(
-            String formatIdentifier, FormatContext context, ClassLoader classLoader) {
-        ServiceLoader<FileFormatFactory> serviceLoader =
-                ServiceLoader.load(FileFormatFactory.class, classLoader);
-        for (FileFormatFactory factory : serviceLoader) {
-            if (factory.identifier().equals(formatIdentifier.toLowerCase())) {
-                return Optional.of(factory.create(context));
-            }
-        }
-
-        return Optional.empty();
+        return FormatFactoryUtil.discoverFactory(
+                        FileFormat.class.getClassLoader(), identifier.toLowerCase())
+                .create(context);
     }
 
     protected Options getIdentifierPrefixOptions(Options options) {

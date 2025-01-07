@@ -176,8 +176,8 @@ PARTITION (k0 = 0, k1 = 0) SELECT v FROM my_table WHERE false;
 {{< hint info >}}
 Important table properties setting:
 1. Only [primary key table]({{< ref "primary-key-table/overview" >}}) supports this feature.
-2. [MergeEngine]({{< ref "primary-key-table/merge-engine" >}}) needs to be [deduplicate]({{< ref "primary-key-table/merge-engine#deduplicate" >}})
-   or [partial-update]({{< ref "primary-key-table/merge-engine#partial-update" >}}) to support this feature.
+2. [MergeEngine]({{< ref "primary-key-table/merge-engine" >}}) needs to be [deduplicate]({{< ref "primary-key-table/merge-engine/overview#deduplicate" >}})
+   or [partial-update]({{< ref "primary-key-table/merge-engine/partial-update" >}}) to support this feature.
 3. Do not support updating primary keys.
 {{< /hint >}}
 
@@ -211,9 +211,9 @@ UPDATE my_table SET b = 1, c = 2 WHERE a = 'myTable';
 {{< hint info >}}
 Important table properties setting:
 1. Only primary key tables support this feature.
-2. If the table has primary keys, the following [MergeEngine]({{< ref "primary-key-table/merge-engine" >}}) support this feature:
-   * [deduplicate]({{< ref "primary-key-table/merge-engine#deduplicate" >}}).
-   * [partial-update]({{< ref "primary-key-table/merge-engine#partial-update" >}}) with option 'partial-update.remove-record-on-delete' enabled.
+2. If the table has primary keys, the following [MergeEngine]({{< ref "primary-key-table/merge-engine/overview" >}}) support this feature:
+   * [deduplicate]({{< ref "primary-key-table/merge-engine/overview#deduplicate" >}}).
+   * [partial-update]({{< ref "primary-key-table/merge-engine/partial-update" >}}) with option 'partial-update.remove-record-on-delete' enabled.
 3. Do not support deleting from table in streaming mode.
 {{< /hint >}}
 
@@ -261,7 +261,25 @@ CREATE TABLE my_partitioned_table (
     'partition.time-interval'='1 d',
     'partition.idle-time-to-done'='15 m',
     'partition.mark-done-action'='done-partition'
+    -- You can also customize a PartitionMarkDoneAction to mark the partition completed.
+    -- 'partition.mark-done-action'='done-partition,custom',
+    -- 'partition.mark-done-action.custom.class'='org.apache.paimon.CustomPartitionMarkDoneAction'
 );
+```
+Define a class CustomPartitionMarkDoneAction to implement the PartitionMarkDoneAction interface.
+```java
+package org.apache.paimon;
+
+public class CustomPartitionMarkDoneAction implements PartitionMarkDoneAction {
+    
+    @Override
+    public void markDone(String partition) {
+        // do something.
+    }
+
+    @Override
+    public void close() {}
+}
 ```
 
 1. Firstly, you need to define the time parser of the partition and the time interval between partitions in order to

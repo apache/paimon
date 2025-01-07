@@ -18,12 +18,14 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
+import org.apache.paimon.spark.catalyst.Compatibility
+
 import org.apache.spark.sql.PaimonUtils.{normalizePartitionSpec, requireExactMatchedPartitionSpec}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{PartitionSpec, ResolvedPartitionSpec, UnresolvedPartitionSpec}
 import org.apache.spark.sql.catalyst.analysis.ResolvePartitionSpec.conf
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
-import org.apache.spark.sql.catalyst.expressions.{Cast, Literal}
+import org.apache.spark.sql.catalyst.expressions.Literal
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.catalog.{Identifier, TableCatalog}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Implicits._
@@ -68,7 +70,9 @@ object PaimonResolvePartitionSpec {
       part =>
         val raw = partitionSpec.get(part.name).orNull
         val dt = CharVarcharUtils.replaceCharVarcharWithString(part.dataType)
-        Cast(Literal.create(raw, StringType), dt, Some(conf.sessionLocalTimeZone)).eval()
+        Compatibility
+          .cast(Literal.create(raw, StringType), dt, Some(conf.sessionLocalTimeZone))
+          .eval()
     }
     InternalRow.fromSeq(partValues)
   }

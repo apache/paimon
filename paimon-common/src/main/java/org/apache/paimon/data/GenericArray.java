@@ -19,6 +19,7 @@
 package org.apache.paimon.data;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.utils.ArrayUtils;
 
@@ -202,6 +203,11 @@ public final class GenericArray implements InternalArray, Serializable {
     @Override
     public byte[] getBinary(int pos) {
         return (byte[]) getObject(pos);
+    }
+
+    @Override
+    public Variant getVariant(int pos) {
+        return (Variant) getObject(pos);
     }
 
     @Override

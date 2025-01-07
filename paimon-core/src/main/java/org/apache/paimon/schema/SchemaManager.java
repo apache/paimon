@@ -208,41 +208,21 @@ public class SchemaManager implements Serializable {
         return createTable(schema, false);
     }
 
-    public TableSchema createTable(Schema schema, boolean ignoreIfExistsSame) throws Exception {
+    public TableSchema createTable(Schema schema, boolean externalTable) throws Exception {
         while (true) {
             Optional<TableSchema> latest = latest();
             if (latest.isPresent()) {
-                TableSchema oldSchema = latest.get();
-                boolean isSame =
-                        Objects.equals(oldSchema.fields(), schema.fields())
-                                && Objects.equals(oldSchema.partitionKeys(), schema.partitionKeys())
-                                && Objects.equals(oldSchema.primaryKeys(), schema.primaryKeys())
-                                && Objects.equals(oldSchema.options(), schema.options());
-                if (ignoreIfExistsSame && isSame) {
-                    return oldSchema;
+                TableSchema latestSchema = latest.get();
+                if (externalTable) {
+                    checkSchemaForExternalTable(latestSchema.toSchema(), schema);
+                    return latestSchema;
+                } else {
+                    throw new IllegalStateException(
+                            "Schema in filesystem exists, creation is not allowed.");
                 }
-
-                throw new IllegalStateException(
-                        "Schema in filesystem exists, please use updating,"
-                                + " latest schema is: "
-                                + oldSchema);
             }
 
-            List<DataField> fields = schema.fields();
-            List<String> partitionKeys = schema.partitionKeys();
-            List<String> primaryKeys = schema.primaryKeys();
-            Map<String, String> options = schema.options();
-            int highestFieldId = RowType.currentHighestFieldId(fields);
-
-            TableSchema newSchema =
-                    new TableSchema(
-                            0,
-                            fields,
-                            highestFieldId,
-                            partitionKeys,
-                            primaryKeys,
-                            options,
-                            schema.comment());
+            TableSchema newSchema = TableSchema.create(0, schema);
 
             // validate table from creating table
             FileStoreTableFactory.create(fileIO, tableRoot, newSchema).store();
@@ -251,6 +231,41 @@ public class SchemaManager implements Serializable {
             if (success) {
                 return newSchema;
             }
+        }
+    }
+
+    private void checkSchemaForExternalTable(Schema existsSchema, Schema newSchema) {
+        // When creating an external table, if the table already exists in the location, we can
+        // choose not to specify the fields.
+        if ((newSchema.fields().isEmpty()
+                        || newSchema.rowType().equalsIgnoreFieldId(existsSchema.rowType()))
+                && (newSchema.partitionKeys().isEmpty()
+                        || Objects.equals(newSchema.partitionKeys(), existsSchema.partitionKeys()))
+                && (newSchema.primaryKeys().isEmpty()
+                        || Objects.equals(newSchema.primaryKeys(), existsSchema.primaryKeys()))) {
+            // check for options
+            Map<String, String> existsOptions = existsSchema.options();
+            Map<String, String> newOptions = newSchema.options();
+            newOptions.forEach(
+                    (key, value) -> {
+                        // ignore `owner` and `path`
+                        if (!key.equals(Catalog.OWNER_PROP)
+                                && !key.equals(CoreOptions.PATH.key())
+                                && (!existsOptions.containsKey(key)
+                                        || !existsOptions.get(key).equals(value))) {
+                            throw new RuntimeException(
+                                    "New schema's options are not equal to the exists schema's, new schema: "
+                                            + newOptions
+                                            + ", exists schema: "
+                                            + existsOptions);
+                        }
+                    });
+        } else {
+            throw new RuntimeException(
+                    "New schema is not equal to exists schema, new schema: "
+                            + newSchema
+                            + ", exists schema: "
+                            + existsSchema);
         }
     }
 

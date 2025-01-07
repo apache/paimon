@@ -18,6 +18,7 @@
 
 package org.apache.spark.sql.paimon.shims
 
+import org.apache.paimon.data.variant.Variant
 import org.apache.paimon.spark.data.{SparkArrayData, SparkInternalRow}
 import org.apache.paimon.types.{DataType, RowType}
 
@@ -33,7 +34,7 @@ import org.apache.spark.sql.types.StructType
 import java.util.{Map => JMap}
 
 /**
- * A spark shim trait. It declare methods which have incompatible implementations between Spark 3
+ * A spark shim trait. It declares methods which have incompatible implementations between Spark 3
  * and Spark 4. The specific SparkShim implementation will be loaded through Service Provider
  * Interface.
  */
@@ -62,4 +63,10 @@ trait SparkShim {
 
   def convertToExpression(spark: SparkSession, column: Column): Expression
 
+  // for variant
+  def toPaimonVariant(o: Object): Variant
+
+  def isSparkVariantType(dataType: org.apache.spark.sql.types.DataType): Boolean
+
+  def SparkVariantType(): org.apache.spark.sql.types.DataType
 }

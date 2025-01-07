@@ -68,12 +68,24 @@ public class RoaringBitmap32 {
         return roaringBitmap.getLongCardinality();
     }
 
-    public long rangeCardinality(long start, long end) {
-        return roaringBitmap.rangeCardinality(start, end);
+    public int first() {
+        return roaringBitmap.first();
     }
 
     public int last() {
         return roaringBitmap.last();
+    }
+
+    public long nextValue(int fromValue) {
+        return roaringBitmap.nextValue(fromValue);
+    }
+
+    public long previousValue(int fromValue) {
+        return roaringBitmap.previousValue(fromValue);
+    }
+
+    public boolean intersects(long minimum, long supremum) {
+        return roaringBitmap.intersects(minimum, supremum);
     }
 
     public RoaringBitmap32 clone() {
@@ -85,8 +97,19 @@ public class RoaringBitmap32 {
         roaringBitmap.serialize(out);
     }
 
+    public byte[] serialize() {
+        roaringBitmap.runOptimize();
+        ByteBuffer buffer = ByteBuffer.allocate(roaringBitmap.serializedSizeInBytes());
+        roaringBitmap.serialize(buffer);
+        return buffer.array();
+    }
+
     public void deserialize(DataInput in) throws IOException {
-        roaringBitmap.deserialize(in);
+        roaringBitmap.deserialize(in, null);
+    }
+
+    public void deserialize(ByteBuffer buffer) throws IOException {
+        roaringBitmap.deserialize(buffer);
     }
 
     @Override
@@ -103,17 +126,6 @@ public class RoaringBitmap32 {
 
     public void clear() {
         roaringBitmap.clear();
-    }
-
-    public byte[] serialize() {
-        roaringBitmap.runOptimize();
-        ByteBuffer buffer = ByteBuffer.allocate(roaringBitmap.serializedSizeInBytes());
-        roaringBitmap.serialize(buffer);
-        return buffer.array();
-    }
-
-    public void deserialize(byte[] rbmBytes) throws IOException {
-        roaringBitmap.deserialize(ByteBuffer.wrap(rbmBytes));
     }
 
     public void flip(final long rangeStart, final long rangeEnd) {

@@ -49,7 +49,7 @@ public class MySqlSyncDatabaseActionFactory
 
     @Override
     public MySqlSyncDatabaseAction createAction() {
-        return new MySqlSyncDatabaseAction(warehouse, database, catalogConfig, cdcSourceConfig);
+        return new MySqlSyncDatabaseAction(database, catalogConfig, cdcSourceConfig);
     }
 
     @Override

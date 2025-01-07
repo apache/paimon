@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
  * Pick the tables to be cloned based on the user input parameters. The record type of the build
@@ -113,6 +114,8 @@ public class CloneSourceBuilder {
                     new Tuple2<>(
                             database + "." + tableName, targetDatabase + "." + targetTableName));
         }
+
+        checkState(!result.isEmpty(), "Didn't find any table in source catalog.");
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("The clone identifiers of source table and target table are: {}", result);

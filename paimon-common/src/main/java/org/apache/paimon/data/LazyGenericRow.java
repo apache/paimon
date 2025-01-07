@@ -18,6 +18,7 @@
 
 package org.apache.paimon.data;
 
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.RowKind;
 
 import java.util.function.Supplier;
@@ -140,6 +141,11 @@ public class LazyGenericRow implements InternalRow {
     @Override
     public byte[] getBinary(int pos) {
         return (byte[]) getField(pos);
+    }
+
+    @Override
+    public Variant getVariant(int pos) {
+        return (Variant) getField(pos);
     }
 
     @Override

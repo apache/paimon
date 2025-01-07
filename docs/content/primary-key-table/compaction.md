@@ -89,7 +89,7 @@ Paimon also provides a configuration that allows for regular execution of Full C
 
 1. 'compaction.optimization-interval': Implying how often to perform an optimization full compaction, this
     configuration is used to ensure the query timeliness of the read-optimized system table.
-2. 'full-compaction.delta-commits': Full compaction will be constantly triggered after delta commits. its disadvantage
+2. 'full-compaction.delta-commits': Full compaction will be constantly triggered after delta commits. Its disadvantage
     is that it can only perform compaction synchronously, which will affect writing efficiency.
 
 ## Compaction Options

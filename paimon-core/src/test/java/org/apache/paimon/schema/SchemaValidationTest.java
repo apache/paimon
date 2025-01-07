@@ -36,6 +36,7 @@ import java.util.Map;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.schema.SchemaValidation.validateTableSchema;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -46,7 +47,8 @@ class SchemaValidationTest {
                 Arrays.asList(
                         new DataField(0, "f0", DataTypes.INT()),
                         new DataField(1, "f1", DataTypes.INT()),
-                        new DataField(2, "f2", DataTypes.INT()));
+                        new DataField(2, "f2", DataTypes.INT()),
+                        new DataField(3, "f3", DataTypes.STRING()));
         List<String> partitionKeys = Collections.singletonList("f0");
         List<String> primaryKeys = Collections.singletonList("f1");
         options.put(BUCKET.key(), String.valueOf(-1));
@@ -102,5 +104,22 @@ class SchemaValidationTest {
         assertThatThrownBy(() -> validateTableSchemaExec(options))
                 .hasMessageContaining(
                         "[scan.snapshot-id] must be null when you set [scan.timestamp-millis,scan.timestamp]");
+    }
+
+    @Test
+    public void testRecordLevelTimeField() {
+        Map<String, String> options = new HashMap<>(2);
+        options.put(CoreOptions.RECORD_LEVEL_TIME_FIELD.key(), "f0");
+        options.put(CoreOptions.RECORD_LEVEL_EXPIRE_TIME.key(), "1 m");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+
+        options.put(CoreOptions.RECORD_LEVEL_TIME_FIELD.key(), "f10");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining("Can not find time field f10 for record level expire.");
+
+        options.put(CoreOptions.RECORD_LEVEL_TIME_FIELD.key(), "f3");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining(
+                        "The record level time field type should be one of INT, BIGINT, or TIMESTAMP, but field type is STRING.");
     }
 }

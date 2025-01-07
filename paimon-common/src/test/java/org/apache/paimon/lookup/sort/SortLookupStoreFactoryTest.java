@@ -115,6 +115,24 @@ public class SortLookupStoreFactoryTest {
     }
 
     @TestTemplate
+    public void testEmpty() throws IOException {
+        CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1));
+        SortLookupStoreFactory factory =
+                new SortLookupStoreFactory(Comparator.naturalOrder(), cacheManager, 1024, compress);
+
+        SortLookupStoreWriter writer =
+                factory.createWriter(file, createBloomFiler(bloomFilterEnabled));
+        Context context = writer.close();
+
+        SortLookupStoreReader reader = factory.createReader(file, context);
+        byte[] bytes = toBytes(rnd.nextInt(VALUE_COUNT));
+        assertThat(reader.lookup(bytes)).isNull();
+        reader.close();
+        assertThat(cacheManager.dataCache().asMap()).isEmpty();
+        assertThat(cacheManager.indexCache().asMap()).isEmpty();
+    }
+
+    @TestTemplate
     public void testIntKey() throws IOException {
         RowCompactedSerializer keySerializer =
                 new RowCompactedSerializer(RowType.of(new IntType()));

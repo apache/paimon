@@ -26,10 +26,10 @@ import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 
 import org.apache.flink.core.io.SimpleVersionedSerializer;
-import org.apache.flink.util.CollectionUtil;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -102,8 +102,7 @@ public class ChangelogCompactTaskSerializer
     private Map<Integer, List<DataFileMeta>> deserializeMap(DataInputView view) throws IOException {
         final int size = view.readInt();
 
-        final Map<Integer, List<DataFileMeta>> map =
-                CollectionUtil.newHashMapWithExpectedSize(size);
+        final Map<Integer, List<DataFileMeta>> map = new HashMap<>(size);
         for (int i = 0; i < size; i++) {
             map.put(view.readInt(), dataFileSerializer.deserializeList(view));
         }

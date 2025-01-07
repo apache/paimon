@@ -26,6 +26,7 @@ import org.apache.paimon.data.SimpleCollectingOutputView;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentSource;
+import org.apache.paimon.operation.metrics.CacheMetrics;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -48,6 +49,8 @@ public class ObjectsCache<K, V> {
     private final FunctionWithIOException<K, Long> fileSizeFunction;
     private final BiFunctionWithIOE<K, Long, CloseableIterator<InternalRow>> reader;
 
+    @Nullable private CacheMetrics cacheMetrics;
+
     public ObjectsCache(
             SegmentsCache<K> cache,
             ObjectSerializer<V> projectedSerializer,
@@ -62,6 +65,10 @@ public class ObjectsCache<K, V> {
         this.reader = reader;
     }
 
+    public void withCacheMetrics(@Nullable CacheMetrics cacheMetrics) {
+        this.cacheMetrics = cacheMetrics;
+    }
+
     public List<V> read(
             K key,
             @Nullable Long fileSize,
@@ -71,8 +78,14 @@ public class ObjectsCache<K, V> {
             throws IOException {
         Segments segments = cache.getIfPresents(key);
         if (segments != null) {
+            if (cacheMetrics != null) {
+                cacheMetrics.increaseHitObject();
+            }
             return readFromSegments(segments, readFilter, readVFilter);
         } else {
+            if (cacheMetrics != null) {
+                cacheMetrics.increaseMissedObject();
+            }
             if (fileSize == null) {
                 fileSize = fileSizeFunction.apply(key);
             }

@@ -19,17 +19,24 @@
 package org.apache.paimon.casting;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.TimestampType;
@@ -41,6 +48,8 @@ import org.apache.paimon.utils.DecimalUtils;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.TimeZone;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -679,6 +688,65 @@ public class CastExecutorTest {
                 CastExecutors.resolve(new TimeType(), new TimestampType(3)),
                 DateTimeUtils.parseTime(time),
                 DateTimeUtils.parseTimestampData("1970-01-01 " + time, 3));
+    }
+
+    @Test
+    public void testArrayToString() {
+        ArrayType arrayType = new ArrayType(DataTypes.INT());
+        GenericArray genericArray = new GenericArray(new Integer[] {1, null, 2});
+        compareCastResult(
+                CastExecutors.resolve(arrayType, DataTypes.STRING()),
+                genericArray,
+                BinaryString.fromString("[1, null, 2]"));
+    }
+
+    @Test
+    public void testMapToString() {
+        MapType mapType = new MapType(DataTypes.INT(), DataTypes.STRING());
+        Map<Object, Object> javaMap = new HashMap<>();
+        javaMap.put(1, BinaryString.fromString("i"));
+        javaMap.put(2, BinaryString.fromString("miss"));
+        javaMap.put(3, BinaryString.fromString("you"));
+        javaMap.put(4, null);
+        GenericMap genericMap = new GenericMap(javaMap);
+        compareCastResult(
+                CastExecutors.resolve(mapType, DataTypes.STRING()),
+                genericMap,
+                BinaryString.fromString("{1 -> i, 2 -> miss, 3 -> you, 4 -> null}"));
+    }
+
+    @Test
+    public void testRowToString() {
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "f0", DataTypes.INT()),
+                        DataTypes.FIELD(
+                                1,
+                                "f1",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(2, "f0", DataTypes.DATE()),
+                                        DataTypes.FIELD(
+                                                3,
+                                                "f1",
+                                                new MapType(
+                                                        DataTypes.INT(),
+                                                        new ArrayType(DataTypes.INT()))),
+                                        DataTypes.FIELD(4, "f2", DataTypes.INT()))));
+
+        HashMap<Integer, GenericArray> javaMap = new HashMap<>();
+        javaMap.put(1, new GenericArray(new Integer[] {1, null, 2}));
+        GenericRow row =
+                GenericRow.of(
+                        1,
+                        GenericRow.of(
+                                DateTimeUtils.parseDate("2025-01-06"),
+                                new GenericMap(javaMap),
+                                null));
+
+        compareCastResult(
+                CastExecutors.resolve(rowType, DataTypes.STRING()),
+                row,
+                BinaryString.fromString("{1, {2025-01-06, {1 -> [1, null, 2]}, null}}"));
     }
 
     @SuppressWarnings("rawtypes")

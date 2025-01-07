@@ -300,6 +300,34 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testIncrementBetweenReadWithSnapshotExpiration() throws Exception {
+        String tableName = "T";
+        batchSql(String.format("INSERT INTO %s VALUES (1, 11, 111)", tableName));
+
+        paimonTable(tableName).createTag("tag1", 1);
+
+        batchSql(String.format("INSERT INTO %s VALUES (2, 22, 222)", tableName));
+        paimonTable(tableName).createTag("tag2", 2);
+        batchSql(String.format("INSERT INTO %s VALUES (3, 33, 333)", tableName));
+        paimonTable(tableName).createTag("tag3", 3);
+
+        // expire snapshot 1
+        Map<String, String> expireOptions = new HashMap<>();
+        expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
+        expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
+        FileStoreTable table = (FileStoreTable) paimonTable(tableName);
+        table.copy(expireOptions).newCommit("").expireSnapshots();
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
+
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT * FROM %s /*+ OPTIONS('incremental-between' = 'tag1,tag2', 'deletion-vectors.enabled' = 'true') */",
+                                        tableName)))
+                .containsExactlyInAnyOrder(Row.of(2, 22, 222));
+    }
+
+    @Test
     public void testSortSpillMerge() {
         sql(
                 "CREATE TABLE IF NOT EXISTS KT (a INT PRIMARY KEY NOT ENFORCED, b STRING) WITH ('sort-spill-threshold'='2')");
@@ -561,17 +589,33 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
         String sql = "SELECT COUNT(*) FROM count_append_dv";
         assertThat(sql(sql)).containsOnly(Row.of(2L));
-        validateCount1NotPushDown(sql);
+        validateCount1PushDown(sql);
     }
 
     @Test
     public void testCountStarPK() {
-        sql("CREATE TABLE count_pk (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING)");
-        sql("INSERT INTO count_pk VALUES (1, 'a'), (2, 'b')");
+        sql(
+                "CREATE TABLE count_pk (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING) WITH ('file.format' = 'avro')");
+        sql("INSERT INTO count_pk VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd')");
+        sql("INSERT INTO count_pk VALUES (1, 'e')");
 
         String sql = "SELECT COUNT(*) FROM count_pk";
-        assertThat(sql(sql)).containsOnly(Row.of(2L));
+        assertThat(sql(sql)).containsOnly(Row.of(4L));
         validateCount1NotPushDown(sql);
+    }
+
+    @Test
+    public void testCountStarPKDv() {
+        sql(
+                "CREATE TABLE count_pk_dv (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING) WITH ("
+                        + "'file.format' = 'avro', "
+                        + "'deletion-vectors.enabled' = 'true')");
+        sql("INSERT INTO count_pk_dv VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd')");
+        sql("INSERT INTO count_pk_dv VALUES (1, 'e')");
+
+        String sql = "SELECT COUNT(*) FROM count_pk_dv";
+        assertThat(sql(sql)).containsOnly(Row.of(4L));
+        validateCount1PushDown(sql);
     }
 
     @Test

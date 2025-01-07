@@ -508,4 +508,78 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
         ) :: Nil
     )
   }
+
+  test("Paimon Insert: insert with column list") {
+    sql("CREATE TABLE T (name String, student_id INT) PARTITIONED BY (address STRING)")
+
+    // insert with a column list
+    sql("INSERT INTO T (name, student_id, address) VALUES ('a', '1', 'Hangzhou')")
+    // Since Spark 3.4, INSERT INTO commands with explicit column lists comprising fewer columns than the target
+    // table will automatically add the corresponding default values for the remaining columns (or NULL for any column
+    // lacking an explicitly-assigned default value). In Spark 3.3 or earlier, these commands would have failed.
+    // See https://issues.apache.org/jira/browse/SPARK-42521
+    if (gteqSpark3_4) {
+      sql("INSERT INTO T (name) VALUES ('b')")
+      sql("INSERT INTO T (address, name) VALUES ('Hangzhou', 'c')")
+    } else {
+      sql("INSERT INTO T (name, student_id, address) VALUES ('b', null, null)")
+      sql("INSERT INTO T (name, student_id, address) VALUES ('c', null, 'Hangzhou')")
+    }
+
+    // insert with both a partition spec and a column list
+    if (gteqSpark3_4) {
+      sql("INSERT INTO T PARTITION (address='Beijing') (name) VALUES ('d')")
+    } else {
+      sql("INSERT INTO T PARTITION (address='Beijing') (name, student_id) VALUES ('d', null)")
+    }
+    sql("INSERT INTO T PARTITION (address='Hangzhou') (student_id, name) VALUES (5, 'e')")
+
+    checkAnswer(
+      sql("SELECT * FROM T ORDER BY name"),
+      Seq(
+        Row("a", 1, "Hangzhou"),
+        Row("b", null, null),
+        Row("c", null, "Hangzhou"),
+        Row("d", null, "Beijing"),
+        Row("e", 5, "Hangzhou"))
+    )
+
+    // insert overwrite with a column list
+    if (gteqSpark3_4) {
+      sql("INSERT OVERWRITE T (name, address) VALUES ('f', 'Shanghai')")
+    } else {
+      sql("INSERT OVERWRITE T (name, student_id, address) VALUES ('f', null, 'Shanghai')")
+    }
+    checkAnswer(sql("SELECT * FROM T ORDER BY name"), Row("f", null, "Shanghai"))
+
+    // insert overwrite with both a partition spec and a column list
+    if (gteqSpark3_4) {
+      sql("INSERT OVERWRITE T PARTITION (address='Shanghai') (name) VALUES ('g')")
+    } else {
+      sql("INSERT OVERWRITE T PARTITION (address='Shanghai') (name, student_id) VALUES ('g', null)")
+    }
+    checkAnswer(sql("SELECT * FROM T ORDER BY name"), Row("g", null, "Shanghai"))
+  }
+
+  test("Paimon Insert: read and write struct with null") {
+    fileFormats {
+      format =>
+        withTable("t") {
+          sql(
+            s"CREATE TABLE t (i INT, s STRUCT<f1: INT, f2: INT>) TBLPROPERTIES ('file.format' = '$format')")
+          sql(
+            "INSERT INTO t VALUES (1, STRUCT(1, 1)), (2, null), (3, STRUCT(1, null)), (4, STRUCT(null, null))")
+          if (format.equals("parquet")) {
+            // todo: fix it, see https://github.com/apache/paimon/issues/4785
+            checkAnswer(
+              sql("SELECT * FROM t ORDER BY i"),
+              Seq(Row(1, Row(1, 1)), Row(2, null), Row(3, Row(1, null)), Row(4, null)))
+          } else {
+            checkAnswer(
+              sql("SELECT * FROM t ORDER BY i"),
+              Seq(Row(1, Row(1, 1)), Row(2, null), Row(3, Row(1, null)), Row(4, Row(null, null))))
+          }
+        }
+    }
+  }
 }

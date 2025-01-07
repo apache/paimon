@@ -27,4 +27,5 @@ trait WithTableOptions {
 
   protected val withPk: Seq[Boolean] = Seq(true, false)
 
+  protected def fileFormats(fn: String => Unit): Unit = Seq("parquet", "orc", "avro").foreach(fn)
 }

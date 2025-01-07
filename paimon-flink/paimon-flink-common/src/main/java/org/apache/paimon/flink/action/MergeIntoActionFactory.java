@@ -18,12 +18,9 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.flink.api.java.tuple.Tuple3;
-
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -62,12 +59,12 @@ public class MergeIntoActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        Tuple3<String, String, String> tablePath = getTablePath(params);
-
-        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
 
         MergeIntoAction action =
-                new MergeIntoAction(tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig);
+                new MergeIntoAction(
+                        params.getRequired(DATABASE),
+                        params.getRequired(TABLE),
+                        catalogConfigMap(params));
 
         if (params.has(TARGET_AS)) {
             action.withTargetAlias(params.get(TARGET_AS));
@@ -78,26 +75,22 @@ public class MergeIntoActionFactory implements ActionFactory {
             action.withSourceSqls(sourceSqls.toArray(new String[0]));
         }
 
-        checkRequiredArgument(params, SOURCE_TABLE);
-        action.withSourceTable(params.get(SOURCE_TABLE));
+        action.withSourceTable(params.getRequired(SOURCE_TABLE));
 
-        checkRequiredArgument(params, ON);
-        action.withMergeCondition(params.get(ON));
+        action.withMergeCondition(params.getRequired(ON));
 
         List<String> actions =
                 Arrays.stream(params.get(MERGE_ACTIONS).split(","))
                         .map(String::trim)
                         .collect(Collectors.toList());
         if (actions.contains(MATCHED_UPSERT)) {
-            checkRequiredArgument(params, MATCHED_UPSERT_SET);
             action.withMatchedUpsert(
-                    params.get(MATCHED_UPSERT_CONDITION), params.get(MATCHED_UPSERT_SET));
+                    params.get(MATCHED_UPSERT_CONDITION), params.getRequired(MATCHED_UPSERT_SET));
         }
         if (actions.contains(NOT_MATCHED_BY_SOURCE_UPSERT)) {
-            checkRequiredArgument(params, NOT_MATCHED_BY_SOURCE_UPSERT_SET);
             action.withNotMatchedBySourceUpsert(
                     params.get(NOT_MATCHED_BY_SOURCE_UPSERT_CONDITION),
-                    params.get(NOT_MATCHED_BY_SOURCE_UPSERT_SET));
+                    params.getRequired(NOT_MATCHED_BY_SOURCE_UPSERT_SET));
         }
         if (actions.contains(MATCHED_DELETE)) {
             action.withMatchedDelete(params.get(MATCHED_DELETE_CONDITION));
@@ -106,10 +99,9 @@ public class MergeIntoActionFactory implements ActionFactory {
             action.withNotMatchedBySourceDelete(params.get(NOT_MATCHED_BY_SOURCE_DELETE_CONDITION));
         }
         if (actions.contains(NOT_MATCHED_INSERT)) {
-            checkRequiredArgument(params, NOT_MATCHED_INSERT_VALUES);
             action.withNotMatchedInsert(
                     params.get(NOT_MATCHED_INSERT_CONDITION),
-                    params.get(NOT_MATCHED_INSERT_VALUES));
+                    params.getRequired(NOT_MATCHED_INSERT_VALUES));
         }
 
         action.validate();

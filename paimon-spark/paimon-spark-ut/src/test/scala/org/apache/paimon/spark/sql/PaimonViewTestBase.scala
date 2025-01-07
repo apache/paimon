@@ -93,4 +93,66 @@ abstract class PaimonViewTestBase extends PaimonHiveTestBase {
         }
     }
   }
+
+  test("Paimon View: show create view") {
+    sql(s"USE $paimonHiveCatalogName")
+    withDatabase("test_db") {
+      sql("CREATE DATABASE test_db")
+      sql("USE test_db")
+      withTable("t") {
+        withView("v") {
+          sql("CREATE TABLE t (id INT, c STRING) USING paimon")
+          sql("""
+                |CREATE VIEW v
+                |COMMENT 'test comment'
+                |TBLPROPERTIES ('k1' = 'v1')
+                |AS SELECT * FROM t
+                |""".stripMargin)
+
+          val s = sql("SHOW CREATE TABLE v").collectAsList().get(0).get(0).toString
+          val r = """
+                    |CREATE VIEW test_db.v \(
+                    |  id,
+                    |  c\)
+                    |COMMENT 'test comment'
+                    |TBLPROPERTIES \(
+                    |  'k1' = 'v1',
+                    |  'transient_lastDdlTime' = '\d+'\)
+                    |AS
+                    |SELECT \* FROM t
+                    |""".stripMargin.replace("\n", "").r
+          assert(r.findFirstIn(s.replace("\n", "")).isDefined)
+        }
+      }
+    }
+  }
+
+  test("Paimon View: describe [extended] view") {
+    sql(s"USE $paimonHiveCatalogName")
+    withDatabase("test_db") {
+      sql("CREATE DATABASE test_db")
+      sql("USE test_db")
+      withTable("t") {
+        withView("v") {
+          sql("CREATE TABLE t (id INT, c STRING) USING paimon")
+          sql("""
+                |CREATE VIEW v
+                |COMMENT 'test comment'
+                |TBLPROPERTIES ('k1' = 'v1')
+                |AS SELECT * FROM t
+                |""".stripMargin)
+
+          checkAnswer(sql("DESC TABLE v"), Seq(Row("id", "INT", null), Row("c", "STRING", null)))
+
+          val rows = sql("DESC TABLE EXTENDED v").collectAsList()
+          assert(rows.get(3).toString().equals("[# Detailed View Information,,]"))
+          assert(rows.get(4).toString().equals("[Name,test_db.v,]"))
+          assert(rows.get(5).toString().equals("[Comment,test comment,]"))
+          assert(rows.get(6).toString().equals("[View Text,SELECT * FROM t,]"))
+          assert(rows.get(7).toString().equals("[View Query Output Columns,[id, c],]"))
+          assert(rows.get(8).toString().contains("[View Properties,[k1=v1"))
+        }
+      }
+    }
+  }
 }

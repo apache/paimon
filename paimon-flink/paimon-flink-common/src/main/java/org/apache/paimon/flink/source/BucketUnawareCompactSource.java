@@ -21,19 +21,19 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.append.UnawareAppendTableCompactionCoordinator;
 import org.apache.paimon.flink.sink.CompactionTaskTypeInfo;
-import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.EndOfScanException;
-import org.apache.paimon.utils.Preconditions;
 
-import org.apache.flink.api.common.functions.OpenContext;
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Boundedness;
-import org.apache.flink.configuration.Configuration;
+import org.apache.flink.api.connector.source.ReaderOutput;
+import org.apache.flink.api.connector.source.SourceReader;
+import org.apache.flink.api.connector.source.SourceReaderContext;
+import org.apache.flink.core.io.InputStatus;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
-import org.apache.flink.streaming.api.operators.StreamSource;
+import org.apache.flink.util.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,15 +42,16 @@ import javax.annotation.Nullable;
 import java.util.List;
 
 /**
- * Source Function for unaware-bucket Compaction.
+ * Source for unaware-bucket Compaction.
  *
- * <p>Note: The function is the source function of unaware-bucket compactor coordinator. It will
- * read the latest snapshot continuously by compactionCoordinator, and generate new compaction
- * tasks. The source function is used in unaware-bucket compaction job (both stand-alone and
- * write-combined). Besides, we don't need to save state in this function, it will invoke a full
- * scan when starting up, and scan continuously for the following snapshot.
+ * <p>Note: The function is the source of unaware-bucket compactor coordinator. It will read the
+ * latest snapshot continuously by compactionCoordinator, and generate new compaction tasks. The
+ * source is used in unaware-bucket compaction job (both stand-alone and write-combined). Besides,
+ * we don't need to save state in this source, it will invoke a full scan when starting up, and scan
+ * continuously for the following snapshot.
  */
-public class BucketUnawareCompactSource extends RichSourceFunction<UnawareAppendCompactionTask> {
+public class BucketUnawareCompactSource
+        extends AbstractNonCoordinatedSource<UnawareAppendCompactionTask> {
 
     private static final Logger LOG = LoggerFactory.getLogger(BucketUnawareCompactSource.class);
     private static final String COMPACTION_COORDINATOR_NAME = "Compaction Coordinator";
@@ -59,9 +60,6 @@ public class BucketUnawareCompactSource extends RichSourceFunction<UnawareAppend
     private final boolean streaming;
     private final long scanInterval;
     private final Predicate filter;
-    private transient UnawareAppendTableCompactionCoordinator compactionCoordinator;
-    private transient SourceContext<UnawareAppendCompactionTask> ctx;
-    private volatile boolean isRunning = true;
 
     public BucketUnawareCompactSource(
             FileStoreTable table,
@@ -74,76 +72,64 @@ public class BucketUnawareCompactSource extends RichSourceFunction<UnawareAppend
         this.filter = filter;
     }
 
-    /**
-     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
-     */
-    public void open(OpenContext openContext) throws Exception {
-        open(new Configuration());
-    }
-
-    /**
-     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
-     */
-    public void open(Configuration parameters) throws Exception {
-        compactionCoordinator =
-                new UnawareAppendTableCompactionCoordinator(table, streaming, filter);
-        Preconditions.checkArgument(
-                RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext()) == 1,
-                "Compaction Operator parallelism in paimon MUST be one.");
+    @Override
+    public Boundedness getBoundedness() {
+        return streaming ? Boundedness.CONTINUOUS_UNBOUNDED : Boundedness.BOUNDED;
     }
 
     @Override
-    public void run(SourceContext<UnawareAppendCompactionTask> sourceContext) throws Exception {
-        this.ctx = sourceContext;
-        while (isRunning) {
+    public SourceReader<UnawareAppendCompactionTask, SimpleSourceSplit> createReader(
+            SourceReaderContext readerContext) throws Exception {
+        Preconditions.checkArgument(
+                readerContext.currentParallelism() == 1,
+                "Compaction Operator parallelism in paimon MUST be one.");
+        return new BucketUnawareCompactSourceReader(table, streaming, filter, scanInterval);
+    }
+
+    /** BucketUnawareCompactSourceReader. */
+    public static class BucketUnawareCompactSourceReader
+            extends AbstractNonCoordinatedSourceReader<UnawareAppendCompactionTask> {
+        private final UnawareAppendTableCompactionCoordinator compactionCoordinator;
+        private final long scanInterval;
+
+        public BucketUnawareCompactSourceReader(
+                FileStoreTable table, boolean streaming, Predicate filter, long scanInterval) {
+            this.scanInterval = scanInterval;
+            compactionCoordinator =
+                    new UnawareAppendTableCompactionCoordinator(table, streaming, filter);
+        }
+
+        @Override
+        public InputStatus pollNext(ReaderOutput<UnawareAppendCompactionTask> readerOutput)
+                throws Exception {
             boolean isEmpty;
-            synchronized (ctx.getCheckpointLock()) {
-                if (!isRunning) {
-                    return;
-                }
-                try {
-                    // do scan and plan action, emit append-only compaction tasks.
-                    List<UnawareAppendCompactionTask> tasks = compactionCoordinator.run();
-                    isEmpty = tasks.isEmpty();
-                    tasks.forEach(ctx::collect);
-                } catch (EndOfScanException esf) {
-                    LOG.info("Catching EndOfStreamException, the stream is finished.");
-                    return;
-                }
+            try {
+                // do scan and plan action, emit append-only compaction tasks.
+                List<UnawareAppendCompactionTask> tasks = compactionCoordinator.run();
+                isEmpty = tasks.isEmpty();
+                tasks.forEach(readerOutput::collect);
+            } catch (EndOfScanException esf) {
+                LOG.info("Catching EndOfStreamException, the stream is finished.");
+                return InputStatus.END_OF_INPUT;
             }
 
             if (isEmpty) {
                 Thread.sleep(scanInterval);
             }
-        }
-    }
-
-    @Override
-    public void cancel() {
-        if (ctx != null) {
-            synchronized (ctx.getCheckpointLock()) {
-                isRunning = false;
-            }
-        } else {
-            isRunning = false;
+            return InputStatus.MORE_AVAILABLE;
         }
     }
 
     public static DataStreamSource<UnawareAppendCompactionTask> buildSource(
             StreamExecutionEnvironment env,
             BucketUnawareCompactSource source,
-            boolean streaming,
             String tableIdentifier) {
-        final StreamSource<UnawareAppendCompactionTask, BucketUnawareCompactSource> sourceOperator =
-                new StreamSource<>(source);
         return (DataStreamSource<UnawareAppendCompactionTask>)
-                new DataStreamSource<>(
-                                env,
-                                new CompactionTaskTypeInfo(),
-                                sourceOperator,
-                                false,
+                env.fromSource(
+                                source,
+                                WatermarkStrategy.noWatermarks(),
                                 COMPACTION_COORDINATOR_NAME + " : " + tableIdentifier,
-                                streaming ? Boundedness.CONTINUOUS_UNBOUNDED : Boundedness.BOUNDED)
+                                new CompactionTaskTypeInfo())
                         .setParallelism(1)
                         .setMaxParallelism(1);
     }

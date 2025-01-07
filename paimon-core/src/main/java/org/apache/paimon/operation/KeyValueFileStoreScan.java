@@ -158,7 +158,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                     schemaId2DataFilter.computeIfAbsent(
                             entry.file().schemaId(),
                             id ->
-                                    fieldValueStatsConverters.convertFilter(
+                                    fieldValueStatsConverters.tryDevolveFilter(
                                             entry.file().schemaId(), valueFilter));
             return predicate.evaluate(dataPredicate).remain();
         } catch (IOException e) {

@@ -23,28 +23,31 @@ import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.beans.ConstructorProperties;
 import java.util.Map;
 import java.util.Objects;
 
 /** Response for getting config. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ConfigResponse implements RESTResponse {
+
     private static final String FIELD_DEFAULTS = "defaults";
     private static final String FIELD_OVERRIDES = "overrides";
 
     @JsonProperty(FIELD_DEFAULTS)
-    private Map<String, String> defaults;
+    private final Map<String, String> defaults;
 
     @JsonProperty(FIELD_OVERRIDES)
-    private Map<String, String> overrides;
+    private final Map<String, String> overrides;
 
-    @ConstructorProperties({FIELD_DEFAULTS, FIELD_OVERRIDES})
-    public ConfigResponse(Map<String, String> defaults, Map<String, String> overrides) {
+    @JsonCreator
+    public ConfigResponse(
+            @JsonProperty(FIELD_DEFAULTS) Map<String, String> defaults,
+            @JsonProperty(FIELD_OVERRIDES) Map<String, String> overrides) {
         this.defaults = defaults;
         this.overrides = overrides;
     }
@@ -65,12 +68,12 @@ public class ConfigResponse implements RESTResponse {
     }
 
     @JsonGetter(FIELD_DEFAULTS)
-    public Map<String, String> defaults() {
+    public Map<String, String> getDefaults() {
         return defaults;
     }
 
     @JsonGetter(FIELD_OVERRIDES)
-    public Map<String, String> overrides() {
+    public Map<String, String> getOverrides() {
         return overrides;
     }
 }

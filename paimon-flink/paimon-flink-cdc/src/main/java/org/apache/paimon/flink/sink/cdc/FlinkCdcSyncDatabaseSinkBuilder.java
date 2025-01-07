@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
@@ -72,7 +72,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     //     it will check newly added tables and create the corresponding
     //     Paimon tables. 2) in multiplex sink where it is used to
     //     initialize different writers to multiple tables.
-    private Catalog.Loader catalogLoader;
+    private CatalogLoader catalogLoader;
     // database to sync, currently only support single database
     private String database;
     private MultiTablesSinkMode mode;
@@ -111,7 +111,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         return this;
     }
 
-    public FlinkCdcSyncDatabaseSinkBuilder<T> withCatalogLoader(Catalog.Loader catalogLoader) {
+    public FlinkCdcSyncDatabaseSinkBuilder<T> withCatalogLoader(CatalogLoader catalogLoader) {
         this.catalogLoader = catalogLoader;
         return this;
     }

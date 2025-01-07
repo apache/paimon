@@ -69,7 +69,8 @@ public class FlinkRecordsWithSplitIdsTest {
                 iterator,
                 output,
                 state,
-                new FileStoreSourceReaderMetrics(new DummyMetricGroup()));
+                new FileStoreSourceReaderMetrics(new DummyMetricGroup()),
+                null);
         assertThat(output.getEmittedRecords()).containsExactly(rows);
         assertThat(state.recordsToSkip()).isEqualTo(2);
         assertThat(records.nextRecordFromSplit()).isNull();

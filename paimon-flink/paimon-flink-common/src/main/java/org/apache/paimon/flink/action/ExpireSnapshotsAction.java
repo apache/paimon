@@ -27,22 +27,24 @@ import java.util.Map;
 /** Expire snapshots action for Flink. */
 public class ExpireSnapshotsAction extends ActionBase {
 
-    private final String identifier;
+    private final String database;
+    private final String table;
     private final Integer retainMax;
     private final Integer retainMin;
     private final String olderThan;
     private final Integer maxDeletes;
 
     public ExpireSnapshotsAction(
-            String warehouse,
-            String identifier,
+            String database,
+            String table,
             Map<String, String> catalogConfig,
             Integer retainMax,
             Integer retainMin,
             String olderThan,
             Integer maxDeletes) {
-        super(warehouse, catalogConfig);
-        this.identifier = identifier;
+        super(catalogConfig);
+        this.database = database;
+        this.table = table;
         this.retainMax = retainMax;
         this.retainMin = retainMin;
         this.olderThan = olderThan;
@@ -54,7 +56,7 @@ public class ExpireSnapshotsAction extends ActionBase {
         expireSnapshotsProcedure.withCatalog(catalog);
         expireSnapshotsProcedure.call(
                 new DefaultProcedureContext(env),
-                identifier,
+                database + "." + table,
                 retainMax,
                 retainMin,
                 olderThan,

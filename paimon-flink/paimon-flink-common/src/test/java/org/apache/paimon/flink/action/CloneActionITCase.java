@@ -32,6 +32,7 @@ import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -44,8 +45,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link CloneAction}. */
 public class CloneActionITCase extends ActionITCaseBase {
@@ -638,6 +641,46 @@ public class CloneActionITCase extends ActionITCaseBase {
                                 .collect(Collectors.toList()));
         assertThat(collect(tEnv, "SELECT COUNT(DISTINCT v) FROM t"))
                 .isEqualTo(Collections.singletonList("+I[1]"));
+    }
+
+    // ------------------------------------------------------------------------
+    //  Negative Tests
+    // ------------------------------------------------------------------------
+
+    @Test
+    public void testEmptySourceCatalog() {
+        String sourceWarehouse = getTempDirPath("source-ware");
+
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().parallelism(1).build();
+        tEnv.executeSql(
+                "CREATE CATALOG sourcecat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + String.format("  'warehouse' = '%s'\n", sourceWarehouse)
+                        + ")");
+
+        String targetWarehouse = getTempDirPath("target-ware");
+
+        String[] args =
+                new String[] {
+                    "clone",
+                    "--warehouse",
+                    sourceWarehouse,
+                    "--target_warehouse",
+                    targetWarehouse,
+                    "--parallelism",
+                    "1"
+                };
+        CloneAction action = (CloneAction) ActionFactory.createAction(args).get();
+
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder().streamingMode().allowRestart().build();
+        action.withStreamExecutionEnvironment(env);
+
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalStateException.class,
+                                "Didn't find any table in source catalog."));
     }
 
     // ------------------------------------------------------------------------

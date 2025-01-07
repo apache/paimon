@@ -22,7 +22,7 @@ import org.apache.paimon.metrics.Gauge;
 import org.apache.paimon.metrics.Histogram;
 import org.apache.paimon.metrics.Metric;
 import org.apache.paimon.metrics.MetricGroup;
-import org.apache.paimon.metrics.MetricRegistryImpl;
+import org.apache.paimon.metrics.TestMetricRegistry;
 
 import org.junit.jupiter.api.Test;
 
@@ -48,7 +48,9 @@ public class ScanMetricsTest {
                         ScanMetrics.SCAN_DURATION,
                         ScanMetrics.LAST_SCANNED_MANIFESTS,
                         ScanMetrics.LAST_SCAN_SKIPPED_TABLE_FILES,
-                        ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES);
+                        ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES,
+                        ScanMetrics.MANIFEST_HIT_CACHE,
+                        ScanMetrics.MANIFEST_MISSED_CACHE);
     }
 
     /** Tests that the metrics are updated properly. */
@@ -124,6 +126,6 @@ public class ScanMetricsTest {
     }
 
     private ScanMetrics getScanMetrics() {
-        return new ScanMetrics(new MetricRegistryImpl(), TABLE_NAME);
+        return new ScanMetrics(new TestMetricRegistry(), TABLE_NAME);
     }
 }

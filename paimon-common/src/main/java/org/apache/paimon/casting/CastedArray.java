@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.Variant;
 
 /**
  * An implementation of {@link InternalArray} which provides a casted view of the underlying {@link
@@ -181,6 +182,11 @@ public class CastedArray implements InternalArray {
 
     @Override
     public byte[] getBinary(int pos) {
+        return castElementGetter.getElementOrNull(array, pos);
+    }
+
+    @Override
+    public Variant getVariant(int pos) {
         return castElementGetter.getElementOrNull(array, pos);
     }
 

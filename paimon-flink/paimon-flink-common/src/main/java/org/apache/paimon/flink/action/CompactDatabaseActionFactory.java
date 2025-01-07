@@ -42,10 +42,7 @@ public class CompactDatabaseActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        CompactDatabaseAction action =
-                new CompactDatabaseAction(
-                        getRequiredValue(params, WAREHOUSE),
-                        optionalConfigMap(params, CATALOG_CONF));
+        CompactDatabaseAction action = new CompactDatabaseAction(catalogConfigMap(params));
 
         action.includingDatabases(params.get(INCLUDING_DATABASES))
                 .includingTables(params.get(INCLUDING_TABLES))

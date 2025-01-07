@@ -58,9 +58,13 @@ public class PartitionListeners implements Closeable {
             throws Exception {
         List<PartitionListener> listeners = new ArrayList<>();
 
-        ReportHmsListener.create(context.isRestored(), context.stateStore(), table)
+        // partition statistics reporter
+        ReportPartStatsListener.create(context.isRestored(), context.stateStore(), table)
                 .ifPresent(listeners::add);
+
+        // partition mark done
         PartitionMarkDone.create(
+                        context.getClass().getClassLoader(),
                         context.streamingCheckpointEnabled(),
                         context.isRestored(),
                         context.stateStore(),

@@ -19,8 +19,6 @@
 package org.apache.paimon.spark.catalyst.plans.logical
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.spark.SparkCatalog
-import org.apache.paimon.spark.catalog.Catalogs
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.FunctionIdentifier
@@ -28,7 +26,7 @@ import org.apache.spark.sql.catalyst.analysis.FunctionRegistryBase
 import org.apache.spark.sql.catalyst.analysis.TableFunctionRegistry.TableFunctionBuilder
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression, ExpressionInfo}
 import org.apache.spark.sql.catalyst.plans.logical.{LeafNode, LogicalPlan}
-import org.apache.spark.sql.connector.catalog.Identifier
+import org.apache.spark.sql.connector.catalog.{Identifier, TableCatalog}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
@@ -40,7 +38,7 @@ object PaimonTableValuedFunctions {
 
   val supportedFnNames: Seq[String] = Seq(INCREMENTAL_QUERY)
 
-  type TableFunctionDescription = (FunctionIdentifier, ExpressionInfo, TableFunctionBuilder)
+  private type TableFunctionDescription = (FunctionIdentifier, ExpressionInfo, TableFunctionBuilder)
 
   def getTableValueFunctionInjection(fnName: String): TableFunctionDescription = {
     val (info, builder) = fnName match {
@@ -60,13 +58,7 @@ object PaimonTableValuedFunctions {
 
     val sessionState = spark.sessionState
     val catalogManager = sessionState.catalogManager
-
-    val sparkCatalog = new SparkCatalog()
-    val currentCatalog = catalogManager.currentCatalog.name()
-    sparkCatalog.initialize(
-      currentCatalog,
-      Catalogs.catalogOptions(currentCatalog, spark.sessionState.conf))
-
+    val sparkCatalog = catalogManager.currentCatalog.asInstanceOf[TableCatalog]
     val tableId = sessionState.sqlParser.parseTableIdentifier(args.head.eval().toString)
     val namespace = tableId.database.map(Array(_)).getOrElse(catalogManager.currentNamespace)
     val ident = Identifier.of(namespace, tableId.table)

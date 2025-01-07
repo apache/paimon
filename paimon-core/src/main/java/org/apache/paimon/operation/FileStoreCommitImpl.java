@@ -83,6 +83,7 @@ import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.manifest.ManifestEntry.recordCount;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountAdd;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountDelete;
+import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.partToSimpleString;
@@ -134,6 +135,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final List<CommitCallback> commitCallbacks;
     private final StatsFileHandler statsFileHandler;
     private final BucketMode bucketMode;
+    private long commitTimeout;
     private final int commitMaxRetries;
 
     @Nullable private Lock lock;
@@ -166,7 +168,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             BucketMode bucketMode,
             @Nullable Integer manifestReadParallelism,
             List<CommitCallback> commitCallbacks,
-            int commitMaxRetries) {
+            int commitMaxRetries,
+            long commitTimeout) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.tableName = tableName;
@@ -193,6 +196,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.manifestReadParallelism = manifestReadParallelism;
         this.commitCallbacks = commitCallbacks;
         this.commitMaxRetries = commitMaxRetries;
+        this.commitTimeout = commitTimeout;
 
         this.lock = null;
         this.ignoreEmptyCommit = true;
@@ -530,17 +534,26 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     partitions.stream().map(Objects::toString).collect(Collectors.joining(",")));
         }
 
-        // partitions may be partial partition fields, so here must to use predicate way.
-        Predicate predicate =
-                partitions.stream()
-                        .map(
-                                partition ->
-                                        createPartitionPredicate(
-                                                partition, partitionType, partitionDefaultName))
-                        .reduce(PredicateBuilder::or)
-                        .orElseThrow(() -> new RuntimeException("Failed to get partition filter."));
-        PartitionPredicate partitionFilter =
-                PartitionPredicate.fromPredicate(partitionType, predicate);
+        boolean fullMode =
+                partitions.stream().allMatch(part -> part.size() == partitionType.getFieldCount());
+        PartitionPredicate partitionFilter;
+        if (fullMode) {
+            List<BinaryRow> binaryPartitions =
+                    createBinaryPartitions(partitions, partitionType, partitionDefaultName);
+            partitionFilter = PartitionPredicate.fromMultiple(partitionType, binaryPartitions);
+        } else {
+            // partitions may be partial partition fields, so here must to use predicate way.
+            Predicate predicate =
+                    partitions.stream()
+                            .map(
+                                    partition ->
+                                            createPartitionPredicate(
+                                                    partition, partitionType, partitionDefaultName))
+                            .reduce(PredicateBuilder::or)
+                            .orElseThrow(
+                                    () -> new RuntimeException("Failed to get partition filter."));
+            partitionFilter = PartitionPredicate.fromPredicate(partitionType, predicate);
+        }
 
         tryOverwrite(
                 partitionFilter,
@@ -580,7 +593,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             toDelete.addAll(commitMessage.compactIncrement().changelogFiles());
 
             for (DataFileMeta file : toDelete) {
-                fileIO.deleteQuietly(pathFactory.toPath(file.fileName()));
+                fileIO.deleteQuietly(pathFactory.toPath(file));
             }
         }
     }
@@ -723,6 +736,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable String statsFileName) {
         int retryCount = 0;
         RetryResult retryResult = null;
+        long startMillis = System.currentTimeMillis();
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
             CommitResult result =
@@ -746,15 +760,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
             retryResult = (RetryResult) result;
 
-            if (retryCount >= commitMaxRetries) {
-                if (retryResult != null) {
-                    retryResult.cleanAll();
-                }
+            if (System.currentTimeMillis() - startMillis > commitTimeout
+                    || retryCount >= commitMaxRetries) {
+                retryResult.cleanAll();
                 throw new RuntimeException(
                         String.format(
-                                "Commit failed after %s retries, there maybe exist commit conflicts between multiple jobs.",
-                                commitMaxRetries));
+                                "Commit failed after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
+                                commitTimeout, retryCount));
             }
+
             retryCount++;
         }
         return retryCount + 1;
@@ -767,75 +781,52 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long identifier,
             @Nullable Long watermark,
             Map<Integer, Long> logOffsets) {
-        int retryCount = 0;
-        while (true) {
-            Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+        // collect all files with overwrite
+        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+        List<ManifestEntry> changesWithOverwrite = new ArrayList<>();
+        List<IndexManifestEntry> indexChangesWithOverwrite = new ArrayList<>();
+        if (latestSnapshot != null) {
+            List<ManifestEntry> currentEntries =
+                    scan.withSnapshot(latestSnapshot)
+                            .withPartitionFilter(partitionFilter)
+                            .withKind(ScanMode.ALL)
+                            .plan()
+                            .files();
+            for (ManifestEntry entry : currentEntries) {
+                changesWithOverwrite.add(
+                        new ManifestEntry(
+                                FileKind.DELETE,
+                                entry.partition(),
+                                entry.bucket(),
+                                entry.totalBuckets(),
+                                entry.file()));
+            }
 
-            List<ManifestEntry> changesWithOverwrite = new ArrayList<>();
-            List<IndexManifestEntry> indexChangesWithOverwrite = new ArrayList<>();
-            if (latestSnapshot != null) {
-                List<ManifestEntry> currentEntries =
-                        scan.withSnapshot(latestSnapshot)
-                                .withPartitionFilter(partitionFilter)
-                                .withKind(ScanMode.ALL)
-                                .plan()
-                                .files();
-                for (ManifestEntry entry : currentEntries) {
-                    changesWithOverwrite.add(
-                            new ManifestEntry(
-                                    FileKind.DELETE,
-                                    entry.partition(),
-                                    entry.bucket(),
-                                    entry.totalBuckets(),
-                                    entry.file()));
-                }
-
-                // collect index files
-                if (latestSnapshot.indexManifest() != null) {
-                    List<IndexManifestEntry> entries =
-                            indexManifestFile.read(latestSnapshot.indexManifest());
-                    for (IndexManifestEntry entry : entries) {
-                        if (partitionFilter == null || partitionFilter.test(entry.partition())) {
-                            indexChangesWithOverwrite.add(entry.toDeleteEntry());
-                        }
+            // collect index files
+            if (latestSnapshot.indexManifest() != null) {
+                List<IndexManifestEntry> entries =
+                        indexManifestFile.read(latestSnapshot.indexManifest());
+                for (IndexManifestEntry entry : entries) {
+                    if (partitionFilter == null || partitionFilter.test(entry.partition())) {
+                        indexChangesWithOverwrite.add(entry.toDeleteEntry());
                     }
                 }
             }
-            changesWithOverwrite.addAll(changes);
-            indexChangesWithOverwrite.addAll(indexFiles);
-
-            CommitResult result =
-                    tryCommitOnce(
-                            null,
-                            changesWithOverwrite,
-                            Collections.emptyList(),
-                            indexChangesWithOverwrite,
-                            identifier,
-                            watermark,
-                            logOffsets,
-                            Snapshot.CommitKind.OVERWRITE,
-                            latestSnapshot,
-                            mustConflictCheck(),
-                            branchName,
-                            null);
-
-            if (result.isSuccess()) {
-                break;
-            }
-
-            // TODO optimize OVERWRITE too
-            RetryResult retryResult = (RetryResult) result;
-            retryResult.cleanAll();
-
-            if (retryCount >= commitMaxRetries) {
-                throw new RuntimeException(
-                        String.format(
-                                "Commit failed after %s retries, there maybe exist commit conflicts between multiple jobs.",
-                                commitMaxRetries));
-            }
-            retryCount++;
         }
-        return retryCount + 1;
+        changesWithOverwrite.addAll(changes);
+        indexChangesWithOverwrite.addAll(indexFiles);
+
+        return tryCommit(
+                changesWithOverwrite,
+                Collections.emptyList(),
+                indexChangesWithOverwrite,
+                identifier,
+                watermark,
+                logOffsets,
+                Snapshot.CommitKind.OVERWRITE,
+                mustConflictCheck(),
+                branchName,
+                null);
     }
 
     @VisibleForTesting
@@ -1077,19 +1068,22 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     public void compactManifest() {
         int retryCount = 0;
         ManifestCompactResult retryResult = null;
+        long startMillis = System.currentTimeMillis();
         while (true) {
             retryResult = compactManifest(retryResult);
             if (retryResult.isSuccess()) {
                 break;
             }
 
-            if (retryCount >= commitMaxRetries) {
+            if (System.currentTimeMillis() - startMillis > commitTimeout
+                    || retryCount >= commitMaxRetries) {
                 retryResult.cleanAll();
                 throw new RuntimeException(
                         String.format(
-                                "Commit compact manifest failed after %s retries, there maybe exist commit conflicts between multiple jobs.",
-                                commitMaxRetries));
+                                "Commit failed after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
+                                commitTimeout, retryCount));
             }
+
             retryCount++;
         }
     }

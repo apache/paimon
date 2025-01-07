@@ -18,64 +18,75 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.PaimonHiveTestBase
 
 import org.apache.spark.sql.{DataFrame, Row}
 
-class TableValuedFunctionsTest extends PaimonSparkTestBase {
+class TableValuedFunctionsTest extends PaimonHiveTestBase {
 
   withPk.foreach {
     hasPk =>
       bucketModes.foreach {
         bucket =>
           test(s"incremental query: hasPk: $hasPk, bucket: $bucket") {
-            val prop = if (hasPk) {
-              s"'primary-key'='a,b', 'bucket' = '$bucket' "
-            } else if (bucket != -1) {
-              s"'bucket-key'='b', 'bucket' = '$bucket' "
-            } else {
-              "'write-only'='true'"
+            Seq("paimon", sparkCatalogName, paimonHiveCatalogName).foreach {
+              catalogName =>
+                sql(s"use $catalogName")
+
+                withTable("t") {
+                  val prop = if (hasPk) {
+                    s"'primary-key'='a,b', 'bucket' = '$bucket' "
+                  } else if (bucket != -1) {
+                    s"'bucket-key'='b', 'bucket' = '$bucket' "
+                  } else {
+                    "'write-only'='true'"
+                  }
+
+                  spark.sql(s"""
+                               |CREATE TABLE t (a INT, b INT, c STRING)
+                               |USING paimon
+                               |TBLPROPERTIES ($prop)
+                               |PARTITIONED BY (a)
+                               |""".stripMargin)
+
+                  spark.sql("INSERT INTO t values (1, 1, '1'), (2, 2, '2')")
+                  spark.sql("INSERT INTO t VALUES (1, 3, '3'), (2, 4, '4')")
+                  spark.sql("INSERT INTO t VALUES (1, 5, '5'), (1, 7, '7')")
+
+                  checkAnswer(
+                    incrementalDF("t", 0, 1).orderBy("a", "b"),
+                    Row(1, 1, "1") :: Row(2, 2, "2") :: Nil)
+                  checkAnswer(
+                    spark.sql(
+                      "SELECT * FROM paimon_incremental_query('t', '0', '1') ORDER BY a, b"),
+                    Row(1, 1, "1") :: Row(2, 2, "2") :: Nil)
+
+                  checkAnswer(
+                    incrementalDF("t", 1, 2).orderBy("a", "b"),
+                    Row(1, 3, "3") :: Row(2, 4, "4") :: Nil)
+                  checkAnswer(
+                    spark.sql(
+                      "SELECT * FROM paimon_incremental_query('t', '1', '2') ORDER BY a, b"),
+                    Row(1, 3, "3") :: Row(2, 4, "4") :: Nil)
+
+                  checkAnswer(
+                    incrementalDF("t", 2, 3).orderBy("a", "b"),
+                    Row(1, 5, "5") :: Row(1, 7, "7") :: Nil)
+                  checkAnswer(
+                    spark.sql(
+                      "SELECT * FROM paimon_incremental_query('t', '2', '3') ORDER BY a, b"),
+                    Row(1, 5, "5") :: Row(1, 7, "7") :: Nil)
+
+                  checkAnswer(
+                    incrementalDF("t", 1, 3).orderBy("a", "b"),
+                    Row(1, 3, "3") :: Row(1, 5, "5") :: Row(1, 7, "7") :: Row(2, 4, "4") :: Nil
+                  )
+                  checkAnswer(
+                    spark.sql(
+                      "SELECT * FROM paimon_incremental_query('t', '1', '3') ORDER BY a, b"),
+                    Row(1, 3, "3") :: Row(1, 5, "5") :: Row(1, 7, "7") :: Row(2, 4, "4") :: Nil)
+                }
             }
-
-            spark.sql(s"""
-                         |CREATE TABLE T (a INT, b INT, c STRING)
-                         |USING paimon
-                         |TBLPROPERTIES ($prop)
-                         |PARTITIONED BY (a)
-                         |""".stripMargin)
-
-            spark.sql("INSERT INTO T values (1, 1, '1'), (2, 2, '2')")
-            spark.sql("INSERT INTO T VALUES (1, 3, '3'), (2, 4, '4')")
-            spark.sql("INSERT INTO T VALUES (1, 5, '5'), (1, 7, '7')")
-
-            checkAnswer(
-              incrementalDF("T", 0, 1).orderBy("a", "b"),
-              Row(1, 1, "1") :: Row(2, 2, "2") :: Nil)
-            checkAnswer(
-              spark.sql("SELECT * FROM paimon_incremental_query('T', '0', '1') ORDER BY a, b"),
-              Row(1, 1, "1") :: Row(2, 2, "2") :: Nil)
-
-            checkAnswer(
-              incrementalDF("T", 1, 2).orderBy("a", "b"),
-              Row(1, 3, "3") :: Row(2, 4, "4") :: Nil)
-            checkAnswer(
-              spark.sql("SELECT * FROM paimon_incremental_query('T', '1', '2') ORDER BY a, b"),
-              Row(1, 3, "3") :: Row(2, 4, "4") :: Nil)
-
-            checkAnswer(
-              incrementalDF("T", 2, 3).orderBy("a", "b"),
-              Row(1, 5, "5") :: Row(1, 7, "7") :: Nil)
-            checkAnswer(
-              spark.sql("SELECT * FROM paimon_incremental_query('T', '2', '3') ORDER BY a, b"),
-              Row(1, 5, "5") :: Row(1, 7, "7") :: Nil)
-
-            checkAnswer(
-              incrementalDF("T", 1, 3).orderBy("a", "b"),
-              Row(1, 3, "3") :: Row(1, 5, "5") :: Row(1, 7, "7") :: Row(2, 4, "4") :: Nil
-            )
-            checkAnswer(
-              spark.sql("SELECT * FROM paimon_incremental_query('T', '1', '3') ORDER BY a, b"),
-              Row(1, 3, "3") :: Row(1, 5, "5") :: Row(1, 7, "7") :: Row(2, 4, "4") :: Nil)
           }
       }
   }

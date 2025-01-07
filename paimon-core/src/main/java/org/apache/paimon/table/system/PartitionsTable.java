@@ -18,6 +18,8 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.casting.CastExecutor;
+import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -40,9 +42,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IteratorRecordReader;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ProjectedRow;
-import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
@@ -51,14 +51,12 @@ import java.io.IOException;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -180,28 +178,19 @@ public class PartitionsTable implements ReadonlyTable {
 
             List<PartitionEntry> partitions = fileStoreTable.newScan().listPartitionEntries();
 
-            RowDataToObjectArrayConverter converter =
-                    new RowDataToObjectArrayConverter(
-                            fileStoreTable.schema().logicalPartitionType());
+            @SuppressWarnings("unchecked")
+            CastExecutor<InternalRow, BinaryString> partitionCastExecutor =
+                    (CastExecutor<InternalRow, BinaryString>)
+                            CastExecutors.resolveToString(
+                                    fileStoreTable.schema().logicalPartitionType());
 
             // sorted by partition
-            List<Pair<String, PartitionEntry>> partitionList =
+            Iterator<InternalRow> iterator =
                     partitions.stream()
-                            .map(
-                                    entry ->
-                                            Pair.of(
-                                                    Arrays.toString(
-                                                            converter.convert(entry.partition())),
-                                                    entry))
-                            .sorted(Comparator.comparing(Pair::getLeft))
-                            .collect(Collectors.toList());
+                            .map(partitionEntry -> toRow(partitionEntry, partitionCastExecutor))
+                            .sorted(Comparator.comparing(row -> row.getString(0)))
+                            .iterator();
 
-            List<InternalRow> results = new ArrayList<>(partitions.size());
-            for (Pair<String, PartitionEntry> pair : partitionList) {
-                results.add(toRow(pair.getLeft(), pair.getRight()));
-            }
-
-            Iterator<InternalRow> iterator = results.iterator();
             if (readType != null) {
                 iterator =
                         Iterators.transform(
@@ -213,9 +202,11 @@ public class PartitionsTable implements ReadonlyTable {
             return new IteratorRecordReader<>(iterator);
         }
 
-        private GenericRow toRow(String partStr, PartitionEntry entry) {
+        private InternalRow toRow(
+                PartitionEntry entry,
+                CastExecutor<InternalRow, BinaryString> partitionCastExecutor) {
             return GenericRow.of(
-                    BinaryString.fromString(partStr),
+                    partitionCastExecutor.cast(entry.partition()),
                     entry.recordCount(),
                     entry.fileSizeInBytes(),
                     entry.fileCount(),

@@ -40,7 +40,7 @@ public class MongoDBSyncDatabaseActionFactory
 
     @Override
     public MongoDBSyncDatabaseAction createAction() {
-        return new MongoDBSyncDatabaseAction(warehouse, database, catalogConfig, cdcSourceConfig);
+        return new MongoDBSyncDatabaseAction(database, catalogConfig, cdcSourceConfig);
     }
 
     @Override

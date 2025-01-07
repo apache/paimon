@@ -77,7 +77,6 @@ public class CompactProcedure extends ProcedureBase {
             String partitionIdleTime,
             String compactStrategy)
             throws Exception {
-        String warehouse = catalog.warehouse();
         Map<String, String> catalogOptions = catalog.options();
         Map<String, String> tableConf =
                 isNullOrWhitespaceOnly(tableOptions)
@@ -89,7 +88,6 @@ public class CompactProcedure extends ProcedureBase {
         if (isNullOrWhitespaceOnly(orderStrategy) && isNullOrWhitespaceOnly(orderByColumns)) {
             action =
                     new CompactAction(
-                            warehouse,
                             identifier.getDatabaseName(),
                             identifier.getObjectName(),
                             catalogOptions,
@@ -109,7 +107,6 @@ public class CompactProcedure extends ProcedureBase {
                     "sort compact do not support 'partition_idle_time'.");
             action =
                     new SortCompactAction(
-                                    warehouse,
                                     identifier.getDatabaseName(),
                                     identifier.getObjectName(),
                                     catalogOptions,

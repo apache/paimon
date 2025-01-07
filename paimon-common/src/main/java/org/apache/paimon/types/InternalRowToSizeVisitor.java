@@ -212,6 +212,17 @@ public class InternalRowToSizeVisitor
     }
 
     @Override
+    public BiFunction<DataGetters, Integer, Integer> visit(VariantType variantType) {
+        return (row, index) -> {
+            if (row.isNullAt(index)) {
+                return NULL_SIZE;
+            } else {
+                return Math.toIntExact(row.getVariant(index).sizeInBytes());
+            }
+        };
+    }
+
+    @Override
     public BiFunction<DataGetters, Integer, Integer> visit(ArrayType arrayType) {
         return (row, index) -> {
             if (row.isNullAt(index)) {

@@ -39,6 +39,7 @@ import org.apache.paimon.utils.VersionedObjectSerializer;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -84,6 +85,15 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         return suggestedFileSize;
     }
 
+    public List<ExpireFileEntry> readExpireFileEntries(String fileName, @Nullable Long fileSize) {
+        List<ManifestEntry> entries = read(fileName, fileSize);
+        List<ExpireFileEntry> result = new ArrayList<>(entries.size());
+        for (ManifestEntry entry : entries) {
+            result.add(ExpireFileEntry.from(entry));
+        }
+        return result;
+    }
+
     /**
      * Write several {@link ManifestEntry}s into manifest files.
      *
@@ -123,7 +133,6 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     serializer::toRow,
                     fileCompression,
                     false);
-
             this.partitionStatsCollector = new SimpleStatsCollector(partitionType);
             this.partitionStatsSerializer = new SimpleStatsConverter(partitionType);
         }

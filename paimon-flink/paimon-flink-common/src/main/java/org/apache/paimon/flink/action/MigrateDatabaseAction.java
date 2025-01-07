@@ -33,12 +33,11 @@ public class MigrateDatabaseAction extends ActionBase {
 
     public MigrateDatabaseAction(
             String connector,
-            String warehouse,
             String hiveDatabaseName,
             Map<String, String> catalogConfig,
             String tableProperties,
             Integer parallelism) {
-        super(warehouse, catalogConfig);
+        super(catalogConfig);
         this.connector = connector;
         this.hiveDatabaseName = hiveDatabaseName;
         this.tableProperties = tableProperties;

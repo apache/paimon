@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.source.operator;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -52,27 +53,26 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /**
  * The operator that reads the Tuple2<{@link Split}, String> received from the preceding {@link
- * CombinedAwareBatchSourceFunction} or {@link CombinedAwareStreamingSourceFunction}. Contrary to
- * the {@link CombinedCompactorSourceFunction} which has a parallelism of 1, this operator can have
- * DOP > 1.
+ * CombinedAwareBatchSource} or {@link CombinedAwareStreamingSource}. Contrary to the {@link
+ * CombinedCompactorSource} which has a parallelism of 1, this operator can have DOP > 1.
  */
 public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
         implements OneInputStreamOperator<Tuple2<Split, String>, RowData> {
 
     private static final long serialVersionUID = 1L;
 
-    private final Catalog.Loader catalogLoader;
+    private final CatalogLoader catalogLoader;
     private final boolean isStreaming;
 
     private Duration partitionIdleTime = null;
 
-    public MultiTablesReadOperator(Catalog.Loader catalogLoader, boolean isStreaming) {
+    public MultiTablesReadOperator(CatalogLoader catalogLoader, boolean isStreaming) {
         this.catalogLoader = catalogLoader;
         this.isStreaming = isStreaming;
     }
 
     public MultiTablesReadOperator(
-            Catalog.Loader catalogLoader, boolean isStreaming, Duration partitionIdleTime) {
+            CatalogLoader catalogLoader, boolean isStreaming, Duration partitionIdleTime) {
         this.catalogLoader = catalogLoader;
         this.isStreaming = isStreaming;
         this.partitionIdleTime = partitionIdleTime;

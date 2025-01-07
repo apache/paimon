@@ -51,18 +51,11 @@ import java.util.Map;
 public class MongoDBSyncTableAction extends SyncTableActionBase {
 
     public MongoDBSyncTableAction(
-            String warehouse,
             String database,
             String table,
             Map<String, String> catalogConfig,
             Map<String, String> mongodbConfig) {
-        super(
-                warehouse,
-                database,
-                table,
-                catalogConfig,
-                mongodbConfig,
-                SyncJobHandler.SourceType.MONGODB);
+        super(database, table, catalogConfig, mongodbConfig, SyncJobHandler.SourceType.MONGODB);
     }
 
     @Override

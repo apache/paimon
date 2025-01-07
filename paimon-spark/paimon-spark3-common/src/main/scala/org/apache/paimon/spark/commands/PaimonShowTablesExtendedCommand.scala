@@ -99,7 +99,7 @@ case class PaimonShowTablesExtendedCommand(
         "Partition Columns",
         table.asPartitionable
           .partitionSchema()
-          .map(field => QuotingUtils.quoteIdentifier(field.name))
+          .map(field => quoteIdentifier(field.name))
           .mkString("[", ", ", "]"))
     }
 
@@ -120,4 +120,10 @@ case class PaimonShowTablesExtendedCommand(
     case _ => false
   }
 
+  // copy from spark for compatibility
+  private def quoteIdentifier(name: String): String = {
+    // Escapes back-ticks within the identifier name with double-back-ticks, and then quote the
+    // identifier with back-ticks.
+    "`" + name.replace("`", "``") + "`"
+  }
 }

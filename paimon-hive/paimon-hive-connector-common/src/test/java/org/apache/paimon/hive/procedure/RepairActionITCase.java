@@ -83,11 +83,9 @@ public class RepairActionITCase extends ActionITCaseBase {
         Map<String, String> catalogConf = new HashMap<>();
         catalogConf.put("metastore", "hive");
         catalogConf.put("uri", "thrift://localhost:" + PORT);
-        RepairAction repairAction =
-                new RepairAction(
-                        System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
-                        "test_db.t_repair_hive",
-                        catalogConf);
+        catalogConf.put(
+                "warehouse", System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname));
+        RepairAction repairAction = new RepairAction("test_db.t_repair_hive", catalogConf);
         repairAction.run();
 
         List<Row> ret =

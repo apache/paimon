@@ -40,11 +40,7 @@ public class PostgresSyncTableActionFactory extends SyncTableActionFactoryBase {
     @Override
     public PostgresSyncTableAction createAction() {
         return new PostgresSyncTableAction(
-                this.tablePath.f0,
-                this.tablePath.f1,
-                this.tablePath.f2,
-                this.catalogConfig,
-                this.cdcSourceConfig);
+                database, table, this.catalogConfig, this.cdcSourceConfig);
     }
 
     @Override

@@ -20,7 +20,9 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.flink.utils.RuntimeContextUtils;
+import org.apache.paimon.flink.source.AbstractNonCoordinatedSource;
+import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
+import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.reader.RecordReader;
@@ -30,9 +32,14 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.TimeUtils;
 
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.connector.source.Boundedness;
+import org.apache.flink.api.connector.source.ReaderOutput;
+import org.apache.flink.api.connector.source.SourceReader;
+import org.apache.flink.api.connector.source.SourceReaderContext;
+import org.apache.flink.core.io.InputStatus;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.source.RichParallelSourceFunction;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
@@ -380,7 +387,12 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
                         .checkpointIntervalMs(500)
                         .build();
         DataStream<Integer> source =
-                env.addSource(new TestStatelessWriterSource(table)).setParallelism(2).forward();
+                env.fromSource(
+                                new TestStatelessWriterSource(table),
+                                WatermarkStrategy.noWatermarks(),
+                                "TestStatelessWriterSource")
+                        .setParallelism(2)
+                        .forward();
 
         StreamTableEnvironment tEnv = StreamTableEnvironment.create(env);
         tEnv.registerCatalog("mycat", sEnv.getCatalog("PAIMON").get());
@@ -392,46 +404,59 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(Row.of(1, "test"), Row.of(2, "test"));
     }
 
-    private static class TestStatelessWriterSource extends RichParallelSourceFunction<Integer> {
+    private static class TestStatelessWriterSource extends AbstractNonCoordinatedSource<Integer> {
 
         private final FileStoreTable table;
-
-        private volatile boolean isRunning = true;
 
         private TestStatelessWriterSource(FileStoreTable table) {
             this.table = table;
         }
 
         @Override
-        public void run(SourceContext<Integer> sourceContext) throws Exception {
-            int taskId = RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext());
-            // wait some time in parallelism #2,
-            // so that it does not commit in the same checkpoint with parallelism #1
-            int waitCount = (taskId == 0 ? 0 : 10);
+        public Boundedness getBoundedness() {
+            return Boundedness.CONTINUOUS_UNBOUNDED;
+        }
 
-            while (isRunning) {
-                synchronized (sourceContext.getCheckpointLock()) {
-                    if (taskId == 0) {
+        @Override
+        public SourceReader<Integer, SimpleSourceSplit> createReader(
+                SourceReaderContext sourceReaderContext) throws Exception {
+            return new Reader(sourceReaderContext.getIndexOfSubtask());
+        }
+
+        private class Reader extends AbstractNonCoordinatedSourceReader<Integer> {
+            private final int taskId;
+            private int waitCount;
+
+            private Reader(int taskId) {
+                this.taskId = taskId;
+                this.waitCount = (taskId == 0 ? 0 : 10);
+            }
+
+            @Override
+            public InputStatus pollNext(ReaderOutput<Integer> readerOutput) throws Exception {
+                if (taskId == 0) {
+                    if (waitCount == 0) {
+                        readerOutput.collect(1);
+                    } else if (countNumRecords() >= 1) {
+                        // wait for the record to commit before exiting
+                        Thread.sleep(1000);
+                        return InputStatus.END_OF_INPUT;
+                    }
+                } else {
+                    int numRecords = countNumRecords();
+                    if (numRecords >= 1) {
                         if (waitCount == 0) {
-                            sourceContext.collect(1);
-                        } else if (countNumRecords() >= 1) {
-                            // wait for the record to commit before exiting
-                            break;
-                        }
-                    } else {
-                        int numRecords = countNumRecords();
-                        if (numRecords >= 1) {
-                            if (waitCount == 0) {
-                                sourceContext.collect(2);
-                            } else if (countNumRecords() >= 2) {
-                                // make sure the next checkpoint is successful
-                                break;
-                            }
+                            readerOutput.collect(2);
+                        } else if (countNumRecords() >= 2) {
+                            // make sure the next checkpoint is successful
+                            Thread.sleep(1000);
+                            return InputStatus.END_OF_INPUT;
                         }
                     }
-                    waitCount--;
                 }
+                waitCount--;
                 Thread.sleep(1000);
+                return InputStatus.MORE_AVAILABLE;
             }
         }
 
@@ -446,11 +471,6 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
                 }
             }
             return ret;
-        }
-
-        @Override
-        public void cancel() {
-            isRunning = false;
         }
     }
 

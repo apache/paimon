@@ -35,6 +35,7 @@ import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
@@ -53,6 +54,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.apache.paimon.CoreOptions.SCAN_FALLBACK_BRANCH;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** IT cases base for {@link RemoveOrphanFilesAction}. */
 public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase {
@@ -86,8 +88,8 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
 
         FileIO fileIO = table.fileIO();
         fileIO.writeFile(orphanFile1, "a", true);
-        Thread.sleep(2000);
         fileIO.writeFile(orphanFile2, "b", true);
+        Thread.sleep(2000);
 
         return table;
     }
@@ -99,6 +101,8 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testRunWithoutException(boolean isNamedArgument) throws Exception {
+        assumeTrue(!isNamedArgument || supportNamedArgument());
+
         createTableAndWriteData(tableName);
 
         List<String> args =
@@ -129,23 +133,28 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         CloseableIterator<Row> withoutOlderThanCollect = executeSQL(withoutOlderThan);
         assertThat(ImmutableList.copyOf(withoutOlderThanCollect)).containsOnly(Row.of("0"));
 
+        String olderThan =
+                DateTimeUtils.formatLocalDateTime(
+                        DateTimeUtils.toLocalDateTime(System.currentTimeMillis()), 3);
         String withDryRun =
                 String.format(
                         isNamedArgument
-                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59', dry_run => true)"
-                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true)",
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '%s', dry_run => true)"
+                                : "CALL sys.remove_orphan_files('%s.%s', '%s', true)",
                         database,
-                        tableName);
+                        tableName,
+                        olderThan);
         ImmutableList<Row> actualDryRunDeleteFile = ImmutableList.copyOf(executeSQL(withDryRun));
         assertThat(actualDryRunDeleteFile).containsOnly(Row.of("2"));
 
         String withOlderThan =
                 String.format(
                         isNamedArgument
-                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59')"
-                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59')",
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '%s')"
+                                : "CALL sys.remove_orphan_files('%s.%s', '%s')",
                         database,
-                        tableName);
+                        tableName,
+                        olderThan);
         ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(executeSQL(withOlderThan));
 
         assertThat(actualDeleteFile).containsExactlyInAnyOrder(Row.of("2"), Row.of("2"));
@@ -154,6 +163,8 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testRemoveDatabaseOrphanFilesITCase(boolean isNamedArgument) throws Exception {
+        assumeTrue(!isNamedArgument || supportNamedArgument());
+
         createTableAndWriteData("tableName1");
         createTableAndWriteData("tableName2");
 
@@ -195,23 +206,28 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         CloseableIterator<Row> withParallelismCollect = executeSQL(withParallelism);
         assertThat(ImmutableList.copyOf(withParallelismCollect)).containsOnly(Row.of("0"));
 
+        String olderThan =
+                DateTimeUtils.formatLocalDateTime(
+                        DateTimeUtils.toLocalDateTime(System.currentTimeMillis()), 3);
         String withDryRun =
                 String.format(
                         isNamedArgument
-                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59', dry_run => true)"
-                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true)",
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '%s', dry_run => true)"
+                                : "CALL sys.remove_orphan_files('%s.%s', '%s', true)",
                         database,
-                        "*");
+                        "*",
+                        olderThan);
         ImmutableList<Row> actualDryRunDeleteFile = ImmutableList.copyOf(executeSQL(withDryRun));
         assertThat(actualDryRunDeleteFile).containsOnly(Row.of("4"));
 
         String withOlderThan =
                 String.format(
                         isNamedArgument
-                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59')"
-                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59')",
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '%s')"
+                                : "CALL sys.remove_orphan_files('%s.%s', '%s')",
                         database,
-                        "*");
+                        "*",
+                        olderThan);
         ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(executeSQL(withOlderThan));
 
         assertThat(actualDeleteFile).containsOnly(Row.of("4"));
@@ -220,6 +236,8 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testCleanWithBranch(boolean isNamedArgument) throws Exception {
+        assumeTrue(!isNamedArgument || supportNamedArgument());
+
         // create main branch
         FileStoreTable table = createTableAndWriteData(tableName);
 
@@ -252,6 +270,7 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         // create orphan file in snapshot directory of second branch
         Path orphanFile4 = new Path(table.location(), "branch/branch-br2/snapshot/orphan_file4");
         branchTable.fileIO().writeFile(orphanFile4, "y", true);
+        Thread.sleep(2000);
 
         if (ThreadLocalRandom.current().nextBoolean()) {
             executeSQL(
@@ -261,13 +280,18 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
                     false,
                     true);
         }
+
+        String olderThan =
+                DateTimeUtils.formatLocalDateTime(
+                        DateTimeUtils.toLocalDateTime(System.currentTimeMillis()), 3);
         String procedure =
                 String.format(
                         isNamedArgument
-                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59')"
-                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59')",
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '%s')"
+                                : "CALL sys.remove_orphan_files('%s.%s', '%s')",
                         database,
-                        "*");
+                        "*",
+                        olderThan);
         ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(executeSQL(procedure));
         assertThat(actualDeleteFile).containsOnly(Row.of("4"));
     }
@@ -275,6 +299,8 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testRunWithMode(boolean isNamedArgument) throws Exception {
+        assumeTrue(!isNamedArgument || supportNamedArgument());
+
         createTableAndWriteData(tableName);
 
         List<String> args =
@@ -305,13 +331,17 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         CloseableIterator<Row> withoutOlderThanCollect = executeSQL(withoutOlderThan);
         assertThat(ImmutableList.copyOf(withoutOlderThanCollect)).containsOnly(Row.of("0"));
 
+        String olderThan =
+                DateTimeUtils.formatLocalDateTime(
+                        DateTimeUtils.toLocalDateTime(System.currentTimeMillis()), 3);
         String withLocalMode =
                 String.format(
                         isNamedArgument
-                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59', dry_run => true, parallelism => 5, mode => 'local')"
-                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true, 5, 'local')",
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '%s', dry_run => true, parallelism => 5, mode => 'local')"
+                                : "CALL sys.remove_orphan_files('%s.%s', '%s', true, 5, 'local')",
                         database,
-                        tableName);
+                        tableName,
+                        olderThan);
         ImmutableList<Row> actualLocalRunDeleteFile =
                 ImmutableList.copyOf(executeSQL(withLocalMode));
         assertThat(actualLocalRunDeleteFile).containsOnly(Row.of("2"));
@@ -319,10 +349,11 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         String withDistributedMode =
                 String.format(
                         isNamedArgument
-                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59', dry_run => true, parallelism => 5, mode => 'distributed')"
-                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true, 5, 'distributed')",
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '%s', dry_run => true, parallelism => 5, mode => 'distributed')"
+                                : "CALL sys.remove_orphan_files('%s.%s', '%s', true, 5, 'distributed')",
                         database,
-                        tableName);
+                        tableName,
+                        olderThan);
         ImmutableList<Row> actualDistributedRunDeleteFile =
                 ImmutableList.copyOf(executeSQL(withDistributedMode));
         assertThat(actualDistributedRunDeleteFile).containsOnly(Row.of("2"));
@@ -330,12 +361,17 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         String withInvalidMode =
                 String.format(
                         isNamedArgument
-                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59', dry_run => true, parallelism => 5, mode => 'unknown')"
-                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true, 5, 'unknown')",
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '%s', dry_run => true, parallelism => 5, mode => 'unknown')"
+                                : "CALL sys.remove_orphan_files('%s.%s', '%s', true, 5, 'unknown')",
                         database,
-                        tableName);
+                        tableName,
+                        olderThan);
         assertThatCode(() -> executeSQL(withInvalidMode))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Unknown mode");
+    }
+
+    protected boolean supportNamedArgument() {
+        return true;
     }
 }

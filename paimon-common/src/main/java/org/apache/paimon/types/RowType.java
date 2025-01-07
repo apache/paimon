@@ -210,13 +210,26 @@ public final class RowType extends DataType {
             return false;
         }
         RowType rowType = (RowType) o;
-        // For nested RowTypes e.g. DataField.dataType = RowType we need to ignoreIds as they can be
-        // different
-        if (fields.size() != rowType.fields.size()) {
+        return fields.equals(rowType.fields);
+    }
+
+    @Override
+    public boolean equalsIgnoreFieldId(DataType o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        for (int i = 0; i < fields.size(); ++i) {
-            if (!DataField.dataFieldEqualsIgnoreId(fields.get(i), rowType.fields.get(i))) {
+        if (!super.equals(o)) {
+            return false;
+        }
+        RowType other = (RowType) o;
+        if (fields.size() != other.fields.size()) {
+            return false;
+        }
+        for (int i = 0; i < fields.size(); i++) {
+            if (!fields.get(i).equalsIgnoreFieldId(other.fields.get(i))) {
                 return false;
             }
         }
@@ -236,7 +249,7 @@ public final class RowType extends DataType {
         }
         RowType rowType = (RowType) o;
         for (DataField field : fields) {
-            if (!field.isPrunedFrom(rowType.getField(field.name()))) {
+            if (!field.isPrunedFrom(rowType.getField(field.id()))) {
                 return false;
             }
         }

@@ -144,15 +144,11 @@ public class MergeIntoProcedure extends ProcedureBase {
         notMatchedBySourceUpsertSetting = notnull(notMatchedBySourceUpsertSetting);
         notMatchedBySourceDeleteCondition = notnull(notMatchedBySourceDeleteCondition);
 
-        String warehouse = catalog.warehouse();
         Map<String, String> catalogOptions = catalog.options();
         Identifier identifier = Identifier.fromString(targetTableId);
         MergeIntoAction action =
                 new MergeIntoAction(
-                        warehouse,
-                        identifier.getDatabaseName(),
-                        identifier.getObjectName(),
-                        catalogOptions);
+                        identifier.getDatabaseName(), identifier.getObjectName(), catalogOptions);
         action.withTargetAlias(nullable(targetAlias));
 
         if (!sourceSqls.isEmpty()) {

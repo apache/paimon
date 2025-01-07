@@ -55,6 +55,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.StringUtils.toLowerCaseIfNeed;
+
 /** Utilities for creating Arrow objects. */
 public class ArrowUtils {
 
@@ -66,13 +68,13 @@ public class ArrowUtils {
     }
 
     public static VectorSchemaRoot createVectorSchemaRoot(
-            RowType rowType, BufferAllocator allocator, boolean allowUpperCase) {
+            RowType rowType, BufferAllocator allocator, boolean caseSensitive) {
         List<Field> fields =
                 rowType.getFields().stream()
                         .map(
                                 f ->
                                         toArrowField(
-                                                allowUpperCase ? f.name() : f.name().toLowerCase(),
+                                                toLowerCaseIfNeed(f.name(), caseSensitive),
                                                 f.id(),
                                                 f.type(),
                                                 0))
@@ -81,9 +83,9 @@ public class ArrowUtils {
     }
 
     public static FieldVector createVector(
-            DataField dataField, BufferAllocator allocator, boolean allowUpperCase) {
+            DataField dataField, BufferAllocator allocator, boolean caseSensitive) {
         return toArrowField(
-                        allowUpperCase ? dataField.name() : dataField.name().toLowerCase(),
+                        toLowerCaseIfNeed(dataField.name(), caseSensitive),
                         dataField.id(),
                         dataField.type(),
                         0)

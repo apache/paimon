@@ -577,8 +577,7 @@ public abstract class HiveCatalogITCaseBase {
                                 "  'uri' = '',",
                                 "  'warehouse' = '" + path + "',",
                                 "  'lock.enabled' = 'true',",
-                                "  'table.type' = 'EXTERNAL',",
-                                "  'allow-upper-case' = 'true'",
+                                "  'table.type' = 'EXTERNAL'",
                                 ")"))
                 .await();
         tEnv.executeSql("USE CATALOG paimon_catalog_01").await();
@@ -593,30 +592,6 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("DROP TABLE t").await();
         Path tablePath = new Path(path, "test_db.db/t");
         assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
-
-        tEnv.executeSql(
-                        String.join(
-                                "\n",
-                                "CREATE CATALOG paimon_catalog_02 WITH (",
-                                "  'type' = 'paimon',",
-                                "  'metastore' = 'hive',",
-                                "  'uri' = '',",
-                                "  'warehouse' = '" + path + "',",
-                                "  'lock.enabled' = 'true',",
-                                "  'table.type' = 'EXTERNAL',",
-                                "  'allow-upper-case' = 'false'",
-                                ")"))
-                .await();
-        tEnv.executeSql("USE CATALOG paimon_catalog_02").await();
-        tEnv.executeSql("USE test_db").await();
-
-        // set case-sensitive = false would throw exception out
-        assertThatThrownBy(
-                        () ->
-                                tEnv.executeSql(
-                                                "CREATE TABLE t1 ( aa INT, Bb STRING ) WITH ( 'file.format' = 'avro' )")
-                                        .await())
-                .isInstanceOf(RuntimeException.class);
     }
 
     @Test
@@ -1006,7 +981,8 @@ public abstract class HiveCatalogITCaseBase {
 
         // the target table name has upper case.
         assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE t1 RENAME TO T1"))
-                .hasMessage("Table name [T1] cannot contain upper case in the catalog.");
+                .hasMessage(
+                        "Could not execute ALTER TABLE my_hive.test_db.t1 RENAME TO my_hive.test_db.T1");
 
         tEnv.executeSql("ALTER TABLE t1 RENAME TO t3").await();
 
@@ -1160,24 +1136,16 @@ public abstract class HiveCatalogITCaseBase {
 
     @Test
     public void testUpperCase() {
+        tEnv.executeSql("CREATE TABLE T (a INT, b STRING ) WITH ( 'file.format' = 'avro' )");
+        tEnv.executeSql(
+                "CREATE TABLE tT (A INT, b STRING, C STRING) WITH ( 'file.format' = 'avro')");
         assertThatThrownBy(
                         () ->
                                 tEnv.executeSql(
-                                                "CREATE TABLE T ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
+                                                "CREATE TABLE tt ( A INT, b STRING, C STRING) WITH ( 'file.format' = 'avro' )")
                                         .await())
                 .hasRootCauseMessage(
-                        String.format(
-                                "Table name [%s] cannot contain upper case in the catalog.", "T"));
-
-        assertThatThrownBy(
-                        () ->
-                                tEnv.executeSql(
-                                                "CREATE TABLE t (A INT, b STRING, C STRING) WITH ( 'file.format' = 'avro')")
-                                        .await())
-                .hasRootCauseMessage(
-                        String.format(
-                                "Field name %s cannot contain upper case in the catalog.",
-                                "[A, C]"));
+                        "Table (or view) test_db.tt already exists in Catalog my_hive.");
     }
 
     @Test

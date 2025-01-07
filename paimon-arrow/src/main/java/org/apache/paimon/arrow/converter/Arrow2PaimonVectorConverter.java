@@ -63,6 +63,7 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.BitVector;
@@ -421,6 +422,11 @@ public interface Arrow2PaimonVectorConverter {
                             }
                         }
                     };
+        }
+
+        @Override
+        public Arrow2PaimonVectorConverter visit(VariantType variantType) {
+            throw new UnsupportedOperationException();
         }
 
         @Override

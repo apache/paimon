@@ -18,6 +18,7 @@
 
 package org.apache.spark.sql.paimon.shims
 
+import org.apache.paimon.data.variant.{GenericVariant, Variant}
 import org.apache.paimon.spark.catalyst.analysis.Spark4ResolutionRules
 import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark4SqlExtensionsParser
 import org.apache.paimon.spark.data.{Spark4ArrayData, Spark4InternalRow, SparkArrayData, SparkInternalRow}
@@ -31,7 +32,8 @@ import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.internal.ExpressionUtils
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.types.{DataTypes, StructType, VariantType}
+import org.apache.spark.unsafe.types.VariantVal
 
 import java.util.{Map => JMap}
 
@@ -73,4 +75,14 @@ class Spark4Shim extends SparkShim {
 
   def convertToExpression(spark: SparkSession, column: Column): Expression =
     spark.expression(column)
+
+  override def toPaimonVariant(o: Object): Variant = {
+    val v = o.asInstanceOf[VariantVal]
+    new GenericVariant(v.getValue, v.getMetadata)
+  }
+
+  override def isSparkVariantType(dataType: org.apache.spark.sql.types.DataType): Boolean =
+    dataType.isInstanceOf[VariantType]
+
+  override def SparkVariantType(): org.apache.spark.sql.types.DataType = DataTypes.VariantType
 }
