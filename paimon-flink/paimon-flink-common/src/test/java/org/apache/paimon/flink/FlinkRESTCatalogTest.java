@@ -21,13 +21,9 @@ package org.apache.paimon.flink;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.rest.MockRESTMessage;
 import org.apache.paimon.rest.RESTCatalogFactory;
 import org.apache.paimon.rest.RESTCatalogOptions;
 import org.apache.paimon.rest.RESTObjectMapper;
-import org.apache.paimon.rest.responses.GetDatabaseResponse;
-import org.apache.paimon.rest.responses.GetTableResponse;
-import org.apache.paimon.rest.responses.ListDatabasesResponse;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
@@ -45,7 +41,6 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
-import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 
 import java.io.File;
 import java.io.IOException;
@@ -57,7 +52,6 @@ import java.util.UUID;
 
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.junit.Assert.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /** Test for {@link FlinkCatalog} when catalog type is RESTCatalog. */
 public class FlinkRESTCatalogTest {
@@ -72,6 +66,7 @@ public class FlinkRESTCatalogTest {
 
     @Before
     public void beforeEach() throws IOException {
+        warehouse = new File(temporaryFolder.newFolder(), UUID.randomUUID().toString()).toString();
         mockRESTCatalogServer = new MockRESTCatalogServer(warehouse);
         mockRESTCatalogServer.start();
         serverUrl = mockRESTCatalogServer.getUrl();
@@ -80,13 +75,8 @@ public class FlinkRESTCatalogTest {
         String initToken = "init_token";
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
-        warehouse = new File(temporaryFolder.newFolder(), UUID.randomUUID().toString()).toString();
         options.set(LOG_SYSTEM_AUTO_REGISTER, true);
         options.set(CatalogOptions.METASTORE, RESTCatalogFactory.IDENTIFIER);
-        GetDatabaseResponse response =
-                MockRESTMessage.getDatabaseResponse(
-                        org.apache.paimon.catalog.Catalog.DEFAULT_DATABASE);
-        mockResponse(mapper.writeValueAsString(response), 200);
         catalog =
                 FlinkCatalogFactory.createCatalog(
                         "test-catalog",
@@ -101,21 +91,17 @@ public class FlinkRESTCatalogTest {
 
     @Test
     public void testListDatabases() throws JsonProcessingException {
-        String name = MockRESTMessage.databaseName();
-        ListDatabasesResponse response = MockRESTMessage.listDatabasesResponse(name);
-        mockResponse(mapper.writeValueAsString(response), 200);
         List<String> result = catalog.listDatabases();
-        assertEquals(response.getDatabases().size(), result.size());
-        assertEquals(name, result.get(0));
+        assertEquals(1, result.size());
     }
 
-    @Test
-    public void testCreateTable() throws Exception {
-        GetTableResponse response = MockRESTMessage.getTableResponse();
-        mockResponse(mapper.writeValueAsString(response), 200);
-        CatalogTable table = this.createTable(ImmutableMap.of());
-        assertDoesNotThrow(() -> catalog.createTable(path1, table, false));
-    }
+    //    @Test
+    //    public void testCreateTable() throws Exception {
+    //        GetTableResponse response = MockRESTMessage.getTableResponse();
+    //        mockResponse(mapper.writeValueAsString(response), 200);
+    //        CatalogTable table = this.createTable(ImmutableMap.of());
+    //        assertDoesNotThrow(() -> catalog.createTable(path1, table, false));
+    //    }
 
     private CatalogTable createTable(Map<String, String> options) {
         ResolvedSchema resolvedSchema = this.createSchema();

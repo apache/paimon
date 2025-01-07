@@ -23,7 +23,13 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.MockRESTMessage;
 import org.apache.paimon.rest.RESTCatalogInternalOptions;
+import org.apache.paimon.rest.RESTObjectMapper;
+import org.apache.paimon.rest.RESTResponse;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
@@ -36,6 +42,8 @@ import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGIST
 
 /** Mock REST server for testing. */
 public class MockRESTCatalogServer {
+
+    private static final ObjectMapper mapper = RESTObjectMapper.create();
 
     private final Catalog catalog;
     private final Dispatcher dispatcher;
@@ -71,19 +79,36 @@ public class MockRESTCatalogServer {
             @Override
             public MockResponse dispatch(RecordedRequest request) throws InterruptedException {
 
+                RESTResponse response;
+                System.out.println("Request: " + request.getPath());
                 switch (request.getPath()) {
                     case "/v1/config":
                         return new MockResponse()
                                 .setResponseCode(200)
                                 .setBody(getConfigBody("/tmp/1"));
-                    case "/v1/prefix/databases/":
-                        return new MockResponse().setResponseCode(200).setBody("version=9");
+                    case "/v1/prefix/databases":
+                        response = MockRESTMessage.listDatabasesResponse("default");
+                        return mockResponse(response, 200);
+                    case "/v1/prefix/databases/default":
+                        response = MockRESTMessage.getDatabaseResponse("default");
+                        return mockResponse(response, 200);
                     case "/v1/profile/info":
                         return new MockResponse().setResponseCode(200).setBody("profile");
                 }
                 return new MockResponse().setResponseCode(404);
             }
         };
+    }
+
+    private static MockResponse mockResponse(RESTResponse response, int httpCode) {
+        try {
+            return new MockResponse()
+                    .setResponseCode(httpCode)
+                    .setBody(mapper.writeValueAsString(response))
+                    .addHeader("Content-Type", "application/json");
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private static String getConfigBody(String warehouseStr) {

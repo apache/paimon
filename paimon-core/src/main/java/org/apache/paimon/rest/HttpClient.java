@@ -56,7 +56,11 @@ public class HttpClient implements RESTClient {
     private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
 
     public HttpClient(HttpClientOptions httpClientOptions) {
-        this.uri = httpClientOptions.uri();
+        if (httpClientOptions.uri() != null && httpClientOptions.uri().endsWith("/")) {
+            this.uri = httpClientOptions.uri().substring(0, httpClientOptions.uri().length() - 1);
+        } else {
+            this.uri = httpClientOptions.uri();
+        }
         this.mapper = httpClientOptions.mapper();
         this.okHttpClient = createHttpClient(httpClientOptions);
         this.errorHandler = httpClientOptions.errorHandler();

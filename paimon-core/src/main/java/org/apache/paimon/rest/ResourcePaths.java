@@ -23,8 +23,9 @@ import java.util.StringJoiner;
 /** Resource paths for REST catalog. */
 public class ResourcePaths {
 
-    public static final String V1_CONFIG = "/v1/config";
-    private static final StringJoiner SLASH = new StringJoiner("/");
+    public static final String V1 = "/v1";
+    public static final String SLASH = "/";
+    public static final String V1_CONFIG = String.format("%s/config", V1);
 
     public static ResourcePaths forCatalogProperties(String prefix) {
         return new ResourcePaths(prefix);
@@ -37,15 +38,21 @@ public class ResourcePaths {
     }
 
     public String databases() {
-        return SLASH.add("v1").add(prefix).add("databases").toString();
+        return new StringJoiner(SLASH).add(V1).add(prefix).add("databases").toString();
     }
 
     public String database(String databaseName) {
-        return SLASH.add("v1").add(prefix).add("databases").add(databaseName).toString();
+        return new StringJoiner(SLASH)
+                .add(V1)
+                .add(prefix)
+                .add("databases")
+                .add(databaseName)
+                .toString();
     }
 
     public String databaseProperties(String databaseName) {
-        return SLASH.add("v1")
+        return new StringJoiner(SLASH)
+                .add(V1)
                 .add(prefix)
                 .add("databases")
                 .add(databaseName)
@@ -54,7 +61,8 @@ public class ResourcePaths {
     }
 
     public String tables(String databaseName) {
-        return SLASH.add("v1")
+        return new StringJoiner(SLASH)
+                .add(V1)
                 .add(prefix)
                 .add("databases")
                 .add(databaseName)
@@ -63,7 +71,8 @@ public class ResourcePaths {
     }
 
     public String table(String databaseName, String tableName) {
-        return SLASH.add("v1")
+        return new StringJoiner(SLASH)
+                .add(V1)
                 .add(prefix)
                 .add("databases")
                 .add(databaseName)
@@ -73,7 +82,8 @@ public class ResourcePaths {
     }
 
     public String renameTable(String databaseName, String tableName) {
-        return SLASH.add("v1")
+        return new StringJoiner(SLASH)
+                .add(V1)
                 .add(prefix)
                 .add("databases")
                 .add(databaseName)
@@ -84,7 +94,8 @@ public class ResourcePaths {
     }
 
     public String partitions(String databaseName, String tableName) {
-        return SLASH.add("v1")
+        return new StringJoiner(SLASH)
+                .add(V1)
                 .add(prefix)
                 .add("databases")
                 .add(databaseName)
