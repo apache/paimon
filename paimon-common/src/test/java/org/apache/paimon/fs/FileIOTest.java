@@ -36,6 +36,8 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardCopyOption;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
@@ -158,6 +160,10 @@ public class FileIOTest {
             // omitted
             FileStatus[] statuses = fileIO.listFiles(new Path(tempDir.toUri()), true);
             assertThat(statuses.length).isEqualTo(2);
+            statuses =
+                    Arrays.stream(statuses)
+                            .sorted(Comparator.comparing(FileStatus::getPath))
+                            .toArray(FileStatus[]::new);
             assertThat(statuses[0].getPath()).isEqualTo(fileA);
             assertThat(statuses[1].getPath()).isEqualTo(fileBC);
         }
