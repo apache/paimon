@@ -23,8 +23,7 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalogFactory;
 import org.apache.paimon.rest.RESTCatalogOptions;
-
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 
 import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.table.catalog.CatalogDatabase;
@@ -60,12 +59,12 @@ public class FlinkRESTCatalogTest {
     @Before
     public void beforeEach() throws IOException {
         warehouse = new File(temporaryFolder.newFolder(), UUID.randomUUID().toString()).toString();
-        mockRESTCatalogServer = new MockRESTCatalogServer(warehouse);
+        String initToken = "init_token";
+        mockRESTCatalogServer = new MockRESTCatalogServer(warehouse, initToken);
         mockRESTCatalogServer.start();
         serverUrl = mockRESTCatalogServer.getUrl();
         Options options = new Options();
         options.set(RESTCatalogOptions.URI, serverUrl);
-        String initToken = "init_token";
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
         options.set(LOG_SYSTEM_AUTO_REGISTER, true);
@@ -83,7 +82,24 @@ public class FlinkRESTCatalogTest {
     }
 
     @Test
-    public void testListDatabases() throws JsonProcessingException {
+    public void testAuthFail() {
+        Options options = new Options();
+        options.set(RESTCatalogOptions.URI, serverUrl);
+        options.set(RESTCatalogOptions.TOKEN, "aaaaa");
+        options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
+        options.set(LOG_SYSTEM_AUTO_REGISTER, true);
+        options.set(CatalogOptions.METASTORE, RESTCatalogFactory.IDENTIFIER);
+        assertThatThrownBy(
+                        () ->
+                                FlinkCatalogFactory.createCatalog(
+                                        "test-catalog",
+                                        CatalogContext.create(options),
+                                        FlinkCatalogTest.class.getClassLoader()))
+                .isInstanceOf(NotAuthorizedException.class);
+    }
+
+    @Test
+    public void testListDatabases() {
         List<String> result = catalog.listDatabases();
         assertEquals(1, result.size());
     }

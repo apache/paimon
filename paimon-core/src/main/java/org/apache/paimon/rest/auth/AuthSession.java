@@ -41,8 +41,8 @@ public class AuthSession {
     private volatile Map<String, String> headers;
 
     public AuthSession(Map<String, String> headers, CredentialsProvider credentialsProvider) {
-        this.headers = headers;
         this.credentialsProvider = credentialsProvider;
+        this.headers = RESTUtil.merge(headers, this.credentialsProvider.authHeader());
     }
 
     public static AuthSession fromRefreshCredentialsProvider(

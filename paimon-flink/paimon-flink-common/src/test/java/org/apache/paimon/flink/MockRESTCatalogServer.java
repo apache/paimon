@@ -53,15 +53,17 @@ public class MockRESTCatalogServer {
     private final Catalog catalog;
     private final Dispatcher dispatcher;
     private final MockWebServer server;
+    private final String authToken;
 
-    public MockRESTCatalogServer(String warehouse) {
+    public MockRESTCatalogServer(String warehouse, String initToken) {
+        authToken = initToken;
         Options conf = new Options();
         conf.setString("warehouse", warehouse);
         conf.set(LOG_SYSTEM_AUTO_REGISTER, true);
         this.catalog =
                 CatalogFactory.createCatalog(
                         CatalogContext.create(conf), this.getClass().getClassLoader());
-        this.dispatcher = initDispatcher(catalog);
+        this.dispatcher = initDispatcher(catalog, authToken);
         try {
             catalog.createDatabase("default", true);
         } catch (Exception e) {
@@ -84,14 +86,18 @@ public class MockRESTCatalogServer {
         server.shutdown();
     }
 
-    public static Dispatcher initDispatcher(Catalog catalog) {
+    public static Dispatcher initDispatcher(Catalog catalog, String authToken) {
         return new Dispatcher() {
             @Override
             public MockResponse dispatch(RecordedRequest request) throws InterruptedException {
 
-                RESTResponse response;
                 System.out.println(request.getPath() + "  method " + request.getMethod());
+                String token = request.getHeaders().get("Authorization");
+                RESTResponse response;
                 try {
+                    if (!("Bearer " + authToken).equals(token)) {
+                        return new MockResponse().setResponseCode(401);
+                    }
                     if ("/v1/config".equals(request.getPath())) {
                         return new MockResponse()
                                 .setResponseCode(200)
