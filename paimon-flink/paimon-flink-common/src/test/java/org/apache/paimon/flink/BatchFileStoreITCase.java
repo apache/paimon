@@ -302,12 +302,14 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     @Test
     public void testIncrementBetweenReadWithSnapshotExpiration() throws Exception {
         String tableName = "T";
-        batchSql(String.format("INSERT INTO %s VALUES (1, 11, 111), (2, 22, 222)", tableName));
+        batchSql(String.format("INSERT INTO %s VALUES (1, 11, 111)", tableName));
 
         paimonTable(tableName).createTag("tag1", 1);
 
-        batchSql(String.format("INSERT INTO %s VALUES (3, 33, 333)", tableName));
+        batchSql(String.format("INSERT INTO %s VALUES (2, 22, 222)", tableName));
         paimonTable(tableName).createTag("tag2", 2);
+        batchSql(String.format("INSERT INTO %s VALUES (3, 33, 333)", tableName));
+        paimonTable(tableName).createTag("tag3", 3);
 
         // expire snapshot 1
         Map<String, String> expireOptions = new HashMap<>();
@@ -322,7 +324,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                                 String.format(
                                         "SELECT * FROM %s /*+ OPTIONS('incremental-between' = 'tag1,tag2', 'deletion-vectors.enabled' = 'true') */",
                                         tableName)))
-                .containsExactlyInAnyOrder(Row.of(3, 33, 333));
+                .containsExactlyInAnyOrder(Row.of(2, 22, 222));
     }
 
     @Test
