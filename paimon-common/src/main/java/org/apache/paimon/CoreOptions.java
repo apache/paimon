@@ -1267,6 +1267,12 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to create tag automatically. And how to generate tags.");
 
+    public static final ConfigOption<Boolean> TAG_CREATE_SUCCESS_FILE =
+            key("tag.create-success-file")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to create tag success file for new created tags.");
+
     public static final ConfigOption<TagCreationPeriod> TAG_CREATION_PERIOD =
             key("tag.creation-period")
                     .enumType(TagCreationPeriod.class)
@@ -2283,6 +2289,10 @@ public class CoreOptions implements Serializable {
     @Nullable
     public String tagToPartitionField() {
         return options.get(METASTORE_TAG_TO_PARTITION);
+    }
+
+    public boolean tagCreateSuccessFile() {
+        return options.get(TAG_CREATE_SUCCESS_FILE);
     }
 
     public TagCreationMode tagToPartitionPreview() {

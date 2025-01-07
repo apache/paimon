@@ -48,6 +48,7 @@ import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.TagCallback;
+import org.apache.paimon.tag.SuccessFileTagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -377,6 +378,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         if (partitionField != null && metastoreClientFactory != null) {
             callbacks.add(
                     new AddPartitionTagCallback(metastoreClientFactory.create(), partitionField));
+        }
+        if (options.tagCreateSuccessFile()) {
+            callbacks.add(new SuccessFileTagCallback(fileIO, newTagManager().tagDirectory()));
         }
         return callbacks;
     }
