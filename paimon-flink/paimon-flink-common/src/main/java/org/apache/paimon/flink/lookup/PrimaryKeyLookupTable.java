@@ -69,7 +69,7 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
 
     @Override
     public void open() throws Exception {
-        super.open();
+        init();
         createTableState();
         bootstrap();
     }

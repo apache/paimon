@@ -142,8 +142,12 @@ public abstract class FullCacheLookupTable implements LookupTable {
         this.cacheRowFilter = filter;
     }
 
-    @Override
-    public void open() throws Exception {
+    protected void init() throws Exception {
+        this.stateFactory =
+                new RocksDBStateFactory(
+                        context.tempPath.toString(),
+                        context.table.coreOptions().toConfiguration(),
+                        null);
         this.refreshExecutor =
                 this.refreshAsync
                         ? Executors.newSingleThreadExecutor(
@@ -152,15 +156,6 @@ public abstract class FullCacheLookupTable implements LookupTable {
                                                 "%s-lookup-refresh",
                                                 Thread.currentThread().getName())))
                         : null;
-        openStateFactory();
-    }
-
-    protected void openStateFactory() throws Exception {
-        this.stateFactory =
-                new RocksDBStateFactory(
-                        context.tempPath.toString(),
-                        context.table.coreOptions().toConfiguration(),
-                        null);
     }
 
     protected void bootstrap() throws Exception {
