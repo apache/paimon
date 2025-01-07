@@ -1089,7 +1089,7 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Read incremental changes between start snapshot (exclusive) and end snapshot, "
+                            "Read incremental changes between start snapshot (exclusive) and end snapshot (inclusive), "
                                     + "for example, '5,10' means changes between snapshot 5 and snapshot 10.");
 
     public static final ConfigOption<IncrementalBetweenScanMode> INCREMENTAL_BETWEEN_SCAN_MODE =
@@ -1097,14 +1097,14 @@ public class CoreOptions implements Serializable {
                     .enumType(IncrementalBetweenScanMode.class)
                     .defaultValue(IncrementalBetweenScanMode.AUTO)
                     .withDescription(
-                            "Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot. ");
+                            "Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot (inclusive). ");
 
     public static final ConfigOption<String> INCREMENTAL_BETWEEN_TIMESTAMP =
             key("incremental-between-timestamp")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Read incremental changes between start timestamp (exclusive) and end timestamp, "
+                            "Read incremental changes between start timestamp (exclusive) and end timestamp (inclusive), "
                                     + "for example, 't1,t2' means changes between timestamp t1 and timestamp t2.");
 
     public static final ConfigOption<String> INCREMENTAL_TO_AUTO_TAG =
@@ -1112,7 +1112,8 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Used to specify the auto-created tag to reading incremental changes.");
+                            "Used to specify the end tag (inclusive), and Paimon will find an earlier tag and return changes between them. "
+                                    + "If the tag doesn't exist or the earlier tag doesn't exist, return empty. ");
 
     public static final ConfigOption<Boolean> END_INPUT_CHECK_PARTITION_EXPIRE =
             key("end-input.check-partition-expire")
