@@ -688,6 +688,29 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
         }
     }
 
+    @Test
+    public void testSqlWithKeywordCase() throws Exception {
+        // drop table S
+        sEnv.executeSql("DROP TABLE T");
+        sEnv.executeSql(
+                buildDdl(
+                        "T",
+                        Arrays.asList("k INT", "`language` STRING", "dt STRING"),
+                        Arrays.asList("k", "dt"),
+                        Collections.singletonList("dt"),
+                        Collections.emptyMap()));
+        insertInto("T", "(1, 'v_1', '02-27')", "(13, 'v_13', '02-29')");
+
+        MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, database, "T");
+        action.withSourceTable("S")
+                .withMergeCondition("T.k = S.k AND T.dt = S.dt")
+                .withMatchedDelete("S.k < 12");
+
+        List<Row> batchExpected = Arrays.asList(changelogRow("+I", 13, "v_13", "02-29"));
+        action.build().run();
+        testBatchRead(buildSimpleQuery("T"), batchExpected);
+    }
+
     private void validateActionRunResult(
             MergeIntoAction action, List<Row> streamingExpected, List<Row> batchExpected)
             throws Exception {
