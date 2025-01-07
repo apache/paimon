@@ -23,19 +23,13 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalogFactory;
 import org.apache.paimon.rest.RESTCatalogOptions;
-import org.apache.paimon.rest.RESTObjectMapper;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
-import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.catalog.Catalog;
-import org.apache.flink.table.catalog.CatalogTable;
-import org.apache.flink.table.catalog.Column;
+import org.apache.flink.table.catalog.CatalogDatabase;
 import org.apache.flink.table.catalog.ObjectPath;
-import org.apache.flink.table.catalog.ResolvedCatalogTable;
-import org.apache.flink.table.catalog.ResolvedSchema;
+import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
@@ -44,19 +38,18 @@ import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 
 /** Test for {@link FlinkCatalog} when catalog type is RESTCatalog. */
 public class FlinkRESTCatalogTest {
-    private final ObjectMapper mapper = RESTObjectMapper.create();
     private final ObjectPath path1 = new ObjectPath("db1", "t1");
+    private final ObjectPath nonExistDbPath = ObjectPath.fromString("non.exist");
     private MockRESTCatalogServer mockRESTCatalogServer;
     private String serverUrl;
     private String warehouse;
@@ -95,41 +88,14 @@ public class FlinkRESTCatalogTest {
         assertEquals(1, result.size());
     }
 
-    //    @Test
-    //    public void testCreateTable() throws Exception {
-    //        GetTableResponse response = MockRESTMessage.getTableResponse();
-    //        mockResponse(mapper.writeValueAsString(response), 200);
-    //        CatalogTable table = this.createTable(ImmutableMap.of());
-    //        assertDoesNotThrow(() -> catalog.createTable(path1, table, false));
-    //    }
-
-    private CatalogTable createTable(Map<String, String> options) {
-        ResolvedSchema resolvedSchema = this.createSchema();
-        CatalogTable origin =
-                CatalogTable.of(
-                        Schema.newBuilder().fromResolvedSchema(resolvedSchema).build(),
-                        "test comment",
-                        Collections.emptyList(),
-                        options);
-        return new ResolvedCatalogTable(origin, resolvedSchema);
-    }
-
-    private ResolvedSchema createSchema() {
-        return new ResolvedSchema(
-                Arrays.asList(
-                        Column.physical("first", DataTypes.STRING()),
-                        Column.physical("second", DataTypes.INT()),
-                        Column.physical("third", DataTypes.STRING()),
-                        Column.physical(
-                                "four",
-                                DataTypes.ROW(
-                                        DataTypes.FIELD("f1", DataTypes.STRING()),
-                                        DataTypes.FIELD("f2", DataTypes.INT()),
-                                        DataTypes.FIELD(
-                                                "f3",
-                                                DataTypes.MAP(
-                                                        DataTypes.STRING(), DataTypes.INT()))))),
-                Collections.emptyList(),
-                null);
+    @Test
+    public void testGetDatabase() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
+        CatalogDatabase database = catalog.getDatabase(path1.getDatabaseName());
+        assertThat(database.getProperties()).isEmpty();
+        assertThat(database.getDescription()).isEmpty();
+        assertThatThrownBy(() -> catalog.getDatabase(nonExistDbPath.getDatabaseName()))
+                .isInstanceOf(DatabaseNotExistException.class)
+                .hasMessageContaining("Database non does not exist in Catalog test-catalog.");
     }
 }

@@ -25,7 +25,7 @@ public class ResourcePaths {
 
     public static final String V1 = "/v1";
     public static final String SLASH = "/";
-    public static final String V1_CONFIG = String.format("%s/config", V1);
+    public static final String V1_CONFIG = V1 + "/config";
 
     public static ResourcePaths forCatalogProperties(String prefix) {
         return new ResourcePaths(prefix);

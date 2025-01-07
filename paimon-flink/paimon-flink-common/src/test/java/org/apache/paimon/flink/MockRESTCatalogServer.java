@@ -21,12 +21,16 @@ package org.apache.paimon.flink;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.Database;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.rest.MockRESTMessage;
 import org.apache.paimon.rest.RESTCatalogInternalOptions;
 import org.apache.paimon.rest.RESTObjectMapper;
 import org.apache.paimon.rest.RESTResponse;
+import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.responses.CreateDatabaseResponse;
+import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.ListDatabasesResponse;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
@@ -37,6 +41,7 @@ import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
 
 import java.io.IOException;
+import java.util.List;
 
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
 
@@ -56,7 +61,12 @@ public class MockRESTCatalogServer {
         this.catalog =
                 CatalogFactory.createCatalog(
                         CatalogContext.create(conf), this.getClass().getClassLoader());
-        this.dispatcher = initDispatcher();
+        this.dispatcher = initDispatcher(catalog);
+        try {
+            catalog.createDatabase("default", true);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
         MockWebServer mockWebServer = new MockWebServer();
         mockWebServer.setDispatcher(dispatcher);
         server = mockWebServer;
@@ -74,28 +84,50 @@ public class MockRESTCatalogServer {
         server.shutdown();
     }
 
-    public static Dispatcher initDispatcher() {
+    public static Dispatcher initDispatcher(Catalog catalog) {
         return new Dispatcher() {
             @Override
             public MockResponse dispatch(RecordedRequest request) throws InterruptedException {
 
                 RESTResponse response;
-                System.out.println("Request: " + request.getPath());
-                switch (request.getPath()) {
-                    case "/v1/config":
+                System.out.println(request.getPath() + "  method " + request.getMethod());
+                try {
+                    if ("/v1/config".equals(request.getPath())) {
                         return new MockResponse()
                                 .setResponseCode(200)
-                                .setBody(getConfigBody("/tmp/1"));
-                    case "/v1/prefix/databases":
-                        response = MockRESTMessage.listDatabasesResponse("default");
-                        return mockResponse(response, 200);
-                    case "/v1/prefix/databases/default":
-                        response = MockRESTMessage.getDatabaseResponse("default");
-                        return mockResponse(response, 200);
-                    case "/v1/profile/info":
-                        return new MockResponse().setResponseCode(200).setBody("profile");
+                                .setBody(getConfigBody(catalog.warehouse()));
+                    } else if ("/v1/prefix/databases".equals(request.getPath())) {
+                        if (request.getMethod().equals("GET")) {
+                            List<String> databaseNameList = catalog.listDatabases();
+                            response = new ListDatabasesResponse(databaseNameList);
+                            return mockResponse(response, 200);
+                        } else if (request.getMethod().equals("POST")) {
+                            CreateDatabaseRequest requestBody =
+                                    mapper.readValue(
+                                            request.getBody().readUtf8(),
+                                            CreateDatabaseRequest.class);
+                            String databaseName = requestBody.getName();
+                            catalog.createDatabase(databaseName, true);
+                            response =
+                                    new CreateDatabaseResponse(
+                                            databaseName, requestBody.getOptions());
+                            return mockResponse(response, 200);
+                        }
+                    } else if (request.getPath().startsWith("/v1/prefix/databases/")) {
+                        String databaseName =
+                                request.getPath().substring("/v1/prefix/databases/".length());
+                        if (request.getMethod().equals("GET")) {
+                            Database database = catalog.getDatabase(databaseName);
+                            response = new GetDatabaseResponse(database.name(), database.options());
+                            return mockResponse(response, 200);
+                        }
+                    }
+                    return new MockResponse().setResponseCode(404);
+                } catch (Catalog.DatabaseNotExistException e) {
+                    return new MockResponse().setResponseCode(404);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
                 }
-                return new MockResponse().setResponseCode(404);
             }
         };
     }
