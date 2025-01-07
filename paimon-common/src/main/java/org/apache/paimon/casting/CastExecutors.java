@@ -58,6 +58,9 @@ public class CastExecutors {
                 .addRule(TimeToStringCastRule.INSTANCE)
                 .addRule(DateToStringCastRule.INSTANCE)
                 .addRule(StringToStringCastRule.INSTANCE)
+                .addRule(ArrayToStringCastRule.INSTANCE)
+                .addRule(MapToStringCastRule.INSTANCE)
+                .addRule(RowToStringCastRule.INSTANCE)
                 // From string rules
                 .addRule(StringToBooleanCastRule.INSTANCE)
                 .addRule(StringToDecimalCastRule.INSTANCE)
