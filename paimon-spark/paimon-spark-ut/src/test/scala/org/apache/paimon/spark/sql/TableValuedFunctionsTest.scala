@@ -18,9 +18,14 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.data.{BinaryString, GenericRow, Timestamp}
+import org.apache.paimon.manifest.ManifestCommittable
 import org.apache.paimon.spark.PaimonHiveTestBase
 
 import org.apache.spark.sql.{DataFrame, Row}
+
+import java.time.LocalDateTime
+import java.util.Collections
 
 class TableValuedFunctionsTest extends PaimonHiveTestBase {
 
@@ -91,10 +96,117 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
       }
   }
 
+  test("Table Valued Functions: paimon_incremental_between_timestamp") {
+    Seq("paimon", sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        sql(s"USE $catalogName")
+        val dbName = "test_tvf_db"
+        withDatabase(dbName) {
+          sql(s"CREATE DATABASE $dbName")
+          withTable("t") {
+            sql(s"USE $dbName")
+            sql("CREATE TABLE t (id INT) USING paimon")
+
+            sql("INSERT INTO t VALUES 1")
+            Thread.sleep(100)
+            val t1 = System.currentTimeMillis()
+            sql("INSERT INTO t VALUES 2")
+            Thread.sleep(100)
+            val t2 = System.currentTimeMillis()
+            sql("INSERT INTO t VALUES 3")
+            sql("INSERT INTO t VALUES 4")
+            Thread.sleep(100)
+            val t3 = System.currentTimeMillis()
+            sql("INSERT INTO t VALUES 5")
+
+            checkAnswer(
+              sql(
+                s"SELECT * FROM paimon_incremental_between_timestamp('t', '$t1', '$t2') ORDER BY id"),
+              Seq(Row(2)))
+            checkAnswer(
+              sql(
+                s"SELECT * FROM paimon_incremental_between_timestamp('$dbName.t', '$t2', '$t3') ORDER BY id"),
+              Seq(Row(3), Row(4)))
+            checkAnswer(
+              sql(
+                s"SELECT * FROM paimon_incremental_between_timestamp('$catalogName.$dbName.t', '$t1', '$t3') ORDER BY id"),
+              Seq(Row(2), Row(3), Row(4)))
+          }
+        }
+    }
+  }
+
+  test("Table Valued Functions: paimon_incremental_to_auto_tag") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (a INT, b STRING) USING paimon
+            |TBLPROPERTIES ('primary-key' = 'a', 'bucket' = '1', 'tag.automatic-creation'='watermark', 'tag.creation-period'='daily')
+            |""".stripMargin)
+
+      val table = loadTable("t")
+      val write = table.newWrite(commitUser)
+      val commit = table.newCommit(commitUser).ignoreEmptyCommit(false)
+
+      write.write(GenericRow.of(1, BinaryString.fromString("a")))
+      var commitMessages = write.prepareCommit(false, 0)
+      commit.commit(
+        new ManifestCommittable(
+          0,
+          utcMills("2024-12-02T10:00:00"),
+          Collections.emptyMap[Integer, java.lang.Long],
+          commitMessages))
+
+      write.write(GenericRow.of(2, BinaryString.fromString("b")))
+      commitMessages = write.prepareCommit(false, 1)
+      commit.commit(
+        new ManifestCommittable(
+          1,
+          utcMills("2024-12-03T10:00:00"),
+          Collections.emptyMap[Integer, java.lang.Long],
+          commitMessages))
+
+      write.write(GenericRow.of(3, BinaryString.fromString("c")))
+      commitMessages = write.prepareCommit(false, 2)
+      commit.commit(
+        new ManifestCommittable(
+          2,
+          utcMills("2024-12-05T10:00:00"),
+          Collections.emptyMap[Integer, java.lang.Long],
+          commitMessages))
+
+      checkAnswer(
+        sql(s"SELECT * FROM paimon_incremental_to_auto_tag('t', '2024-12-01') ORDER BY a"),
+        Seq())
+      checkAnswer(
+        sql(s"SELECT * FROM paimon_incremental_to_auto_tag('t', '2024-12-02') ORDER BY a"),
+        Seq(Row(2, "b")))
+      checkAnswer(
+        sql(s"SELECT * FROM paimon_incremental_to_auto_tag('t', '2024-12-03') ORDER BY a"),
+        Seq())
+      checkAnswer(
+        sql(s"SELECT * FROM paimon_incremental_to_auto_tag('t', '2024-12-04') ORDER BY a"),
+        Seq(Row(3, "c")))
+    }
+  }
+
   private def incrementalDF(tableIdent: String, start: Int, end: Int): DataFrame = {
     spark.read
       .format("paimon")
       .option("incremental-between", s"$start,$end")
       .table(tableIdent)
+  }
+
+  private def utcMills(timestamp: String) =
+    Timestamp.fromLocalDateTime(LocalDateTime.parse(timestamp)).getMillisecond
+
+  object GenericRow {
+    def of(values: Any*): GenericRow = {
+      val row = new GenericRow(values.length)
+      values.zipWithIndex.foreach {
+        case (value, index) =>
+          row.setField(index, value)
+      }
+      row
+    }
   }
 }

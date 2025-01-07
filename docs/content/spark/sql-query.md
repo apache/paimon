@@ -77,11 +77,17 @@ You can also force specifying `'incremental-between-scan-mode'`.
 
 Paimon supports that use Spark SQL to do the incremental query that implemented by Spark Table Valued Function.
 
-you can use `paimon_incremental_query` in query to extract the incremental data:
-
 ```sql
 -- read the incremental data between snapshot id 12 and snapshot id 20.
 SELECT * FROM paimon_incremental_query('tableName', 12, 20);
+
+-- read the incremental data between ts 1692169900000 and ts 1692169900000.
+SELECT * FROM paimon_incremental_between_timestamp('tableName', '1692169000000', '1692169900000');
+
+-- read the incremental data to tag '2024-12-04'.
+-- Paimon will find an earlier tag and return changes between them.
+-- If the tag doesn't exist or the earlier tag doesn't exist, return empty.
+SELECT * FROM paimon_incremental_to_auto_tag('tableName', '2024-12-04');
 ```
 
 In Batch SQL, the `DELETE` records are not allowed to be returned, so records of `-D` will be dropped.
