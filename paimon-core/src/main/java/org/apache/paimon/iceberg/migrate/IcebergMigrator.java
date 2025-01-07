@@ -223,7 +223,7 @@ public class IcebergMigrator implements Migrator {
             }
             try (BatchTableCommit commit = paimonTable.newBatchWriteBuilder().newCommit()) {
                 commit.commit(new ArrayList<>(commitMessages));
-                LOG.info("paimon commit success! Iceberg data files has been migrated to paimon.");
+                LOG.info("paimon commit success! Iceberg data files have been migrated to paimon.");
             }
         } catch (Exception e) {
             paimonCatalog.dropTable(paimonIdentifier, true);
@@ -243,8 +243,10 @@ public class IcebergMigrator implements Migrator {
 
     @Override
     public void renameTable(boolean ignoreIfNotExists) throws Exception {
-        LOG.info("Last step: rename.");
-        LOG.info("Iceberg migrator do not rename table now.");
+        Identifier targetTableId = Identifier.create(paimonDatabaseName, paimonTableName);
+        Identifier sourceTableId = Identifier.create(icebergDatabaseName, icebergTableName);
+        LOG.info("Last step: rename {} to {}.", targetTableId, sourceTableId);
+        paimonCatalog.renameTable(targetTableId, sourceTableId, ignoreIfNotExists);
     }
 
     public Schema icebergSchemaToPaimonSchema(IcebergMetadata icebergMetadata) {

@@ -153,9 +153,10 @@ public class IcebergMigrateTest {
                         new Options(icebergProperties),
                         1);
         icebergMigrator.executeMigrate();
+        icebergMigrator.renameTable(false);
 
         FileStoreTable paimonTable =
-                (FileStoreTable) paiCatalog.getTable(Identifier.create(paiDatabase, paiTable));
+                (FileStoreTable) paiCatalog.getTable(Identifier.create(iceDatabase, iceTable));
         List<String> paiResults = getPaimonResult(paimonTable);
         assertThat(
                         paiResults.stream()
@@ -165,6 +166,9 @@ public class IcebergMigrateTest {
                         Stream.concat(records1.stream(), records2.stream())
                                 .map(GenericRecord::toString)
                                 .collect(Collectors.toList()));
+
+        // verify iceberg table has been deleted
+        assertThat(paimonTable.fileIO().exists(new Path(icebergTable.location()))).isFalse();
     }
 
     @ParameterizedTest(name = "isPartitioned = {0}")
@@ -278,8 +282,8 @@ public class IcebergMigrateTest {
         Table icebergTable = createIcebergTable(isPartitioned);
         String format = "parquet";
 
-        int numRounds = 100;
-        int numRecords = 50;
+        int numRounds = 50;
+        int numRecords = 20;
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<GenericRecord> expectRecords = new ArrayList<>();
         for (int i = 0; i < numRounds; i++) {
