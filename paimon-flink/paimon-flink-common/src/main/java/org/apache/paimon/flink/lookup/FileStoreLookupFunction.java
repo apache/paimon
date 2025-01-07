@@ -91,6 +91,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     @Nullable private final Predicate predicate;
     @Nullable private final RefreshBlacklist refreshBlacklist;
 
+    private final List<InternalRow.FieldGetter> joinKeysGetters;
+    private final List<InternalRow.FieldGetter> projectFieldsGetters;
+
     private transient File path;
     private transient LookupTable lookupTable;
 
@@ -121,6 +124,16 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         this.projectFields =
                 Arrays.stream(projection)
                         .mapToObj(i -> table.rowType().getFieldNames().get(i))
+                        .collect(Collectors.toList());
+
+        this.joinKeysGetters =
+                Arrays.stream(joinKeyIndex)
+                        .mapToObj(i -> table.rowType().fieldGetters()[projection[i]])
+                        .collect(Collectors.toList());
+
+        this.projectFieldsGetters =
+                Arrays.stream(projection)
+                        .mapToObj(i -> table.rowType().fieldGetters()[i])
                         .collect(Collectors.toList());
 
         // add primary keys
@@ -166,6 +179,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
         List<String> fieldNames = table.rowType().getFieldNames();
         int[] projection = projectFields.stream().mapToInt(fieldNames::indexOf).toArray();
+        LOG.info("lookup projection fields: {}, join fields:{}", projectFields, joinKeys);
+
         FileStoreTable storeTable = (FileStoreTable) table;
 
         if (options.get(LOOKUP_CACHE_MODE) == LookupCacheMode.AUTO
@@ -249,6 +264,19 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             for (BinaryRow partition : partitionLoader.partitions()) {
                 rows.addAll(lookupInternal(JoinedRow.join(key, partition)));
             }
+
+            try {
+                LOG.debug(
+                        "lookup key: {}, matched rows size: {}, matched rows: {}",
+                        logRow(joinKeysGetters, key),
+                        results.size(),
+                        results.stream()
+                                .map(row -> logRow(projectFieldsGetters, row))
+                                .collect(Collectors.toList()));
+            } catch (Exception e) {
+                LOG.error("Error occurs when logging specific join keys and results");
+            }
+
             return rows;
         } catch (OutOfRangeException | ReopenException e) {
             reopen();
@@ -412,5 +440,16 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     protected void setCacheRowFilter(@Nullable Filter<InternalRow> cacheRowFilter) {
         this.cacheRowFilter = cacheRowFilter;
+    }
+
+    private String logRow(List<InternalRow.FieldGetter> fieldGetters, InternalRow row) {
+        List<String> rowValues = new ArrayList<>(fieldGetters.size());
+
+        for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
+            Object fieldValue = fieldGetter.getFieldOrNull(row);
+            String value = fieldValue == null ? "null" : fieldValue.toString();
+            rowValues.add(value);
+        }
+        return rowValues.toString();
     }
 }
