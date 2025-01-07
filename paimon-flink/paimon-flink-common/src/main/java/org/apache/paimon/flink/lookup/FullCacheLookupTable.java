@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -79,7 +80,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
     protected final int appendUdsFieldNumber;
 
     protected RocksDBStateFactory stateFactory;
-    @Nullable private final ExecutorService refreshExecutor;
+    @Nullable private ExecutorService refreshExecutor;
     private final AtomicReference<Exception> cachedException;
     private final int maxPendingSnapshotCount;
     private final FileStoreTable table;
@@ -127,14 +128,6 @@ public abstract class FullCacheLookupTable implements LookupTable {
         Options options = Options.fromMap(context.table.options());
         this.projectedType = projectedType;
         this.refreshAsync = options.get(LOOKUP_REFRESH_ASYNC);
-        this.refreshExecutor =
-                this.refreshAsync
-                        ? Executors.newSingleThreadExecutor(
-                                new ExecutorThreadFactory(
-                                        String.format(
-                                                "%s-lookup-refresh",
-                                                Thread.currentThread().getName())))
-                        : null;
         this.cachedException = new AtomicReference<>();
         this.maxPendingSnapshotCount = options.get(LOOKUP_REFRESH_ASYNC_PENDING_SNAPSHOT_COUNT);
     }
@@ -147,6 +140,19 @@ public abstract class FullCacheLookupTable implements LookupTable {
     @Override
     public void specifyCacheRowFilter(Filter<InternalRow> filter) {
         this.cacheRowFilter = filter;
+    }
+
+    @Override
+    public void open() throws Exception {
+        this.refreshExecutor =
+                this.refreshAsync
+                        ? Executors.newSingleThreadExecutor(
+                                new ExecutorThreadFactory(
+                                        String.format(
+                                                "%s-lookup-refresh",
+                                                Thread.currentThread().getName())))
+                        : null;
+        openStateFactory();
     }
 
     protected void openStateFactory() throws Exception {
@@ -320,6 +326,11 @@ public abstract class FullCacheLookupTable implements LookupTable {
             stateFactory.close();
             FileIOUtils.deleteDirectory(context.tempPath);
         }
+    }
+
+    @VisibleForTesting
+    public Future<?> getRefreshFuture() {
+        return refreshFuture;
     }
 
     /** Bulk loader for the table. */
