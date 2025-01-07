@@ -1242,6 +1242,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(TagPeriodFormatter.WITH_DASHES)
                     .withDescription("The date format for tag periods.");
 
+    public static final ConfigOption<Duration> TAG_CUSTOM_DURATION =
+            key("tag.custom-duration")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription("The custom duration for tag auto create periods.");
+
     public static final ConfigOption<Integer> TAG_NUM_RETAINED_MAX =
             key("tag.num-retained-max")
                     .intType()
@@ -2238,6 +2244,10 @@ public class CoreOptions implements Serializable {
         return options.get(TAG_PERIOD_FORMATTER);
     }
 
+    public Optional<Duration> tagCustomDuration() {
+        return options.getOptional(TAG_CUSTOM_DURATION);
+    }
+
     @Nullable
     public Integer tagNumRetainedMax() {
         return options.get(TAG_NUM_RETAINED_MAX);
@@ -2874,7 +2884,9 @@ public class CoreOptions implements Serializable {
     public enum TagCreationPeriod implements DescribedEnum {
         DAILY("daily", "Generate a tag every day."),
         HOURLY("hourly", "Generate a tag every hour."),
-        TWO_HOURS("two-hours", "Generate a tag every two hours.");
+        TWO_HOURS("two-hours", "Generate a tag every two hours."),
+
+        CUSTOM_DURATION("custom-duration", "Generate a tag with custom duration.");
 
         private final String value;
         private final String description;
