@@ -601,6 +601,41 @@ public class LookupTableTest extends TableTestBase {
     }
 
     @Test
+    public void testRefreshExecutorRebuildAfterReopen() throws Exception {
+        Options options = new Options();
+        options.set(FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC, true);
+        FileStoreTable storeTable = createTable(singletonList("f0"), options);
+        writeWithBucketAssigner(
+                storeTable, row -> 0, GenericRow.of(1, 11, 111), GenericRow.of(2, 22, 222));
+
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        storeTable,
+                        new int[] {0, 1, 2},
+                        null,
+                        null,
+                        tempDir.toFile(),
+                        singletonList("f0"),
+                        null);
+        table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        assertThat(table).isInstanceOf(PrimaryKeyLookupTable.class);
+        table.open();
+        // reopen
+        table.close();
+        table.open();
+        List<InternalRow> res = table.get(GenericRow.of(1));
+        assertThat(res).hasSize(1);
+        assertRow(res.get(0), 1, 11, 111);
+        writeWithBucketAssigner(storeTable, row -> 0, GenericRow.of(1, 22, 222));
+        table.refresh();
+        assertThat(table.getRefreshFuture()).isNotNull();
+        table.getRefreshFuture().get();
+        res = table.get(GenericRow.of(1));
+        assertThat(res).hasSize(1);
+        assertRow(res.get(0), 1, 22, 222);
+    }
+
+    @Test
     public void testNoPkTableWithCacheRowFilter() throws Exception {
         FileStoreTable storeTable = createTable(emptyList(), new Options());
         writeWithBucketAssigner(
