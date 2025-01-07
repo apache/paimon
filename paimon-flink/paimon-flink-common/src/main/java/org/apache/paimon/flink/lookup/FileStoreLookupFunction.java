@@ -265,18 +265,6 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 rows.addAll(lookupInternal(JoinedRow.join(key, partition)));
             }
 
-            try {
-                LOG.debug(
-                        "lookup key: {}, matched rows size: {}, matched rows: {}",
-                        logRow(joinKeysGetters, key),
-                        results.size(),
-                        results.stream()
-                                .map(row -> logRow(projectFieldsGetters, row))
-                                .collect(Collectors.toList()));
-            } catch (Exception e) {
-                LOG.error("Error occurs when logging specific join keys and results");
-            }
-
             return rows;
         } catch (OutOfRangeException | ReopenException e) {
             reopen();
@@ -291,6 +279,18 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         List<InternalRow> lookupResults = lookupTable.get(key);
         for (InternalRow matchedRow : lookupResults) {
             rows.add(new FlinkRowData(matchedRow));
+        }
+
+        try {
+            LOG.debug(
+                    "lookup key: {}, matched rows size: {}, matched rows: {}",
+                    logRow(joinKeysGetters, key),
+                    lookupResults.size(),
+                    lookupResults.stream()
+                            .map(row -> logRow(projectFieldsGetters, row))
+                            .collect(Collectors.toList()));
+        } catch (Exception e) {
+            LOG.error("Error occurs when logging specific join keys and results");
         }
         return rows;
     }
