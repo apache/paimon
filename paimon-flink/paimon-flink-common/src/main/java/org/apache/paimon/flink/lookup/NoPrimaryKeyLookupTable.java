@@ -52,7 +52,7 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
 
     @Override
     public void open() throws Exception {
-        openStateFactory();
+        init();
         this.state =
                 stateFactory.listState(
                         "join-key-index",
