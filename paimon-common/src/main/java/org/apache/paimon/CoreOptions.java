@@ -2885,7 +2885,6 @@ public class CoreOptions implements Serializable {
         DAILY("daily", "Generate a tag every day."),
         HOURLY("hourly", "Generate a tag every hour."),
         TWO_HOURS("two-hours", "Generate a tag every two hours."),
-
         CUSTOM_DURATION("custom-duration", "Generate a tag with custom duration.");
 
         private final String value;
