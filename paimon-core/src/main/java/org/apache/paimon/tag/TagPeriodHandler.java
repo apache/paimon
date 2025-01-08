@@ -232,15 +232,15 @@ public interface TagPeriodHandler {
     /** Period duration {@link TagPeriodHandler}. */
     class PeriodDurationTagPeriodHandler extends BaseTagPeriodHandler {
 
-        Duration customDuration;
+        Duration periodDuration;
 
         public PeriodDurationTagPeriodHandler(Duration duration) {
-            this.customDuration = duration;
+            this.periodDuration = duration;
         }
 
         @Override
         protected Duration onePeriod() {
-            return customDuration;
+            return periodDuration;
         }
 
         @Override
