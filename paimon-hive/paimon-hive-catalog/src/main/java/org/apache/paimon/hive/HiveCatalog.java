@@ -389,7 +389,7 @@ public class HiveCatalog extends AbstractCatalog {
             throws TableNotExistException {
         TableSchema schema = getDataTableSchema(identifier);
         CoreOptions options = CoreOptions.fromMap(schema.options());
-        boolean tagToPart = options.tagToPartitionField() == null;
+        boolean tagToPart = options.tagToPartitionField() != null;
         if (metastorePartitioned(schema)) {
             List<Map<String, String>> metaPartitions =
                     tagToPart
