@@ -2139,10 +2139,6 @@ public class CoreOptions implements Serializable {
         return options.get(SEQUENCE_FIELD_SORT_ORDER) == SortOrder.ASCENDING;
     }
 
-    public boolean partialUpdateRemoveRecordOnDelete() {
-        return options.get(PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE);
-    }
-
     public Optional<String> rowkindField() {
         return options.getOptional(ROWKIND_FIELD);
     }
