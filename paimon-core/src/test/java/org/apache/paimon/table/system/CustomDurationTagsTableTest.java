@@ -54,7 +54,7 @@ public class CustomDurationTagsTableTest extends TableTestBase {
                         .column("sales", DataTypes.INT())
                         .primaryKey("product_id")
                         .option("tag.automatic-creation", "watermark")
-                        .option("tag.create-custom-duration", "120 s")
+                        .option("tag.creation-period-duration", "120 s")
                         .build();
         catalog.createTable(identifier, schema, true);
         table = (FileStoreTable) catalog.getTable(identifier);

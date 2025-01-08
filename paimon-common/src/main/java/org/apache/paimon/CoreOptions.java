@@ -1243,7 +1243,7 @@ public class CoreOptions implements Serializable {
                     .withDescription("The date format for tag periods.");
 
     public static final ConfigOption<Duration> TAG_CUSTOM_DURATION =
-            key("tag.create-custom-duration")
+            key("tag.creation-period-duration")
                     .durationType()
                     .noDefaultValue()
                     .withDescription(
