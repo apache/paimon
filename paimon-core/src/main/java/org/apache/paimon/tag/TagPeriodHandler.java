@@ -250,8 +250,8 @@ public interface TagPeriodHandler {
     }
 
     static TagPeriodHandler create(CoreOptions options) {
-        if (options.tagCustomDuration().isPresent()) {
-            return new CustomDurationTagPeriodHandler(options.tagCustomDuration().get());
+        if (options.tagPeriodDuration().isPresent()) {
+            return new CustomDurationTagPeriodHandler(options.tagPeriodDuration().get());
         }
 
         switch (options.tagCreationPeriod()) {

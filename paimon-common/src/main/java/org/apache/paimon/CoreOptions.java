@@ -1242,7 +1242,7 @@ public class CoreOptions implements Serializable {
                     .defaultValue(TagPeriodFormatter.WITH_DASHES)
                     .withDescription("The date format for tag periods.");
 
-    public static final ConfigOption<Duration> TAG_CUSTOM_DURATION =
+    public static final ConfigOption<Duration> TAG_PERIOD_DURATION =
             key("tag.creation-period-duration")
                     .durationType()
                     .noDefaultValue()
@@ -2245,8 +2245,8 @@ public class CoreOptions implements Serializable {
         return options.get(TAG_PERIOD_FORMATTER);
     }
 
-    public Optional<Duration> tagCustomDuration() {
-        return options.getOptional(TAG_CUSTOM_DURATION);
+    public Optional<Duration> tagPeriodDuration() {
+        return options.getOptional(TAG_PERIOD_DURATION);
     }
 
     @Nullable
