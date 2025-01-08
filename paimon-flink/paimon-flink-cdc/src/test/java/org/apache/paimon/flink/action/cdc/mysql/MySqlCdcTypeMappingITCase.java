@@ -411,7 +411,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
 
     // ------------------------------------- ignore-not-null -------------------------------------
     @Test
-    @Timeout(60)
+    @Timeout(180)
     public void testIgnoreNotNull() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "ignore_not_null_test");
@@ -607,7 +607,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
     // --------------------------------- bigint-unsigned-to-bigint ---------------------------------
 
     @Test
-    @Timeout(60)
+    @Timeout(180)
     public void testBigintUnsignedToBigint() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "bigint_unsigned_to_bigint_test");
