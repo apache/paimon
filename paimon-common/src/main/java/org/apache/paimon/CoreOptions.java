@@ -1294,6 +1294,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(TagPeriodFormatter.WITH_DASHES)
                     .withDescription("The date format for tag periods.");
 
+    public static final ConfigOption<Duration> TAG_PERIOD_DURATION =
+            key("tag.creation-period-duration")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The period duration for tag auto create periods.If user set it, tag.creation-period would be invalid.");
+
     public static final ConfigOption<Integer> TAG_NUM_RETAINED_MAX =
             key("tag.num-retained-max")
                     .intType()
@@ -2314,6 +2321,10 @@ public class CoreOptions implements Serializable {
 
     public TagPeriodFormatter tagPeriodFormatter() {
         return options.get(TAG_PERIOD_FORMATTER);
+    }
+
+    public Optional<Duration> tagPeriodDuration() {
+        return options.getOptional(TAG_PERIOD_DURATION);
     }
 
     @Nullable
