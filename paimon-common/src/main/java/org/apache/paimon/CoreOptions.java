@@ -1246,7 +1246,8 @@ public class CoreOptions implements Serializable {
             key("tag.create-custom-duration")
                     .durationType()
                     .noDefaultValue()
-                    .withDescription("The custom duration for tag auto create periods.If user set it, tag.creation-period would be invalid.");
+                    .withDescription(
+                            "The custom duration for tag auto create periods.If user set it, tag.creation-period would be invalid.");
 
     public static final ConfigOption<Integer> TAG_NUM_RETAINED_MAX =
             key("tag.num-retained-max")
