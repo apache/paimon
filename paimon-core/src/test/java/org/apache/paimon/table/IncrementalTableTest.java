@@ -25,6 +25,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommitImpl;
@@ -383,6 +384,19 @@ public class IncrementalTableTest extends TableTestBase {
                         commitMessages));
 
         assertThat(tagManager.allTagNames()).containsOnly("2024-12-01", "2024-12-02", "2024-12-04");
+
+        assertThat(read(table, Pair.of(INCREMENTAL_TO_AUTO_TAG, "2024-12-01"))).isEmpty();
+        assertThat(read(table, Pair.of(INCREMENTAL_TO_AUTO_TAG, "2024-12-02")))
+                .containsExactly(GenericRow.of(2, BinaryString.fromString("b")));
+        assertThat(read(table, Pair.of(INCREMENTAL_TO_AUTO_TAG, "2024-12-03"))).isEmpty();
+        assertThat(read(table, Pair.of(INCREMENTAL_TO_AUTO_TAG, "2024-12-04")))
+                .containsExactly(GenericRow.of(3, BinaryString.fromString("c")));
+
+        // validate after snapshot expire
+        table.newExpireSnapshots()
+                .config(ExpireConfig.builder().snapshotRetainMax(1).snapshotRetainMin(1).build())
+                .expire();
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
 
         assertThat(read(table, Pair.of(INCREMENTAL_TO_AUTO_TAG, "2024-12-01"))).isEmpty();
         assertThat(read(table, Pair.of(INCREMENTAL_TO_AUTO_TAG, "2024-12-02")))
