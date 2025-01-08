@@ -38,7 +38,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for {@link TagsTable}. */
-public class CustomDurationTagsTableTest extends TableTestBase {
+public class PeriodDurationTagsTableTest extends TableTestBase {
 
     private static final String tableName = "3TagTestTable";
     private TagsTable tagsTable;
