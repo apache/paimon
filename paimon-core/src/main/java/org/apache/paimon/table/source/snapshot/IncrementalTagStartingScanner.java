@@ -22,19 +22,24 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.tag.TagPeriodHandler;
-import org.apache.paimon.tag.TagTimeExtractor;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
-import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** {@link StartingScanner} for incremental changes by tag. */
 public class IncrementalTagStartingScanner extends AbstractStartingScanner {
+
+    private static final Logger LOG = LoggerFactory.getLogger(IncrementalTagStartingScanner.class);
 
     private final Snapshot start;
     private final Snapshot end;
@@ -54,11 +59,6 @@ public class IncrementalTagStartingScanner extends AbstractStartingScanner {
 
     public static AbstractStartingScanner create(
             SnapshotManager snapshotManager, String endTagName, CoreOptions options) {
-        TagTimeExtractor extractor = TagTimeExtractor.createForAutoTag(options);
-        checkNotNull(
-                extractor,
-                "Table's tag creation mode doesn't support '%s' scan mode.",
-                CoreOptions.INCREMENTAL_TO_AUTO_TAG);
         TagPeriodHandler periodHandler = TagPeriodHandler.create(options);
         checkArgument(
                 periodHandler.isAutoTag(endTagName),
@@ -70,42 +70,27 @@ public class IncrementalTagStartingScanner extends AbstractStartingScanner {
 
         Optional<Tag> endTag = tagManager.get(endTagName);
         if (!endTag.isPresent()) {
+            LOG.info("Tag {} doesn't exist.", endTagName);
             return new EmptyResultStartingScanner(snapshotManager);
         }
-
         Snapshot end = endTag.get().trimToSnapshot();
 
-        Snapshot earliestSnapshot = snapshotManager.earliestSnapshot();
-        checkState(earliestSnapshot != null, "No tags can be found.");
-
-        LocalDateTime earliestTime =
-                extractor
-                        .extract(earliestSnapshot.timeMillis(), earliestSnapshot.watermark())
-                        .orElseThrow(
-                                () ->
-                                        new RuntimeException(
-                                                "Cannot get valid tag time from the earliest snapshot."));
-        LocalDateTime earliestTagTime = periodHandler.normalizeToPreviousTag(earliestTime);
-
         LocalDateTime endTagTime = periodHandler.tagToTime(endTagName);
-        LocalDateTime previousTagTime = periodHandler.previousTagTime(endTagTime);
 
-        Snapshot start = null;
-        while (previousTagTime.isAfter(earliestTagTime)
-                || previousTagTime.isEqual(earliestTagTime)) {
-            String previousTagName = periodHandler.timeToTag(previousTagTime);
-            Optional<Tag> previousTag = tagManager.get(previousTagName);
-            if (previousTag.isPresent()) {
-                start = previousTag.get().trimToSnapshot();
-                break;
-            } else {
-                previousTagTime = periodHandler.previousTagTime(previousTagTime);
-            }
-        }
+        List<Pair<Tag, LocalDateTime>> previousTags =
+                tagManager.tagObjects().stream()
+                        .filter(p -> periodHandler.isAutoTag(p.getRight()))
+                        .map(p -> Pair.of(p.getLeft(), periodHandler.tagToTime(p.getRight())))
+                        .filter(p -> p.getRight().isBefore(endTagTime))
+                        .sorted((tag1, tag2) -> tag2.getRight().compareTo(tag1.getRight()))
+                        .collect(Collectors.toList());
 
-        if (start == null) {
+        if (previousTags.isEmpty()) {
+            LOG.info("Didn't found earlier tags for {}.", endTagName);
             return new EmptyResultStartingScanner(snapshotManager);
         }
+        LOG.info("Found start tag {} .", periodHandler.timeToTag(previousTags.get(0).getRight()));
+        Snapshot start = previousTags.get(0).getLeft().trimToSnapshot();
 
         return new IncrementalTagStartingScanner(snapshotManager, start, end);
     }
