@@ -105,6 +105,20 @@ spark-sql ... \
     --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 ```
 
+{{< hint info >}}
+If you want to create or read Hive tables in Paimon format with Spark, you can use the following configuration.
+
+```bash
+spark-sql ... \
+    --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
+    --conf spark.sql.catalog.paimon.metastore=hive \
+    --conf spark.sql.catalog.paimon.uri=thrift://hive-metastore:9083 \
+    --conf spark.sql.catalog.paimon.warehouse=hdfs:///path/to/warehouse \
+    --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
+```
+
+{{< /hint >}}
+
 Catalogs are configured using properties under spark.sql.catalog.(catalog_name). In above case, 'paimon' is the
 catalog name, you can change it to your own favorite catalog name.
 
