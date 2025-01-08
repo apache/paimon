@@ -50,9 +50,7 @@ import org.junit.rules.TemporaryFolder;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
@@ -315,106 +313,6 @@ public class RESTCatalogTest {
         assertThrows(
                 Catalog.TableNotExistException.class,
                 () -> restCatalog.dropTable(Identifier.create(databaseName, tableName), false));
-    }
-
-    @Test
-    public void testCreatePartition() throws Exception {
-        String databaseName = MockRESTMessage.databaseName();
-        GetTableResponse response = MockRESTMessage.getTableResponse();
-        mockResponse(mapper.writeValueAsString(response), 200);
-
-        Map<String, String> partitionSpec = new HashMap<>();
-        partitionSpec.put("p1", "v1");
-        mockResponse(mapper.writeValueAsString(MockRESTMessage.partitionResponse()), 200);
-        assertDoesNotThrow(
-                () ->
-                        restCatalog.createPartition(
-                                Identifier.create(databaseName, "table"), partitionSpec));
-    }
-
-    @Test
-    public void testCreatePartitionWhenTableNotExist() throws Exception {
-        String databaseName = MockRESTMessage.databaseName();
-        Map<String, String> partitionSpec = new HashMap<>();
-        partitionSpec.put("p1", "v1");
-        mockResponse("", 404);
-        assertThrows(
-                Catalog.TableNotExistException.class,
-                () ->
-                        restCatalog.createPartition(
-                                Identifier.create(databaseName, "table"), partitionSpec));
-    }
-
-    @Test
-    public void testCreatePartitionWhenTableNoPermissionException() throws Exception {
-        String databaseName = MockRESTMessage.databaseName();
-        Map<String, String> partitionSpec = new HashMap<>();
-        partitionSpec.put("p1", "v1");
-        mockResponse("", 403);
-        assertThrows(
-                Catalog.TableNoPermissionException.class,
-                () ->
-                        restCatalog.createPartition(
-                                Identifier.create(databaseName, "table"), partitionSpec));
-    }
-
-    @Test
-    public void testDropPartition() throws Exception {
-        String databaseName = MockRESTMessage.databaseName();
-        Map<String, String> partitionSpec = new HashMap<>();
-        GetTableResponse response = MockRESTMessage.getTableResponse();
-        partitionSpec.put(response.getSchema().primaryKeys().get(0), "1");
-        mockResponse(mapper.writeValueAsString(""), 200);
-        mockResponse(mapper.writeValueAsString(response), 200);
-        assertThrows(
-                RuntimeException.class,
-                () ->
-                        restCatalog.dropPartition(
-                                Identifier.create(databaseName, "table"), partitionSpec));
-    }
-
-    @Test
-    public void testDropPartitionWhenPartitionNoExist() throws Exception {
-        String databaseName = MockRESTMessage.databaseName();
-        GetTableResponse response = MockRESTMessage.getTableResponseEnablePartition();
-        mockResponse(mapper.writeValueAsString(response), 200);
-
-        Map<String, String> partitionSpec = new HashMap<>();
-        partitionSpec.put(response.getSchema().primaryKeys().get(0), "1");
-        mockResponse(mapper.writeValueAsString(""), 404);
-        assertThrows(
-                Catalog.PartitionNotExistException.class,
-                () ->
-                        restCatalog.dropPartition(
-                                Identifier.create(databaseName, "table"), partitionSpec));
-    }
-
-    @Test
-    public void testDropPartitionWhenTableNoPermission() throws Exception {
-        String databaseName = MockRESTMessage.databaseName();
-        Map<String, String> partitionSpec = new HashMap<>();
-        GetTableResponse response = MockRESTMessage.getTableResponse();
-        partitionSpec.put(response.getSchema().primaryKeys().get(0), "1");
-        mockResponse(mapper.writeValueAsString(""), 403);
-        assertThrows(
-                Catalog.TableNoPermissionException.class,
-                () ->
-                        restCatalog.dropPartition(
-                                Identifier.create(databaseName, "table"), partitionSpec));
-    }
-
-    @Test
-    public void testDropPartitionWhenTableNoExist() throws Exception {
-        String databaseName = MockRESTMessage.databaseName();
-        Map<String, String> partitionSpec = new HashMap<>();
-        GetTableResponse response = MockRESTMessage.getTableResponse();
-        partitionSpec.put(response.getSchema().primaryKeys().get(0), "1");
-        mockResponse("", 404);
-        assertThrows(
-                Catalog.TableNotExistException.class,
-                () ->
-                        restCatalog.dropPartition(
-                                Identifier.create(databaseName, "table"), partitionSpec));
     }
 
     @Test

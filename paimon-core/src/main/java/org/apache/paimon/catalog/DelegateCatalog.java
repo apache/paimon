@@ -120,6 +120,30 @@ public class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        wrapped.createPartitions(identifier, partitions);
+    }
+
+    @Override
+    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        wrapped.dropPartitions(identifier, partitions);
+    }
+
+    @Override
+    public void alterPartitions(Identifier identifier, List<Partition> partitions)
+            throws TableNotExistException {
+        wrapped.alterPartitions(identifier, partitions);
+    }
+
+    @Override
+    public void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        wrapped.markDonePartitions(identifier, partitions);
+    }
+
+    @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
         return wrapped.getTable(identifier);
     }
@@ -150,18 +174,6 @@ public class DelegateCatalog implements Catalog {
     public void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
             throws ViewNotExistException, ViewAlreadyExistException {
         wrapped.renameView(fromView, toView, ignoreIfNotExists);
-    }
-
-    @Override
-    public void createPartition(Identifier identifier, Map<String, String> partitions)
-            throws TableNotExistException {
-        wrapped.createPartition(identifier, partitions);
-    }
-
-    @Override
-    public void dropPartition(Identifier identifier, Map<String, String> partitions)
-            throws TableNotExistException, PartitionNotExistException {
-        wrapped.dropPartition(identifier, partitions);
     }
 
     @Override

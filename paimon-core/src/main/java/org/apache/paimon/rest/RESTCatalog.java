@@ -41,9 +41,7 @@ import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
-import org.apache.paimon.rest.requests.CreatePartitionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
-import org.apache.paimon.rest.requests.DropPartitionRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -53,7 +51,6 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
-import org.apache.paimon.rest.responses.PartitionResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
@@ -62,7 +59,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
-import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
@@ -84,7 +80,6 @@ import java.util.concurrent.ScheduledExecutorService;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
-import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
@@ -362,56 +357,27 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void createPartition(Identifier identifier, Map<String, String> partitionSpec)
+    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        Table table = getTable(identifier);
-        Options options = Options.fromMap(table.options());
-        if (!options.get(METASTORE_PARTITIONED_TABLE)) {
-            return;
-        }
-
-        try {
-            CreatePartitionRequest request = new CreatePartitionRequest(identifier, partitionSpec);
-            client.post(
-                    resourcePaths.partitions(
-                            identifier.getDatabaseName(), identifier.getTableName()),
-                    request,
-                    PartitionResponse.class,
-                    headers());
-        } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
-        } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
-        }
+        throw new UnsupportedOperationException();
     }
 
     @Override
-    public void dropPartition(Identifier identifier, Map<String, String> partition)
-            throws TableNotExistException, PartitionNotExistException {
-        checkNotSystemTable(identifier, "dropPartition");
+    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
 
-        Table table = getTable(identifier);
-        Options options = Options.fromMap(table.options());
-        if (options.get(METASTORE_PARTITIONED_TABLE)) {
-            try {
-                client.delete(
-                        resourcePaths.partitions(
-                                identifier.getDatabaseName(), identifier.getTableName()),
-                        new DropPartitionRequest(partition),
-                        headers());
-            } catch (NoSuchResourceException ignore) {
-                throw new PartitionNotExistException(identifier, partition);
-            } catch (ForbiddenException e) {
-                throw new TableNoPermissionException(identifier, e);
-            }
-        }
+    @Override
+    public void alterPartitions(Identifier identifier, List<Partition> partitions)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
 
-        try (BatchTableCommit commit =
-                table.newBatchWriteBuilder().withOverwrite(partition).newCommit()) {
-            commit.commit(Collections.emptyList());
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+    @Override
+    public void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException();
     }
 
     @Override
