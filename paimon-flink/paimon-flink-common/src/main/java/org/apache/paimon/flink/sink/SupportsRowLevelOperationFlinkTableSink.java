@@ -58,7 +58,10 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
+import static org.apache.paimon.CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE;
+import static org.apache.paimon.CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_SEQUENCE_GROUP;
 import static org.apache.paimon.CoreOptions.createCommitUser;
+import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Flink table sink that supports row level update and delete. */
@@ -185,17 +188,31 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
                             table.getClass().getName()));
         }
 
-        CoreOptions coreOptions = CoreOptions.fromMap(table.options());
-        if (coreOptions.mergeEngine() == DEDUPLICATE
-                || (coreOptions.mergeEngine() == PARTIAL_UPDATE
-                        && coreOptions.partialUpdateRemoveRecordOnDelete())) {
-            return;
-        }
+        Options options = Options.fromMap(table.options());
+        MergeEngine mergeEngine = options.get(MERGE_ENGINE);
 
-        throw new UnsupportedOperationException(
-                String.format(
-                        "Merge engine %s can not support batch delete.",
-                        coreOptions.mergeEngine()));
+        switch (mergeEngine) {
+            case DEDUPLICATE:
+                return;
+            case PARTIAL_UPDATE:
+                if (options.get(PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE)
+                        || options.get(PARTIAL_UPDATE_REMOVE_RECORD_ON_SEQUENCE_GROUP) != null) {
+                    return;
+                } else {
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Merge engine %s doesn't support batch delete by default. To support batch delete, "
+                                            + "please set %s to true when there is no %s or set %s.",
+                                    mergeEngine,
+                                    PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE.key(),
+                                    SEQUENCE_GROUP,
+                                    PARTIAL_UPDATE_REMOVE_RECORD_ON_SEQUENCE_GROUP));
+                }
+            default:
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Merge engine %s can not support batch delete.", mergeEngine));
+        }
     }
 
     private boolean canPushDownDeleteFilter() {
