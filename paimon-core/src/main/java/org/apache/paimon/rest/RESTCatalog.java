@@ -38,6 +38,7 @@ import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.CredentialsProvider;
 import org.apache.paimon.rest.auth.CredentialsProviderFactory;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
+import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
@@ -87,9 +88,11 @@ import java.util.concurrent.ScheduledExecutorService;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
+import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternalRow;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -294,6 +297,9 @@ public class RESTCatalog implements Catalog {
     public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException {
         try {
+            checkNotBranch(identifier, "createTable");
+            checkNotSystemTable(identifier, "createTable");
+            validateAutoCreateClose(schema.options());
             CreateTableRequest request = new CreateTableRequest(identifier, schema);
             client.post(
                     resourcePaths.tables(identifier.getDatabaseName()),
@@ -304,6 +310,14 @@ public class RESTCatalog implements Catalog {
             if (!ignoreIfExists) {
                 throw new TableAlreadyExistException(identifier);
             }
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(identifier.getDatabaseName());
+        } catch (BadRequestException e) {
+            throw new RuntimeException(new IllegalArgumentException(e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -333,6 +347,7 @@ public class RESTCatalog implements Catalog {
     public void alterTable(
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
+        checkNotSystemTable(identifier, "alterTable");
         try {
             AlterTableRequest request = new AlterTableRequest(changes);
             client.post(
@@ -342,8 +357,14 @@ public class RESTCatalog implements Catalog {
                     headers());
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
-                throw new TableNotExistException(identifier);
+                if (e.resourceType().equals("table")) {
+                    throw new TableNotExistException(identifier);
+                } else if (e.resourceType().equals("column")) {
+                    throw new ColumnNotExistException(identifier, e.resourceName());
+                }
             }
+        } catch (AlreadyExistsException e) {
+            throw new ColumnAlreadyExistException(identifier, e.resourceName());
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         }

@@ -125,10 +125,19 @@ public class HttpClient implements RESTClient {
         try (Response response = okHttpClient.newCall(request).execute()) {
             String responseBodyStr = response.body() != null ? response.body().string() : null;
             if (!response.isSuccessful()) {
-                ErrorResponse error =
-                        new ErrorResponse(
-                                responseBodyStr != null ? responseBodyStr : "response body is null",
-                                response.code());
+                ErrorResponse error;
+                try {
+                    error = mapper.readValue(responseBodyStr, ErrorResponse.class);
+                } catch (JsonProcessingException e) {
+                    error =
+                            new ErrorResponse(
+                                    null,
+                                    null,
+                                    responseBodyStr != null
+                                            ? responseBodyStr
+                                            : "response body is null",
+                                    response.code());
+                }
                 errorHandler.accept(error);
             }
             if (responseType != null && responseBodyStr != null) {

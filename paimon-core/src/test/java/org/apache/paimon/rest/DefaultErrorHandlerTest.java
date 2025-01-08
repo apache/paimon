@@ -80,6 +80,6 @@ public class DefaultErrorHandlerTest {
     }
 
     private ErrorResponse generateErrorResponse(int code) {
-        return new ErrorResponse("message", code, new ArrayList<String>());
+        return new ErrorResponse(null, null, "message", code, new ArrayList<String>());
     }
 }

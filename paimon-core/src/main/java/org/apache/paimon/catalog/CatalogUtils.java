@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
@@ -30,6 +31,7 @@ import java.util.Map;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for {@link Catalog}. */
 public class CatalogUtils {
@@ -98,6 +100,17 @@ public class CatalogUtils {
                                     + "please modify the table with the default branch.",
                             method, identifier));
         }
+    }
+
+    public static void validateAutoCreateClose(Map<String, String> options) {
+        checkArgument(
+                !Boolean.parseBoolean(
+                        options.getOrDefault(
+                                CoreOptions.AUTO_CREATE.key(),
+                                CoreOptions.AUTO_CREATE.defaultValue().toString())),
+                String.format(
+                        "The value of %s property should be %s.",
+                        CoreOptions.AUTO_CREATE.key(), Boolean.FALSE));
     }
 
     public static Table createSystemTable(Identifier identifier, Table originTable)

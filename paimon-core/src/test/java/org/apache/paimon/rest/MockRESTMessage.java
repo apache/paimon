@@ -90,8 +90,9 @@ public class MockRESTMessage {
         return new ListDatabasesResponse(databaseNameList);
     }
 
-    public static ErrorResponse noSuchResourceExceptionErrorResponse() {
-        return new ErrorResponse("message", 404, new ArrayList<>());
+    public static ErrorResponse noSuchResourceExceptionErrorResponse(
+            String resourceType, String resourceName) {
+        return new ErrorResponse(resourceType, resourceName, "message", 404, new ArrayList<>());
     }
 
     public static AlterDatabaseRequest alterDatabaseRequest() {

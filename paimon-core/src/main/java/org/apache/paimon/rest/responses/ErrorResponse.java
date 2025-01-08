@@ -36,8 +36,16 @@ import java.util.List;
 public class ErrorResponse implements RESTResponse {
 
     private static final String FIELD_MESSAGE = "message";
+    private static final String FIELD_RESOURCE_TYPE = "resourceType";
+    private static final String FIELD_RESOURCE_NAME = "resourceName";
     private static final String FIELD_CODE = "code";
     private static final String FIELD_STACK = "stack";
+
+    @JsonProperty(FIELD_RESOURCE_TYPE)
+    private final String resourceType;
+
+    @JsonProperty(FIELD_RESOURCE_NAME)
+    private final String resourceName;
 
     @JsonProperty(FIELD_MESSAGE)
     private final String message;
@@ -48,7 +56,9 @@ public class ErrorResponse implements RESTResponse {
     @JsonProperty(FIELD_STACK)
     private final List<String> stack;
 
-    public ErrorResponse(String message, Integer code) {
+    public ErrorResponse(String resourceType, String resourceName, String message, Integer code) {
+        this.resourceType = resourceType;
+        this.resourceName = resourceName;
         this.code = code;
         this.message = message;
         this.stack = new ArrayList<String>();
@@ -56,23 +66,31 @@ public class ErrorResponse implements RESTResponse {
 
     @JsonCreator
     public ErrorResponse(
+            @JsonProperty(FIELD_RESOURCE_TYPE) String resourceType,
+            @JsonProperty(FIELD_RESOURCE_NAME) String resourceName,
             @JsonProperty(FIELD_MESSAGE) String message,
             @JsonProperty(FIELD_CODE) int code,
             @JsonProperty(FIELD_STACK) List<String> stack) {
+        this.resourceType = resourceType;
+        this.resourceName = resourceName;
         this.message = message;
         this.code = code;
         this.stack = stack;
     }
 
-    public ErrorResponse(String message, int code, Throwable throwable) {
-        this.message = message;
-        this.code = code;
-        this.stack = getStackFromThrowable(throwable);
-    }
-
     @JsonGetter(FIELD_MESSAGE)
     public String getMessage() {
         return message;
+    }
+
+    @JsonGetter(FIELD_RESOURCE_TYPE)
+    public String getResourceType() {
+        return resourceType;
+    }
+
+    @JsonGetter(FIELD_RESOURCE_NAME)
+    public String getResourceName() {
+        return resourceName;
     }
 
     @JsonGetter(FIELD_CODE)

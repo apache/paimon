@@ -30,6 +30,7 @@ import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
+import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
@@ -124,10 +125,34 @@ public class MockRESTCatalogServer {
                     }
                     return new MockResponse().setResponseCode(404);
                 } catch (Catalog.DatabaseNotExistException e) {
-                    return new MockResponse().setResponseCode(404);
+                    response = new ErrorResponse("database", e.database(), e.getMessage(), 404);
+                    return mockResponse(response, 404);
+                } catch (Catalog.TableNotExistException e) {
+                    response =
+                            new ErrorResponse(
+                                    "table", e.identifier().getTableName(), e.getMessage(), 404);
+                    return mockResponse(response, 404);
+                } catch (Catalog.ColumnNotExistException e) {
+                    response = new ErrorResponse("column", e.column(), e.getMessage(), 404);
+                    return mockResponse(response, 404);
+                } catch (Catalog.TableAlreadyExistException e) {
+                    response =
+                            new ErrorResponse(
+                                    "table", e.identifier().getTableName(), e.getMessage(), 409);
+                    return mockResponse(response, 409);
                 } catch (Catalog.ColumnAlreadyExistException e) {
-                    return new MockResponse().setResponseCode(404);
+                    response = new ErrorResponse("column", e.column(), e.getMessage(), 409);
+                    return mockResponse(response, 409);
+                } catch (IllegalArgumentException e) {
+                    response = new ErrorResponse(null, null, e.getMessage(), 400);
+                    return mockResponse(response, 400);
                 } catch (Exception e) {
+                    if (e.getCause() instanceof IllegalArgumentException) {
+                        response =
+                                new ErrorResponse(
+                                        null, null, e.getCause().getCause().getMessage(), 400);
+                        return mockResponse(response, 400);
+                    }
                     return new MockResponse().setResponseCode(500);
                 }
             }
@@ -172,7 +197,7 @@ public class MockRESTCatalogServer {
         if (request.getMethod().equals("POST")) {
             CreateTableRequest requestBody =
                     mapper.readValue(request.getBody().readUtf8(), CreateTableRequest.class);
-            catalog.createTable(requestBody.getIdentifier(), requestBody.getSchema(), true);
+            catalog.createTable(requestBody.getIdentifier(), requestBody.getSchema(), false);
             response = new GetTableResponse("", 1L, requestBody.getSchema());
             return mockResponse(response, 200);
         } else if (request.getMethod().equals("GET")) {

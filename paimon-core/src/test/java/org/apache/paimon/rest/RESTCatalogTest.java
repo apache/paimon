@@ -132,7 +132,8 @@ public class RESTCatalogTest {
     @Test
     public void testDropDatabaseWhenNoExistAndIgnoreIfNotExistsIsFalse() throws Exception {
         String name = MockRESTMessage.databaseName();
-        ErrorResponse response = MockRESTMessage.noSuchResourceExceptionErrorResponse();
+        ErrorResponse response =
+                MockRESTMessage.noSuchResourceExceptionErrorResponse("database", name);
         mockResponse(mapper.writeValueAsString(response), 404);
         assertThrows(
                 Catalog.DatabaseNotExistException.class,
@@ -142,7 +143,8 @@ public class RESTCatalogTest {
     @Test
     public void testDropDatabaseWhenNoExistAndIgnoreIfNotExistsIsTrue() throws Exception {
         String name = MockRESTMessage.databaseName();
-        ErrorResponse response = MockRESTMessage.noSuchResourceExceptionErrorResponse();
+        ErrorResponse response =
+                MockRESTMessage.noSuchResourceExceptionErrorResponse("database", name);
         mockResponse(mapper.writeValueAsString(response), 404);
         assertDoesNotThrow(() -> restCatalog.dropDatabase(name, true, true));
     }
@@ -180,7 +182,8 @@ public class RESTCatalogTest {
     public void testAlterDatabaseWhenDatabaseNotExistAndIgnoreIfNotExistsIsFalse()
             throws Exception {
         String name = MockRESTMessage.databaseName();
-        ErrorResponse response = MockRESTMessage.noSuchResourceExceptionErrorResponse();
+        ErrorResponse response =
+                MockRESTMessage.noSuchResourceExceptionErrorResponse("database", name);
         mockResponse(mapper.writeValueAsString(response), 404);
         assertThrows(
                 Catalog.DatabaseNotExistException.class,
@@ -190,7 +193,8 @@ public class RESTCatalogTest {
     @Test
     public void testAlterDatabaseWhenDatabaseNotExistAndIgnoreIfNotExistsIsTrue() throws Exception {
         String name = MockRESTMessage.databaseName();
-        ErrorResponse response = MockRESTMessage.noSuchResourceExceptionErrorResponse();
+        ErrorResponse response =
+                MockRESTMessage.noSuchResourceExceptionErrorResponse("database", name);
         mockResponse(mapper.writeValueAsString(response), 404);
         assertDoesNotThrow(() -> restCatalog.alterDatabase(name, new ArrayList<>(), true));
     }

@@ -43,18 +43,20 @@ public class DefaultErrorHandler extends ErrorHandler {
         String message = error.getMessage();
         switch (code) {
             case 400:
-                throw new BadRequestException(String.format("Malformed request: %s", message));
+                throw new BadRequestException(String.format("%s", message));
             case 401:
                 throw new NotAuthorizedException("Not authorized: %s", message);
             case 403:
                 throw new ForbiddenException("Forbidden: %s", message);
             case 404:
-                throw new NoSuchResourceException("%s", message);
+                throw new NoSuchResourceException(
+                        error.getResourceType(), error.getResourceName(), "%s", message);
             case 405:
             case 406:
                 break;
             case 409:
-                throw new AlreadyExistsException("%s", message);
+                throw new AlreadyExistsException(
+                        error.getResourceType(), error.getResourceName(), "%s", message);
             case 500:
                 throw new ServiceFailureException("Server error: %s", message);
             case 501:

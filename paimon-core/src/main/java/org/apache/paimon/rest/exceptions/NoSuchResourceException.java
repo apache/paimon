@@ -21,7 +21,21 @@ package org.apache.paimon.rest.exceptions;
 /** Exception thrown on HTTP 404 means a resource not exists. */
 public class NoSuchResourceException extends RESTException {
 
-    public NoSuchResourceException(String message, Object... args) {
+    private final String resourceType;
+    private final String resourceName;
+
+    public NoSuchResourceException(
+            String resourceType, String resourceName, String message, Object... args) {
         super(message, args);
+        this.resourceType = resourceType;
+        this.resourceName = resourceName;
+    }
+
+    public String resourceType() {
+        return resourceType;
+    }
+
+    public String resourceName() {
+        return resourceName;
     }
 }

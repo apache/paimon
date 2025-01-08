@@ -18,30 +18,25 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.Assert.assertThrows;
 
 /** RESTCatalog test with mock server. */
-public class RESTCatalogMockServerTest {
+public class RESTCatalogMockServerTest extends CatalogTestBase {
     MockRESTCatalogServer mockRESTCatalogServer;
     private String serverUrl;
-    protected String warehouse;
-    protected Catalog catalog;
-
-    @TempDir java.nio.file.Path tempFile;
 
     @BeforeEach
     public void setUp() throws Exception {
-        warehouse = tempFile.toUri().toString();
+        super.setUp();
         String initToken = "init_token";
         mockRESTCatalogServer = new MockRESTCatalogServer(warehouse, initToken);
         mockRESTCatalogServer.start();

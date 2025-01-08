@@ -70,7 +70,8 @@ public class RESTObjectMapperTest {
     public void errorResponseParseTest() throws Exception {
         String message = "message";
         Integer code = 400;
-        ErrorResponse response = new ErrorResponse(message, code, new ArrayList<String>());
+        ErrorResponse response =
+                new ErrorResponse(null, null, message, code, new ArrayList<String>());
         String responseStr = mapper.writeValueAsString(response);
         ErrorResponse parseData = mapper.readValue(responseStr, ErrorResponse.class);
         assertEquals(message, parseData.getMessage());

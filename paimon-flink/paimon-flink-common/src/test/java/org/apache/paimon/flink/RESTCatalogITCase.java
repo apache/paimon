@@ -60,11 +60,11 @@ public class RESTCatalogITCase extends CatalogITCaseBase {
         sql("CREATE DATABASE mydb");
         sql("CREATE TABLE mydb.T1 (a INT, b INT)");
         String result = sql("DESCRIBE mydb.T1").toString();
-        sql("DROP TABLE mydb.T1");
-        sql("DROP DATABASE mydb");
         assertThat(result)
                 .isEqualTo(
                         "[+I[a, INT, true, null, null, null], +I[b, INT, true, null, null, null]]");
+        sql("DROP TABLE mydb.T1");
+        sql("DROP DATABASE mydb");
     }
 
     @Override
