@@ -67,11 +67,6 @@ public class MockRESTCatalogServer {
                 CatalogFactory.createCatalog(
                         CatalogContext.create(conf), this.getClass().getClassLoader());
         this.dispatcher = initDispatcher(catalog, authToken);
-        try {
-            catalog.createDatabase("default", true);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
         MockWebServer mockWebServer = new MockWebServer();
         mockWebServer.setDispatcher(dispatcher);
         server = mockWebServer;
@@ -156,6 +151,9 @@ public class MockRESTCatalogServer {
                 } catch (Catalog.ColumnNotExistException e) {
                     response = new ErrorResponse("column", e.column(), e.getMessage(), 404);
                     return mockResponse(response, 404);
+                } catch (Catalog.DatabaseAlreadyExistException e) {
+                    response = new ErrorResponse("database", e.database(), e.getMessage(), 409);
+                    return mockResponse(response, 409);
                 } catch (Catalog.TableAlreadyExistException e) {
                     response =
                             new ErrorResponse(
@@ -197,7 +195,7 @@ public class MockRESTCatalogServer {
             CreateDatabaseRequest requestBody =
                     mapper.readValue(request.getBody().readUtf8(), CreateDatabaseRequest.class);
             String databaseName = requestBody.getName();
-            catalog.createDatabase(databaseName, true);
+            catalog.createDatabase(databaseName, false);
             response = new CreateDatabaseResponse(databaseName, requestBody.getOptions());
             return mockResponse(response, 200);
         }
@@ -212,7 +210,7 @@ public class MockRESTCatalogServer {
             response = new GetDatabaseResponse(database.name(), database.options());
             return mockResponse(response, 200);
         } else if (request.getMethod().equals("DELETE")) {
-            catalog.dropDatabase(databaseName, true, true);
+            catalog.dropDatabase(databaseName, false, true);
             return new MockResponse().setResponseCode(200);
         }
         return new MockResponse().setResponseCode(404);
@@ -253,13 +251,13 @@ public class MockRESTCatalogServer {
             Identifier identifier = Identifier.create(databaseName, tableName);
             AlterTableRequest requestBody =
                     mapper.readValue(request.getBody().readUtf8(), AlterTableRequest.class);
-            catalog.alterTable(identifier, requestBody.getChanges(), true);
+            catalog.alterTable(identifier, requestBody.getChanges(), false);
             FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
             response = new GetTableResponse("", table.schema().id(), table.schema().toSchema());
             return mockResponse(response, 200);
         } else if (request.getMethod().equals("DELETE")) {
             Identifier identifier = Identifier.create(databaseName, tableName);
-            catalog.dropTable(identifier, true);
+            catalog.dropTable(identifier, false);
             return new MockResponse().setResponseCode(200);
         }
         return new MockResponse().setResponseCode(404);

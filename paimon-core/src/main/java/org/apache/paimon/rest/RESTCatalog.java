@@ -376,12 +376,16 @@ public class RESTCatalog implements Catalog {
             throw new UnsupportedOperationException(e.getMessage());
         } catch (ServiceFailureException e) {
             throw new IllegalStateException(e.getMessage());
+        } catch (BadRequestException e) {
+            throw new RuntimeException(new IllegalArgumentException(e.getMessage()));
         }
     }
 
     @Override
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
             throws TableNotExistException {
+        checkNotBranch(identifier, "dropTable");
+        checkNotSystemTable(identifier, "dropTable");
         try {
             client.delete(
                     resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),
