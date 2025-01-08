@@ -1444,11 +1444,18 @@ public class HiveCatalog extends AbstractCatalog {
 
     protected boolean tableExists(Identifier identifier) {
         try {
-            getHmsTable(identifier);
-        } catch (Exception e) {
-            return false;
+            return clients.run(
+                    client ->
+                            client.tableExists(
+                                    identifier.getDatabaseName(), identifier.getTableName()));
+        } catch (TException e) {
+            throw new RuntimeException(
+                    "Cannot determine if table " + identifier.getFullName() + "exists.", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(
+                    "Interrupted in call to tableExists " + identifier.getFullName(), e);
         }
-        return true;
     }
 
     public int getBatchGetTableSize() {
