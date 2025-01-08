@@ -288,13 +288,15 @@ Paimon also support http-report partition mark done action, this action will rep
 - partition.mark-done-action: http-report
 - partition.mark-done-action.url : Action will report the partition to the remote http server.
 - partition.mark-done-action.timeout : Http client connection timeout and default is 5s.
+- partition.mark-done-action.params : Http client request params in the request body json.
 
-Http Request body :
+Http Post request body :
 ```json
 {
     "table": "table fullName",
     "path": "table location path",
-    "partition": "mark done partition"
+    "partition": "mark done partition",
+    "params" : "custom params"
 }
 ```
 Http Response body :

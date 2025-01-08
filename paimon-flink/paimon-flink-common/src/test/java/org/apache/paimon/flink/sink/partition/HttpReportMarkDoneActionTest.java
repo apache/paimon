@@ -49,6 +49,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.concurrent.TimeUnit;
 
+import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION_PARAMS;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION_TIMEOUT;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION_URL;
 import static org.apache.paimon.utils.InternalRowUtilsTest.ROW_TYPE;
@@ -60,6 +61,7 @@ public class HttpReportMarkDoneActionTest {
     private static TestHttpWebServer server;
 
     private static final String partition = "partition";
+    private static String params = "key1=value1,key2=value2";
     private static FileStoreTable fileStoreTable;
     @Rule public TemporaryFolder folder = new TemporaryFolder();
 
@@ -92,6 +94,15 @@ public class HttpReportMarkDoneActionTest {
         httpReportMarkDoneAction.markDone(partition);
         RecordedRequest request2 = server.takeRequest(10, TimeUnit.SECONDS);
         assertRequest(request2);
+
+        // test params is null.
+        params = null;
+        HttpReportMarkDoneAction httpReportMarkDoneAction3 = createHttpReportMarkDoneAction();
+        HttpReportMarkDoneResponse expectedResponse3 = new HttpReportMarkDoneResponse("success");
+        server.enqueueResponse(expectedResponse3, 200);
+        httpReportMarkDoneAction3.markDone(partition);
+        RecordedRequest request3 = server.takeRequest(10, TimeUnit.SECONDS);
+        assertRequest(request3);
     }
 
     @Test
@@ -129,7 +140,8 @@ public class HttpReportMarkDoneActionTest {
         assertThat(
                         request.getPath().equals(fileStoreTable.location().toString())
                                 && request.getPartition().equals(partition)
-                                && request.getTable().equals(fileStoreTable.fullName()))
+                                && request.getTable().equals(fileStoreTable.fullName())
+                                && (params == null || params.equals(request.getParams())))
                 .isTrue();
     }
 
@@ -137,6 +149,9 @@ public class HttpReportMarkDoneActionTest {
         HashMap<String, String> httpOptions = new HashMap<>();
         httpOptions.put(PARTITION_MARK_DONE_ACTION_URL.key(), server.getBaseUrl());
         httpOptions.put(PARTITION_MARK_DONE_ACTION_TIMEOUT.key(), "2 s");
+        if (params != null) {
+            httpOptions.put(PARTITION_MARK_DONE_ACTION_PARAMS.key(), params);
+        }
         return new CoreOptions(httpOptions);
     }
 

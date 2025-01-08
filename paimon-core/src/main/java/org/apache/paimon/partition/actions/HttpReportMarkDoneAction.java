@@ -48,15 +48,21 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
 
     private final FileStoreTable fileStoreTable;
 
+    private final String params;
+
     private static final String RESPONSE_SUCCESS = "SUCCESS";
 
     public HttpReportMarkDoneAction(FileStoreTable fileStoreTable, CoreOptions options) {
+
         Preconditions.checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(options.httpReportMarkDoneActionUrl()),
                 String.format(
                         "Parameter %s must be non-empty when you use `http-report` partition mark done action.",
                         PARTITION_MARK_DONE_ACTION_URL.key()));
+
         this.fileStoreTable = fileStoreTable;
+        this.params = options.httpReportMarkDoneActionParams();
+
         HttpClientOptions httpClientOptions =
                 new HttpClientOptions(
                         options.httpReportMarkDoneActionUrl(),
@@ -74,6 +80,7 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
                 client.post(
                         null,
                         new HttpReportMarkDoneRequest(
+                                params,
                                 fileStoreTable.fullName(),
                                 fileStoreTable.location().toString(),
                                 partition),
@@ -105,6 +112,7 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
         private static final String MARK_DONE_PARTITION = "partition";
         private static final String TABLE = "table";
         private static final String PATH = "path";
+        private static final String PARAMS = "params";
 
         @JsonProperty(MARK_DONE_PARTITION)
         private final String partition;
@@ -115,11 +123,16 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
         @JsonProperty(PATH)
         private final String path;
 
+        @JsonProperty(PARAMS)
+        private final String params;
+
         @JsonCreator
         public HttpReportMarkDoneRequest(
+                @JsonProperty(PARAMS) String params,
                 @JsonProperty(TABLE) String table,
                 @JsonProperty(PATH) String path,
                 @JsonProperty(MARK_DONE_PARTITION) String partition) {
+            this.params = params;
             this.table = table;
             this.path = path;
             this.partition = partition;
@@ -138,6 +151,11 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
         @JsonGetter(PATH)
         public String getPath() {
             return path;
+        }
+
+        @JsonGetter(PARAMS)
+        public String getParams() {
+            return params;
         }
     }
 

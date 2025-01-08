@@ -1251,6 +1251,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Http client connect timeout, This can only be used by http-report partition mark done action.");
 
+    public static final ConfigOption<String> PARTITION_MARK_DONE_ACTION_PARAMS =
+            key("partition.mark-done-action.params")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Http client request parameters will be written to the request body, This can only be used by http-report partition mark done action.");
+
     public static final ConfigOption<Boolean> METASTORE_PARTITIONED_TABLE =
             key("metastore.partitioned-table")
                     .booleanType()
@@ -2285,6 +2292,10 @@ public class CoreOptions implements Serializable {
 
     public Duration httpReportMarkDoneActionTimeout() {
         return options.get(PARTITION_MARK_DONE_ACTION_TIMEOUT);
+    }
+
+    public String httpReportMarkDoneActionParams() {
+        return options.get(PARTITION_MARK_DONE_ACTION_PARAMS);
     }
 
     public String partitionMarkDoneCustomClass() {
