@@ -26,6 +26,7 @@ import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.exceptions.RESTException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.exceptions.ServiceUnavailableException;
+import org.apache.paimon.rest.exceptions.UnsupportedOperationException;
 import org.apache.paimon.rest.responses.ErrorResponse;
 
 /** Default error handler. */

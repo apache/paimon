@@ -152,6 +152,12 @@ public class MockRESTCatalogServer {
                                 new ErrorResponse(
                                         null, null, e.getCause().getCause().getMessage(), 400);
                         return mockResponse(response, 400);
+                    } else if (e instanceof UnsupportedOperationException) {
+                        response = new ErrorResponse(null, null, e.getMessage(), 501);
+                        return mockResponse(response, 501);
+                    } else if (e instanceof IllegalStateException) {
+                        response = new ErrorResponse(null, null, e.getMessage(), 500);
+                        return mockResponse(response, 500);
                     }
                     return new MockResponse().setResponseCode(500);
                 }
@@ -185,7 +191,7 @@ public class MockRESTCatalogServer {
             response = new GetDatabaseResponse(database.name(), database.options());
             return mockResponse(response, 200);
         } else if (request.getMethod().equals("DELETE")) {
-            catalog.dropDatabase(databaseName, true, false);
+            catalog.dropDatabase(databaseName, true, true);
             return new MockResponse().setResponseCode(200);
         }
         return new MockResponse().setResponseCode(404);

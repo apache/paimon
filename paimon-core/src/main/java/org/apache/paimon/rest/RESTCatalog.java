@@ -41,6 +41,7 @@ import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
+import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
@@ -367,6 +368,10 @@ public class RESTCatalog implements Catalog {
             throw new ColumnAlreadyExistException(identifier, e.resourceName());
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
+        } catch (org.apache.paimon.rest.exceptions.UnsupportedOperationException e) {
+            throw new UnsupportedOperationException(e.getMessage());
+        } catch (ServiceFailureException e) {
+            throw new IllegalStateException(e.getMessage());
         }
     }
 
