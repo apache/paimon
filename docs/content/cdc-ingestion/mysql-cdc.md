@@ -32,9 +32,10 @@ Paimon supports synchronizing changes from different databases using change data
 
 Download `CDC Bundled Jar` and put them under <FLINK_HOME>/lib/.
 
-| Version | Bundled Jar                                                                                                             |
-|---------|-------------------------------------------------------------------------------------------------------------------------|
-| 3.1.x   | <li> flink-sql-connector-mysql-cdc-3.1.x.jar <li> mysql-connector-java-8.0.27.jar                                       |
+| Version | Bundled Jar                                                                       |
+|---------|-----------------------------------------------------------------------------------|
+| 3.1.x   | <li> flink-sql-connector-mysql-cdc-3.1.x.jar <li> mysql-connector-java-8.0.27.jar |
+| 3.2.x   | <li> flink-sql-connector-mysql-cdc-3.2.x.jar <li> mysql-connector-java-8.0.27.jar |
 
 {{< hint danger >}}
 Only cdc 3.1+ is supported.
