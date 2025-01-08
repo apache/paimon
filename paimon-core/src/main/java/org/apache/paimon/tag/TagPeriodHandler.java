@@ -250,6 +250,10 @@ public interface TagPeriodHandler {
     }
 
     static TagPeriodHandler create(CoreOptions options) {
+        if (options.tagCustomDuration().isPresent()) {
+            return new CustomDurationTagPeriodHandler(options.tagCustomDuration().get());
+        }
+
         switch (options.tagCreationPeriod()) {
             case DAILY:
                 return new DailyTagPeriodHandler(options.tagPeriodFormatter());
@@ -257,12 +261,6 @@ public interface TagPeriodHandler {
                 return new HourlyTagPeriodHandler(options.tagPeriodFormatter());
             case TWO_HOURS:
                 return new TwoHoursTagPeriodHandler();
-            case CUSTOM_DURATION:
-                if (!options.tagCustomDuration().isPresent()) {
-                    throw new IllegalArgumentException(
-                            "tag.custom-duration must be set if use custom-duration");
-                }
-                return new CustomDurationTagPeriodHandler(options.tagCustomDuration().get());
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported " + options.tagCreationPeriod());

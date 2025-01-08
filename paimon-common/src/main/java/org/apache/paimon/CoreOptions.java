@@ -1243,10 +1243,10 @@ public class CoreOptions implements Serializable {
                     .withDescription("The date format for tag periods.");
 
     public static final ConfigOption<Duration> TAG_CUSTOM_DURATION =
-            key("tag.custom-duration")
+            key("tag.create-custom-duration")
                     .durationType()
                     .noDefaultValue()
-                    .withDescription("The custom duration for tag auto create periods.");
+                    .withDescription("The custom duration for tag auto create periods.If user set it, tag.creation-period would be invalid.");
 
     public static final ConfigOption<Integer> TAG_NUM_RETAINED_MAX =
             key("tag.num-retained-max")

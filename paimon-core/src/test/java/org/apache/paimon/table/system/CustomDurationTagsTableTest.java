@@ -41,9 +41,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Unit tests for {@link TagsTable}. */
 public class CustomDurationTagsTableTest extends TableTestBase {
 
-    private static final String tableName = "TagTestTable";
+    private static final String tableName = "3TagTestTable";
     private TagsTable tagsTable;
-    private TagManager tagManager;
     private FileStoreTable table;
 
     @BeforeEach
@@ -56,8 +55,7 @@ public class CustomDurationTagsTableTest extends TableTestBase {
                         .column("sales", DataTypes.INT())
                         .primaryKey("product_id")
                         .option("tag.automatic-creation", "watermark")
-                        .option("tag.creation-period", "custom-duration")
-                        .option("tag.custom-duration", "120 s")
+                        .option("tag.create-custom-duration", "120 s")
                         .build();
         catalog.createTable(identifier, schema, true);
         table = (FileStoreTable) catalog.getTable(identifier);
@@ -75,11 +73,10 @@ public class CustomDurationTagsTableTest extends TableTestBase {
                                 .getMillisecond()));
 
         tagsTable = (TagsTable) catalog.getTable(identifier(tableName + "$tags"));
-        tagManager = table.store().newTagManager();
     }
 
     @Test
-    void testTagsTable() throws Exception {
+    void testCreateTagsWithCustomDuration() throws Exception {
         List<InternalRow> result = read(tagsTable);
         assertThat(result.size()).isEqualTo(2);
         assertThat(result.get(0).getString(0).toString()).isEqualTo("202501071158");
