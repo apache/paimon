@@ -29,7 +29,6 @@ import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.metastore.AddPartitionTagCallback;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.ManifestsReader;
@@ -45,6 +44,7 @@ import org.apache.paimon.stats.StatsFile;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.table.PartitionHandler;
 import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.TagCallback;
@@ -345,11 +345,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             return null;
         }
 
-        MetastoreClient.Factory metastoreClientFactory =
-                catalogEnvironment.metastoreClientFactory();
-        MetastoreClient metastoreClient = null;
-        if (options.partitionedTableInMetastore() && metastoreClientFactory != null) {
-            metastoreClient = metastoreClientFactory.create();
+        PartitionHandler partitionHandler = null;
+        if (options.partitionedTableInMetastore()) {
+            partitionHandler = catalogEnvironment.partitionHandler();
         }
 
         return new PartitionExpire(
@@ -358,7 +356,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 PartitionExpireStrategy.createPartitionExpireStrategy(options, partitionType()),
                 newScan(),
                 newCommit(commitUser),
-                metastoreClient,
+                partitionHandler,
                 options.endInputCheckPartitionExpire(),
                 options.partitionExpireMaxNum());
     }
@@ -377,11 +375,12 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     public List<TagCallback> createTagCallbacks() {
         List<TagCallback> callbacks = new ArrayList<>(CallbackUtils.loadTagCallbacks(options));
         String partitionField = options.tagToPartitionField();
-        MetastoreClient.Factory metastoreClientFactory =
-                catalogEnvironment.metastoreClientFactory();
-        if (partitionField != null && metastoreClientFactory != null) {
-            callbacks.add(
-                    new AddPartitionTagCallback(metastoreClientFactory.create(), partitionField));
+
+        if (partitionField != null) {
+            PartitionHandler partitionHandler = catalogEnvironment.partitionHandler();
+            if (partitionHandler != null) {
+                callbacks.add(new AddPartitionTagCallback(partitionHandler, partitionField));
+            }
         }
         if (options.tagCreateSuccessFile()) {
             callbacks.add(new SuccessFileTagCallback(fileIO, newTagManager().tagDirectory()));

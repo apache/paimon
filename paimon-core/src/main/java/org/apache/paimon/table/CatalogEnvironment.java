@@ -18,8 +18,8 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.Lock;
 
 import javax.annotation.Nullable;
@@ -34,17 +34,17 @@ public class CatalogEnvironment implements Serializable {
     @Nullable private final Identifier identifier;
     @Nullable private final String uuid;
     private final Lock.Factory lockFactory;
-    @Nullable private final MetastoreClient.Factory metastoreClientFactory;
+    @Nullable private final CatalogLoader catalogLoader;
 
     public CatalogEnvironment(
             @Nullable Identifier identifier,
             @Nullable String uuid,
             Lock.Factory lockFactory,
-            @Nullable MetastoreClient.Factory metastoreClientFactory) {
+            @Nullable CatalogLoader catalogLoader) {
         this.identifier = identifier;
         this.uuid = uuid;
         this.lockFactory = lockFactory;
-        this.metastoreClientFactory = metastoreClientFactory;
+        this.catalogLoader = catalogLoader;
     }
 
     public static CatalogEnvironment empty() {
@@ -66,7 +66,10 @@ public class CatalogEnvironment implements Serializable {
     }
 
     @Nullable
-    public MetastoreClient.Factory metastoreClientFactory() {
-        return metastoreClientFactory;
+    public PartitionHandler partitionHandler() {
+        if (catalogLoader == null) {
+            return null;
+        }
+        return PartitionHandler.create(catalogLoader.load(), identifier);
     }
 }

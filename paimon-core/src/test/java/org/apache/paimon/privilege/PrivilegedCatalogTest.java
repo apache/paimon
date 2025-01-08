@@ -42,8 +42,10 @@ public class PrivilegedCatalogTest extends FileSystemCatalogTest {
     @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
-        getPrivilegeManager("anonymous", "anonymous").initializePrivilege(PASSWORD_ROOT);
-        catalog = new PrivilegedCatalog(catalog, getPrivilegeManager("root", PASSWORD_ROOT));
+        create(catalog, "anonymous", "anonymous")
+                .privilegeManager()
+                .initializePrivilege(PASSWORD_ROOT);
+        catalog = create(catalog, "root", PASSWORD_ROOT);
     }
 
     @Override
@@ -54,10 +56,8 @@ public class PrivilegedCatalogTest extends FileSystemCatalogTest {
 
         PrivilegedCatalog rootCatalog = ((PrivilegedCatalog) catalog);
         rootCatalog.createPrivilegedUser(USERNAME_TEST_USER, PASSWORD_TEST_USER);
-        Catalog userCatalog =
-                new PrivilegedCatalog(
-                        rootCatalog.wrapped(),
-                        getPrivilegeManager(USERNAME_TEST_USER, PASSWORD_TEST_USER));
+        Catalog userCatalog = create(rootCatalog.wrapped(), USERNAME_TEST_USER, PASSWORD_TEST_USER);
+
         FileStoreTable dataTable = (FileStoreTable) userCatalog.getTable(identifier);
 
         assertNoPrivilege(dataTable::snapshotManager);
@@ -65,10 +65,7 @@ public class PrivilegedCatalogTest extends FileSystemCatalogTest {
         assertNoPrivilege(() -> dataTable.snapshot(0));
 
         rootCatalog.grantPrivilegeOnTable(USERNAME_TEST_USER, identifier, PrivilegeType.SELECT);
-        userCatalog =
-                new PrivilegedCatalog(
-                        rootCatalog.wrapped(),
-                        getPrivilegeManager(USERNAME_TEST_USER, PASSWORD_TEST_USER));
+        userCatalog = create(rootCatalog.wrapped(), USERNAME_TEST_USER, PASSWORD_TEST_USER);
         FileStoreTable dataTable2 = (FileStoreTable) userCatalog.getTable(identifier);
 
         assertThat(dataTable2.snapshotManager().latestSnapshotId()).isNull();
@@ -76,8 +73,8 @@ public class PrivilegedCatalogTest extends FileSystemCatalogTest {
         assertThatThrownBy(() -> dataTable2.snapshot(0)).isNotNull();
     }
 
-    private FileBasedPrivilegeManager getPrivilegeManager(String user, String password) {
-        return new FileBasedPrivilegeManager(warehouse, fileIO, user, password);
+    private PrivilegedCatalog create(Catalog catalog, String user, String password) {
+        return new PrivilegedCatalog(catalog, warehouse, fileIO, user, password);
     }
 
     private void assertNoPrivilege(Executable executable) {

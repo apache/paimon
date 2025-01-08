@@ -19,11 +19,11 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.hive.annotation.Minio;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.privilege.NoPrivilegeException;
 import org.apache.paimon.s3.MinioTestContainer;
@@ -1513,11 +1513,11 @@ public abstract class HiveCatalogITCaseBase {
         Identifier identifier = new Identifier("test_db", "mark_done_t2");
         Table table = catalog.getTable(identifier);
         assertThat(table).isInstanceOf(FileStoreTable.class);
-        FileStoreTable fileStoreTable = (FileStoreTable) table;
-        MetastoreClient.Factory metastoreClientFactory =
-                fileStoreTable.catalogEnvironment().metastoreClientFactory();
-        HiveMetastoreClient metastoreClient = (HiveMetastoreClient) metastoreClientFactory.create();
-        IMetaStoreClient hmsClient = metastoreClient.client();
+        while (catalog instanceof DelegateCatalog) {
+            catalog = ((DelegateCatalog) catalog).wrapped();
+        }
+        HiveCatalog hiveCatalog = (HiveCatalog) catalog;
+        IMetaStoreClient hmsClient = hiveCatalog.getHmsClient();
         Map<String, String> partitionSpec = Collections.singletonMap("dt", "20240501");
         // LOAD_DONE event is not marked by now.
         assertThat(

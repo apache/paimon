@@ -20,6 +20,7 @@ package org.apache.paimon.jdbc;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Database;
@@ -147,6 +148,11 @@ public class JdbcCatalog extends AbstractCatalog {
     @Override
     public String warehouse() {
         return warehouse;
+    }
+
+    @Override
+    public CatalogLoader catalogLoader() {
+        return new JdbcCatalogLoader(fileIO, catalogKey, options, warehouse);
     }
 
     @Override

@@ -163,6 +163,11 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
+    public CatalogLoader catalogLoader() {
+        return new FileSystemCatalogLoader(fileIO, warehouse, catalogOptions);
+    }
+
+    @Override
     public boolean caseSensitive() {
         return catalogOptions.getOptional(CASE_SENSITIVE).orElse(true);
     }

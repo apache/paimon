@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
@@ -162,6 +163,11 @@ public class RESTCatalog implements Catalog {
     @Override
     public Map<String, String> options() {
         return options.toMap();
+    }
+
+    @Override
+    public CatalogLoader catalogLoader() {
+        throw new UnsupportedOperationException("Not supported yet.");
     }
 
     @Override
