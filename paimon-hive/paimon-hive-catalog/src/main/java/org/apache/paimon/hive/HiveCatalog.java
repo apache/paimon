@@ -467,7 +467,7 @@ public class HiveCatalog extends AbstractCatalog {
         InternalRowPartitionComputer partitionComputer =
                 new InternalRowPartitionComputer(
                         mainTable.coreOptions().partitionDefaultName(),
-                        mainTable.rowType(),
+                        mainTable.rowType().project(mainTable.partitionKeys()),
                         mainTable.partitionKeys().toArray(new String[0]),
                         mainTable.coreOptions().legacyPartitionName());
         List<String> branchNames = new ArrayList<>(mainTable.branchManager().branches());
