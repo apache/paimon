@@ -29,6 +29,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
@@ -114,7 +115,27 @@ public class MockRESTCatalogServer {
                         String databaseName = resources[0];
                         boolean isTables = resources.length == 2 && "tables".equals(resources[1]);
                         boolean isTable = resources.length == 3 && "tables".equals(resources[1]);
-                        if (isTable) {
+                        if (resources.length == 4 && "rename".equals(resources[3])) {
+                            RenameTableRequest requestBody =
+                                    mapper.readValue(
+                                            request.getBody().readUtf8(), RenameTableRequest.class);
+                            catalog.renameTable(
+                                    Identifier.create(databaseName, resources[2]),
+                                    requestBody.getNewIdentifier(),
+                                    false);
+                            FileStoreTable table =
+                                    (FileStoreTable)
+                                            catalog.getTable(requestBody.getNewIdentifier());
+                            response =
+                                    new GetTableResponse(
+                                            AbstractCatalog.newTableLocation(
+                                                            catalog.warehouse(),
+                                                            requestBody.getNewIdentifier())
+                                                    .toString(),
+                                            table.schema().id(),
+                                            table.schema().toSchema());
+                            return mockResponse(response, 200);
+                        } else if (isTable) {
                             String tableName = resources[2];
                             return tableApiHandler(catalog, request, databaseName, tableName);
                         } else if (isTables) {
