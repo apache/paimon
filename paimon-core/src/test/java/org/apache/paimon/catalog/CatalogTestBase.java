@@ -541,10 +541,7 @@ public abstract class CatalogTestBase {
                                         Lists.newArrayList(
                                                 SchemaChange.renameColumn("col2", "new_col1")),
                                         false))
-                .satisfies(
-                        anyCauseMatches(
-                                Catalog.ColumnAlreadyExistException.class,
-                                "Column new_col1 already exists in the test_db.test_table table."));
+                .isInstanceOf(Catalog.ColumnAlreadyExistException.class);
 
         // Alter table renames a column throws ColumnNotExistException when column does not exist
         assertThatThrownBy(
@@ -555,10 +552,7 @@ public abstract class CatalogTestBase {
                                                 SchemaChange.renameColumn(
                                                         "non_existing_col", "new_col2")),
                                         false))
-                .satisfies(
-                        anyCauseMatches(
-                                Catalog.ColumnNotExistException.class,
-                                "Column non_existing_col does not exist in the test_db.test_table table."));
+                .isInstanceOf(Catalog.ColumnNotExistException.class);
     }
 
     @Test

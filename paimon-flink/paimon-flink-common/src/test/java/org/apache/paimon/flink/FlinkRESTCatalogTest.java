@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.MockRESTCatalogServer;
 import org.apache.paimon.rest.RESTCatalogFactory;
 import org.apache.paimon.rest.RESTCatalogOptions;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;

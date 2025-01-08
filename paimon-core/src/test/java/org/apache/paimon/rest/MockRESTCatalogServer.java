@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink;
+package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
@@ -26,9 +26,7 @@ import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.rest.RESTCatalogInternalOptions;
-import org.apache.paimon.rest.RESTObjectMapper;
-import org.apache.paimon.rest.RESTResponse;
+import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
@@ -48,8 +46,6 @@ import okhttp3.mockwebserver.RecordedRequest;
 import java.io.IOException;
 import java.util.List;
 
-import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
-
 /** Mock REST server for testing. */
 public class MockRESTCatalogServer {
 
@@ -64,7 +60,6 @@ public class MockRESTCatalogServer {
         authToken = initToken;
         Options conf = new Options();
         conf.setString("warehouse", warehouse);
-        conf.set(LOG_SYSTEM_AUTO_REGISTER, true);
         this.catalog =
                 CatalogFactory.createCatalog(
                         CatalogContext.create(conf), this.getClass().getClassLoader());
@@ -146,6 +141,19 @@ public class MockRESTCatalogServer {
                                                 table.schema().id(),
                                                 table.schema().toSchema());
                                 return mockResponse(response, 200);
+                            } else if (request.getMethod().equals("POST")) {
+                                Identifier identifier = Identifier.create(databaseName, tableName);
+                                AlterTableRequest requestBody =
+                                        mapper.readValue(
+                                                request.getBody().readUtf8(),
+                                                AlterTableRequest.class);
+                                catalog.alterTable(identifier, requestBody.getChanges(), true);
+                                FileStoreTable table =
+                                        (FileStoreTable) catalog.getTable(identifier);
+                                response =
+                                        new GetTableResponse(
+                                                "", table.schema().id(), table.schema().toSchema());
+                                return mockResponse(response, 200);
                             }
                         } else if (isTables) {
                             //  /v1/prefix/databases/db1/tables
@@ -173,8 +181,10 @@ public class MockRESTCatalogServer {
                     return new MockResponse().setResponseCode(404);
                 } catch (Catalog.DatabaseNotExistException e) {
                     return new MockResponse().setResponseCode(404);
+                } catch (Catalog.ColumnAlreadyExistException e) {
+                    return new MockResponse().setResponseCode(404);
                 } catch (Exception e) {
-                    throw new RuntimeException(e);
+                    return new MockResponse().setResponseCode(500);
                 }
             }
         };
