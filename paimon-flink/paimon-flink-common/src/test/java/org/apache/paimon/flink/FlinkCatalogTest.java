@@ -145,22 +145,7 @@ public class FlinkCatalogTest {
     }
 
     private ResolvedSchema createSchema() {
-        return new ResolvedSchema(
-                Arrays.asList(
-                        Column.physical("first", DataTypes.STRING()),
-                        Column.physical("second", DataTypes.INT()),
-                        Column.physical("third", DataTypes.STRING()),
-                        Column.physical(
-                                "four",
-                                DataTypes.ROW(
-                                        DataTypes.FIELD("f1", DataTypes.STRING()),
-                                        DataTypes.FIELD("f2", DataTypes.INT()),
-                                        DataTypes.FIELD(
-                                                "f3",
-                                                DataTypes.MAP(
-                                                        DataTypes.STRING(), DataTypes.INT()))))),
-                Collections.emptyList(),
-                null);
+        return FlinkCatalogTestUtil.createSchema();
     }
 
     private List<String> createPartitionKeys() {
@@ -192,14 +177,7 @@ public class FlinkCatalogTest {
     }
 
     private CatalogTable createTable(Map<String, String> options) {
-        ResolvedSchema resolvedSchema = this.createSchema();
-        CatalogTable origin =
-                CatalogTable.of(
-                        Schema.newBuilder().fromResolvedSchema(resolvedSchema).build(),
-                        "test comment",
-                        Collections.emptyList(),
-                        options);
-        return new ResolvedCatalogTable(origin, resolvedSchema);
+        return FlinkCatalogTestUtil.createTable(options);
     }
 
     private CatalogTable createPartitionedTable(Map<String, String> options) {
@@ -364,7 +342,7 @@ public class FlinkCatalogTest {
     @MethodSource("streamingOptionProvider")
     public void testCreateTable_Streaming(Map<String, String> options) throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
-        CatalogTable table = createTable(options);
+        CatalogTable table = FlinkCatalogTestUtil.createTable(options);
         catalog.createTable(path1, table, false);
         checkCreateTable(path1, table, (CatalogTable) catalog.getTable(path1));
     }

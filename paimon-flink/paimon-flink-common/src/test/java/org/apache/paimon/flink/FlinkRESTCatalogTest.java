@@ -27,6 +27,7 @@ import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 
 import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.table.catalog.CatalogDatabase;
+import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.junit.After;
@@ -34,13 +35,17 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
+import org.testcontainers.shaded.com.google.common.collect.ImmutableList;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
+import static org.apache.paimon.flink.FlinkCatalogTestUtil.createTable;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
@@ -113,5 +118,28 @@ public class FlinkRESTCatalogTest {
         assertThatThrownBy(() -> catalog.getDatabase(nonExistDbPath.getDatabaseName()))
                 .isInstanceOf(DatabaseNotExistException.class)
                 .hasMessageContaining("Database non does not exist in Catalog test-catalog.");
+    }
+
+    @Test
+    public void testCreateTable_Streaming() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
+        Map<String, String> options = new HashMap<>();
+        options.put("is_streaming", String.valueOf(true));
+        CatalogTable table = createTable(options);
+        catalog.createTable(path1, table, false);
+        CatalogTable tableFromServer = (CatalogTable) catalog.getTable(path1);
+        checkOptions(options, tableFromServer.getOptions());
+        assertEquals(tableFromServer.getTableKind(), table.getTableKind());
+        assertEquals(tableFromServer.getUnresolvedSchema(), table.getUnresolvedSchema());
+    }
+
+    private void checkOptions(Map<String, String> expected, Map<String, String> actual) {
+        List<String> ignoreKeys = ImmutableList.of(FlinkCatalogOptions.REGISTER_TIMEOUT.key());
+        for (Map.Entry<String, String> entry : expected.entrySet()) {
+            String key = entry.getKey();
+            if (!ignoreKeys.contains(key)) {
+                assertEquals(actual.get(key), actual.get(key));
+            }
+        }
     }
 }

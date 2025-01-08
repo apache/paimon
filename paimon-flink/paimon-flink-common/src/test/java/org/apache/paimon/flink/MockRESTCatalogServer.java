@@ -18,19 +18,24 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Database;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalogInternalOptions;
 import org.apache.paimon.rest.RESTObjectMapper;
 import org.apache.paimon.rest.RESTResponse;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
@@ -120,12 +125,49 @@ public class MockRESTCatalogServer {
                             return mockResponse(response, 200);
                         }
                     } else if (request.getPath().startsWith("/v1/prefix/databases/")) {
-                        String databaseName =
-                                request.getPath().substring("/v1/prefix/databases/".length());
-                        if (request.getMethod().equals("GET")) {
-                            Database database = catalog.getDatabase(databaseName);
-                            response = new GetDatabaseResponse(database.name(), database.options());
-                            return mockResponse(response, 200);
+                        String[] resources =
+                                request.getPath()
+                                        .substring("/v1/prefix/databases/".length())
+                                        .split("/");
+                        String databaseName = resources[0];
+                        boolean isTables = resources.length == 2 && "tables".equals(resources[1]);
+                        boolean isTable = resources.length == 3 && "tables".equals(resources[1]);
+                        if (isTable) {
+                            String tableName = resources[2];
+                            if (request.getMethod().equals("GET")) {
+                                Identifier identifier = Identifier.create(databaseName, tableName);
+                                FileStoreTable table =
+                                        (FileStoreTable) catalog.getTable(identifier);
+                                response =
+                                        new GetTableResponse(
+                                                AbstractCatalog.newTableLocation(
+                                                                catalog.warehouse(), identifier)
+                                                        .toString(),
+                                                table.schema().id(),
+                                                table.schema().toSchema());
+                                return mockResponse(response, 200);
+                            }
+                        } else if (isTables) {
+                            //  /v1/prefix/databases/db1/tables
+                            if (request.getMethod().equals("POST")) {
+                                CreateTableRequest requestBody =
+                                        mapper.readValue(
+                                                request.getBody().readUtf8(),
+                                                CreateTableRequest.class);
+                                catalog.createTable(
+                                        requestBody.getIdentifier(), requestBody.getSchema(), true);
+                                response = new GetTableResponse("", 1L, requestBody.getSchema());
+                                return mockResponse(response, 200);
+                            }
+
+                        } else {
+                            if (request.getMethod().equals("GET")) {
+                                Database database = catalog.getDatabase(databaseName);
+                                response =
+                                        new GetDatabaseResponse(
+                                                database.name(), database.options());
+                                return mockResponse(response, 200);
+                            }
                         }
                     }
                     return new MockResponse().setResponseCode(404);
