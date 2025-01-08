@@ -232,7 +232,11 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     }
 
     protected ManifestsReader newManifestsReader(boolean forWrite) {
-        return new ManifestsReader(partitionType, snapshotManager(), manifestListFactory(forWrite));
+        return new ManifestsReader(
+                partitionType,
+                options.partitionDefaultName(),
+                snapshotManager(),
+                manifestListFactory(forWrite));
     }
 
     @Override

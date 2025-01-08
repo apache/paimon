@@ -1421,7 +1421,8 @@ public class FlinkCatalog extends AbstractCatalog {
 
         try {
             Identifier identifier = toIdentifier(tablePath);
-            catalog.createPartition(identifier, partitionSpec.getPartitionSpec());
+            catalog.createPartitions(
+                    identifier, Collections.singletonList(partitionSpec.getPartitionSpec()));
         } catch (Catalog.TableNotExistException e) {
             throw new CatalogException(e);
         }
@@ -1440,11 +1441,10 @@ public class FlinkCatalog extends AbstractCatalog {
 
         try {
             Identifier identifier = toIdentifier(tablePath);
-            catalog.dropPartition(identifier, partitionSpec.getPartitionSpec());
+            catalog.dropPartitions(
+                    identifier, Collections.singletonList(partitionSpec.getPartitionSpec()));
         } catch (Catalog.TableNotExistException e) {
             throw new CatalogException(e);
-        } catch (Catalog.PartitionNotExistException e) {
-            throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
         }
     }
 

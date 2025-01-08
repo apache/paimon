@@ -314,6 +314,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader withPartitionsFilter(List<Map<String, String>> partitions) {
+            wrapped.withPartitionsFilter(partitions);
+            return this;
+        }
+
+        @Override
         public SnapshotReader withMode(ScanMode scanMode) {
             wrapped.withMode(scanMode);
             return this;
@@ -443,6 +449,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public InnerTableScan withPartitionFilter(List<BinaryRow> partitions) {
             batchScan.withPartitionFilter(partitions);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withPartitionsFilter(List<Map<String, String>> partitions) {
+            batchScan.withPartitionsFilter(partitions);
             return this;
         }
 
