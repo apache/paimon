@@ -179,7 +179,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
         List<String> fieldNames = table.rowType().getFieldNames();
         int[] projection = projectFields.stream().mapToInt(fieldNames::indexOf).toArray();
-        LOG.info("lookup projection fields: {}, join fields:{}", projectFields, joinKeys);
+        LOG.info("lookup projection fields:{}, join fields:{}", projectFields, joinKeys);
 
         FileStoreTable storeTable = (FileStoreTable) table;
 
@@ -281,17 +281,16 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             rows.add(new FlinkRowData(matchedRow));
         }
 
-        try {
+        if (LOG.isDebugEnabled()) {
             LOG.debug(
-                    "lookup key: {}, matched rows size: {}, matched rows: {}",
+                    "lookup key:{}, matched rows size:{}, matched rows:{}",
                     logRow(joinKeysGetters, key),
                     lookupResults.size(),
                     lookupResults.stream()
                             .map(row -> logRow(projectFieldsGetters, row))
                             .collect(Collectors.toList()));
-        } catch (Exception e) {
-            LOG.error("Error occurs when logging specific join keys and results");
         }
+
         return rows;
     }
 
