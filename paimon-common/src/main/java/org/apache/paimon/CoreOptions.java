@@ -2885,8 +2885,7 @@ public class CoreOptions implements Serializable {
     public enum TagCreationPeriod implements DescribedEnum {
         DAILY("daily", "Generate a tag every day."),
         HOURLY("hourly", "Generate a tag every hour."),
-        TWO_HOURS("two-hours", "Generate a tag every two hours."),
-        CUSTOM_DURATION("custom-duration", "Generate a tag with custom duration.");
+        TWO_HOURS("two-hours", "Generate a tag every two hours.");
 
         private final String value;
         private final String description;
