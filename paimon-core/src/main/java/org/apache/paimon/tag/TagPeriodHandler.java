@@ -229,12 +229,12 @@ public interface TagPeriodHandler {
         }
     }
 
-    /** Two Hours {@link TagPeriodHandler}. */
-    class CustomDurationTagPeriodHandler extends BaseTagPeriodHandler {
+    /** Period duration {@link TagPeriodHandler}. */
+    class PeriodDurationTagPeriodHandler extends BaseTagPeriodHandler {
 
         Duration customDuration;
 
-        public CustomDurationTagPeriodHandler(Duration duration) {
+        public PeriodDurationTagPeriodHandler(Duration duration) {
             this.customDuration = duration;
         }
 
@@ -251,7 +251,7 @@ public interface TagPeriodHandler {
 
     static TagPeriodHandler create(CoreOptions options) {
         if (options.tagPeriodDuration().isPresent()) {
-            return new CustomDurationTagPeriodHandler(options.tagPeriodDuration().get());
+            return new PeriodDurationTagPeriodHandler(options.tagPeriodDuration().get());
         }
 
         switch (options.tagCreationPeriod()) {
