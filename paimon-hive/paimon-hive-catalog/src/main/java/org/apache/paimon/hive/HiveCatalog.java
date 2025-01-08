@@ -1442,6 +1442,15 @@ public class HiveCatalog extends AbstractCatalog {
         return System.getenv("HIVE_CONF_DIR");
     }
 
+    protected boolean tableExists(Identifier identifier) {
+        try {
+            getHmsTable(identifier);
+        } catch (Exception e) {
+            return false;
+        }
+        return true;
+    }
+
     public int getBatchGetTableSize() {
         try {
             int size =

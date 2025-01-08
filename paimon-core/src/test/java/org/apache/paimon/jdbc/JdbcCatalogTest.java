@@ -21,6 +21,7 @@ package org.apache.paimon.jdbc;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.Table;
@@ -33,6 +34,7 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.ObjectOutputStream;
 import java.sql.SQLException;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -115,6 +117,33 @@ public class JdbcCatalogTest extends CatalogTestBase {
                         oos.flush();
                     }
                 });
+    }
+
+    @Test
+    public void testDropTable() throws Exception {
+        String databaseName = "test_db";
+        String tableName = "new_table";
+        catalog.createDatabase(databaseName, false);
+        catalog.createTable(
+                Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
+        JdbcCatalog jdbcCatalog = (JdbcCatalog) catalog;
+        Path path = jdbcCatalog.getTableLocation(Identifier.create(databaseName, tableName));
+        // delete file path
+        catalog.fileIO().deleteDirectoryQuietly(path);
+
+        assertThatThrownBy(() -> catalog.getTable(Identifier.create(databaseName, tableName)))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage(
+                        "There is no paimon table in "
+                                + jdbcCatalog.getTableLocation(
+                                        Identifier.create(databaseName, tableName)));
+
+        List<String> tablesCon = catalog.listTables(databaseName);
+        assertThat(tablesCon).contains(tableName);
+
+        catalog.dropTable(Identifier.create(databaseName, tableName), false);
+        List<String> tables = catalog.listTables(databaseName);
+        assertThat(tableName).isNotIn(tables);
     }
 
     @Test

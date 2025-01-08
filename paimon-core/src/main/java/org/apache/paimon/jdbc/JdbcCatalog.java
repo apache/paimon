@@ -364,6 +364,11 @@ public class JdbcCatalog extends AbstractCatalog {
                         () -> new RuntimeException("There is no paimon table in " + tableLocation));
     }
 
+    protected boolean tableExists(Identifier identifier) {
+        return JdbcUtils.tableExists(
+                connections, catalogKey, identifier.getDatabaseName(), identifier.getTableName());
+    }
+
     @Override
     public boolean caseSensitive() {
         return false;

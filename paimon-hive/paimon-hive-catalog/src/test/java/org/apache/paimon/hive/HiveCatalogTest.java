@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -60,6 +61,7 @@ import static org.apache.paimon.hive.HiveCatalog.TABLE_TYPE_PROP;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /** Tests for {@link HiveCatalog}. */
@@ -272,6 +274,47 @@ public class HiveCatalogTest extends CatalogTestBase {
 
             assertThat(tableProperties).containsEntry("table.owner", "Hms");
             assertThat(tableProperties).containsEntry("table.create_time", "2024-01-22");
+        } catch (Exception e) {
+            fail("Test failed due to exception: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void testDropTable() {
+        try {
+            String databaseName = "test_db";
+            catalog.createDatabase(databaseName, false);
+            String tableName = "new_table";
+            Map<String, String> options = new HashMap<>();
+            Schema addHiveTableParametersSchema =
+                    new Schema(
+                            Lists.newArrayList(
+                                    new DataField(0, "pk", DataTypes.INT()),
+                                    new DataField(1, "col1", DataTypes.STRING()),
+                                    new DataField(2, "col2", DataTypes.STRING())),
+                            Collections.emptyList(),
+                            Collections.emptyList(),
+                            options,
+                            "");
+
+            catalog.createTable(
+                    Identifier.create(databaseName, tableName),
+                    addHiveTableParametersSchema,
+                    false);
+            // delete file path
+            HiveCatalog hiveCatalog = (HiveCatalog) catalog;
+            Path path = hiveCatalog.getTableLocation(Identifier.create(databaseName, tableName));
+            catalog.fileIO().deleteDirectoryQuietly(path);
+            assertThrows(
+                    Catalog.TableNotExistException.class,
+                    () -> catalog.getTable(Identifier.create(databaseName, tableName)));
+
+            List<String> tablesCon = catalog.listTables(databaseName);
+            assertThat(tablesCon).contains(tableName);
+
+            catalog.dropTable(Identifier.create(databaseName, tableName), false);
+            List<String> tables = catalog.listTables(databaseName);
+            assertThat(tableName).isNotIn(tables);
         } catch (Exception e) {
             fail("Test failed due to exception: " + e.getMessage());
         }

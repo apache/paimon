@@ -268,16 +268,13 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableNotExistException {
         checkNotBranch(identifier, "dropTable");
         checkNotSystemTable(identifier, "dropTable");
-
-        try {
-            getTable(identifier);
-        } catch (TableNotExistException e) {
+        if (!tableExists(identifier)) {
             if (ignoreIfNotExists) {
                 return;
+            } else {
+                throw new TableNotExistException(identifier);
             }
-            throw new TableNotExistException(identifier);
         }
-
         dropTableImpl(identifier);
     }
 
@@ -596,6 +593,10 @@ public abstract class AbstractCatalog implements Catalog {
                                 return s;
                             }
                         });
+    }
+
+    protected boolean tableExists(Identifier identifier) {
+        return tableExistsInFileSystem(getTableLocation(identifier), DEFAULT_MAIN_BRANCH);
     }
 
     /** Table metadata. */
