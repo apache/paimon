@@ -75,7 +75,9 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
 
         Map<String, String> options = new HashMap<>(catalogOptions());
         options.put("type", "paimon");
-        options.put("warehouse", toWarehouse(path));
+        if (supportDefineWarehouse()) {
+            options.put("warehouse", toWarehouse(path));
+        }
         tEnv.executeSql(
                 String.format(
                         "CREATE CATALOG %s WITH (" + "%s" + inferScan + ")",
@@ -95,6 +97,10 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
 
     protected Map<String, String> catalogOptions() {
         return Collections.emptyMap();
+    }
+
+    protected boolean supportDefineWarehouse() {
+        return true;
     }
 
     protected boolean inferScanParallelism() {

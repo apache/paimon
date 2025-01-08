@@ -33,6 +33,7 @@ import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
@@ -103,22 +104,7 @@ public class MockRESTCatalogServer {
                                 .setResponseCode(200)
                                 .setBody(getConfigBody(catalog.warehouse()));
                     } else if ("/v1/prefix/databases".equals(request.getPath())) {
-                        if (request.getMethod().equals("GET")) {
-                            List<String> databaseNameList = catalog.listDatabases();
-                            response = new ListDatabasesResponse(databaseNameList);
-                            return mockResponse(response, 200);
-                        } else if (request.getMethod().equals("POST")) {
-                            CreateDatabaseRequest requestBody =
-                                    mapper.readValue(
-                                            request.getBody().readUtf8(),
-                                            CreateDatabaseRequest.class);
-                            String databaseName = requestBody.getName();
-                            catalog.createDatabase(databaseName, true);
-                            response =
-                                    new CreateDatabaseResponse(
-                                            databaseName, requestBody.getOptions());
-                            return mockResponse(response, 200);
-                        }
+                        return databasesApiHandler(catalog, request);
                     } else if (request.getPath().startsWith("/v1/prefix/databases/")) {
                         String[] resources =
                                 request.getPath()
@@ -129,53 +115,11 @@ public class MockRESTCatalogServer {
                         boolean isTable = resources.length == 3 && "tables".equals(resources[1]);
                         if (isTable) {
                             String tableName = resources[2];
-                            if (request.getMethod().equals("GET")) {
-                                Identifier identifier = Identifier.create(databaseName, tableName);
-                                FileStoreTable table =
-                                        (FileStoreTable) catalog.getTable(identifier);
-                                response =
-                                        new GetTableResponse(
-                                                AbstractCatalog.newTableLocation(
-                                                                catalog.warehouse(), identifier)
-                                                        .toString(),
-                                                table.schema().id(),
-                                                table.schema().toSchema());
-                                return mockResponse(response, 200);
-                            } else if (request.getMethod().equals("POST")) {
-                                Identifier identifier = Identifier.create(databaseName, tableName);
-                                AlterTableRequest requestBody =
-                                        mapper.readValue(
-                                                request.getBody().readUtf8(),
-                                                AlterTableRequest.class);
-                                catalog.alterTable(identifier, requestBody.getChanges(), true);
-                                FileStoreTable table =
-                                        (FileStoreTable) catalog.getTable(identifier);
-                                response =
-                                        new GetTableResponse(
-                                                "", table.schema().id(), table.schema().toSchema());
-                                return mockResponse(response, 200);
-                            }
+                            return tableApiHandler(catalog, request, databaseName, tableName);
                         } else if (isTables) {
-                            //  /v1/prefix/databases/db1/tables
-                            if (request.getMethod().equals("POST")) {
-                                CreateTableRequest requestBody =
-                                        mapper.readValue(
-                                                request.getBody().readUtf8(),
-                                                CreateTableRequest.class);
-                                catalog.createTable(
-                                        requestBody.getIdentifier(), requestBody.getSchema(), true);
-                                response = new GetTableResponse("", 1L, requestBody.getSchema());
-                                return mockResponse(response, 200);
-                            }
-
+                            return tablesApiHandler(catalog, request, databaseName);
                         } else {
-                            if (request.getMethod().equals("GET")) {
-                                Database database = catalog.getDatabase(databaseName);
-                                response =
-                                        new GetDatabaseResponse(
-                                                database.name(), database.options());
-                                return mockResponse(response, 200);
-                            }
+                            return databaseApiHandler(catalog, request, databaseName);
                         }
                     }
                     return new MockResponse().setResponseCode(404);
@@ -188,6 +132,85 @@ public class MockRESTCatalogServer {
                 }
             }
         };
+    }
+
+    private static MockResponse databasesApiHandler(Catalog catalog, RecordedRequest request)
+            throws Exception {
+        RESTResponse response;
+        if (request.getMethod().equals("GET")) {
+            List<String> databaseNameList = catalog.listDatabases();
+            response = new ListDatabasesResponse(databaseNameList);
+            return mockResponse(response, 200);
+        } else if (request.getMethod().equals("POST")) {
+            CreateDatabaseRequest requestBody =
+                    mapper.readValue(request.getBody().readUtf8(), CreateDatabaseRequest.class);
+            String databaseName = requestBody.getName();
+            catalog.createDatabase(databaseName, true);
+            response = new CreateDatabaseResponse(databaseName, requestBody.getOptions());
+            return mockResponse(response, 200);
+        }
+        return new MockResponse().setResponseCode(404);
+    }
+
+    private static MockResponse databaseApiHandler(
+            Catalog catalog, RecordedRequest request, String databaseName) throws Exception {
+        RESTResponse response;
+        if (request.getMethod().equals("GET")) {
+            Database database = catalog.getDatabase(databaseName);
+            response = new GetDatabaseResponse(database.name(), database.options());
+            return mockResponse(response, 200);
+        } else if (request.getMethod().equals("DELETE")) {
+            catalog.dropDatabase(databaseName, true, false);
+            return new MockResponse().setResponseCode(200);
+        }
+        return new MockResponse().setResponseCode(404);
+    }
+
+    private static MockResponse tablesApiHandler(
+            Catalog catalog, RecordedRequest request, String databaseName) throws Exception {
+        RESTResponse response;
+        if (request.getMethod().equals("POST")) {
+            CreateTableRequest requestBody =
+                    mapper.readValue(request.getBody().readUtf8(), CreateTableRequest.class);
+            catalog.createTable(requestBody.getIdentifier(), requestBody.getSchema(), true);
+            response = new GetTableResponse("", 1L, requestBody.getSchema());
+            return mockResponse(response, 200);
+        } else if (request.getMethod().equals("GET")) {
+            catalog.listTables(databaseName);
+            response = new ListTablesResponse(catalog.listTables(databaseName));
+            return mockResponse(response, 200);
+        }
+        return new MockResponse().setResponseCode(404);
+    }
+
+    private static MockResponse tableApiHandler(
+            Catalog catalog, RecordedRequest request, String databaseName, String tableName)
+            throws Exception {
+        RESTResponse response;
+        if (request.getMethod().equals("GET")) {
+            Identifier identifier = Identifier.create(databaseName, tableName);
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+            response =
+                    new GetTableResponse(
+                            AbstractCatalog.newTableLocation(catalog.warehouse(), identifier)
+                                    .toString(),
+                            table.schema().id(),
+                            table.schema().toSchema());
+            return mockResponse(response, 200);
+        } else if (request.getMethod().equals("POST")) {
+            Identifier identifier = Identifier.create(databaseName, tableName);
+            AlterTableRequest requestBody =
+                    mapper.readValue(request.getBody().readUtf8(), AlterTableRequest.class);
+            catalog.alterTable(identifier, requestBody.getChanges(), true);
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+            response = new GetTableResponse("", table.schema().id(), table.schema().toSchema());
+            return mockResponse(response, 200);
+        } else if (request.getMethod().equals("DELETE")) {
+            Identifier identifier = Identifier.create(databaseName, tableName);
+            catalog.dropTable(identifier, true);
+            return new MockResponse().setResponseCode(200);
+        }
+        return new MockResponse().setResponseCode(404);
     }
 
     private static MockResponse mockResponse(RESTResponse response, int httpCode) {
