@@ -18,352 +18,103 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.Database;
+import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
-import org.apache.paimon.rest.requests.CreateTableRequest;
-import org.apache.paimon.rest.responses.AlterDatabaseResponse;
-import org.apache.paimon.rest.responses.CreateDatabaseResponse;
-import org.apache.paimon.rest.responses.ErrorResponse;
-import org.apache.paimon.rest.responses.GetDatabaseResponse;
-import org.apache.paimon.rest.responses.GetTableResponse;
-import org.apache.paimon.rest.responses.ListDatabasesResponse;
-import org.apache.paimon.rest.responses.ListPartitionsResponse;
-import org.apache.paimon.rest.responses.ListTablesResponse;
-import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.table.Table;
+import org.apache.paimon.rest.exceptions.NotAuthorizedException;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
-import okhttp3.mockwebserver.MockResponse;
-import okhttp3.mockwebserver.MockWebServer;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-import java.io.IOException;
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /** Test for REST Catalog. */
-public class RESTCatalogTest {
+public class RESTCatalogTest extends CatalogTestBase {
 
-    private final ObjectMapper mapper = RESTObjectMapper.create();
-    private MockWebServer mockWebServer;
-    private RESTCatalog restCatalog;
-    private String warehouseStr;
-    private String serverUrl;
-    @Rule public TemporaryFolder folder = new TemporaryFolder();
+    private MockRESTCatalogServer mockRESTCatalogServer;
 
-    @Before
-    public void setUp() throws IOException {
-        mockWebServer = new MockWebServer();
-        mockWebServer.start();
-        serverUrl = mockWebServer.url("").toString();
-        Options options = mockInitOptions();
-        warehouseStr = folder.getRoot().getPath();
-        mockConfig(warehouseStr);
-        restCatalog = new RESTCatalog(CatalogContext.create(options));
+    @BeforeEach
+    public void setUp() throws Exception {
+        super.setUp();
+        String initToken = "init_token";
+        mockRESTCatalogServer = new MockRESTCatalogServer(warehouse, initToken);
+        mockRESTCatalogServer.start();
+        Options options = new Options();
+        options.set(RESTCatalogOptions.URI, mockRESTCatalogServer.getUrl());
+        options.set(RESTCatalogOptions.TOKEN, initToken);
+        options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
+        this.catalog = new RESTCatalog(CatalogContext.create(options));
     }
 
-    @After
-    public void tearDown() throws IOException {
-        mockWebServer.shutdown();
+    @AfterEach
+    public void tearDown() throws Exception {
+        mockRESTCatalogServer.shutdown();
     }
 
     @Test
     public void testInitFailWhenDefineWarehouse() {
         Options options = new Options();
-        options.set(CatalogOptions.WAREHOUSE, warehouseStr);
+        options.set(CatalogOptions.WAREHOUSE, warehouse);
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new RESTCatalog(CatalogContext.create(options)));
     }
 
     @Test
-    public void testListDatabases() throws JsonProcessingException {
-        String name = MockRESTMessage.databaseName();
-        ListDatabasesResponse response = MockRESTMessage.listDatabasesResponse(name);
-        mockResponse(mapper.writeValueAsString(response), 200);
-        List<String> result = restCatalog.listDatabases();
-        assertEquals(response.getDatabases().size(), result.size());
-        assertEquals(name, result.get(0));
-    }
-
-    @Test
-    public void testCreateDatabase() throws Exception {
-        String name = MockRESTMessage.databaseName();
-        CreateDatabaseResponse response = MockRESTMessage.createDatabaseResponse(name);
-        mockResponse(mapper.writeValueAsString(response), 200);
-        assertDoesNotThrow(() -> restCatalog.createDatabase(name, false, response.getOptions()));
-    }
-
-    @Test
-    public void testGetDatabase() throws Exception {
-        String name = MockRESTMessage.databaseName();
-        GetDatabaseResponse response = MockRESTMessage.getDatabaseResponse(name);
-        mockResponse(mapper.writeValueAsString(response), 200);
-        Database result = restCatalog.getDatabase(name);
-        assertEquals(name, result.name());
-        assertEquals(response.getOptions().size(), result.options().size());
-        assertEquals(response.comment().get(), result.comment().get());
-    }
-
-    @Test
-    public void testDropDatabase() throws Exception {
-        String name = MockRESTMessage.databaseName();
-        mockResponse("", 200);
-        assertDoesNotThrow(() -> restCatalog.dropDatabase(name, false, true));
-    }
-
-    @Test
-    public void testDropDatabaseWhenNoExistAndIgnoreIfNotExistsIsFalse() throws Exception {
-        String name = MockRESTMessage.databaseName();
-        ErrorResponse response =
-                MockRESTMessage.noSuchResourceExceptionErrorResponse("database", name);
-        mockResponse(mapper.writeValueAsString(response), 404);
-        assertThrows(
-                Catalog.DatabaseNotExistException.class,
-                () -> restCatalog.dropDatabase(name, false, true));
-    }
-
-    @Test
-    public void testDropDatabaseWhenNoExistAndIgnoreIfNotExistsIsTrue() throws Exception {
-        String name = MockRESTMessage.databaseName();
-        ErrorResponse response =
-                MockRESTMessage.noSuchResourceExceptionErrorResponse("database", name);
-        mockResponse(mapper.writeValueAsString(response), 404);
-        assertDoesNotThrow(() -> restCatalog.dropDatabase(name, true, true));
-    }
-
-    @Test
-    public void testDropDatabaseWhenCascadeIsFalseAndNoTables() throws Exception {
-        String name = MockRESTMessage.databaseName();
-        boolean cascade = false;
-        ListTablesResponse response = MockRESTMessage.listTablesEmptyResponse();
-        mockResponse(mapper.writeValueAsString(response), 200);
-        mockResponse("", 200);
-        assertDoesNotThrow(() -> restCatalog.dropDatabase(name, false, cascade));
-    }
-
-    @Test
-    public void testDropDatabaseWhenCascadeIsFalseAndTablesExist() throws Exception {
-        String name = MockRESTMessage.databaseName();
-        boolean cascade = false;
-        ListTablesResponse response = MockRESTMessage.listTablesResponse();
-        mockResponse(mapper.writeValueAsString(response), 200);
-        assertThrows(
-                Catalog.DatabaseNotEmptyException.class,
-                () -> restCatalog.dropDatabase(name, false, cascade));
-    }
-
-    @Test
-    public void testAlterDatabase() throws Exception {
-        String name = MockRESTMessage.databaseName();
-        AlterDatabaseResponse response = MockRESTMessage.alterDatabaseResponse();
-        mockResponse(mapper.writeValueAsString(response), 200);
-        assertDoesNotThrow(() -> restCatalog.alterDatabase(name, new ArrayList<>(), true));
-    }
-
-    @Test
-    public void testAlterDatabaseWhenDatabaseNotExistAndIgnoreIfNotExistsIsFalse()
-            throws Exception {
-        String name = MockRESTMessage.databaseName();
-        ErrorResponse response =
-                MockRESTMessage.noSuchResourceExceptionErrorResponse("database", name);
-        mockResponse(mapper.writeValueAsString(response), 404);
-        assertThrows(
-                Catalog.DatabaseNotExistException.class,
-                () -> restCatalog.alterDatabase(name, new ArrayList<>(), false));
-    }
-
-    @Test
-    public void testAlterDatabaseWhenDatabaseNotExistAndIgnoreIfNotExistsIsTrue() throws Exception {
-        String name = MockRESTMessage.databaseName();
-        ErrorResponse response =
-                MockRESTMessage.noSuchResourceExceptionErrorResponse("database", name);
-        mockResponse(mapper.writeValueAsString(response), 404);
-        assertDoesNotThrow(() -> restCatalog.alterDatabase(name, new ArrayList<>(), true));
-    }
-
-    @Test
-    public void testListTables() throws Exception {
-        String databaseName = MockRESTMessage.databaseName();
-        ListTablesResponse response = MockRESTMessage.listTablesResponse();
-        mockResponse(mapper.writeValueAsString(response), 200);
-        List<String> result = restCatalog.listTables(databaseName);
-        assertEquals(response.getTables().size(), result.size());
-    }
-
-    @Test
-    public void testGetTable() throws Exception {
-        String databaseName = MockRESTMessage.databaseName();
-        GetTableResponse response = MockRESTMessage.getTableResponse();
-        mockResponse(mapper.writeValueAsString(response), 200);
-        Table result = restCatalog.getTable(Identifier.create(databaseName, "table"));
-        assertEquals(response.getSchema().options().size() + 1, result.options().size());
-    }
-
-    @Test
-    public void testCreateTable() throws Exception {
-        CreateTableRequest request = MockRESTMessage.createTableRequest("table");
-        GetTableResponse response = MockRESTMessage.getTableResponse();
-        mockResponse(mapper.writeValueAsString(response), 200);
-        assertDoesNotThrow(
-                () -> restCatalog.createTable(request.getIdentifier(), request.getSchema(), false));
-    }
-
-    @Test
-    public void testCreateTableWhenTableAlreadyExistAndIgnoreIfExistsIsFalse() throws Exception {
-        CreateTableRequest request = MockRESTMessage.createTableRequest("table");
-        mockResponse("", 409);
-        assertThrows(
-                Catalog.TableAlreadyExistException.class,
-                () -> restCatalog.createTable(request.getIdentifier(), request.getSchema(), false));
-    }
-
-    @Test
-    public void testRenameTable() throws Exception {
-        String databaseName = MockRESTMessage.databaseName();
-        String fromTableName = "fromTable";
-        String toTableName = "toTable";
-        GetTableResponse response = MockRESTMessage.getTableResponse();
-        mockResponse(mapper.writeValueAsString(response), 200);
-        assertDoesNotThrow(
-                () ->
-                        restCatalog.renameTable(
-                                Identifier.create(databaseName, fromTableName),
-                                Identifier.create(databaseName, toTableName),
-                                true));
-    }
-
-    @Test
-    public void testRenameTableWhenTableNotExistAndIgnoreIfNotExistsIsFalse() throws Exception {
-        String databaseName = MockRESTMessage.databaseName();
-        String fromTableName = "fromTable";
-        String toTableName = "toTable";
-        mockResponse("", 404);
-        assertThrows(
-                Catalog.TableNotExistException.class,
-                () ->
-                        restCatalog.renameTable(
-                                Identifier.create(databaseName, fromTableName),
-                                Identifier.create(databaseName, toTableName),
-                                false));
-    }
-
-    @Test
-    public void testRenameTableWhenToTableAlreadyExist() throws Exception {
-        String databaseName = MockRESTMessage.databaseName();
-        String fromTableName = "fromTable";
-        String toTableName = "toTable";
-        mockResponse("", 409);
-        assertThrows(
-                Catalog.TableAlreadyExistException.class,
-                () ->
-                        restCatalog.renameTable(
-                                Identifier.create(databaseName, fromTableName),
-                                Identifier.create(databaseName, toTableName),
-                                false));
-    }
-
-    @Test
-    public void testAlterTable() throws Exception {
-        String databaseName = MockRESTMessage.databaseName();
-        List<SchemaChange> changes = MockRESTMessage.getChanges();
-        GetTableResponse response = MockRESTMessage.getTableResponse();
-        mockResponse(mapper.writeValueAsString(response), 200);
-        assertDoesNotThrow(
-                () -> restCatalog.alterTable(Identifier.create(databaseName, "t1"), changes, true));
-    }
-
-    @Test
-    public void testAlterTableWhenTableNotExistAndIgnoreIfNotExistsIsFalse() throws Exception {
-        String databaseName = MockRESTMessage.databaseName();
-        List<SchemaChange> changes = MockRESTMessage.getChanges();
-        mockResponse("", 404);
-        assertThrows(
-                Catalog.TableNotExistException.class,
-                () ->
-                        restCatalog.alterTable(
-                                Identifier.create(databaseName, "t1"), changes, false));
-    }
-
-    @Test
-    public void testDropTable() throws Exception {
-        String databaseName = MockRESTMessage.databaseName();
-        String tableName = "table";
-        mockResponse("", 200);
-        assertDoesNotThrow(
-                () -> restCatalog.dropTable(Identifier.create(databaseName, tableName), true));
-    }
-
-    @Test
-    public void testDropTableWhenTableNotExistAndIgnoreIfNotExistsIsFalse() throws Exception {
-        String databaseName = MockRESTMessage.databaseName();
-        String tableName = "table";
-        mockResponse("", 404);
-        assertThrows(
-                Catalog.TableNotExistException.class,
-                () -> restCatalog.dropTable(Identifier.create(databaseName, tableName), false));
+    public void testAuthFail() {
+        Options options = new Options();
+        options.set(RESTCatalogOptions.URI, mockRESTCatalogServer.getUrl());
+        options.set(RESTCatalogOptions.TOKEN, "aaaaa");
+        options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
+        options.set(CatalogOptions.METASTORE, RESTCatalogFactory.IDENTIFIER);
+        assertThatThrownBy(() -> new RESTCatalog(CatalogContext.create(options)))
+                .isInstanceOf(NotAuthorizedException.class);
     }
 
     @Test
     public void testListPartitionsWhenMetastorePartitionedIsTrue() throws Exception {
-        String databaseName = MockRESTMessage.databaseName();
-        GetTableResponse getTableResponse = MockRESTMessage.getTableResponseEnablePartition();
-        mockResponse(mapper.writeValueAsString(getTableResponse), 200);
-        ListPartitionsResponse response = MockRESTMessage.listPartitionsResponse();
-        mockResponse(mapper.writeValueAsString(response), 200);
-        List<Partition> result =
-                restCatalog.listPartitions(Identifier.create(databaseName, "table"));
-        assertEquals(response.getPartitions().size(), result.size());
+        Identifier identifier = Identifier.create("test_db", "test_table");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        List<Partition> result = catalog.listPartitions(identifier);
+        assertEquals(0, result.size());
     }
 
     @Test
     public void testListPartitionsFromFile() throws Exception {
-        String databaseName = MockRESTMessage.databaseName();
-        GetTableResponse response = MockRESTMessage.getTableResponseEnablePartition();
-        mockResponse(mapper.writeValueAsString(response), 200);
-        mockResponse(mapper.writeValueAsString(response), 200);
-        List<Partition> partitionEntries =
-                restCatalog.listPartitions(Identifier.create(databaseName, "table"));
-        assertEquals(partitionEntries.size(), 0);
+        Identifier identifier = Identifier.create("test_db", "test_table");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        List<Partition> result = catalog.listPartitions(identifier);
+        assertEquals(0, result.size());
     }
 
-    private void mockResponse(String mockContent, int httpCode) {
-        MockResponse mockResponse = MockRESTMessage.mockResponse(mockContent, httpCode);
-        mockWebServer.enqueue(mockResponse);
-    }
-
-    private void mockConfig(String warehouseStr) {
-        String mockResponse =
-                String.format(
-                        "{\"defaults\": {\"%s\": \"%s\", \"%s\": \"%s\"}}",
-                        RESTCatalogInternalOptions.PREFIX.key(),
-                        "prefix",
-                        CatalogOptions.WAREHOUSE.key(),
-                        warehouseStr);
-        mockResponse(mockResponse, 200);
-    }
-
-    public Options mockInitOptions() {
-        Options options = new Options();
-        options.set(RESTCatalogOptions.URI, serverUrl);
-        String initToken = "init_token";
-        options.set(RESTCatalogOptions.TOKEN, initToken);
-        options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
-        return options;
+    private void createTable(
+            Identifier identifier, Map<String, String> options, List<String> partitionKeys)
+            throws Exception {
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(new DataField(0, "col1", DataTypes.STRING())),
+                        partitionKeys,
+                        Collections.emptyList(),
+                        options,
+                        ""),
+                true);
     }
 }

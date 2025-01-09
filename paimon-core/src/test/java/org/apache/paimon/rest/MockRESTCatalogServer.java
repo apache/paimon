@@ -26,6 +26,7 @@ import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
@@ -35,6 +36,7 @@ import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.table.FileStoreTable;
 
@@ -89,6 +91,7 @@ public class MockRESTCatalogServer {
             @Override
             public MockResponse dispatch(RecordedRequest request) throws InterruptedException {
 
+                System.out.println(request.getPath() + "  method " + request.getMethod());
                 String token = request.getHeaders().get("Authorization");
                 RESTResponse response;
                 try {
@@ -109,26 +112,22 @@ public class MockRESTCatalogServer {
                         String databaseName = resources[0];
                         boolean isTables = resources.length == 2 && "tables".equals(resources[1]);
                         boolean isTable = resources.length == 3 && "tables".equals(resources[1]);
-                        if (resources.length == 4 && "rename".equals(resources[3])) {
-                            RenameTableRequest requestBody =
-                                    mapper.readValue(
-                                            request.getBody().readUtf8(), RenameTableRequest.class);
-                            catalog.renameTable(
-                                    Identifier.create(databaseName, resources[2]),
-                                    requestBody.getNewIdentifier(),
-                                    false);
-                            FileStoreTable table =
-                                    (FileStoreTable)
-                                            catalog.getTable(requestBody.getNewIdentifier());
-                            response =
-                                    new GetTableResponse(
-                                            AbstractCatalog.newTableLocation(
-                                                            catalog.warehouse(),
-                                                            requestBody.getNewIdentifier())
-                                                    .toString(),
-                                            table.schema().id(),
-                                            table.schema().toSchema());
+                        boolean isTableRename =
+                                resources.length == 4 && "rename".equals(resources[3]);
+                        boolean isPartitions =
+                                resources.length == 4
+                                        && "tables".equals(resources[1])
+                                        && "partitions".equals(resources[3]);
+                        if (isPartitions) {
+                            String tableName = resources[2];
+                            List<Partition> partitions =
+                                    catalog.listPartitions(
+                                            Identifier.create(databaseName, tableName));
+                            response = new ListPartitionsResponse(partitions);
                             return mockResponse(response, 200);
+                        } else if (isTableRename) {
+                            return renameTableApiHandler(
+                                    catalog, request, databaseName, resources[2]);
                         } else if (isTable) {
                             String tableName = resources[2];
                             return tableApiHandler(catalog, request, databaseName, tableName);
@@ -181,6 +180,24 @@ public class MockRESTCatalogServer {
                 }
             }
         };
+    }
+
+    private static MockResponse renameTableApiHandler(
+            Catalog catalog, RecordedRequest request, String databaseName, String tableName)
+            throws Exception {
+        RenameTableRequest requestBody =
+                mapper.readValue(request.getBody().readUtf8(), RenameTableRequest.class);
+        catalog.renameTable(
+                Identifier.create(databaseName, tableName), requestBody.getNewIdentifier(), false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(requestBody.getNewIdentifier());
+        RESTResponse response =
+                new GetTableResponse(
+                        AbstractCatalog.newTableLocation(
+                                        catalog.warehouse(), requestBody.getNewIdentifier())
+                                .toString(),
+                        table.schema().id(),
+                        table.schema().toSchema());
+        return mockResponse(response, 200);
     }
 
     private static MockResponse databasesApiHandler(Catalog catalog, RecordedRequest request)
