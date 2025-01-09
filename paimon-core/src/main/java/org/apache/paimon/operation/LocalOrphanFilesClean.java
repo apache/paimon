@@ -70,6 +70,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
 
     private final List<Path> deleteFiles;
 
+    private final boolean dryRun;
+
     private final AtomicLong deletedFilesLenInBytes = new AtomicLong(0);
 
     private Set<String> candidateDeletes;
@@ -79,16 +81,20 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
     }
 
     public LocalOrphanFilesClean(FileStoreTable table, long olderThanMillis) {
-        this(table, olderThanMillis, path -> table.fileIO().deleteQuietly(path));
+        this(table, olderThanMillis, path -> table.fileIO().deleteQuietly(path), false);
     }
 
     public LocalOrphanFilesClean(
-            FileStoreTable table, long olderThanMillis, SerializableConsumer<Path> fileCleaner) {
+            FileStoreTable table,
+            long olderThanMillis,
+            SerializableConsumer<Path> fileCleaner,
+            boolean dryRun) {
         super(table, olderThanMillis, fileCleaner);
         this.deleteFiles = new ArrayList<>();
         this.executor =
                 createCachedThreadPool(
                         table.coreOptions().deleteFileThreadNum(), "ORPHAN_FILES_CLEAN");
+        this.dryRun = dryRun;
     }
 
     public CleanOrphanFilesResult clean()
@@ -129,7 +135,9 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         candidateDeletes.clear();
 
         // clean empty directory
-        cleanEmptyDirectory(deleteFiles);
+        if (!dryRun) {
+            cleanEmptyDirectory(deleteFiles);
+        }
 
         return new CleanOrphanFilesResult(
                 deleteFiles.size(), deletedFilesLenInBytes.get(), deleteFiles);
@@ -230,7 +238,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
             @Nullable String tableName,
             long olderThanMillis,
             SerializableConsumer<Path> fileCleaner,
-            @Nullable Integer parallelism)
+            @Nullable Integer parallelism,
+            boolean dryRun)
             throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
         List<String> tableNames = Collections.singletonList(tableName);
         if (tableName == null || "*".equals(tableName)) {
@@ -259,7 +268,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
 
             orphanFilesCleans.add(
                     new LocalOrphanFilesClean(
-                            (FileStoreTable) table, olderThanMillis, fileCleaner));
+                            (FileStoreTable) table, olderThanMillis, fileCleaner, dryRun));
         }
 
         return orphanFilesCleans;
@@ -271,7 +280,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
             @Nullable String tableName,
             long olderThanMillis,
             SerializableConsumer<Path> fileCleaner,
-            @Nullable Integer parallelism)
+            @Nullable Integer parallelism,
+            boolean dryRun)
             throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
         List<LocalOrphanFilesClean> tableCleans =
                 createOrphanFilesCleans(
@@ -280,7 +290,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                         tableName,
                         olderThanMillis,
                         fileCleaner,
-                        parallelism);
+                        parallelism,
+                        dryRun);
 
         ExecutorService executorService =
                 Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());

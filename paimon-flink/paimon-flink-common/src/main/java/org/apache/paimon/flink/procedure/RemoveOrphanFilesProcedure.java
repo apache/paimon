@@ -98,7 +98,8 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
                                     tableName,
                                     olderThanMillis(olderThan),
                                     createFileCleaner(catalog, dryRun),
-                                    parallelism);
+                                    parallelism,
+                                    dryRun);
                     break;
                 default:
                     throw new IllegalArgumentException(

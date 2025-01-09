@@ -399,18 +399,21 @@ public abstract class OrphanFilesClean implements Serializable {
     }
 
     /** Try to clean empty partition directories. */
-    protected void tryCleanPartitionDirectory(Set<Path> deletedPaths) {
+    protected void tryCleanPartitionDirectory(Set<Path> partitionDirs) {
         for (int level = 0; level < partitionKeysNum; level++) {
-            deletedPaths.forEach(this::tryDeleteEmptyDirectory);
-            deletedPaths = deletedPaths.stream().map(Path::getParent).collect(Collectors.toSet());
+            partitionDirs =
+                    partitionDirs.stream()
+                            .filter(this::tryDeleteEmptyDirectory)
+                            .map(Path::getParent)
+                            .collect(Collectors.toSet());
         }
     }
 
-    public void tryDeleteEmptyDirectory(Path path) {
+    public boolean tryDeleteEmptyDirectory(Path path) {
         try {
-            fileIO.delete(path, false);
+            return fileIO.delete(path, false);
         } catch (IOException e) {
-            LOG.debug("Failed to delete directory '{}' because it is not empty.", path);
+            return false;
         }
     }
 }

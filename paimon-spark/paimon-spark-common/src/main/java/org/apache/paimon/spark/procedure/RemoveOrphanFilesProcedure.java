@@ -90,6 +90,10 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         org.apache.paimon.catalog.Identifier identifier;
         String tableId = args.getString(0);
+        String olderThan = args.isNullAt(1) ? null : args.getString(1);
+        boolean dryRun = !args.isNullAt(2) && args.getBoolean(2);
+        Integer parallelism = args.isNullAt(3) ? null : args.getInt(3);
+
         Preconditions.checkArgument(
                 tableId != null && !tableId.isEmpty(),
                 "Cannot handle an empty tableId for argument %s",
@@ -116,11 +120,10 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
                                     catalog,
                                     identifier.getDatabaseName(),
                                     identifier.getTableName(),
-                                    OrphanFilesClean.olderThanMillis(
-                                            args.isNullAt(1) ? null : args.getString(1)),
-                                    OrphanFilesClean.createFileCleaner(
-                                            catalog, !args.isNullAt(2) && args.getBoolean(2)),
-                                    args.isNullAt(3) ? null : args.getInt(3));
+                                    OrphanFilesClean.olderThanMillis(olderThan),
+                                    OrphanFilesClean.createFileCleaner(catalog, dryRun),
+                                    parallelism,
+                                    dryRun);
                     break;
                 case "DISTRIBUTED":
                     cleanOrphanFilesResult =
@@ -128,11 +131,10 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
                                     catalog,
                                     identifier.getDatabaseName(),
                                     identifier.getTableName(),
-                                    OrphanFilesClean.olderThanMillis(
-                                            args.isNullAt(1) ? null : args.getString(1)),
-                                    OrphanFilesClean.createFileCleaner(
-                                            catalog, !args.isNullAt(2) && args.getBoolean(2)),
-                                    args.isNullAt(3) ? null : args.getInt(3));
+                                    OrphanFilesClean.olderThanMillis(olderThan),
+                                    OrphanFilesClean.createFileCleaner(catalog, dryRun),
+                                    parallelism,
+                                    dryRun);
                     break;
                 default:
                     throw new IllegalArgumentException(

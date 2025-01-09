@@ -46,13 +46,13 @@ case class SparkOrphanFilesClean(
     specifiedOlderThanMillis: Long,
     specifiedFileCleaner: SerializableConsumer[Path],
     parallelism: Int,
+    dryRun: Boolean,
     @transient spark: SparkSession)
   extends OrphanFilesClean(specifiedTable, specifiedOlderThanMillis, specifiedFileCleaner)
   with SQLConfHelper
   with Logging {
 
-  def doOrphanClean()
-      : (Dataset[(Long, Long)], (Dataset[BranchAndManifestFile], Dataset[(Long, Long, Set[String])])) = {
+  def doOrphanClean(): (Dataset[(Long, Long)], Dataset[BranchAndManifestFile]) = {
     import spark.implicits._
 
     val branches = validBranches()
@@ -140,7 +140,7 @@ case class SparkOrphanFilesClean(
         it =>
           var deletedFilesCount = 0L
           var deletedFilesLenInBytes = 0L
-          val involvedDirectories = new mutable.HashSet[String]()
+          val bucketDirs = new mutable.HashSet[String]()
 
           while (it.hasNext) {
             val fileInfo = it.next();
@@ -149,29 +149,35 @@ case class SparkOrphanFilesClean(
             deletedFilesLenInBytes += fileInfo.getLong(2)
             specifiedFileCleaner.accept(deletedPath)
             logInfo(s"Cleaned file: $pathToClean")
-            involvedDirectories.add(deletedPath.getParent.toUri.toString)
+            bucketDirs.add(deletedPath.getParent.toUri.toString)
             deletedFilesCount += 1
           }
+
+          // clean empty directory
+          if (!dryRun) {
+            val partitionDirs = bucketDirs
+              .filter(_.contains(BUCKET_PATH_PREFIX))
+              .map(new Path(_))
+              .filter(tryDeleteEmptyDirectory)
+              .map(_.getParent)
+            tryCleanPartitionDirectory(partitionDirs.asJava)
+          }
+
           logInfo(
             s"Total cleaned files: $deletedFilesCount, Total cleaned files len : $deletedFilesLenInBytes")
-          Iterator.single((deletedFilesCount, deletedFilesLenInBytes, involvedDirectories.toSet))
+          Iterator.single((deletedFilesCount, deletedFilesLenInBytes))
       }
-      .cache()
 
-    // clean empty directory
-    cleanEmptyDirectory(deleted.flatMap { case (_, _, paths) => paths })
-
-    val deletedResult = deleted.map { case (filesCount, filesLen, _) => (filesCount, filesLen) }
     val finalDeletedDataset =
       if (deletedFilesCountInLocal.get() != 0 || deletedFilesLenInBytesInLocal.get() != 0) {
-        deletedResult.union(
+        deleted.union(
           spark.createDataset(
             Seq((deletedFilesCountInLocal.get(), deletedFilesLenInBytesInLocal.get()))))
       } else {
-        deletedResult
+        deleted
       }
 
-    (finalDeletedDataset, (usedManifestFiles, deleted))
+    (finalDeletedDataset, usedManifestFiles)
   }
 
   private def cleanEmptyDirectory(deletedPaths: Dataset[String]): Unit = {
@@ -210,7 +216,8 @@ object SparkOrphanFilesClean extends SQLConfHelper {
       tableName: String,
       olderThanMillis: Long,
       fileCleaner: SerializableConsumer[Path],
-      parallelismOpt: Integer): CleanOrphanFilesResult = {
+      parallelismOpt: Integer,
+      dryRun: Boolean): CleanOrphanFilesResult = {
     val spark = SparkSession.active
     val parallelism = if (parallelismOpt == null) {
       Math.max(spark.sparkContext.defaultParallelism, conf.numShufflePartitions)
@@ -242,6 +249,7 @@ object SparkOrphanFilesClean extends SQLConfHelper {
           olderThanMillis,
           fileCleaner,
           parallelism,
+          dryRun,
           spark
         ).doOrphanClean()
     }.unzip
@@ -259,11 +267,7 @@ object SparkOrphanFilesClean extends SQLConfHelper {
         new CleanOrphanFilesResult(result.getLong(0), result.getLong(1))
       }
     } finally {
-      waitToRelease.foreach {
-        case (usedManifestFiles, deleted) =>
-          usedManifestFiles.unpersist()
-          deleted.unpersist()
-      }
+      waitToRelease.foreach(_.unpersist())
     }
   }
 }
