@@ -165,7 +165,7 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
     @MethodSource("testArguments")
     public void testCustomPartitionMarkDoneAction(boolean hasPk, String invoker) throws Exception {
 
-        Map<String, String> options = new HashMap<>();
+        Map<String, String> options = new HashMap<>(2);
         options.put(
                 PARTITION_MARK_DONE_ACTION.key(),
                 PartitionMarkDoneAction.SUCCESS_FILE + "," + PartitionMarkDoneAction.CUSTOM);

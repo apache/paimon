@@ -86,14 +86,14 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
                                 partition),
                         HttpReportMarkDoneResponse.class,
                         Collections.emptyMap());
-        Preconditions.checkArgument(
+        Preconditions.checkState(
                 reportIsSuccess(response),
                 String.format(
-                        "The http-report actions response attribute `result` should be 'SUCCESS' but is '%s'.",
+                        "The http-report action's response attribute `result` should be 'SUCCESS' but is '%s'.",
                         response.getResult()));
     }
 
-    public boolean reportIsSuccess(HttpReportMarkDoneResponse response) {
+    private boolean reportIsSuccess(HttpReportMarkDoneResponse response) {
         return response != null && RESPONSE_SUCCESS.equalsIgnoreCase(response.getResult());
     }
 
@@ -109,6 +109,7 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
     /** RestRequest only for HttpReportMarkDoneAction. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class HttpReportMarkDoneRequest implements RESTRequest {
+
         private static final String MARK_DONE_PARTITION = "partition";
         private static final String TABLE = "table";
         private static final String PATH = "path";

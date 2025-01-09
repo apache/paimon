@@ -286,9 +286,9 @@ public class CustomPartitionMarkDoneAction implements PartitionMarkDoneAction {
 
 Paimon also support http-report partition mark done action, this action will report the partition to the remote http server.
 - partition.mark-done-action: http-report
-- partition.mark-done-action.url : Action will report the partition to the remote http server.
-- partition.mark-done-action.timeout : Http client connection timeout and default is 5s.
-- partition.mark-done-action.params : Http client request params in the request body json.
+- partition.mark-done-action.http.url : Action will report the partition to the remote http server.
+- partition.mark-done-action.http.timeout : Http client connection timeout and default is 5s.
+- partition.mark-done-action.http.params : Http client request params in the request body json.
 
 Http Post request body :
 ```json

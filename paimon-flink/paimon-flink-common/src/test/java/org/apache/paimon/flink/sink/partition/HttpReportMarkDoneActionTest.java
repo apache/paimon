@@ -113,17 +113,17 @@ public class HttpReportMarkDoneActionTest {
         HttpReportMarkDoneResponse failedResponse = new HttpReportMarkDoneResponse("failed");
         server.enqueueResponse(failedResponse, 200);
         Assertions.assertThatThrownBy(() -> markDoneAction.markDone(partition))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining(
-                        "The http-report actions response attribute `result` should be 'SUCCESS' but is 'failed'.");
+                        "The http-report action's response attribute `result` should be 'SUCCESS' but is 'failed'.");
 
         // Illegal response body.
         String unExpectResponse = "{\"unknow\" :\"unknow\"}";
         server.enqueueResponse(unExpectResponse, 200);
         Assertions.assertThatThrownBy(() -> markDoneAction.markDone(partition))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining(
-                        "The http-report actions response attribute `result` should be 'SUCCESS' but is 'null'.");
+                        "The http-report action's response attribute `result` should be 'SUCCESS' but is 'null'.");
 
         // 400.
         server.enqueueResponse("", 400);

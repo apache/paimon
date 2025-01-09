@@ -1238,25 +1238,25 @@ public class CoreOptions implements Serializable {
                                     + " PartitionMarkDoneAction interface. Only work in custom mark-done-action.");
 
     public static final ConfigOption<String> PARTITION_MARK_DONE_ACTION_URL =
-            key("partition.mark-done-action.url")
+            key("partition.mark-done-action.http.url")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Mark done action will reports the partition to the remote http server, This can only be used by http-report partition mark done action.");
+                            "Mark done action will reports the partition to the remote http server, this can only be used by http-report partition mark done action.");
 
     public static final ConfigOption<Duration> PARTITION_MARK_DONE_ACTION_TIMEOUT =
-            key("partition.mark-done-action.timeout")
+            key("partition.mark-done-action.http.timeout")
                     .durationType()
                     .defaultValue(Duration.ofSeconds(5))
                     .withDescription(
-                            "Http client connect timeout, This can only be used by http-report partition mark done action.");
+                            "Http client connection timeout, this can only be used by http-report partition mark done action.");
 
     public static final ConfigOption<String> PARTITION_MARK_DONE_ACTION_PARAMS =
-            key("partition.mark-done-action.params")
+            key("partition.mark-done-action.http.params")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Http client request parameters will be written to the request body, This can only be used by http-report partition mark done action.");
+                            "Http client request parameters will be written to the request body, this can only be used by http-report partition mark done action.");
 
     public static final ConfigOption<Boolean> METASTORE_PARTITIONED_TABLE =
             key("metastore.partitioned-table")
