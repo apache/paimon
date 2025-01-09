@@ -60,7 +60,6 @@ public interface PartitionMarkDoneAction extends Closeable {
                                 case MARK_EVENT:
                                     return new MarkPartitionDoneEventAction(
                                             createPartitionHandler(fileStoreTable, options));
-                                            createMetastoreClient(fileStoreTable, options));
                                 case HTTP_REPORT:
                                     return new HttpReportMarkDoneAction(fileStoreTable, options);
                                 case CUSTOM:

@@ -19,11 +19,10 @@
 package org.apache.paimon.partition.actions;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.rest.DefaultErrorHandler;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.rest.HttpClient;
 import org.apache.paimon.rest.HttpClientOptions;
 import org.apache.paimon.rest.RESTClient;
-import org.apache.paimon.rest.RESTObjectMapper;
 import org.apache.paimon.rest.RESTRequest;
 import org.apache.paimon.rest.RESTResponse;
 import org.apache.paimon.table.FileStoreTable;
@@ -37,7 +36,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION_URL;
 
@@ -66,11 +64,9 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
         HttpClientOptions httpClientOptions =
                 new HttpClientOptions(
                         options.httpReportMarkDoneActionUrl(),
-                        Optional.of(options.httpReportMarkDoneActionTimeout()),
-                        Optional.of(options.httpReportMarkDoneActionTimeout()),
-                        RESTObjectMapper.create(),
-                        1,
-                        DefaultErrorHandler.getInstance());
+                        options.httpReportMarkDoneActionTimeout(),
+                        options.httpReportMarkDoneActionTimeout(),
+                        1);
         this.client = new HttpClient(httpClientOptions);
     }
 
@@ -108,6 +104,7 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
 
     /** RestRequest only for HttpReportMarkDoneAction. */
     @JsonIgnoreProperties(ignoreUnknown = true)
+    @VisibleForTesting
     public static class HttpReportMarkDoneRequest implements RESTRequest {
 
         private static final String MARK_DONE_PARTITION = "partition";
@@ -162,6 +159,7 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
 
     /** Response only for HttpReportMarkDoneAction. */
     @JsonIgnoreProperties(ignoreUnknown = true)
+    @VisibleForTesting
     public static class HttpReportMarkDoneResponse implements RESTResponse {
         private static final String RESULT = "result";
 
