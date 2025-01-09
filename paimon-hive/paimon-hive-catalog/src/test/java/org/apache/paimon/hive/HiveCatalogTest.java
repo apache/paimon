@@ -173,11 +173,6 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testAlterDatabase() throws Exception {
-        this.alterDatabaseWhenSupportAlter();
-    }
-
-    @Test
     public void testAddHiveTableParameters() {
         try {
             // Create a new database for the test
@@ -502,5 +497,10 @@ public class HiveCatalogTest extends CatalogTestBase {
 
         // hive catalog list partitions from filesystem, so here return empty.
         assertThat(catalog.listPartitions(identifier)).isEmpty();
+    }
+
+    @Override
+    protected boolean supportsAlterDatabase() {
+        return true;
     }
 }

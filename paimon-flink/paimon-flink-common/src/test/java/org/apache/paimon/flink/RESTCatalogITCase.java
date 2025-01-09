@@ -40,7 +40,7 @@ public class RESTCatalogITCase extends CatalogITCaseBase {
     private static final String databaseName = "mydb";
     private static final String tableName = "t1";
 
-    RESTCatalogServer RESTCatalogServer;
+    RESTCatalogServer restCatalogServer;
     private String serverUrl;
     protected String warehouse;
     @TempDir java.nio.file.Path tempFile;
@@ -49,9 +49,9 @@ public class RESTCatalogITCase extends CatalogITCaseBase {
     public void before() throws IOException {
         String initToken = "init_token";
         warehouse = tempFile.toUri().toString();
-        RESTCatalogServer = new RESTCatalogServer(warehouse, initToken);
-        RESTCatalogServer.start();
-        serverUrl = RESTCatalogServer.getUrl();
+        restCatalogServer = new RESTCatalogServer(warehouse, initToken);
+        restCatalogServer.start();
+        serverUrl = restCatalogServer.getUrl();
         super.before();
         sql(String.format("CREATE DATABASE %s", databaseName));
         sql(String.format("CREATE TABLE %s.%s (a STRING, b DOUBLE)", databaseName, tableName));
@@ -61,7 +61,7 @@ public class RESTCatalogITCase extends CatalogITCaseBase {
     public void after() throws IOException {
         sql(String.format("DROP TABLE  %s.%s", databaseName, tableName));
         sql(String.format("DROP DATABASE %s", databaseName));
-        RESTCatalogServer.shutdown();
+        restCatalogServer.shutdown();
     }
 
     @Test
@@ -81,13 +81,14 @@ public class RESTCatalogITCase extends CatalogITCaseBase {
         sql(String.format("ALTER TABLE %s.%s ADD e INT AFTER b", databaseName, tableName));
         sql(String.format("ALTER TABLE %s.%s DROP b", databaseName, tableName));
         sql(String.format("ALTER TABLE %s.%s RENAME a TO a1", databaseName, tableName));
+        sql(String.format("ALTER TABLE %s.%s MODIFY e DOUBLE", databaseName, tableName));
         List<Row> result = sql(String.format("SHOW CREATE TABLE %s.%s", databaseName, tableName));
         assertThat(result.toString())
                 .contains(
                         String.format(
                                 "CREATE TABLE `PAIMON`.`%s`.`%s` (\n"
                                         + "  `a1` VARCHAR(2147483647),\n"
-                                        + "  `e` INT",
+                                        + "  `e` DOUBLE",
                                 databaseName, tableName));
     }
 

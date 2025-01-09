@@ -77,7 +77,7 @@ public class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testAuthFail() {
+    void testAuthFail() {
         Options options = new Options();
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, "aaaaa");
