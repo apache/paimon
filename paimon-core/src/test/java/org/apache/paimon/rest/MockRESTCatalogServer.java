@@ -89,7 +89,6 @@ public class MockRESTCatalogServer {
             @Override
             public MockResponse dispatch(RecordedRequest request) throws InterruptedException {
 
-                System.out.println(request.getPath() + "  method " + request.getMethod());
                 String token = request.getHeaders().get("Authorization");
                 RESTResponse response;
                 try {

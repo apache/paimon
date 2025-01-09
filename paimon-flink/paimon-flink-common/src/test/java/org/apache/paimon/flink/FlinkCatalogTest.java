@@ -364,7 +364,7 @@ public class FlinkCatalogTest {
     @MethodSource("streamingOptionProvider")
     public void testCreateTable_Streaming(Map<String, String> options) throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
-        CatalogTable table = this.createTable(options);
+        CatalogTable table = createTable(options);
         catalog.createTable(path1, table, false);
         checkCreateTable(path1, table, (CatalogTable) catalog.getTable(path1));
     }
