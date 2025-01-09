@@ -219,7 +219,6 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
     checkAnswer(spark.sql(s"CALL sys.remove_orphan_files(table => 'T')"), Row(0, 0) :: Nil)
   }
 
-
   test("Paimon procedure: remove orphan files with data file path directory") {
     sql(s"""
            |CREATE TABLE T (id STRING, name STRING)
