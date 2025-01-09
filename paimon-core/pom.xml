@@ -234,13 +234,6 @@ under the License.
             <scope>test</scope>
         </dependency>
 
-        <dependency>
-            <groupId>org.apache.iceberg</groupId>
-            <artifactId>iceberg-orc</artifactId>
-            <version>${iceberg.version}</version>
-            <scope>test</scope>
-        </dependency>
-
     </dependencies>
 
     <build>

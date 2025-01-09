@@ -40,17 +40,14 @@ import org.apache.iceberg.PartitionKey;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
-import org.apache.iceberg.avro.Avro;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.data.GenericRecord;
 import org.apache.iceberg.data.Record;
-import org.apache.iceberg.data.orc.GenericOrcWriter;
 import org.apache.iceberg.data.parquet.GenericParquetWriter;
 import org.apache.iceberg.deletes.EqualityDeleteWriter;
 import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.io.DataWriter;
 import org.apache.iceberg.io.OutputFile;
-import org.apache.iceberg.orc.ORC;
 import org.apache.iceberg.parquet.Parquet;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
 import org.apache.iceberg.types.Types;
@@ -476,8 +473,7 @@ public class IcebergMigrateTest {
     }
 
     private Table createIcebergTable(boolean isPartitioned, Schema icebergSchema) {
-        //        HadoopCatalog catalog = new HadoopCatalog(new Configuration(),
-        // iceTempDir.toString());
+
         org.apache.iceberg.catalog.Catalog icebergCatalog = createIcebergCatalog();
         TableIdentifier icebergIdentifier = TableIdentifier.of(iceDatabase, iceTable);
 
@@ -519,28 +515,12 @@ public class IcebergMigrateTest {
                                 icebergTable,
                                 partitionValues[0],
                                 partitionValues[1]);
-        // TODO: currently only support "parquet" format
+        // currently only support "parquet" format
         switch (format) {
             case "parquet":
                 return Parquet.writeData(file)
                         .schema(schema)
                         .createWriterFunc(GenericParquetWriter::buildWriter)
-                        .overwrite()
-                        .withSpec(partitionSpec)
-                        .withPartition(partitionKey)
-                        .build();
-            case "avro":
-                return Avro.writeData(file)
-                        .schema(schema)
-                        .createWriterFunc(org.apache.iceberg.data.avro.DataWriter::create)
-                        .overwrite()
-                        .withSpec(partitionSpec)
-                        .withPartition(partitionKey)
-                        .build();
-            case "orc":
-                return ORC.writeData(file)
-                        .schema(schema)
-                        .createWriterFunc(GenericOrcWriter::buildWriter)
                         .overwrite()
                         .withSpec(partitionSpec)
                         .withPartition(partitionKey)
