@@ -134,6 +134,54 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
     }
   }
 
+  test(
+    "Paimon partition expire test with hive catalog: expire partition for paimon table sparkCatalogName") {
+    spark.sql(s"USE $paimonHiveCatalogName")
+    withTempDir {
+      dBLocation =>
+        withDatabase("paimon_db") {
+          spark.sql(s"CREATE DATABASE paimon_db LOCATION '${dBLocation.getCanonicalPath}'")
+          withTable("paimon_db.paimon_tbl") {
+            spark.sql(s"""
+                         |CREATE TABLE paimon_db.paimon_tbl (id STRING, name STRING, pt STRING)
+                         |USING PAIMON
+                         |PARTITIONED BY (pt)
+                         |TBLPROPERTIES('metastore.partitioned-table' = 'false')
+                         |""".stripMargin)
+            spark.sql("insert into paimon_db.paimon_tbl select '1', 'n', '2024-11-01'")
+            spark.sql("insert into paimon_db.paimon_tbl select '2', 'n', '9999-11-01'")
+
+            spark.sql(
+              "CALL paimon_hive.sys.expire_partitions(table => 'paimon_db.paimon_tbl', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd')")
+
+            checkAnswer(
+              spark.sql("SELECT * FROM paimon_db.paimon_tbl"),
+              Row("2", "n", "9999-11-01") :: Nil)
+          }
+
+          withTable("paimon_db.paimon_tbl2") {
+            spark.sql(s"""
+                         |CREATE TABLE paimon_db.paimon_tbl2 (id STRING, name STRING, pt STRING)
+                         |USING PAIMON
+                         |PARTITIONED BY (pt)
+                         |TBLPROPERTIES('metastore.partitioned-table' = 'true')
+                         |""".stripMargin)
+            spark.sql("insert into paimon_db.paimon_tbl2 select '1', 'n', '2024-11-01'")
+
+            spark.sql("insert into paimon_db.paimon_tbl2 select '2', 'n', '9999-11-01'")
+
+            spark.sql(
+              "CALL paimon_hive.sys.expire_partitions(table => 'paimon_db.paimon_tbl2', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd')")
+
+            checkAnswer(
+              spark.sql("SELECT * FROM paimon_db.paimon_tbl2"),
+              Row("2", "n", "9999-11-01") :: Nil)
+          }
+
+        }
+    }
+  }
+
   test("Paimon DDL with hive catalog: create partition for paimon table sparkCatalogName") {
     Seq(paimonHiveCatalogName).foreach {
       catalogName =>
