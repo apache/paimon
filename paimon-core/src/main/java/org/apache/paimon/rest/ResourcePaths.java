@@ -30,7 +30,7 @@ public class ResourcePaths {
     private static final String DATABASES = "databases";
     private static final String TABLES = "tables";
 
-    public static final String V1_CONFIG = SLASH.join(V1, "config");
+    public static final String V1_CONFIG = V1 + "/config";
 
     public static ResourcePaths forCatalogProperties(Options options) {
         return new ResourcePaths(options.get(RESTCatalogInternalOptions.PREFIX));
