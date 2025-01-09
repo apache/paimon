@@ -163,11 +163,11 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 spark.sql("insert into paimon_db.paimon_tbl select '2', 'n', '9999-11-01'")
 
                 spark.sql(
-                  "CALL paimon.sys.expire_partitions(table => 'paimon_db.paimon_tbl', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd')")
+                  "CALL paimon_hive.sys.expire_partitions(table => 'paimon_db.paimon_tbl', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd')")
 
                 checkAnswer(
                   spark.sql("SELECT * FROM paimon_db.paimon_tbl"),
-                  Row("1", "n", "9999-11-01") :: Nil)
+                  Row("2", "n", "9999-11-01") :: Nil)
               }
 
               withTable("paimon_db.paimon_tbl2") {
@@ -185,11 +185,11 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 spark.sql("insert into paimon_db.paimon_tbl2 select '2', 'n', '9999-11-01'")
 
                 spark.sql(
-                  "CALL paimon.sys.expire_partitions(table => 'paimon_db.paimon_tbl2', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd')")
+                  "CALL paimon_hive.sys.expire_partitions(table => 'paimon_db.paimon_tbl2', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd')")
 
                 checkAnswer(
                   spark.sql("SELECT * FROM paimon_db.paimon_tbl2"),
-                  Row("1", "n", "9999-11-01") :: Nil)
+                  Row("2", "n", "9999-11-01") :: Nil)
               }
 
             }
