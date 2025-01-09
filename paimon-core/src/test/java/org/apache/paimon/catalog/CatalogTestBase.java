@@ -38,7 +38,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -55,7 +54,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /** Base test class of paimon catalog in {@link Catalog}. */
 public abstract class CatalogTestBase {
@@ -124,7 +124,7 @@ public abstract class CatalogTestBase {
 
         List<String> databases = catalog.listDatabases();
         List<String> distinctDatabases = databases.stream().distinct().collect(Collectors.toList());
-        Assertions.assertEquals(distinctDatabases.size(), databases.size());
+        assertEquals(distinctDatabases.size(), databases.size());
     }
 
     @Test
@@ -149,53 +149,52 @@ public abstract class CatalogTestBase {
 
     @Test
     public void testAlterDatabase() throws Exception {
-        if (supportsAlterDatabase()) {
-            // Alter database
-            String databaseName = "db_to_alter";
-            catalog.createDatabase(databaseName, false);
-            String key = "key1";
-            String key2 = "key2";
-            // Add property
-            catalog.alterDatabase(
-                    databaseName,
-                    Lists.newArrayList(
-                            PropertyChange.setProperty(key, "value"),
-                            PropertyChange.setProperty(key2, "value")),
-                    false);
-            Database db = catalog.getDatabase(databaseName);
-            assertEquals("value", db.options().get(key));
-            assertEquals("value", db.options().get(key2));
-            // Update property
-            catalog.alterDatabase(
-                    databaseName,
-                    Lists.newArrayList(
-                            PropertyChange.setProperty(key, "value1"),
-                            PropertyChange.setProperty(key2, "value1")),
-                    false);
-            db = catalog.getDatabase(databaseName);
-            assertEquals("value1", db.options().get(key));
-            assertEquals("value1", db.options().get(key2));
-            // remove property
-            catalog.alterDatabase(
-                    databaseName,
-                    Lists.newArrayList(
-                            PropertyChange.removeProperty(key),
-                            PropertyChange.removeProperty(key2)),
-                    false);
-            db = catalog.getDatabase(databaseName);
-            assertEquals(false, db.options().containsKey(key));
-            assertEquals(false, db.options().containsKey(key2));
-            // Remove non-existent property
-            catalog.alterDatabase(
-                    databaseName,
-                    Lists.newArrayList(
-                            PropertyChange.removeProperty(key),
-                            PropertyChange.removeProperty(key2)),
-                    false);
-            db = catalog.getDatabase(databaseName);
-            assertEquals(false, db.options().containsKey(key));
-            assertEquals(false, db.options().containsKey(key2));
+        if (!supportsAlterDatabase()) {
+            return;
         }
+        // Alter database
+        String databaseName = "db_to_alter";
+        catalog.createDatabase(databaseName, false);
+        String key = "key1";
+        String key2 = "key2";
+        // Add property
+        catalog.alterDatabase(
+                databaseName,
+                Lists.newArrayList(
+                        PropertyChange.setProperty(key, "value"),
+                        PropertyChange.setProperty(key2, "value")),
+                false);
+        Database db = catalog.getDatabase(databaseName);
+        assertEquals("value", db.options().get(key));
+        assertEquals("value", db.options().get(key2));
+        // Update property
+        catalog.alterDatabase(
+                databaseName,
+                Lists.newArrayList(
+                        PropertyChange.setProperty(key, "value1"),
+                        PropertyChange.setProperty(key2, "value1")),
+                false);
+        db = catalog.getDatabase(databaseName);
+        assertEquals("value1", db.options().get(key));
+        assertEquals("value1", db.options().get(key2));
+        // remove property
+        catalog.alterDatabase(
+                databaseName,
+                Lists.newArrayList(
+                        PropertyChange.removeProperty(key), PropertyChange.removeProperty(key2)),
+                false);
+        db = catalog.getDatabase(databaseName);
+        assertFalse(db.options().containsKey(key));
+        assertFalse(db.options().containsKey(key2));
+        // Remove non-existent property
+        catalog.alterDatabase(
+                databaseName,
+                Lists.newArrayList(
+                        PropertyChange.removeProperty(key), PropertyChange.removeProperty(key2)),
+                false);
+        db = catalog.getDatabase(databaseName);
+        assertFalse(db.options().containsKey(key));
+        assertFalse(db.options().containsKey(key2));
     }
 
     @Test
@@ -280,9 +279,17 @@ public abstract class CatalogTestBase {
                 .isThrownBy(() -> catalog.createTable(identifier, schema, false))
                 .withMessage("The value of auto-create property should be false.");
         schema.options().remove(CoreOptions.AUTO_CREATE.key());
-
+        // create table and check the schema
+        schema.options().put("k1", "v1");
         catalog.createTable(identifier, schema, false);
-        catalog.getTable(identifier);
+        FileStoreTable dataTable = (FileStoreTable) catalog.getTable(identifier);
+        assertThat(dataTable.schema().toSchema().fields()).isEqualTo(schema.fields());
+        assertThat(dataTable.schema().toSchema().partitionKeys()).isEqualTo(schema.partitionKeys());
+        assertThat(dataTable.schema().toSchema().comment()).isEqualTo(schema.comment());
+        assertThat(dataTable.schema().toSchema().primaryKeys()).isEqualTo(schema.primaryKeys());
+        for (Map.Entry<String, String> option : schema.options().entrySet()) {
+            assertThat(dataTable.options().get(option.getKey())).isEqualTo(option.getValue());
+        }
 
         // Create table throws Exception when table is system table
         assertThatExceptionOfType(IllegalArgumentException.class)
@@ -373,8 +380,8 @@ public abstract class CatalogTestBase {
         catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
         Table systemTable = catalog.getTable(Identifier.create("test_db", "test_table$snapshots"));
         assertThat(systemTable).isNotNull();
-        FileStoreTable dataTable = (FileStoreTable) catalog.getTable(identifier);
-        assertThat(dataTable.schema().toSchema().fields()).isEqualTo(DEFAULT_TABLE_SCHEMA.fields());
+        Table dataTable = catalog.getTable(identifier);
+        assertThat(dataTable).isNotNull();
 
         // Get system table throws Exception when table contains multiple '$' separator
         assertThatExceptionOfType(IllegalArgumentException.class)
@@ -889,10 +896,6 @@ public abstract class CatalogTestBase {
         assertThat(table.comment().isPresent()).isFalse();
     }
 
-    protected boolean supportsView() {
-        return false;
-    }
-
     @Test
     public void testView() throws Exception {
         if (!supportsView()) {
@@ -954,10 +957,6 @@ public abstract class CatalogTestBase {
                 .isInstanceOf(Catalog.ViewNotExistException.class);
     }
 
-    protected boolean supportsFormatTable() {
-        return false;
-    }
-
     @Test
     public void testFormatTable() throws Exception {
         if (!supportsFormatTable()) {
@@ -1012,7 +1011,19 @@ public abstract class CatalogTestBase {
                 .isGreaterThan(0);
     }
 
+    protected boolean supportAllTableOptions(){
+        return true;
+    }
+
     protected boolean supportsAlterDatabase() {
+        return false;
+    }
+
+    protected boolean supportsFormatTable() {
+        return false;
+    }
+
+    protected boolean supportsView() {
         return false;
     }
 }
