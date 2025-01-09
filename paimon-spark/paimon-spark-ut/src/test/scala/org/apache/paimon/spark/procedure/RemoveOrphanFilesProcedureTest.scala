@@ -219,4 +219,25 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
     checkAnswer(spark.sql(s"CALL sys.remove_orphan_files(table => 'T')"), Row(0, 0) :: Nil)
   }
 
+  test("Paimon procedure: remove orphan files with data file path directory") {
+    sql(s"""
+           |CREATE TABLE T (id STRING, name STRING)
+           |USING PAIMON
+           |TBLPROPERTIES ('primary-key'='id', 'data-file.path-directory'='data')
+           |""".stripMargin)
+
+    sql(s"INSERT INTO T VALUES ('1', 'a'), ('2', 'b')")
+
+    val table = loadTable("T")
+    val orphanFile = new Path(table.store().pathFactory().dataFilePath(), ORPHAN_FILE_1)
+    table.fileIO().tryToWriteAtomic(orphanFile, "b")
+
+    Thread.sleep(1000)
+    val older_than = DateTimeUtils.formatLocalDateTime(
+      DateTimeUtils.toLocalDateTime(System.currentTimeMillis()),
+      3)
+    checkAnswer(
+      sql(s"CALL sys.remove_orphan_files(table => 'T', older_than => '$older_than')"),
+      Row(1, 1) :: Nil)
+  }
 }

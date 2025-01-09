@@ -33,6 +33,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SerializableConsumer;
@@ -252,12 +253,14 @@ public abstract class OrphanFilesClean implements Serializable {
 
     /** List directories that contains data files and manifest files. */
     protected List<Path> listPaimonFileDirs() {
+        FileStorePathFactory pathFactory = table.store().pathFactory();
+
         List<Path> paimonFileDirs = new ArrayList<>();
 
-        paimonFileDirs.add(new Path(location, "manifest"));
-        paimonFileDirs.add(new Path(location, "index"));
-        paimonFileDirs.add(new Path(location, "statistics"));
-        paimonFileDirs.addAll(listFileDirs(location, partitionKeysNum));
+        paimonFileDirs.add(pathFactory.manifestPath());
+        paimonFileDirs.add(pathFactory.indexPath());
+        paimonFileDirs.add(pathFactory.statisticsPath());
+        paimonFileDirs.addAll(listFileDirs(pathFactory.dataFilePath(), partitionKeysNum));
 
         return paimonFileDirs;
     }
