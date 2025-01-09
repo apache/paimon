@@ -356,7 +356,11 @@ public final class RowType extends DataType {
     }
 
     public static Builder builder() {
-        return builder(true, new AtomicInteger(-1));
+        return builder(new AtomicInteger(-1));
+    }
+
+    public static Builder builder(AtomicInteger fieldId) {
+        return builder(true, fieldId);
     }
 
     public static Builder builder(boolean isNullable, AtomicInteger fieldId) {
