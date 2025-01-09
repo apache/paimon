@@ -52,6 +52,8 @@ public class IcebergMigrateHiveMetadata implements IcebergMigrateMetadata {
 
     private String metadataLocation = null;
 
+    private IcebergMetadata icebergMetadata;
+
     public IcebergMigrateHiveMetadata(
             Identifier icebergIdentifier, FileIO fileIO, Options icebergOptions) {
         this.fileIO = fileIO;
@@ -114,7 +116,8 @@ public class IcebergMigrateHiveMetadata implements IcebergMigrateMetadata {
             metadataLocation = icebergHiveTable.getParameters().get(ICEBERG_METADATA_LOCATION);
             LOG.info("iceberg latest metadata location: {}", metadataLocation);
 
-            return IcebergMetadata.fromPath(fileIO, new Path(metadataLocation));
+            icebergMetadata = IcebergMetadata.fromPath(fileIO, new Path(metadataLocation));
+            return icebergMetadata;
         } catch (Exception e) {
             throw new RuntimeException(
                     String.format("Failed to read Iceberg metadata from path %s", metadataLocation),
@@ -140,10 +143,16 @@ public class IcebergMigrateHiveMetadata implements IcebergMigrateMetadata {
                                 true);
                         return null;
                     });
+
+            // iceberg table in hive is external table, client.dropTable only deletes the metadata
+            // of iceberg table in hive, so we manually delete the data files
+            Path icebergTablePath = new Path(icebergMetadata.location());
+
+            if (fileIO.exists(icebergTablePath) && fileIO.isDir(icebergTablePath)) {
+                fileIO.deleteDirectoryQuietly(icebergTablePath);
+            }
         } catch (Exception e) {
-            LOG.warn(
-                    "exception occurred when deleting origin table, exception message:{}",
-                    e.getMessage());
+            LOG.warn("exception occurred when deleting origin table", e);
         }
     }
 
