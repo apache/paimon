@@ -18,26 +18,28 @@
 
 package org.apache.paimon.privilege;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogLoader;
+import org.apache.paimon.fs.FileIO;
 
-/** Loader to create {@link PrivilegedCatalog}. */
-public class PrivilegedCatalogLoader implements CatalogLoader {
+/** Loader for creating a {@link FileBasedPrivilegeManager}. */
+public class FileBasedPrivilegeManagerLoader implements PrivilegeManagerLoader {
 
     private static final long serialVersionUID = 1L;
 
-    private final CatalogLoader catalogLoader;
-    private final PrivilegeManagerLoader privilegeManagerLoader;
+    private final String warehouse;
+    private final FileIO fileIO;
+    private final String user;
+    private final String password;
 
-    public PrivilegedCatalogLoader(
-            CatalogLoader catalogLoader, PrivilegeManagerLoader privilegeManagerLoader) {
-        this.catalogLoader = catalogLoader;
-        this.privilegeManagerLoader = privilegeManagerLoader;
+    public FileBasedPrivilegeManagerLoader(
+            String warehouse, FileIO fileIO, String user, String password) {
+        this.warehouse = warehouse;
+        this.fileIO = fileIO;
+        this.user = user;
+        this.password = password;
     }
 
     @Override
-    public Catalog load() {
-        Catalog catalog = catalogLoader.load();
-        return new PrivilegedCatalog(catalog, privilegeManagerLoader);
+    public FileBasedPrivilegeManager load() {
+        return new FileBasedPrivilegeManager(warehouse, fileIO, user, password);
     }
 }

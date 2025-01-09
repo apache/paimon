@@ -23,7 +23,6 @@ import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
@@ -47,37 +46,27 @@ public class PrivilegedCatalog extends DelegateCatalog {
                     .stringType()
                     .defaultValue(PrivilegeManager.PASSWORD_ANONYMOUS);
 
-    private final String warehouse;
-    private final FileIO fileIO;
-    private final String user;
-    private final String password;
-
     private final PrivilegeManager privilegeManager;
+    private final PrivilegeManagerLoader privilegeManagerLoader;
 
-    public PrivilegedCatalog(
-            Catalog wrapped, String warehouse, FileIO fileIO, String user, String password) {
+    public PrivilegedCatalog(Catalog wrapped, PrivilegeManagerLoader privilegeManagerLoader) {
         super(wrapped);
-        this.warehouse = warehouse;
-        this.fileIO = fileIO;
-        this.user = user;
-        this.password = password;
-        this.privilegeManager = new FileBasedPrivilegeManager(warehouse, fileIO, user, password);
+        this.privilegeManager = privilegeManagerLoader.load();
+        this.privilegeManagerLoader = privilegeManagerLoader;
     }
 
     public static Catalog tryToCreate(Catalog catalog, Options options) {
-        if (new FileBasedPrivilegeManager(
+        FileBasedPrivilegeManagerLoader fileBasedPrivilegeManagerLoader =
+                new FileBasedPrivilegeManagerLoader(
                         catalog.warehouse(),
                         catalog.fileIO(),
                         options.get(PrivilegedCatalog.USER),
-                        options.get(PrivilegedCatalog.PASSWORD))
-                .privilegeEnabled()) {
-            catalog =
-                    new PrivilegedCatalog(
-                            catalog,
-                            catalog.warehouse(),
-                            catalog.fileIO(),
-                            options.get(PrivilegedCatalog.USER),
-                            options.get(PrivilegedCatalog.PASSWORD));
+                        options.get(PrivilegedCatalog.PASSWORD));
+        FileBasedPrivilegeManager fileBasedPrivilegeManager =
+                fileBasedPrivilegeManagerLoader.load();
+
+        if (fileBasedPrivilegeManager.privilegeEnabled()) {
+            catalog = new PrivilegedCatalog(catalog, fileBasedPrivilegeManagerLoader);
         }
         return catalog;
     }
@@ -88,8 +77,7 @@ public class PrivilegedCatalog extends DelegateCatalog {
 
     @Override
     public CatalogLoader catalogLoader() {
-        return new PrivilegedCatalogLoader(
-                wrapped.catalogLoader(), warehouse, fileIO, user, password);
+        return new PrivilegedCatalogLoader(wrapped.catalogLoader(), privilegeManagerLoader);
     }
 
     @Override

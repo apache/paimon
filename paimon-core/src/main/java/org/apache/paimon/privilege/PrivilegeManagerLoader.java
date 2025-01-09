@@ -18,26 +18,11 @@
 
 package org.apache.paimon.privilege;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogLoader;
+import java.io.Serializable;
 
-/** Loader to create {@link PrivilegedCatalog}. */
-public class PrivilegedCatalogLoader implements CatalogLoader {
+/** Loader for creating a {@link PrivilegeManager}. */
+@FunctionalInterface
+public interface PrivilegeManagerLoader extends Serializable {
 
-    private static final long serialVersionUID = 1L;
-
-    private final CatalogLoader catalogLoader;
-    private final PrivilegeManagerLoader privilegeManagerLoader;
-
-    public PrivilegedCatalogLoader(
-            CatalogLoader catalogLoader, PrivilegeManagerLoader privilegeManagerLoader) {
-        this.catalogLoader = catalogLoader;
-        this.privilegeManagerLoader = privilegeManagerLoader;
-    }
-
-    @Override
-    public Catalog load() {
-        Catalog catalog = catalogLoader.load();
-        return new PrivilegedCatalog(catalog, privilegeManagerLoader);
-    }
+    PrivilegeManager load();
 }

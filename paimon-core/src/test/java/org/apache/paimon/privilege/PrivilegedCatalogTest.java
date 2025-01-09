@@ -74,7 +74,8 @@ public class PrivilegedCatalogTest extends FileSystemCatalogTest {
     }
 
     private PrivilegedCatalog create(Catalog catalog, String user, String password) {
-        return new PrivilegedCatalog(catalog, warehouse, fileIO, user, password);
+        return new PrivilegedCatalog(
+                catalog, new FileBasedPrivilegeManagerLoader(warehouse, fileIO, user, password));
     }
 
     private void assertNoPrivilege(Executable executable) {
