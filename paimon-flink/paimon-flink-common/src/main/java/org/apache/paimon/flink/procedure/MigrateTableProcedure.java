@@ -52,10 +52,6 @@ public class MigrateTableProcedure extends ProcedureBase {
                         type = @DataTypeHint("Integer"),
                         isOptional = true),
                 @ArgumentHint(
-                        name = "target_table",
-                        type = @DataTypeHint("STRING"),
-                        isOptional = true),
-                @ArgumentHint(
                         name = "iceberg_options",
                         type = @DataTypeHint("STRING"),
                         isOptional = true)
@@ -66,16 +62,12 @@ public class MigrateTableProcedure extends ProcedureBase {
             String sourceTablePath,
             String properties,
             Integer parallelism,
-            String targetTablePath,
             String icebergProperties)
             throws Exception {
         properties = notnull(properties);
         icebergProperties = notnull(icebergProperties);
 
         String targetPaimonTablePath = sourceTablePath + PAIMON_SUFFIX;
-        if (targetTablePath != null) {
-            targetPaimonTablePath = targetTablePath;
-        }
 
         Identifier sourceTableId = Identifier.fromString(sourceTablePath);
         Identifier targetTableId = Identifier.fromString(targetPaimonTablePath);
