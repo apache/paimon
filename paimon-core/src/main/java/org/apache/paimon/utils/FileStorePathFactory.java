@@ -133,7 +133,7 @@ public class FileStorePathFactory {
     }
 
     public Path newManifestFile() {
-        return toManifestListPath(
+        return toManifestFilePath(
                 MANIFEST_PREFIX + uuid + "-" + manifestFileCount.getAndIncrement());
     }
 
