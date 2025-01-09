@@ -18,6 +18,8 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.options.Options;
+
 import java.util.StringJoiner;
 
 /** Resource paths for REST catalog. */
@@ -27,8 +29,8 @@ public class ResourcePaths {
     public static final String SLASH = "/";
     public static final String V1_CONFIG = V1 + "/config";
 
-    public static ResourcePaths forCatalogProperties(String prefix) {
-        return new ResourcePaths(prefix);
+    public static ResourcePaths forCatalogProperties(Options options) {
+        return new ResourcePaths(options.get(RESTCatalogInternalOptions.PREFIX));
     }
 
     private final String prefix;

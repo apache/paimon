@@ -40,39 +40,6 @@ import java.util.Map;
 @Public
 public interface Catalog extends AutoCloseable {
 
-    // constants for system table and database
-    String SYSTEM_TABLE_SPLITTER = "$";
-    String SYSTEM_DATABASE_NAME = "sys";
-    String SYSTEM_BRANCH_PREFIX = "branch_";
-
-    // constants for table and database
-    String COMMENT_PROP = "comment";
-    String OWNER_PROP = "owner";
-
-    // constants for database
-    String DEFAULT_DATABASE = "default";
-    String DB_SUFFIX = ".db";
-    String DB_LOCATION_PROP = "location";
-
-    // constants for table
-    String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
-    String NUM_ROWS_PROP = "numRows";
-    String NUM_FILES_PROP = "numFiles";
-    String TOTAL_SIZE_PROP = "totalSize";
-    String LAST_UPDATE_TIME_PROP = "lastUpdateTime";
-
-    /** Warehouse root path for creating new databases. */
-    String warehouse();
-
-    /** {@link FileIO} of this catalog. It can access {@link #warehouse()} path. */
-    FileIO fileIO();
-
-    /** Catalog options for re-creating this catalog. */
-    Map<String, String> options();
-
-    /** Return a boolean that indicates whether this catalog is case-sensitive. */
-    boolean caseSensitive();
-
     // ======================= database methods ===============================
 
     /**
@@ -398,6 +365,48 @@ public interface Catalog extends AutoCloseable {
     default void repairTable(Identifier identifier) throws TableNotExistException {
         throw new UnsupportedOperationException();
     }
+
+    // ==================== Catalog Information ==========================
+
+    /** Warehouse root path for creating new databases. */
+    String warehouse();
+
+    /** {@link FileIO} of this catalog. It can access {@link #warehouse()} path. */
+    FileIO fileIO();
+
+    /** Catalog options for re-creating this catalog. */
+    Map<String, String> options();
+
+    /** Serializable loader to create catalog. */
+    CatalogLoader catalogLoader();
+
+    /** Return a boolean that indicates whether this catalog is case-sensitive. */
+    boolean caseSensitive();
+
+    // ======================= Constants ===============================
+
+    // constants for system table and database
+    String SYSTEM_TABLE_SPLITTER = "$";
+    String SYSTEM_DATABASE_NAME = "sys";
+    String SYSTEM_BRANCH_PREFIX = "branch_";
+
+    // constants for table and database
+    String COMMENT_PROP = "comment";
+    String OWNER_PROP = "owner";
+
+    // constants for database
+    String DEFAULT_DATABASE = "default";
+    String DB_SUFFIX = ".db";
+    String DB_LOCATION_PROP = "location";
+
+    // constants for table
+    String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
+    String NUM_ROWS_PROP = "numRows";
+    String NUM_FILES_PROP = "numFiles";
+    String TOTAL_SIZE_PROP = "totalSize";
+    String LAST_UPDATE_TIME_PROP = "lastUpdateTime";
+
+    // ======================= Exceptions ===============================
 
     /** Exception for trying to drop on a database that is not empty. */
     class DatabaseNotEmptyException extends Exception {

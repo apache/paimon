@@ -19,8 +19,8 @@
 package org.apache.paimon.partition.actions;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.PartitionHandler;
 import org.apache.paimon.utils.StringUtils;
 
 import java.io.Closeable;
@@ -55,10 +55,10 @@ public interface PartitionMarkDoneAction extends Closeable {
                                             fileStoreTable.fileIO(), fileStoreTable.location());
                                 case DONE_PARTITION:
                                     return new AddDonePartitionAction(
-                                            createMetastoreClient(fileStoreTable, options));
+                                            createPartitionHandler(fileStoreTable, options));
                                 case MARK_EVENT:
                                     return new MarkPartitionDoneEventAction(
-                                            createMetastoreClient(fileStoreTable, options));
+                                            createPartitionHandler(fileStoreTable, options));
                                 case CUSTOM:
                                     return generateCustomMarkDoneAction(cl, options);
                                 default:
@@ -87,20 +87,18 @@ public interface PartitionMarkDoneAction extends Closeable {
         }
     }
 
-    static MetastoreClient createMetastoreClient(FileStoreTable table, CoreOptions options) {
-        MetastoreClient.Factory metastoreClientFactory =
-                table.catalogEnvironment().metastoreClientFactory();
+    static PartitionHandler createPartitionHandler(FileStoreTable table, CoreOptions options) {
+        PartitionHandler partitionHandler = table.catalogEnvironment().partitionHandler();
 
         if (options.toConfiguration().get(PARTITION_MARK_DONE_ACTION).contains("done-partition")) {
             checkNotNull(
-                    metastoreClientFactory,
-                    "Cannot mark done partition for table without metastore.");
+                    partitionHandler, "Cannot mark done partition for table without metastore.");
             checkArgument(
                     options.partitionedTableInMetastore(),
                     "Table should enable %s",
                     METASTORE_PARTITIONED_TABLE.key());
         }
 
-        return metastoreClientFactory.create();
+        return partitionHandler;
     }
 }

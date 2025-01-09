@@ -89,7 +89,7 @@ public class FieldProductAgg extends FieldAggregator {
         Object product;
 
         if (accumulator == null || inputField == null) {
-            product = (accumulator == null ? inputField : accumulator);
+            product = accumulator;
         } else {
             switch (fieldType.getTypeRoot()) {
                 case DECIMAL:

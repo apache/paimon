@@ -22,12 +22,12 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.PartitionHandler;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -43,7 +43,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -87,41 +86,34 @@ public class PartitionStatisticsReporterTest {
         AtomicBoolean closed = new AtomicBoolean(false);
         Map<String, Partition> partitionParams = Maps.newHashMap();
 
-        MetastoreClient client =
-                new MetastoreClient() {
+        PartitionHandler partitionHandler =
+                new PartitionHandler() {
 
                     @Override
-                    public void addPartition(LinkedHashMap<String, String> partition) {
+                    public void createPartitions(List<Map<String, String>> partitions) {
                         throw new UnsupportedOperationException();
                     }
 
                     @Override
-                    public void addPartitions(List<LinkedHashMap<String, String>> partitions) {
+                    public void dropPartitions(List<Map<String, String>> partitions) {
                         throw new UnsupportedOperationException();
                     }
 
                     @Override
-                    public void dropPartition(LinkedHashMap<String, String> partition) {
+                    public void markDonePartitions(List<Map<String, String>> partitions) {
                         throw new UnsupportedOperationException();
                     }
 
                     @Override
-                    public void dropPartitions(List<LinkedHashMap<String, String>> partitions) {
-                        throw new UnsupportedOperationException();
-                    }
-
-                    @Override
-                    public void markPartitionDone(LinkedHashMap<String, String> partitionSpec) {
-                        throw new UnsupportedOperationException();
-                    }
-
-                    @Override
-                    public void alterPartition(Partition partition) {
-                        partitionParams.put(
-                                PartitionPathUtils.generatePartitionPath(
-                                        partition.spec(),
-                                        table.rowType().project(table.partitionKeys())),
-                                partition);
+                    public void alterPartitions(List<Partition> partitions) {
+                        partitions.forEach(
+                                partition -> {
+                                    partitionParams.put(
+                                            PartitionPathUtils.generatePartitionPath(
+                                                    partition.spec(),
+                                                    table.rowType().project(table.partitionKeys())),
+                                            partition);
+                                });
                     }
 
                     @Override
@@ -130,7 +122,8 @@ public class PartitionStatisticsReporterTest {
                     }
                 };
 
-        PartitionStatisticsReporter action = new PartitionStatisticsReporter(table, client);
+        PartitionStatisticsReporter action =
+                new PartitionStatisticsReporter(table, partitionHandler);
         long time = 1729598544974L;
         action.report("c1=a/", time);
         Assertions.assertThat(partitionParams).containsKey("c1=a/");

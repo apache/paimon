@@ -360,6 +360,8 @@ If you allow some functions to ignore retraction messages, you can configure:
 
 The `last_value` and `last_non_null_value` just set field to null when accept retract messages.
 
+The `product` will return null for retraction message when accumulator is null.
+
 The `collect` and `merge_map` make a best-effort attempt to handle retraction messages, but the results are not
 guaranteed to be accurate. The following behaviors may occur when processing retraction messages:
 

@@ -33,7 +33,6 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Optional;
 
 import static org.junit.Assert.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
@@ -44,15 +43,17 @@ import static org.mockito.Mockito.verify;
 /** Test for {@link HttpClient}. */
 public class HttpClientTest {
 
+    private static final String MOCK_PATH = "/v1/api/mock";
+    private static final String TOKEN = "token";
+
+    private final ObjectMapper objectMapper = RESTObjectMapper.create();
+
     private MockWebServer mockWebServer;
     private HttpClient httpClient;
-    private ObjectMapper objectMapper = RESTObjectMapper.create();
     private ErrorHandler errorHandler;
     private MockRESTData mockResponseData;
     private String mockResponseDataStr;
     private Map<String, String> headers;
-    private static final String MOCK_PATH = "/v1/api/mock";
-    private static final String TOKEN = "token";
 
     @Before
     public void setUp() throws IOException {
@@ -61,16 +62,11 @@ public class HttpClientTest {
         String baseUrl = mockWebServer.url("").toString();
         errorHandler = mock(ErrorHandler.class);
         HttpClientOptions httpClientOptions =
-                new HttpClientOptions(
-                        baseUrl,
-                        Optional.of(Duration.ofSeconds(3)),
-                        Optional.of(Duration.ofSeconds(3)),
-                        objectMapper,
-                        1,
-                        errorHandler);
+                new HttpClientOptions(baseUrl, Duration.ofSeconds(3), Duration.ofSeconds(3), 1);
         mockResponseData = new MockRESTData(MOCK_PATH);
         mockResponseDataStr = objectMapper.writeValueAsString(mockResponseData);
         httpClient = new HttpClient(httpClientOptions);
+        httpClient.setErrorHandler(errorHandler);
         CredentialsProvider credentialsProvider = new BearTokenCredentialsProvider(TOKEN);
         headers = credentialsProvider.authHeader();
     }

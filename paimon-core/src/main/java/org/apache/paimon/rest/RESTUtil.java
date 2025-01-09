@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -27,6 +28,11 @@ import java.util.Map;
 
 /** Util for REST. */
 public class RESTUtil {
+
+    public static Map<String, String> extractPrefixMap(Options options, String prefix) {
+        return extractPrefixMap(options.toMap(), prefix);
+    }
+
     public static Map<String, String> extractPrefixMap(
             Map<String, String> properties, String prefix) {
         Preconditions.checkNotNull(properties, "Invalid properties map: null");

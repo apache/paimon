@@ -18,6 +18,8 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.exceptions.RESTException;
 import org.apache.paimon.rest.responses.ErrorResponse;
 
@@ -47,13 +49,18 @@ import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 /** HTTP client for REST catalog. */
 public class HttpClient implements RESTClient {
 
-    private final OkHttpClient okHttpClient;
-    private final String uri;
-    private final ObjectMapper mapper;
-    private final ErrorHandler errorHandler;
-
+    private static final ObjectMapper OBJECT_MAPPER = RESTObjectMapper.create();
     private static final String THREAD_NAME = "REST-CATALOG-HTTP-CLIENT-THREAD-POOL";
     private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
+
+    private final OkHttpClient okHttpClient;
+    private final String uri;
+
+    private ErrorHandler errorHandler;
+
+    public HttpClient(Options options) {
+        this(HttpClientOptions.create(options));
+    }
 
     public HttpClient(HttpClientOptions httpClientOptions) {
         if (httpClientOptions.uri() != null && httpClientOptions.uri().endsWith("/")) {
@@ -61,9 +68,13 @@ public class HttpClient implements RESTClient {
         } else {
             this.uri = httpClientOptions.uri();
         }
-        this.mapper = httpClientOptions.mapper();
         this.okHttpClient = createHttpClient(httpClientOptions);
-        this.errorHandler = httpClientOptions.errorHandler();
+        this.errorHandler = DefaultErrorHandler.getInstance();
+    }
+
+    @VisibleForTesting
+    void setErrorHandler(ErrorHandler errorHandler) {
+        this.errorHandler = errorHandler;
     }
 
     @Override
@@ -141,7 +152,7 @@ public class HttpClient implements RESTClient {
                 errorHandler.accept(error);
             }
             if (responseType != null && responseBodyStr != null) {
-                return mapper.readValue(responseBodyStr, responseType);
+                return OBJECT_MAPPER.readValue(responseBodyStr, responseType);
             } else if (responseType == null) {
                 return null;
             } else {
@@ -155,7 +166,7 @@ public class HttpClient implements RESTClient {
     }
 
     private RequestBody buildRequestBody(RESTRequest body) throws JsonProcessingException {
-        return RequestBody.create(mapper.writeValueAsBytes(body), MEDIA_TYPE);
+        return RequestBody.create(OBJECT_MAPPER.writeValueAsBytes(body), MEDIA_TYPE);
     }
 
     private static OkHttpClient createHttpClient(HttpClientOptions httpClientOptions) {

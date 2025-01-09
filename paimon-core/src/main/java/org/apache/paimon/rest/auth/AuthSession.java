@@ -19,6 +19,8 @@
 package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTCatalog;
 import org.apache.paimon.rest.RESTUtil;
 
 import org.slf4j.Logger;
@@ -28,6 +30,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+
+import static org.apache.paimon.rest.RESTCatalog.HEADER_PREFIX;
+import static org.apache.paimon.rest.RESTUtil.extractPrefixMap;
 
 /** Auth session. */
 public class AuthSession {
@@ -138,6 +143,20 @@ public class AuthSession {
                     TimeUnit.MILLISECONDS);
         } else {
             log.warn("Failed to refresh token after {} retries.", TOKEN_REFRESH_NUM_RETRIES);
+        }
+    }
+
+    public static AuthSession createAuthSession(
+            Options options, ScheduledExecutorService refreshExecutor) {
+        Map<String, String> baseHeader = extractPrefixMap(options, HEADER_PREFIX);
+        CredentialsProvider credentialsProvider =
+                CredentialsProviderFactory.createCredentialsProvider(
+                        options, RESTCatalog.class.getClassLoader());
+        if (credentialsProvider.keepRefreshed()) {
+            return AuthSession.fromRefreshCredentialsProvider(
+                    refreshExecutor, baseHeader, credentialsProvider);
+        } else {
+            return new AuthSession(baseHeader, credentialsProvider);
         }
     }
 }
