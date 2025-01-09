@@ -37,6 +37,17 @@ import java.util.stream.Collectors;
 @ThreadSafe
 public class FileStorePathFactory {
 
+    public static final String MANIFEST_PATH = "manifest";
+    public static final String MANIFEST_PREFIX = "manifest-";
+    public static final String MANIFEST_LIST_PREFIX = "manifest-list-";
+    public static final String INDEX_MANIFEST_PREFIX = "index-manifest-";
+
+    public static final String INDEX_PATH = "index";
+    public static final String INDEX_PREFIX = "index-";
+
+    public static final String STATISTICS_PATH = "statistics";
+    public static final String STATISTICS_PREFIX = "stat-";
+
     public static final String BUCKET_PATH_PREFIX = "bucket-";
 
     // this is the table schema root path
@@ -94,6 +105,25 @@ public class FileStorePathFactory {
         return root;
     }
 
+    public Path manifestPath() {
+        return new Path(root, MANIFEST_PATH);
+    }
+
+    public Path indexPath() {
+        return new Path(root, INDEX_PATH);
+    }
+
+    public Path statisticsPath() {
+        return new Path(root, STATISTICS_PATH);
+    }
+
+    public Path dataFilePath() {
+        if (dataFilePathDirectory != null) {
+            return new Path(root, dataFilePathDirectory);
+        }
+        return root;
+    }
+
     @VisibleForTesting
     public static InternalRowPartitionComputer getPartitionComputer(
             RowType partitionType, String defaultPartValue, boolean legacyPartitionName) {
@@ -103,25 +133,21 @@ public class FileStorePathFactory {
     }
 
     public Path newManifestFile() {
-        return new Path(
-                root + "/manifest/manifest-" + uuid + "-" + manifestFileCount.getAndIncrement());
+        return toManifestListPath(
+                MANIFEST_PREFIX + uuid + "-" + manifestFileCount.getAndIncrement());
     }
 
     public Path newManifestList() {
-        return new Path(
-                root
-                        + "/manifest/manifest-list-"
-                        + uuid
-                        + "-"
-                        + manifestListCount.getAndIncrement());
+        return toManifestListPath(
+                MANIFEST_LIST_PREFIX + uuid + "-" + manifestListCount.getAndIncrement());
     }
 
     public Path toManifestFilePath(String manifestFileName) {
-        return new Path(root + "/manifest/" + manifestFileName);
+        return new Path(manifestPath(), manifestFileName);
     }
 
     public Path toManifestListPath(String manifestListName) {
-        return new Path(root + "/manifest/" + manifestListName);
+        return new Path(manifestPath(), manifestListName);
     }
 
     public DataFilePathFactory createDataFilePathFactory(BinaryRow partition, int bucket) {
@@ -217,17 +243,13 @@ public class FileStorePathFactory {
         return new PathFactory() {
             @Override
             public Path newPath() {
-                return new Path(
-                        root
-                                + "/manifest/index-manifest-"
-                                + uuid
-                                + "-"
-                                + indexManifestCount.getAndIncrement());
+                return toPath(
+                        INDEX_MANIFEST_PREFIX + uuid + "-" + indexManifestCount.getAndIncrement());
             }
 
             @Override
             public Path toPath(String fileName) {
-                return new Path(root + "/manifest/" + fileName);
+                return new Path(manifestPath(), fileName);
             }
         };
     }
@@ -236,13 +258,12 @@ public class FileStorePathFactory {
         return new PathFactory() {
             @Override
             public Path newPath() {
-                return new Path(
-                        root + "/index/index-" + uuid + "-" + indexFileCount.getAndIncrement());
+                return toPath(INDEX_PREFIX + uuid + "-" + indexFileCount.getAndIncrement());
             }
 
             @Override
             public Path toPath(String fileName) {
-                return new Path(root + "/index/" + fileName);
+                return new Path(indexPath(), fileName);
             }
         };
     }
@@ -251,17 +272,12 @@ public class FileStorePathFactory {
         return new PathFactory() {
             @Override
             public Path newPath() {
-                return new Path(
-                        root
-                                + "/statistics/stats-"
-                                + uuid
-                                + "-"
-                                + statsFileCount.getAndIncrement());
+                return toPath(STATISTICS_PREFIX + uuid + "-" + statsFileCount.getAndIncrement());
             }
 
             @Override
             public Path toPath(String fileName) {
-                return new Path(root + "/statistics/" + fileName);
+                return new Path(statisticsPath(), fileName);
             }
         };
     }
