@@ -18,7 +18,9 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.paimon.options.Options;
+
+import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.Optional;
@@ -27,25 +29,27 @@ import java.util.Optional;
 public class HttpClientOptions {
 
     private final String uri;
-    private final Optional<Duration> connectTimeout;
-    private final Optional<Duration> readTimeout;
-    private final ObjectMapper mapper;
+    @Nullable private final Duration connectTimeout;
+    @Nullable private final Duration readTimeout;
     private final int threadPoolSize;
-    private final ErrorHandler errorHandler;
 
     public HttpClientOptions(
             String uri,
-            Optional<Duration> connectTimeout,
-            Optional<Duration> readTimeout,
-            ObjectMapper mapper,
-            int threadPoolSize,
-            ErrorHandler errorHandler) {
+            @Nullable Duration connectTimeout,
+            @Nullable Duration readTimeout,
+            int threadPoolSize) {
         this.uri = uri;
         this.connectTimeout = connectTimeout;
         this.readTimeout = readTimeout;
-        this.mapper = mapper;
         this.threadPoolSize = threadPoolSize;
-        this.errorHandler = errorHandler;
+    }
+
+    public static HttpClientOptions create(Options options) {
+        return new HttpClientOptions(
+                options.get(RESTCatalogOptions.URI),
+                options.get(RESTCatalogOptions.CONNECTION_TIMEOUT),
+                options.get(RESTCatalogOptions.READ_TIMEOUT),
+                options.get(RESTCatalogOptions.THREAD_POOL_SIZE));
     }
 
     public String uri() {
@@ -53,22 +57,14 @@ public class HttpClientOptions {
     }
 
     public Optional<Duration> connectTimeout() {
-        return connectTimeout;
+        return Optional.ofNullable(connectTimeout);
     }
 
     public Optional<Duration> readTimeout() {
-        return readTimeout;
-    }
-
-    public ObjectMapper mapper() {
-        return mapper;
+        return Optional.ofNullable(readTimeout);
     }
 
     public int threadPoolSize() {
         return threadPoolSize;
-    }
-
-    public ErrorHandler errorHandler() {
-        return errorHandler;
     }
 }

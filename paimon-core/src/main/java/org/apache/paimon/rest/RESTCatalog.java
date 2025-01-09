@@ -34,8 +34,6 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.auth.AuthSession;
-import org.apache.paimon.rest.auth.CredentialsProvider;
-import org.apache.paimon.rest.auth.CredentialsProviderFactory;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
@@ -64,18 +62,15 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -84,6 +79,8 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
+import static org.apache.paimon.rest.RESTUtil.extractPrefixMap;
+import static org.apache.paimon.rest.auth.AuthSession.createAuthSession;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
@@ -91,7 +88,7 @@ import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 public class RESTCatalog implements Catalog {
 
     private static final Logger LOG = LoggerFactory.getLogger(RESTCatalog.class);
-    private static final ObjectMapper OBJECT_MAPPER = RESTObjectMapper.create();
+    public static final String HEADER_PREFIX = "header.";
 
     private final RESTClient client;
     private final ResourcePaths resourcePaths;
@@ -105,42 +102,18 @@ public class RESTCatalog implements Catalog {
         if (context.options().getOptional(CatalogOptions.WAREHOUSE).isPresent()) {
             throw new IllegalArgumentException("Can not config warehouse in RESTCatalog.");
         }
-        String uri = context.options().get(RESTCatalogOptions.URI);
-        Optional<Duration> connectTimeout =
-                context.options().getOptional(RESTCatalogOptions.CONNECTION_TIMEOUT);
-        Optional<Duration> readTimeout =
-                context.options().getOptional(RESTCatalogOptions.READ_TIMEOUT);
-        Integer threadPoolSize = context.options().get(RESTCatalogOptions.THREAD_POOL_SIZE);
-        HttpClientOptions httpClientOptions =
-                new HttpClientOptions(
-                        uri,
-                        connectTimeout,
-                        readTimeout,
-                        OBJECT_MAPPER,
-                        threadPoolSize,
-                        DefaultErrorHandler.getInstance());
-        this.client = new HttpClient(httpClientOptions);
-        Map<String, String> baseHeader = configHeaders(context.options().toMap());
-        CredentialsProvider credentialsProvider =
-                CredentialsProviderFactory.createCredentialsProvider(
-                        context.options(), RESTCatalog.class.getClassLoader());
-        if (credentialsProvider.keepRefreshed()) {
-            this.catalogAuth =
-                    AuthSession.fromRefreshCredentialsProvider(
-                            tokenRefreshExecutor(), baseHeader, credentialsProvider);
-        } else {
-            this.catalogAuth = new AuthSession(baseHeader, credentialsProvider);
-        }
+        this.client = new HttpClient(context.options());
+        this.catalogAuth = createAuthSession(context.options(), tokenRefreshExecutor());
+
         Map<String, String> initHeaders =
                 RESTUtil.merge(
-                        configHeaders(context.options().toMap()), this.catalogAuth.getHeaders());
-
+                        extractPrefixMap(context.options(), HEADER_PREFIX),
+                        catalogAuth.getHeaders());
         this.options =
                 new Options(
                         client.get(ResourcePaths.V1_CONFIG, ConfigResponse.class, initHeaders)
                                 .merge(context.options().toMap()));
-        this.resourcePaths =
-                ResourcePaths.forCatalogProperties(options.get(RESTCatalogInternalOptions.PREFIX));
+        this.resourcePaths = ResourcePaths.forCatalogProperties(options);
 
         try {
             String warehouseStr = options.get(CatalogOptions.WAREHOUSE);
@@ -155,6 +128,14 @@ public class RESTCatalog implements Catalog {
         }
     }
 
+    protected RESTCatalog(Options options, FileIO fileIO) {
+        this.client = new HttpClient(options);
+        this.catalogAuth = createAuthSession(options, tokenRefreshExecutor());
+        this.options = options;
+        this.resourcePaths = ResourcePaths.forCatalogProperties(options);
+        this.fileIO = fileIO;
+    }
+
     @Override
     public String warehouse() {
         return options.get(CatalogOptions.WAREHOUSE);
@@ -167,7 +148,7 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public CatalogLoader catalogLoader() {
-        throw new UnsupportedOperationException("Not supported yet.");
+        return new RESTCatalogLoader(options, fileIO);
     }
 
     @Override
@@ -452,7 +433,9 @@ public class RESTCatalog implements Catalog {
                         fileIO(),
                         new Path(response.getPath()),
                         TableSchema.create(response.getSchemaId(), response.getSchema()),
-                        new CatalogEnvironment(identifier, null, Lock.emptyFactory(), null));
+                        // TODO add uuid from server
+                        new CatalogEnvironment(
+                                identifier, null, Lock.emptyFactory(), catalogLoader()));
         CoreOptions options = table.coreOptions();
         if (options.type() == TableType.OBJECT_TABLE) {
             String objectLocation = options.objectLocation();
@@ -465,10 +448,6 @@ public class RESTCatalog implements Catalog {
                             .build();
         }
         return table;
-    }
-
-    private static Map<String, String> configHeaders(Map<String, String> properties) {
-        return RESTUtil.extractPrefixMap(properties, "header.");
     }
 
     private Map<String, String> headers() {
