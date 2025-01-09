@@ -23,7 +23,6 @@ import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.PartitionHandler;
 import org.apache.paimon.utils.TimeUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
