@@ -47,16 +47,16 @@ import static org.junit.Assert.assertThrows;
 /** Test for REST Catalog. */
 public class RESTCatalogTest extends CatalogTestBase {
 
-    private RESTCatalogServer RESTCatalogServer;
+    private RESTCatalogServer restCatalogServer;
 
     @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
         String initToken = "init_token";
-        RESTCatalogServer = new RESTCatalogServer(warehouse, initToken);
-        RESTCatalogServer.start();
+        restCatalogServer = new RESTCatalogServer(warehouse, initToken);
+        restCatalogServer.start();
         Options options = new Options();
-        options.set(RESTCatalogOptions.URI, RESTCatalogServer.getUrl());
+        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
         this.catalog = new RESTCatalog(CatalogContext.create(options));
@@ -64,7 +64,7 @@ public class RESTCatalogTest extends CatalogTestBase {
 
     @AfterEach
     public void tearDown() throws Exception {
-        RESTCatalogServer.shutdown();
+        restCatalogServer.shutdown();
     }
 
     @Test
@@ -79,7 +79,7 @@ public class RESTCatalogTest extends CatalogTestBase {
     @Test
     public void testAuthFail() {
         Options options = new Options();
-        options.set(RESTCatalogOptions.URI, RESTCatalogServer.getUrl());
+        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, "aaaaa");
         options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
         options.set(CatalogOptions.METASTORE, RESTCatalogFactory.IDENTIFIER);

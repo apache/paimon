@@ -54,7 +54,7 @@ import java.util.List;
 /** Mock REST server for testing. */
 public class RESTCatalogServer {
 
-    private static final ObjectMapper mapper = RESTObjectMapper.create();
+    private static final ObjectMapper MAPPER = RESTObjectMapper.create();
     private static final String PREFIX = "paimon";
     private static final String DATABASE_URI = String.format("/v1/%s/databases", PREFIX);
 
@@ -187,7 +187,7 @@ public class RESTCatalogServer {
             Catalog catalog, RecordedRequest request, String databaseName, String tableName)
             throws Exception {
         RenameTableRequest requestBody =
-                mapper.readValue(request.getBody().readUtf8(), RenameTableRequest.class);
+                MAPPER.readValue(request.getBody().readUtf8(), RenameTableRequest.class);
         catalog.renameTable(
                 Identifier.create(databaseName, tableName), requestBody.getNewIdentifier(), false);
         FileStoreTable table = (FileStoreTable) catalog.getTable(requestBody.getNewIdentifier());
@@ -210,7 +210,7 @@ public class RESTCatalogServer {
             return mockResponse(response, 200);
         } else if (request.getMethod().equals("POST")) {
             CreateDatabaseRequest requestBody =
-                    mapper.readValue(request.getBody().readUtf8(), CreateDatabaseRequest.class);
+                    MAPPER.readValue(request.getBody().readUtf8(), CreateDatabaseRequest.class);
             String databaseName = requestBody.getName();
             catalog.createDatabase(databaseName, false);
             response = new CreateDatabaseResponse(databaseName, requestBody.getOptions());
@@ -238,7 +238,7 @@ public class RESTCatalogServer {
         RESTResponse response;
         if (request.getMethod().equals("POST")) {
             CreateTableRequest requestBody =
-                    mapper.readValue(request.getBody().readUtf8(), CreateTableRequest.class);
+                    MAPPER.readValue(request.getBody().readUtf8(), CreateTableRequest.class);
             catalog.createTable(requestBody.getIdentifier(), requestBody.getSchema(), false);
             response = new GetTableResponse("", 1L, requestBody.getSchema());
             return mockResponse(response, 200);
@@ -267,7 +267,7 @@ public class RESTCatalogServer {
         } else if (request.getMethod().equals("POST")) {
             Identifier identifier = Identifier.create(databaseName, tableName);
             AlterTableRequest requestBody =
-                    mapper.readValue(request.getBody().readUtf8(), AlterTableRequest.class);
+                    MAPPER.readValue(request.getBody().readUtf8(), AlterTableRequest.class);
             catalog.alterTable(identifier, requestBody.getChanges(), false);
             FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
             response = new GetTableResponse("", table.schema().id(), table.schema().toSchema());
@@ -284,7 +284,7 @@ public class RESTCatalogServer {
         try {
             return new MockResponse()
                     .setResponseCode(httpCode)
-                    .setBody(mapper.writeValueAsString(response))
+                    .setBody(MAPPER.writeValueAsString(response))
                     .addHeader("Content-Type", "application/json");
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
