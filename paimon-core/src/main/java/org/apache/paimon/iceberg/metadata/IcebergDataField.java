@@ -203,8 +203,7 @@ public class IcebergDataField {
         }
     }
 
-    @JsonIgnore
-    public DataType getDataTypeFromType() {
+    private DataType getDataTypeFromType() {
         String simpleType = type.toString();
         String delimiter = "(";
         if (simpleType.contains("[")) {
