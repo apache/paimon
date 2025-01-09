@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.rest.MockRESTCatalogServer;
 import org.apache.paimon.rest.RESTCatalogOptions;
 
+import org.apache.flink.types.Row;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,12 +29,16 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for REST catalog. */
 public class RESTCatalogITCase extends CatalogITCaseBase {
+
+    private static final String databaseName = "mydb";
+    private static final String tableName = "t1";
 
     MockRESTCatalogServer mockRESTCatalogServer;
     private String serverUrl;
@@ -48,23 +53,44 @@ public class RESTCatalogITCase extends CatalogITCaseBase {
         mockRESTCatalogServer.start();
         serverUrl = mockRESTCatalogServer.getUrl();
         super.before();
+        sql(String.format("CREATE DATABASE %s", databaseName));
+        sql(String.format("CREATE TABLE %s.%s (a STRING, b DOUBLE)", databaseName, tableName));
     }
 
     @AfterEach()
     public void after() throws IOException {
+        sql(String.format("DROP TABLE  %s.%s", databaseName, tableName));
+        sql(String.format("DROP DATABASE %s", databaseName));
         mockRESTCatalogServer.shutdown();
     }
 
     @Test
     public void testCreateTable() {
-        sql("CREATE DATABASE mydb");
-        sql("CREATE TABLE mydb.T1 (a INT, b INT)");
-        String result = sql("DESCRIBE mydb.T1").toString();
-        assertThat(result)
-                .isEqualTo(
-                        "[+I[a, INT, true, null, null, null], +I[b, INT, true, null, null, null]]");
-        sql("DROP TABLE mydb.T1");
-        sql("DROP DATABASE mydb");
+        List<Row> result = sql(String.format("SHOW CREATE TABLE %s.%s", databaseName, tableName));
+        assertThat(result.toString())
+                .contains(
+                        String.format(
+                                "CREATE TABLE `PAIMON`.`%s`.`%s` (\n"
+                                        + "  `a` VARCHAR(2147483647),\n"
+                                        + "  `b` DOUBLE",
+                                databaseName, tableName));
+    }
+
+    @Test
+    public void testAlterTable() {
+        sql(String.format("ALTER TABLE %s.%s ADD e INT AFTER b", databaseName, tableName));
+        sql(String.format("ALTER TABLE %s.%s DROP b", databaseName, tableName));
+        ;
+        sql(String.format("ALTER TABLE %s.%s RENAME a TO a1", databaseName, tableName));
+        ;
+        List<Row> result = sql(String.format("SHOW CREATE TABLE %s.%s", databaseName, tableName));
+        assertThat(result.toString())
+                .contains(
+                        String.format(
+                                "CREATE TABLE `PAIMON`.`%s`.`%s` (\n"
+                                        + "  `a1` VARCHAR(2147483647),\n"
+                                        + "  `e` INT",
+                                databaseName, tableName));
     }
 
     @Override
