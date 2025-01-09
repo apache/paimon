@@ -52,16 +52,18 @@ import java.io.IOException;
 import java.util.List;
 
 /** Mock REST server for testing. */
-public class MockRESTCatalogServer {
+public class RESTCatalogServer {
 
     private static final ObjectMapper mapper = RESTObjectMapper.create();
+    private static final String PREFIX = "paimon";
+    private static final String DATABASE_URI = String.format("/v1/%s/databases", PREFIX);
 
     private final Catalog catalog;
     private final Dispatcher dispatcher;
     private final MockWebServer server;
     private final String authToken;
 
-    public MockRESTCatalogServer(String warehouse, String initToken) {
+    public RESTCatalogServer(String warehouse, String initToken) {
         authToken = initToken;
         Options conf = new Options();
         conf.setString("warehouse", warehouse);
@@ -90,7 +92,7 @@ public class MockRESTCatalogServer {
         return new Dispatcher() {
             @Override
             public MockResponse dispatch(RecordedRequest request) throws InterruptedException {
-
+                System.out.println("request: " + request.getPath());
                 String token = request.getHeaders().get("Authorization");
                 RESTResponse response;
                 try {
@@ -101,12 +103,12 @@ public class MockRESTCatalogServer {
                         return new MockResponse()
                                 .setResponseCode(200)
                                 .setBody(getConfigBody(catalog.warehouse()));
-                    } else if ("/v1/prefix/databases".equals(request.getPath())) {
+                    } else if (DATABASE_URI.equals(request.getPath())) {
                         return databasesApiHandler(catalog, request);
-                    } else if (request.getPath().startsWith("/v1/prefix/databases/")) {
+                    } else if (request.getPath().startsWith(DATABASE_URI)) {
                         String[] resources =
                                 request.getPath()
-                                        .substring("/v1/prefix/databases/".length())
+                                        .substring((DATABASE_URI + "/").length())
                                         .split("/");
                         String databaseName = resources[0];
                         boolean isTables = resources.length == 2 && "tables".equals(resources[1]);
@@ -293,7 +295,7 @@ public class MockRESTCatalogServer {
         return String.format(
                 "{\"defaults\": {\"%s\": \"%s\", \"%s\": \"%s\"}}",
                 RESTCatalogInternalOptions.PREFIX.key(),
-                "prefix",
+                PREFIX,
                 CatalogOptions.WAREHOUSE.key(),
                 warehouseStr);
     }

@@ -18,8 +18,8 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.rest.MockRESTCatalogServer;
 import org.apache.paimon.rest.RESTCatalogOptions;
+import org.apache.paimon.rest.RESTCatalogServer;
 
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.AfterEach;
@@ -40,7 +40,7 @@ public class RESTCatalogITCase extends CatalogITCaseBase {
     private static final String databaseName = "mydb";
     private static final String tableName = "t1";
 
-    MockRESTCatalogServer mockRESTCatalogServer;
+    RESTCatalogServer RESTCatalogServer;
     private String serverUrl;
     protected String warehouse;
     @TempDir java.nio.file.Path tempFile;
@@ -49,9 +49,9 @@ public class RESTCatalogITCase extends CatalogITCaseBase {
     public void before() throws IOException {
         String initToken = "init_token";
         warehouse = tempFile.toUri().toString();
-        mockRESTCatalogServer = new MockRESTCatalogServer(warehouse, initToken);
-        mockRESTCatalogServer.start();
-        serverUrl = mockRESTCatalogServer.getUrl();
+        RESTCatalogServer = new RESTCatalogServer(warehouse, initToken);
+        RESTCatalogServer.start();
+        serverUrl = RESTCatalogServer.getUrl();
         super.before();
         sql(String.format("CREATE DATABASE %s", databaseName));
         sql(String.format("CREATE TABLE %s.%s (a STRING, b DOUBLE)", databaseName, tableName));
@@ -61,7 +61,7 @@ public class RESTCatalogITCase extends CatalogITCaseBase {
     public void after() throws IOException {
         sql(String.format("DROP TABLE  %s.%s", databaseName, tableName));
         sql(String.format("DROP DATABASE %s", databaseName));
-        mockRESTCatalogServer.shutdown();
+        RESTCatalogServer.shutdown();
     }
 
     @Test

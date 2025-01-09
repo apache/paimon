@@ -47,16 +47,16 @@ import static org.junit.Assert.assertThrows;
 /** Test for REST Catalog. */
 public class RESTCatalogTest extends CatalogTestBase {
 
-    private MockRESTCatalogServer mockRESTCatalogServer;
+    private RESTCatalogServer RESTCatalogServer;
 
     @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
         String initToken = "init_token";
-        mockRESTCatalogServer = new MockRESTCatalogServer(warehouse, initToken);
-        mockRESTCatalogServer.start();
+        RESTCatalogServer = new RESTCatalogServer(warehouse, initToken);
+        RESTCatalogServer.start();
         Options options = new Options();
-        options.set(RESTCatalogOptions.URI, mockRESTCatalogServer.getUrl());
+        options.set(RESTCatalogOptions.URI, RESTCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
         this.catalog = new RESTCatalog(CatalogContext.create(options));
@@ -64,7 +64,7 @@ public class RESTCatalogTest extends CatalogTestBase {
 
     @AfterEach
     public void tearDown() throws Exception {
-        mockRESTCatalogServer.shutdown();
+        RESTCatalogServer.shutdown();
     }
 
     @Test
@@ -79,7 +79,7 @@ public class RESTCatalogTest extends CatalogTestBase {
     @Test
     public void testAuthFail() {
         Options options = new Options();
-        options.set(RESTCatalogOptions.URI, mockRESTCatalogServer.getUrl());
+        options.set(RESTCatalogOptions.URI, RESTCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, "aaaaa");
         options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
         options.set(CatalogOptions.METASTORE, RESTCatalogFactory.IDENTIFIER);
