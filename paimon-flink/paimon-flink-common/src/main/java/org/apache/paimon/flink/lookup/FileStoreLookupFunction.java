@@ -91,7 +91,6 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     @Nullable private final Predicate predicate;
     @Nullable private final RefreshBlacklist refreshBlacklist;
 
-    private final List<InternalRow.FieldGetter> joinKeysGetters;
     private final List<InternalRow.FieldGetter> projectFieldsGetters;
 
     private transient File path;
@@ -124,11 +123,6 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         this.projectFields =
                 Arrays.stream(projection)
                         .mapToObj(i -> table.rowType().getFieldNames().get(i))
-                        .collect(Collectors.toList());
-
-        this.joinKeysGetters =
-                Arrays.stream(joinKeyIndex)
-                        .mapToObj(i -> table.rowType().fieldGetters()[projection[i]])
                         .collect(Collectors.toList());
 
         this.projectFieldsGetters =
@@ -179,7 +173,10 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
         List<String> fieldNames = table.rowType().getFieldNames();
         int[] projection = projectFields.stream().mapToInt(fieldNames::indexOf).toArray();
-        LOG.info("lookup projection fields:{}, join fields:{}", projectFields, joinKeys);
+        LOG.info(
+                "lookup projection fields in lookup table:{}, join fields in lookup table:{}",
+                projectFields,
+                joinKeys);
 
         FileStoreTable storeTable = (FileStoreTable) table;
 
@@ -251,6 +248,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         try {
             tryRefresh();
 
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("lookup key:{}", keyRow.toString());
+            }
             InternalRow key = new FlinkRowWrapper(keyRow);
             if (partitionLoader == null) {
                 return lookupInternal(key);
@@ -264,7 +264,6 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             for (BinaryRow partition : partitionLoader.partitions()) {
                 rows.addAll(lookupInternal(JoinedRow.join(key, partition)));
             }
-
             return rows;
         } catch (OutOfRangeException | ReopenException e) {
             reopen();
@@ -283,8 +282,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
         if (LOG.isDebugEnabled()) {
             LOG.debug(
-                    "lookup key:{}, matched rows size:{}, matched rows:{}",
-                    logRow(joinKeysGetters, key),
+                    "matched rows in lookup table, size:{}, rows:{}",
                     lookupResults.size(),
                     lookupResults.stream()
                             .map(row -> logRow(projectFieldsGetters, row))
