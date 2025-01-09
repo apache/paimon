@@ -135,6 +135,10 @@ public class IcebergDataField {
 
     @JsonIgnore
     public DataType dataType() {
+        if (dataType != null) {
+            return dataType;
+        }
+        dataType = getDataTypeFromType();
         return Preconditions.checkNotNull(dataType);
     }
 
@@ -200,15 +204,6 @@ public class IcebergDataField {
     }
 
     @JsonIgnore
-    public DataType getDataType() {
-        if (dataType != null) {
-            return dataType;
-        }
-        dataType = getDataTypeFromType();
-        return dataType();
-    }
-
-    @JsonIgnore
     public DataType getDataTypeFromType() {
         String simpleType = type.toString();
         String delimiter = "(";
@@ -270,7 +265,7 @@ public class IcebergDataField {
     }
 
     public DataField toDatafield() {
-        return new DataField(id, name, getDataType(), doc);
+        return new DataField(id, name, dataType(), doc);
     }
 
     @Override
