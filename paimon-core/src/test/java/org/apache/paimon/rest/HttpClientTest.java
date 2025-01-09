@@ -44,8 +44,7 @@ public class HttpClientTest {
 
     private static final String MOCK_PATH = "/v1/api/mock";
     private static final String TOKEN = "token";
-
-    private final ObjectMapper objectMapper = RESTObjectMapper.create();
+    private static final ObjectMapper OBJECT_MAPPER = RESTObjectMapper.create();
 
     private MockWebServer mockWebServer;
     private HttpClient httpClient;
@@ -65,9 +64,9 @@ public class HttpClientTest {
         HttpClientOptions httpClientOptions =
                 new HttpClientOptions(baseUrl, Duration.ofSeconds(3), Duration.ofSeconds(3), 1);
         mockResponseData = new MockRESTData(MOCK_PATH);
-        mockResponseDataStr = objectMapper.writeValueAsString(mockResponseData);
+        mockResponseDataStr = OBJECT_MAPPER.writeValueAsString(mockResponseData);
         errorResponse = new ErrorResponse("test", "test", "test", 400);
-        errorResponseStr = objectMapper.writeValueAsString(errorResponse);
+        errorResponseStr = OBJECT_MAPPER.writeValueAsString(errorResponse);
         httpClient = new HttpClient(httpClientOptions);
         httpClient.setErrorHandler(errorHandler);
         CredentialsProvider credentialsProvider = new BearTokenCredentialsProvider(TOKEN);

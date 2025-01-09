@@ -20,6 +20,7 @@ package org.apache.paimon.rest.exceptions;
 
 /** Exception thrown on HTTP 501 - UnsupportedOperationException. */
 public class UnsupportedOperationException extends RESTException {
+
     public UnsupportedOperationException(String message, Object... args) {
         super(String.format(message, args));
     }

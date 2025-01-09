@@ -41,15 +41,15 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Test for REST Catalog. */
-public class RESTCatalogTest extends CatalogTestBase {
+class RESTCatalogTest extends CatalogTestBase {
 
     private RESTCatalogServer restCatalogServer;
 
     @BeforeEach
+    @Override
     public void setUp() throws Exception {
         super.setUp();
         String initToken = "init_token";
@@ -67,13 +67,17 @@ public class RESTCatalogTest extends CatalogTestBase {
         restCatalogServer.shutdown();
     }
 
+    @Override
+    protected boolean supportGetFromSystemDatabase() {
+        return false;
+    }
+
     @Test
-    public void testInitFailWhenDefineWarehouse() {
+    void testInitFailWhenDefineWarehouse() {
         Options options = new Options();
         options.set(CatalogOptions.WAREHOUSE, warehouse);
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new RESTCatalog(CatalogContext.create(options)));
+        assertThatThrownBy(() -> new RESTCatalog(CatalogContext.create(options)))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -88,7 +92,7 @@ public class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testListPartitionsWhenMetastorePartitionedIsTrue() throws Exception {
+    void testListPartitionsWhenMetastorePartitionedIsTrue() throws Exception {
         Identifier identifier = Identifier.create("test_db", "test_table");
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         List<Partition> result = catalog.listPartitions(identifier);
@@ -96,7 +100,7 @@ public class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testListPartitionsFromFile() throws Exception {
+    void testListPartitionsFromFile() throws Exception {
         Identifier identifier = Identifier.create("test_db", "test_table");
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         List<Partition> result = catalog.listPartitions(identifier);

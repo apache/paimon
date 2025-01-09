@@ -49,6 +49,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
+import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
+import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -279,7 +282,8 @@ public abstract class CatalogTestBase {
                 .isThrownBy(() -> catalog.createTable(identifier, schema, false))
                 .withMessage("The value of auto-create property should be false.");
         schema.options().remove(CoreOptions.AUTO_CREATE.key());
-        // create table and check the schema
+
+        // Create table and check the schema
         schema.options().put("k1", "v1");
         catalog.createTable(identifier, schema, false);
         FileStoreTable dataTable = (FileStoreTable) catalog.getTable(identifier);
@@ -421,6 +425,20 @@ public abstract class CatalogTestBase {
                 .isThrownBy(
                         () -> catalog.getTable(Identifier.create("non_existing_db", "test_table")))
                 .withMessage("Table non_existing_db.test_table does not exist.");
+
+        // Get all table options from system database
+        if (!supportGetFromSystemDatabase()) {
+            return;
+        }
+        Table allTableOptionsTable =
+                catalog.getTable(Identifier.create(SYSTEM_DATABASE_NAME, ALL_TABLE_OPTIONS));
+        assertThat(allTableOptionsTable).isNotNull();
+        Table catalogOptionsTable =
+                catalog.getTable(Identifier.create(SYSTEM_DATABASE_NAME, CATALOG_OPTIONS));
+        assertThat(catalogOptionsTable).isNotNull();
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(
+                        () -> catalog.getTable(Identifier.create(SYSTEM_DATABASE_NAME, "1111")));
     }
 
     @Test
@@ -1011,7 +1029,7 @@ public abstract class CatalogTestBase {
                 .isGreaterThan(0);
     }
 
-    protected boolean supportAllTableOptions() {
+    protected boolean supportGetFromSystemDatabase() {
         return true;
     }
 
