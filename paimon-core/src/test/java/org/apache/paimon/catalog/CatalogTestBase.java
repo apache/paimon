@@ -1011,7 +1011,7 @@ public abstract class CatalogTestBase {
                 .isGreaterThan(0);
     }
 
-    protected boolean supportAllTableOptions(){
+    protected boolean supportAllTableOptions() {
         return true;
     }
 

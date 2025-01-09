@@ -138,7 +138,7 @@ public class HttpClient implements RESTClient {
             if (!response.isSuccessful()) {
                 ErrorResponse error;
                 try {
-                    error = mapper.readValue(responseBodyStr, ErrorResponse.class);
+                    error = OBJECT_MAPPER.readValue(responseBodyStr, ErrorResponse.class);
                 } catch (JsonProcessingException e) {
                     error =
                             new ErrorResponse(

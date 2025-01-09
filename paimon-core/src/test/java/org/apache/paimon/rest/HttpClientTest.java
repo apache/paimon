@@ -20,9 +20,9 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.rest.auth.BearTokenCredentialsProvider;
 import org.apache.paimon.rest.auth.CredentialsProvider;
-
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.responses.ErrorResponse;
+
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import okhttp3.mockwebserver.MockResponse;
@@ -89,7 +89,9 @@ public class HttpClientTest {
     @Test
     public void testGetFail() {
         mockHttpCallWithCode(errorResponseStr, 400);
-        assertThrows(BadRequestException.class, () -> httpClient.get(MOCK_PATH, MockRESTData.class, headers));
+        assertThrows(
+                BadRequestException.class,
+                () -> httpClient.get(MOCK_PATH, MockRESTData.class, headers));
     }
 
     @Test
@@ -103,7 +105,9 @@ public class HttpClientTest {
     @Test
     public void testPostFail() {
         mockHttpCallWithCode(errorResponseStr, 400);
-        assertThrows(BadRequestException.class, () -> httpClient.post(MOCK_PATH, mockResponseData, ErrorResponse.class, headers));
+        assertThrows(
+                BadRequestException.class,
+                () -> httpClient.post(MOCK_PATH, mockResponseData, ErrorResponse.class, headers));
     }
 
     @Test
