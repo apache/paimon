@@ -42,7 +42,7 @@ public class ErrorResponse implements RESTResponse {
     private static final String FIELD_STACK = "stack";
 
     @JsonProperty(FIELD_RESOURCE_TYPE)
-    private final String resourceType;
+    private final ErrorResponseResourceType resourceType;
 
     @JsonProperty(FIELD_RESOURCE_NAME)
     private final String resourceName;
@@ -56,7 +56,11 @@ public class ErrorResponse implements RESTResponse {
     @JsonProperty(FIELD_STACK)
     private final List<String> stack;
 
-    public ErrorResponse(String resourceType, String resourceName, String message, Integer code) {
+    public ErrorResponse(
+            ErrorResponseResourceType resourceType,
+            String resourceName,
+            String message,
+            Integer code) {
         this.resourceType = resourceType;
         this.resourceName = resourceName;
         this.code = code;
@@ -66,7 +70,7 @@ public class ErrorResponse implements RESTResponse {
 
     @JsonCreator
     public ErrorResponse(
-            @JsonProperty(FIELD_RESOURCE_TYPE) String resourceType,
+            @JsonProperty(FIELD_RESOURCE_TYPE) ErrorResponseResourceType resourceType,
             @JsonProperty(FIELD_RESOURCE_NAME) String resourceName,
             @JsonProperty(FIELD_MESSAGE) String message,
             @JsonProperty(FIELD_CODE) int code,
@@ -84,7 +88,7 @@ public class ErrorResponse implements RESTResponse {
     }
 
     @JsonGetter(FIELD_RESOURCE_TYPE)
-    public String getResourceType() {
+    public ErrorResponseResourceType getResourceType() {
         return resourceType;
     }
 

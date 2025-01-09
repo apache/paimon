@@ -22,6 +22,7 @@ import org.apache.paimon.rest.auth.BearTokenCredentialsProvider;
 import org.apache.paimon.rest.auth.CredentialsProvider;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.responses.ErrorResponse;
+import org.apache.paimon.rest.responses.ErrorResponseResourceType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -65,7 +66,7 @@ public class HttpClientTest {
                 new HttpClientOptions(baseUrl, Duration.ofSeconds(3), Duration.ofSeconds(3), 1);
         mockResponseData = new MockRESTData(MOCK_PATH);
         mockResponseDataStr = OBJECT_MAPPER.writeValueAsString(mockResponseData);
-        errorResponse = new ErrorResponse("test", "test", "test", 400);
+        errorResponse = new ErrorResponse(ErrorResponseResourceType.DATABASE, "test", "test", 400);
         errorResponseStr = OBJECT_MAPPER.writeValueAsString(errorResponse);
         httpClient = new HttpClient(httpClientOptions);
         httpClient.setErrorHandler(errorHandler);

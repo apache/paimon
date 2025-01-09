@@ -33,6 +33,7 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
+import org.apache.paimon.rest.responses.ErrorResponseResourceType;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
@@ -139,26 +140,52 @@ public class RESTCatalogServer {
                     }
                     return new MockResponse().setResponseCode(404);
                 } catch (Catalog.DatabaseNotExistException e) {
-                    response = new ErrorResponse("database", e.database(), e.getMessage(), 404);
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponseResourceType.DATABASE,
+                                    e.database(),
+                                    e.getMessage(),
+                                    404);
                     return mockResponse(response, 404);
                 } catch (Catalog.TableNotExistException e) {
                     response =
                             new ErrorResponse(
-                                    "table", e.identifier().getTableName(), e.getMessage(), 404);
+                                    ErrorResponseResourceType.TABLE,
+                                    e.identifier().getTableName(),
+                                    e.getMessage(),
+                                    404);
                     return mockResponse(response, 404);
                 } catch (Catalog.ColumnNotExistException e) {
-                    response = new ErrorResponse("column", e.column(), e.getMessage(), 404);
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponseResourceType.COLUMN,
+                                    e.column(),
+                                    e.getMessage(),
+                                    404);
                     return mockResponse(response, 404);
                 } catch (Catalog.DatabaseAlreadyExistException e) {
-                    response = new ErrorResponse("database", e.database(), e.getMessage(), 409);
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponseResourceType.DATABASE,
+                                    e.database(),
+                                    e.getMessage(),
+                                    409);
                     return mockResponse(response, 409);
                 } catch (Catalog.TableAlreadyExistException e) {
                     response =
                             new ErrorResponse(
-                                    "table", e.identifier().getTableName(), e.getMessage(), 409);
+                                    ErrorResponseResourceType.TABLE,
+                                    e.identifier().getTableName(),
+                                    e.getMessage(),
+                                    409);
                     return mockResponse(response, 409);
                 } catch (Catalog.ColumnAlreadyExistException e) {
-                    response = new ErrorResponse("column", e.column(), e.getMessage(), 409);
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponseResourceType.COLUMN,
+                                    e.column(),
+                                    e.getMessage(),
+                                    409);
                     return mockResponse(response, 409);
                 } catch (IllegalArgumentException e) {
                     response = new ErrorResponse(null, null, e.getMessage(), 400);
