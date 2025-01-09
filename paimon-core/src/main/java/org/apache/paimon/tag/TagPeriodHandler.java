@@ -31,6 +31,7 @@ import java.time.format.SignStyle;
 
 import static java.time.temporal.ChronoField.DAY_OF_MONTH;
 import static java.time.temporal.ChronoField.HOUR_OF_DAY;
+import static java.time.temporal.ChronoField.MINUTE_OF_HOUR;
 import static java.time.temporal.ChronoField.MONTH_OF_YEAR;
 import static java.time.temporal.ChronoField.YEAR;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -57,6 +58,16 @@ public interface TagPeriodHandler {
                     .appendValue(DAY_OF_MONTH, 2, 2, SignStyle.NORMAL)
                     .appendLiteral(" ")
                     .appendValue(HOUR_OF_DAY, 2, 2, SignStyle.NORMAL)
+                    .toFormatter()
+                    .withResolverStyle(ResolverStyle.LENIENT);
+
+    DateTimeFormatter MINUTE_FORMATTER =
+            new DateTimeFormatterBuilder()
+                    .appendValue(YEAR, 1, 10, SignStyle.NORMAL)
+                    .appendValue(MONTH_OF_YEAR, 2, 2, SignStyle.NORMAL)
+                    .appendValue(DAY_OF_MONTH, 2, 2, SignStyle.NORMAL)
+                    .appendValue(HOUR_OF_DAY, 2, 2, SignStyle.NORMAL)
+                    .appendValue(MINUTE_OF_HOUR, 2, 2, SignStyle.NORMAL)
                     .toFormatter()
                     .withResolverStyle(ResolverStyle.LENIENT);
 
@@ -87,6 +98,8 @@ public interface TagPeriodHandler {
     String timeToTag(LocalDateTime time);
 
     LocalDateTime nextTagTime(LocalDateTime time);
+
+    LocalDateTime previousTagTime(LocalDateTime time);
 
     boolean isAutoTag(String tagName);
 
@@ -125,6 +138,11 @@ public interface TagPeriodHandler {
         @Override
         public LocalDateTime nextTagTime(LocalDateTime time) {
             return time.plus(onePeriod());
+        }
+
+        @Override
+        public LocalDateTime previousTagTime(LocalDateTime time) {
+            return time.minus(onePeriod());
         }
 
         @Override
@@ -218,7 +236,31 @@ public interface TagPeriodHandler {
         }
     }
 
+    /** Period duration {@link TagPeriodHandler}. */
+    class PeriodDurationTagPeriodHandler extends BaseTagPeriodHandler {
+
+        Duration periodDuration;
+
+        public PeriodDurationTagPeriodHandler(Duration duration) {
+            this.periodDuration = duration;
+        }
+
+        @Override
+        protected Duration onePeriod() {
+            return periodDuration;
+        }
+
+        @Override
+        protected DateTimeFormatter formatter() {
+            return MINUTE_FORMATTER;
+        }
+    }
+
     static TagPeriodHandler create(CoreOptions options) {
+        if (options.tagPeriodDuration().isPresent()) {
+            return new PeriodDurationTagPeriodHandler(options.tagPeriodDuration().get());
+        }
+
         switch (options.tagCreationPeriod()) {
             case DAILY:
                 return new DailyTagPeriodHandler(options.tagPeriodFormatter());

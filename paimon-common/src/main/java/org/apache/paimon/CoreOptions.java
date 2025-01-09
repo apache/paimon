@@ -124,6 +124,33 @@ public class CoreOptions implements Serializable {
                                                     + "if there is no primary key, the full row will be used.")
                                     .build());
 
+    public static final ConfigOption<String> DATA_FILE_EXTERNAL_PATHS =
+            key("data-file.external-paths")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The external paths where the data of this table will be written, "
+                                    + "multiple elements separated by commas.");
+
+    public static final ConfigOption<ExternalPathStrategy> DATA_FILE_EXTERNAL_PATHS_STRATEGY =
+            key("data-file.external-paths.strategy")
+                    .enumType(ExternalPathStrategy.class)
+                    .defaultValue(ExternalPathStrategy.NONE)
+                    .withDescription(
+                            "The strategy of selecting an external path when writing data.");
+
+    public static final ConfigOption<String> DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS =
+            key("data-file.external-paths.specific-fs")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The specific file system of the external path when "
+                                    + DATA_FILE_EXTERNAL_PATHS_STRATEGY.key()
+                                    + " is set to "
+                                    + ExternalPathStrategy.SPECIFIC_FS
+                                    + ", should be the prefix scheme of the external path, now supported are s3 and oss.");
+
+    // todo, this path is the table schema path, the name will be changed in the later PR.
     @ExcludeFromDocumentation("Internal use only")
     public static final ConfigOption<String> PATH =
             key("path")
@@ -1062,7 +1089,7 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Read incremental changes between start snapshot (exclusive) and end snapshot, "
+                            "Read incremental changes between start snapshot (exclusive) and end snapshot (inclusive), "
                                     + "for example, '5,10' means changes between snapshot 5 and snapshot 10.");
 
     public static final ConfigOption<IncrementalBetweenScanMode> INCREMENTAL_BETWEEN_SCAN_MODE =
@@ -1070,15 +1097,23 @@ public class CoreOptions implements Serializable {
                     .enumType(IncrementalBetweenScanMode.class)
                     .defaultValue(IncrementalBetweenScanMode.AUTO)
                     .withDescription(
-                            "Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot. ");
+                            "Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot (inclusive). ");
 
     public static final ConfigOption<String> INCREMENTAL_BETWEEN_TIMESTAMP =
             key("incremental-between-timestamp")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Read incremental changes between start timestamp (exclusive) and end timestamp, "
+                            "Read incremental changes between start timestamp (exclusive) and end timestamp (inclusive), "
                                     + "for example, 't1,t2' means changes between timestamp t1 and timestamp t2.");
+
+    public static final ConfigOption<String> INCREMENTAL_TO_AUTO_TAG =
+            key("incremental-to-auto-tag")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Used to specify the end tag (inclusive), and Paimon will find an earlier tag and return changes between them. "
+                                    + "If the tag doesn't exist or the earlier tag doesn't exist, return empty. ");
 
     public static final ConfigOption<Boolean> END_INPUT_CHECK_PARTITION_EXPIRE =
             key("end-input.check-partition-expire")
@@ -1185,8 +1220,19 @@ public class CoreOptions implements Serializable {
                                     .text("3. 'mark-event': mark partition event to metastore.")
                                     .linebreak()
                                     .text(
-                                            "Both can be configured at the same time: 'done-partition,success-file,mark-event'.")
+                                            "4. 'custom': use policy class to create a mark-partition policy.")
+                                    .linebreak()
+                                    .text(
+                                            "Both can be configured at the same time: 'done-partition,success-file,mark-event,custom'.")
                                     .build());
+
+    public static final ConfigOption<String> PARTITION_MARK_DONE_CUSTOM_CLASS =
+            key("partition.mark-done-action.custom.class")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The partition mark done class for implement"
+                                    + " PartitionMarkDoneAction interface. Only work in custom mark-done-action.");
 
     public static final ConfigOption<Boolean> METASTORE_PARTITIONED_TABLE =
             key("metastore.partitioned-table")
@@ -1222,6 +1268,12 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to create tag automatically. And how to generate tags.");
 
+    public static final ConfigOption<Boolean> TAG_CREATE_SUCCESS_FILE =
+            key("tag.create-success-file")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to create tag success file for new created tags.");
+
     public static final ConfigOption<TagCreationPeriod> TAG_CREATION_PERIOD =
             key("tag.creation-period")
                     .enumType(TagCreationPeriod.class)
@@ -1241,6 +1293,13 @@ public class CoreOptions implements Serializable {
                     .enumType(TagPeriodFormatter.class)
                     .defaultValue(TagPeriodFormatter.WITH_DASHES)
                     .withDescription("The date format for tag periods.");
+
+    public static final ConfigOption<Duration> TAG_PERIOD_DURATION =
+            key("tag.creation-period-duration")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The period duration for tag auto create periods.If user set it, tag.creation-period would be invalid.");
 
     public static final ConfigOption<Integer> TAG_NUM_RETAINED_MAX =
             key("tag.num-retained-max")
@@ -2119,6 +2178,10 @@ public class CoreOptions implements Serializable {
         return options.get(INCREMENTAL_BETWEEN_SCAN_MODE);
     }
 
+    public String incrementalToAutoTag() {
+        return options.get(INCREMENTAL_TO_AUTO_TAG);
+    }
+
     public Integer scanManifestParallelism() {
         return options.get(SCAN_MANIFEST_PARALLELISM);
     }
@@ -2143,10 +2206,6 @@ public class CoreOptions implements Serializable {
 
     public boolean sequenceFieldSortOrderIsAscending() {
         return options.get(SEQUENCE_FIELD_SORT_ORDER) == SortOrder.ASCENDING;
-    }
-
-    public boolean partialUpdateRemoveRecordOnDelete() {
-        return options.get(PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE);
     }
 
     public Optional<String> rowkindField() {
@@ -2181,12 +2240,30 @@ public class CoreOptions implements Serializable {
         return options.get(PARTITION_EXPIRATION_STRATEGY);
     }
 
+    @Nullable
+    public String dataFileExternalPaths() {
+        return options.get(DATA_FILE_EXTERNAL_PATHS);
+    }
+
+    public ExternalPathStrategy externalPathStrategy() {
+        return options.get(DATA_FILE_EXTERNAL_PATHS_STRATEGY);
+    }
+
+    @Nullable
+    public String externalSpecificFS() {
+        return options.get(DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS);
+    }
+
     public String partitionTimestampFormatter() {
         return options.get(PARTITION_TIMESTAMP_FORMATTER);
     }
 
     public String partitionTimestampPattern() {
         return options.get(PARTITION_TIMESTAMP_PATTERN);
+    }
+
+    public String partitionMarkDoneCustomClass() {
+        return options.get(PARTITION_MARK_DONE_CUSTOM_CLASS);
     }
 
     public String consumerId() {
@@ -2218,6 +2295,10 @@ public class CoreOptions implements Serializable {
         return options.get(METASTORE_TAG_TO_PARTITION);
     }
 
+    public boolean tagCreateSuccessFile() {
+        return options.get(TAG_CREATE_SUCCESS_FILE);
+    }
+
     public TagCreationMode tagToPartitionPreview() {
         return options.get(METASTORE_TAG_TO_PARTITION_PREVIEW);
     }
@@ -2236,6 +2317,10 @@ public class CoreOptions implements Serializable {
 
     public TagPeriodFormatter tagPeriodFormatter() {
         return options.get(TAG_PERIOD_FORMATTER);
+    }
+
+    public Optional<Duration> tagPeriodDuration() {
+        return options.getOptional(TAG_PERIOD_DURATION);
     }
 
     @Nullable
@@ -2752,7 +2837,8 @@ public class CoreOptions implements Serializable {
         }
 
         if ((options.contains(INCREMENTAL_BETWEEN_TIMESTAMP)
-                        || options.contains(INCREMENTAL_BETWEEN))
+                        || options.contains(INCREMENTAL_BETWEEN)
+                        || options.contains(INCREMENTAL_TO_AUTO_TAG))
                 && !options.contains(SCAN_MODE)) {
             options.set(SCAN_MODE, StartupMode.INCREMENTAL);
         }
@@ -2973,6 +3059,40 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         PartitionExpireStrategy(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Specifies the strategy for selecting external storage paths. */
+    public enum ExternalPathStrategy implements DescribedEnum {
+        NONE(
+                "none",
+                "Do not choose any external storage, data will still be written to the default warehouse path."),
+
+        SPECIFIC_FS(
+                "specific-fs",
+                "Select a specific file system as the external path. Currently supported are S3 and OSS."),
+
+        ROUND_ROBIN(
+                "round-robin",
+                "When writing a new file, a path is chosen from data-file.external-paths in turn.");
+
+        private final String value;
+
+        private final String description;
+
+        ExternalPathStrategy(String value, String description) {
             this.value = value;
             this.description = description;
         }

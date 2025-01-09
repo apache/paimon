@@ -210,7 +210,7 @@ public class SparkWriteITCase {
                 spark.sql(
                                 "SELECT partition, max(bucket) FROM `T$FILES` GROUP BY partition ORDER BY partition")
                         .collectAsList();
-        assertThat(rows.toString()).isEqualTo("[[[1],2], [[2],0]]");
+        assertThat(rows.toString()).isEqualTo("[[{1},2], [{2},0]]");
     }
 
     @Test

@@ -66,6 +66,7 @@ public abstract class KeyValueDataFileWriter
     private final int level;
 
     private final SimpleStatsConverter keyStatsConverter;
+    private final boolean isExternalPath;
     private final SimpleStatsConverter valueStatsConverter;
     private final InternalRowSerializer keySerializer;
     private final FileSource fileSource;
@@ -91,7 +92,8 @@ public abstract class KeyValueDataFileWriter
             String compression,
             CoreOptions options,
             FileSource fileSource,
-            FileIndexOptions fileIndexOptions) {
+            FileIndexOptions fileIndexOptions,
+            boolean isExternalPath) {
         super(
                 fileIO,
                 factory,
@@ -110,6 +112,7 @@ public abstract class KeyValueDataFileWriter
         this.level = level;
 
         this.keyStatsConverter = new SimpleStatsConverter(keyType);
+        this.isExternalPath = isExternalPath;
         this.valueStatsConverter = new SimpleStatsConverter(valueType, options.statsDenseStore());
         this.keySerializer = new InternalRowSerializer(keyType);
         this.fileSource = fileSource;
@@ -177,6 +180,7 @@ public abstract class KeyValueDataFileWriter
                         ? DataFileIndexWriter.EMPTY_RESULT
                         : dataFileIndexWriter.result();
 
+        String externalPath = isExternalPath ? path.toString() : null;
         return new DataFileMeta(
                 path.getName(),
                 fileIO.getFileSize(path),
@@ -196,7 +200,7 @@ public abstract class KeyValueDataFileWriter
                 indexResult.embeddedIndexBytes(),
                 fileSource,
                 valueStatsPair.getKey(),
-                null);
+                externalPath);
     }
 
     abstract Pair<SimpleColStats[], SimpleColStats[]> fetchKeyValueStats(SimpleColStats[] rowStats);

@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.fs.Path
+import org.apache.paimon.partition.actions.PartitionMarkDoneAction
 import org.apache.paimon.partition.file.SuccessFile
 import org.apache.paimon.spark.PaimonSparkTestBase
 
@@ -55,6 +56,43 @@ class MarkPartitionDoneProcedureTest extends PaimonSparkTestBase {
     val successPath2 = new Path(table.location, "day=2024-07-14/_SUCCESS")
     val successFile2 = SuccessFile.safelyFromPath(table.fileIO, successPath2)
     assertThat(successFile2).isNotNull
+
+  }
+
+  test("Paimon procedure: custom partition mark done test") {
+    spark.sql(
+      s"""
+         |CREATE TABLE T (id STRING, name STRING, day STRING)
+         |USING PAIMON
+         |PARTITIONED BY (day)
+         |TBLPROPERTIES (
+         |'primary-key'='day,id',
+         |'partition.mark-done-action'='success-file,custom',
+         |'partition.mark-done-action.custom.class'='${classOf[MockCustomPartitionMarkDoneAction].getName}'
+         |)
+         |""".stripMargin)
+
+    spark.sql(s"INSERT INTO T VALUES ('1', 'a', '2024-07-13')")
+    spark.sql(s"INSERT INTO T VALUES ('2', 'b', '2024-07-14')")
+
+    checkAnswer(
+      spark.sql(
+        "CALL paimon.sys.mark_partition_done(" +
+          "table => 'test.T', partitions => 'day=2024-07-13;day=2024-07-14')"),
+      Row(true) :: Nil)
+
+    val table = loadTable("T")
+
+    val successPath1 = new Path(table.location, "day=2024-07-13/_SUCCESS")
+    val successFile1 = SuccessFile.safelyFromPath(table.fileIO, successPath1)
+    assertThat(successFile1).isNotNull
+
+    val successPath2 = new Path(table.location, "day=2024-07-14/_SUCCESS")
+    val successFile2 = SuccessFile.safelyFromPath(table.fileIO, successPath2)
+    assertThat(successFile2).isNotNull
+
+    assertThat(MockCustomPartitionMarkDoneAction.getMarkedDonePartitions.toArray)
+      .containsExactlyInAnyOrder("day=2024-07-14/", "day=2024-07-13/")
 
   }
 

@@ -90,6 +90,22 @@ public class IcebergOptions {
                     .defaultValue("org.apache.hadoop.hive.metastore.HiveMetaStoreClient")
                     .withDescription("Hive client class name for Iceberg Hive Catalog.");
 
+    public static final ConfigOption<String> METASTORE_DATABASE =
+            key("metadata.iceberg.database")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Metastore database name for Iceberg Catalog. "
+                                    + "Set this as an iceberg database alias if using a centralized Catalog.");
+
+    public static final ConfigOption<String> METASTORE_TABLE =
+            key("metadata.iceberg.table")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Metastore table name for Iceberg Catalog."
+                                    + "Set this as an iceberg table alias if using a centralized Catalog.");
+
     /** Where to store Iceberg metadata. */
     public enum StorageType implements DescribedEnum {
         DISABLED("disabled", "Disable Iceberg compatibility support."),

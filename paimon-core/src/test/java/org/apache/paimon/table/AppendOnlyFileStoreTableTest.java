@@ -73,6 +73,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -731,7 +732,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     public void testBitmapIndexResultFilterParquetRowRanges() throws Exception {
         RowType rowType =
                 RowType.builder()
-                        .field("id", DataTypes.INT())
+                        .field("id", DataTypes.STRING())
                         .field("event", DataTypes.STRING())
                         .field("price", DataTypes.INT())
                         .build();
@@ -749,26 +750,26 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                             + "."
                                             + CoreOptions.COLUMNS,
                                     "price");
+                            options.set(ParquetOutputFormat.BLOCK_SIZE, "1048576");
                             options.set(
                                     ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK, "100");
                             options.set(ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT, "300");
                         });
 
-        int bound = 3000;
+        int bound = 300000;
         Random random = new Random();
         Map<Integer, Integer> expectedMap = new HashMap<>();
-        for (int i = 0; i < 5; i++) {
-            StreamTableWrite write = table.newWrite(commitUser);
-            StreamTableCommit commit = table.newCommit(commitUser);
-            for (int j = 0; j < 10000; j++) {
-                int next = random.nextInt(bound);
-                expectedMap.compute(next, (key, value) -> value == null ? 1 : value + 1);
-                write.write(GenericRow.of(1, BinaryString.fromString("A"), next));
-            }
-            commit.commit(i, write.prepareCommit(true, i));
-            write.close();
-            commit.close();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        for (int j = 0; j < 1000000; j++) {
+            int next = random.nextInt(bound);
+            BinaryString uuid = BinaryString.fromString(UUID.randomUUID().toString());
+            expectedMap.compute(next, (key, value) -> value == null ? 1 : value + 1);
+            write.write(GenericRow.of(uuid, uuid, next));
         }
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
 
         // test eq
         for (int i = 0; i < 10; i++) {
@@ -789,7 +790,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
 
         //  test between
         for (int i = 0; i < 10; i++) {
-            int max = random.nextInt(bound);
+            int max = random.nextInt(bound) + 1;
             int min = random.nextInt(max);
             Predicate predicate =
                     PredicateBuilder.and(

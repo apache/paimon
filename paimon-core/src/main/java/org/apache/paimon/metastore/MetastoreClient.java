@@ -18,6 +18,8 @@
 
 package org.apache.paimon.metastore;
 
+import org.apache.paimon.partition.Partition;
+
 import java.io.Serializable;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -38,9 +40,7 @@ public interface MetastoreClient extends AutoCloseable {
 
     void markPartitionDone(LinkedHashMap<String, String> partition) throws Exception;
 
-    default void alterPartition(
-            LinkedHashMap<String, String> partition, PartitionStats partitionStats)
-            throws Exception {
+    default void alterPartition(Partition partition) throws Exception {
         throw new UnsupportedOperationException();
     }
 

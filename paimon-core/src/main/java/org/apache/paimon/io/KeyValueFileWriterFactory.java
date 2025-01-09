@@ -93,24 +93,29 @@ public class KeyValueFileWriterFactory {
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(
             int level, FileSource fileSource) {
         return new RollingFileWriter<>(
-                () ->
-                        createDataFileWriter(
-                                formatContext.pathFactory(level).newPath(), level, fileSource),
+                () -> {
+                    DataFilePathFactory pathFactory = formatContext.pathFactory(level);
+                    return createDataFileWriter(
+                            pathFactory.newPath(), level, fileSource, pathFactory.isExternalPath());
+                },
                 suggestedFileSize);
     }
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingChangelogFileWriter(int level) {
         return new RollingFileWriter<>(
-                () ->
-                        createDataFileWriter(
-                                formatContext.pathFactory(level).newChangelogPath(),
-                                level,
-                                FileSource.APPEND),
+                () -> {
+                    DataFilePathFactory pathFactory = formatContext.pathFactory(level);
+                    return createDataFileWriter(
+                            pathFactory.newChangelogPath(),
+                            level,
+                            FileSource.APPEND,
+                            pathFactory.isExternalPath());
+                },
                 suggestedFileSize);
     }
 
     private KeyValueDataFileWriter createDataFileWriter(
-            Path path, int level, FileSource fileSource) {
+            Path path, int level, FileSource fileSource, boolean isExternalPath) {
         return formatContext.thinModeEnabled()
                 ? new KeyValueThinDataFileWriterImpl(
                         fileIO,
@@ -125,7 +130,8 @@ public class KeyValueFileWriterFactory {
                         formatContext.compression(level),
                         options,
                         fileSource,
-                        fileIndexOptions)
+                        fileIndexOptions,
+                        isExternalPath)
                 : new KeyValueDataFileWriterImpl(
                         fileIO,
                         formatContext.writerFactory(level),
@@ -139,7 +145,8 @@ public class KeyValueFileWriterFactory {
                         formatContext.compression(level),
                         options,
                         fileSource,
-                        fileIndexOptions);
+                        fileIndexOptions,
+                        isExternalPath);
     }
 
     public void deleteFile(DataFileMeta file) {

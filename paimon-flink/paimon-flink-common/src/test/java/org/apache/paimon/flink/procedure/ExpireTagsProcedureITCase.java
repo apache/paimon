@@ -102,7 +102,7 @@ public class ExpireTagsProcedureITCase extends CatalogITCaseBase {
 
         // tag-2 as the base older_than time.
         // tag-1 expired by its file creation time.
-        LocalDateTime olderThanTime1 = table.tagManager().tag("tag-2").getTagCreateTime();
+        LocalDateTime olderThanTime1 = table.tagManager().getOrThrow("tag-2").getTagCreateTime();
         java.sql.Timestamp timestamp1 =
                 new java.sql.Timestamp(
                         Timestamp.fromLocalDateTime(olderThanTime1).getMillisecond());
@@ -119,7 +119,7 @@ public class ExpireTagsProcedureITCase extends CatalogITCaseBase {
 
         // tag-4 as the base older_than time.
         // tag-2,tag-3,tag-5 expired, tag-5 reached its tagTimeRetained.
-        LocalDateTime olderThanTime2 = table.tagManager().tag("tag-4").getTagCreateTime();
+        LocalDateTime olderThanTime2 = table.tagManager().getOrThrow("tag-4").getTagCreateTime();
         java.sql.Timestamp timestamp2 =
                 new java.sql.Timestamp(
                         Timestamp.fromLocalDateTime(olderThanTime2).getMillisecond());

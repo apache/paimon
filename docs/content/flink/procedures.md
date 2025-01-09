@@ -148,7 +148,7 @@ All available procedures are listed below.
          -- based on the specified snapshot <br/>
          CALL [catalog.]sys.create_tag(`table` => 'identifier', tag => 'tagName', snapshot_id => snapshotId) <br/>
          -- based on the latest snapshot <br/>
-         CALL [catalog.]sys.create_tag(`table` => 'identifier', snapshot_id => 'tagName') <br/><br/>
+         CALL [catalog.]sys.create_tag(`table` => 'identifier', tag => 'tagName') <br/><br/>
          -- Use indexed argument<br/>
          -- based on the specified snapshot <br/>
          CALL [catalog.]sys.create_tag('identifier', 'tagName', snapshotId) <br/>

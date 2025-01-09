@@ -22,7 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.metastore.MetastoreClient;
-import org.apache.paimon.metastore.PartitionStats;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ScanMode;
@@ -82,10 +82,10 @@ public class PartitionStatisticsReporter implements Closeable {
                 }
             }
 
-            PartitionStats partitionStats =
-                    PartitionStats.create(fileCount, totalSize, rowCount, modifyTimeMillis);
+            Partition partitionStats =
+                    new Partition(partitionSpec, fileCount, totalSize, rowCount, modifyTimeMillis);
             LOG.info("alter partition {} with statistic {}.", partitionSpec, partitionStats);
-            metastoreClient.alterPartition(partitionSpec, partitionStats);
+            metastoreClient.alterPartition(partitionStats);
         }
     }
 

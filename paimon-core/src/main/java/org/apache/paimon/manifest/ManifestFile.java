@@ -133,7 +133,6 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     serializer::toRow,
                     fileCompression,
                     false);
-
             this.partitionStatsCollector = new SimpleStatsCollector(partitionType);
             this.partitionStatsSerializer = new SimpleStatsConverter(partitionType);
         }

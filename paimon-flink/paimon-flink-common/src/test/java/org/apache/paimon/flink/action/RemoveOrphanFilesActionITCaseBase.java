@@ -54,6 +54,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.apache.paimon.CoreOptions.SCAN_FALLBACK_BRANCH;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** IT cases base for {@link RemoveOrphanFilesAction}. */
 public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase {
@@ -87,8 +88,8 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
 
         FileIO fileIO = table.fileIO();
         fileIO.writeFile(orphanFile1, "a", true);
-        Thread.sleep(2000);
         fileIO.writeFile(orphanFile2, "b", true);
+        Thread.sleep(2000);
 
         return table;
     }
@@ -100,6 +101,8 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testRunWithoutException(boolean isNamedArgument) throws Exception {
+        assumeTrue(!isNamedArgument || supportNamedArgument());
+
         createTableAndWriteData(tableName);
 
         List<String> args =
@@ -160,6 +163,8 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testRemoveDatabaseOrphanFilesITCase(boolean isNamedArgument) throws Exception {
+        assumeTrue(!isNamedArgument || supportNamedArgument());
+
         createTableAndWriteData("tableName1");
         createTableAndWriteData("tableName2");
 
@@ -231,6 +236,8 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testCleanWithBranch(boolean isNamedArgument) throws Exception {
+        assumeTrue(!isNamedArgument || supportNamedArgument());
+
         // create main branch
         FileStoreTable table = createTableAndWriteData(tableName);
 
@@ -263,6 +270,7 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         // create orphan file in snapshot directory of second branch
         Path orphanFile4 = new Path(table.location(), "branch/branch-br2/snapshot/orphan_file4");
         branchTable.fileIO().writeFile(orphanFile4, "y", true);
+        Thread.sleep(2000);
 
         if (ThreadLocalRandom.current().nextBoolean()) {
             executeSQL(
@@ -291,6 +299,8 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testRunWithMode(boolean isNamedArgument) throws Exception {
+        assumeTrue(!isNamedArgument || supportNamedArgument());
+
         createTableAndWriteData(tableName);
 
         List<String> args =
@@ -359,5 +369,9 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         assertThatCode(() -> executeSQL(withInvalidMode))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Unknown mode");
+    }
+
+    protected boolean supportNamedArgument() {
+        return true;
     }
 }

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.open.api;
 
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.ResourcePaths;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
@@ -377,7 +378,7 @@ public class RESTCatalogController {
             @PathVariable String table) {
         Map<String, String> spec = new HashMap<>();
         spec.put("f1", "1");
-        PartitionResponse partition = new PartitionResponse(spec, 1, 2, 3, 4);
+        Partition partition = new Partition(spec, 1, 2, 3, 4);
         return new ListPartitionsResponse(ImmutableList.of(partition));
     }
 
@@ -404,7 +405,7 @@ public class RESTCatalogController {
             @RequestBody CreatePartitionRequest request) {
         Map<String, String> spec = new HashMap<>();
         spec.put("f1", "1");
-        return new PartitionResponse(spec, 0, 0, 0, 4);
+        return new PartitionResponse(new Partition(spec, 0, 0, 0, 4));
     }
 
     @Operation(

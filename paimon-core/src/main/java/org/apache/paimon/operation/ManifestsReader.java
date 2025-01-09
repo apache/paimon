@@ -34,13 +34,17 @@ import javax.annotation.concurrent.ThreadSafe;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 
 /** A util class to read manifest files. */
 @ThreadSafe
 public class ManifestsReader {
 
     private final RowType partitionType;
+    private final String partitionDefaultValue;
     private final SnapshotManager snapshotManager;
     private final ManifestList.Factory manifestListFactory;
 
@@ -48,9 +52,11 @@ public class ManifestsReader {
 
     public ManifestsReader(
             RowType partitionType,
+            String partitionDefaultValue,
             SnapshotManager snapshotManager,
             ManifestList.Factory manifestListFactory) {
         this.partitionType = partitionType;
+        this.partitionDefaultValue = partitionDefaultValue;
         this.snapshotManager = snapshotManager;
         this.manifestListFactory = manifestListFactory;
     }
@@ -63,6 +69,11 @@ public class ManifestsReader {
     public ManifestsReader withPartitionFilter(List<BinaryRow> partitions) {
         this.partitionFilter = PartitionPredicate.fromMultiple(partitionType, partitions);
         return this;
+    }
+
+    public ManifestsReader withPartitionsFilter(List<Map<String, String>> partitions) {
+        return withPartitionFilter(
+                createBinaryPartitions(partitions, partitionType, partitionDefaultValue));
     }
 
     public ManifestsReader withPartitionFilter(PartitionPredicate predicate) {

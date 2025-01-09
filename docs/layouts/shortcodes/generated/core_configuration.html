@@ -219,6 +219,24 @@ under the License.
             <td>The TTL in rocksdb index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
         </tr>
         <tr>
+            <td><h5>data-file.external-paths</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The external paths where the data of this table will be written, multiple elements separated by commas.</td>
+        </tr>
+        <tr>
+            <td><h5>data-file.external-paths.specific-fs</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The specific file system of the external path when data-file.external-paths.strategy is set to specific-fs, should be the prefix scheme of the external path, now supported are s3 and oss.</td>
+        </tr>
+        <tr>
+            <td><h5>data-file.external-paths.strategy</h5></td>
+            <td style="word-wrap: break-word;">none</td>
+            <td><p>Enum</p></td>
+            <td>The strategy of selecting an external path when writing data.<br /><br />Possible values:<ul><li>"none": Do not choose any external storage, data will still be written to the default warehouse path.</li><li>"specific-fs": Select a specific file system as the external path. Currently supported are S3 and OSS.</li><li>"round-robin": When writing a new file, a path is chosen from data-file.external-paths in turn.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>data-file.path-directory</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -378,19 +396,25 @@ under the License.
             <td><h5>incremental-between</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Read incremental changes between start snapshot (exclusive) and end snapshot, for example, '5,10' means changes between snapshot 5 and snapshot 10.</td>
+            <td>Read incremental changes between start snapshot (exclusive) and end snapshot (inclusive), for example, '5,10' means changes between snapshot 5 and snapshot 10.</td>
         </tr>
         <tr>
             <td><h5>incremental-between-scan-mode</h5></td>
             <td style="word-wrap: break-word;">auto</td>
             <td><p>Enum</p></td>
-            <td>Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot. <br /><br />Possible values:<ul><li>"auto": Scan changelog files for the table which produces changelog files. Otherwise, scan newly changed files.</li><li>"delta": Scan newly changed files between snapshots.</li><li>"changelog": Scan changelog files between snapshots.</li></ul></td>
+            <td>Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot (inclusive). <br /><br />Possible values:<ul><li>"auto": Scan changelog files for the table which produces changelog files. Otherwise, scan newly changed files.</li><li>"delta": Scan newly changed files between snapshots.</li><li>"changelog": Scan changelog files between snapshots.</li></ul></td>
         </tr>
         <tr>
             <td><h5>incremental-between-timestamp</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Read incremental changes between start timestamp (exclusive) and end timestamp, for example, 't1,t2' means changes between timestamp t1 and timestamp t2.</td>
+            <td>Read incremental changes between start timestamp (exclusive) and end timestamp (inclusive), for example, 't1,t2' means changes between timestamp t1 and timestamp t2.</td>
+        </tr>
+        <tr>
+            <td><h5>incremental-to-auto-tag</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Used to specify the end tag (inclusive), and Paimon will find an earlier tag and return changes between them. If the tag doesn't exist or the earlier tag doesn't exist, return empty. </td>
         </tr>
         <tr>
             <td><h5>local-merge-buffer-size</h5></td>
@@ -639,7 +663,13 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>partition.mark-done-action</h5></td>
             <td style="word-wrap: break-word;">"success-file"</td>
             <td>String</td>
-            <td>Action to mark a partition done is to notify the downstream application that the partition has finished writing, the partition is ready to be read.<br />1. 'success-file': add '_success' file to directory.<br />2. 'done-partition': add 'xxx.done' partition to metastore.<br />3. 'mark-event': mark partition event to metastore.<br />Both can be configured at the same time: 'done-partition,success-file,mark-event'.</td>
+            <td>Action to mark a partition done is to notify the downstream application that the partition has finished writing, the partition is ready to be read.<br />1. 'success-file': add '_success' file to directory.<br />2. 'done-partition': add 'xxx.done' partition to metastore.<br />3. 'mark-event': mark partition event to metastore.<br />4. 'custom': use policy class to create a mark-partition policy.<br />Both can be configured at the same time: 'done-partition,success-file,mark-event,custom'.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.mark-done-action.custom.class</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The partition mark done class for implement PartitionMarkDoneAction interface. Only work in custom mark-done-action.</td>
         </tr>
         <tr>
             <td><h5>partition.timestamp-formatter</h5></td>
@@ -919,6 +949,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>A list of commit callback classes to be called after a successful tag. Class names are connected with comma (example: com.test.CallbackA,com.sample.CallbackB).</td>
         </tr>
         <tr>
+            <td><h5>tag.create-success-file</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to create tag success file for new created tags.</td>
+        </tr>
+        <tr>
             <td><h5>tag.creation-delay</h5></td>
             <td style="word-wrap: break-word;">0 ms</td>
             <td>Duration</td>
@@ -929,6 +965,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">daily</td>
             <td><p>Enum</p></td>
             <td>What frequency is used to generate tags.<br /><br />Possible values:<ul><li>"daily": Generate a tag every day.</li><li>"hourly": Generate a tag every hour.</li><li>"two-hours": Generate a tag every two hours.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>tag.creation-period-duration</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>The period duration for tag auto create periods.If user set it, tag.creation-period would be invalid.</td>
         </tr>
         <tr>
             <td><h5>tag.default-time-retained</h5></td>

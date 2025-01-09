@@ -18,8 +18,6 @@
 
 package org.apache.orc.impl;
 
-import org.apache.paimon.fileindex.FileIndexResult;
-import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.commons.lang3.ArrayUtils;
@@ -129,7 +127,8 @@ public class RecordReaderImpl implements RecordReader {
     private final boolean noSelectedVector;
     // identifies whether the file has bad bloom filters that we should not use.
     private final boolean skipBloomFilters;
-    @Nullable private final FileIndexResult fileIndexResult;
+    @Nullable private final RoaringBitmap32 selection;
+
     static final String[] BAD_CPP_BLOOM_FILTER_VERSIONS = {
         "1.6.0", "1.6.1", "1.6.2", "1.6.3", "1.6.4", "1.6.5", "1.6.6", "1.6.7", "1.6.8", "1.6.9",
         "1.6.10", "1.6.11", "1.7.0"
@@ -226,9 +225,9 @@ public class RecordReaderImpl implements RecordReader {
     }
 
     public RecordReaderImpl(
-            ReaderImpl fileReader, Reader.Options options, FileIndexResult fileIndexResult)
+            ReaderImpl fileReader, Reader.Options options, @Nullable RoaringBitmap32 selection)
             throws IOException {
-        this.fileIndexResult = fileIndexResult;
+        this.selection = selection;
         OrcFile.WriterVersion writerVersion = fileReader.getWriterVersion();
         SchemaEvolution evolution;
         if (options.getSchema() == null) {
@@ -1278,7 +1277,7 @@ public class RecordReaderImpl implements RecordReader {
                 OrcProto.BloomFilterIndex[] bloomFilterIndices,
                 boolean returnNone,
                 long rowBaseInStripe,
-                FileIndexResult fileIndexResult)
+                @Nullable RoaringBitmap32 selection)
                 throws IOException {
             long rowsInStripe = stripe.getNumberOfRows();
             int groupsInStripe = (int) ((rowsInStripe + rowIndexStride - 1) / rowIndexStride);
@@ -1289,10 +1288,6 @@ public class RecordReaderImpl implements RecordReader {
             boolean hasSkipped = false;
             SearchArgument.TruthValue[] exceptionAnswer =
                     new SearchArgument.TruthValue[leafValues.length];
-            RoaringBitmap32 bitmap = null;
-            if (fileIndexResult instanceof BitmapIndexResult) {
-                bitmap = ((BitmapIndexResult) fileIndexResult).get();
-            }
             for (int rowGroup = 0; rowGroup < result.length; ++rowGroup) {
                 for (int pred = 0; pred < leafValues.length; ++pred) {
                     int columnIx = filterColumns[pred];
@@ -1376,10 +1371,10 @@ public class RecordReaderImpl implements RecordReader {
                     }
                 }
                 result[rowGroup] = sarg.evaluate(leafValues).isNeeded();
-                if (bitmap != null) {
+                if (selection != null) {
                     long firstRow = rowBaseInStripe + rowIndexStride * rowGroup;
                     long lastRow = Math.min(firstRow + rowIndexStride, firstRow + rowsInStripe);
-                    result[rowGroup] &= bitmap.rangeCardinality(firstRow, lastRow) > 0;
+                    result[rowGroup] &= selection.intersects(firstRow, lastRow);
                 }
                 hasSelected = hasSelected || result[rowGroup];
                 hasSkipped = hasSkipped || (!result[rowGroup]);
@@ -1435,7 +1430,7 @@ public class RecordReaderImpl implements RecordReader {
                 skipBloomFilters ? null : indexes.getBloomFilterIndex(),
                 false,
                 rowBaseInStripe,
-                fileIndexResult);
+                selection);
     }
 
     private void clearStreams() {

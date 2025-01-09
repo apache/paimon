@@ -709,6 +709,7 @@ public class FlinkCatalogTest {
 
         Map<String, String> expected = got.getOptions();
         expected.remove("path");
+        expected.remove("table.data.path");
         expected.remove(FlinkCatalogOptions.REGISTER_TIMEOUT.key());
         assertThat(catalogTable.getOptions()).isEqualTo(expected);
     }
@@ -892,14 +893,14 @@ public class FlinkCatalogTest {
             Map<String, String> optionsToAdd,
             Set<String> optionsToRemove) {
         Path tablePath;
+        Path tableDataPath;
         try {
-            tablePath =
-                    new Path(
-                            ((FlinkCatalog) catalog)
-                                    .catalog()
-                                    .getTable(FlinkCatalog.toIdentifier(path))
-                                    .options()
-                                    .get(PATH.key()));
+            Map<String, String> options =
+                    ((FlinkCatalog) catalog)
+                            .catalog()
+                            .getTable(FlinkCatalog.toIdentifier(path))
+                            .options();
+            tablePath = new Path(options.get(PATH.key()));
         } catch (org.apache.paimon.catalog.Catalog.TableNotExistException e) {
             throw new RuntimeException(e);
         }

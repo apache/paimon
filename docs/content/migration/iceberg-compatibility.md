@@ -509,27 +509,6 @@ Paimon Iceberg compatibility currently supports the following data types.
 
 ## Table Options
 
-<table class="table table-bordered">
-    <thead>
-    <tr>
-      <th class="text-left" style="width: 20%">Option</th>
-      <th class="text-left" style="width: 5%">Default</th>
-      <th class="text-left" style="width: 10%">Type</th>
-      <th class="text-left" style="width: 60%">Description</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><h5>metadata.iceberg.compaction.min.file-num</h5></td>
-      <td style="word-wrap: break-word;">10</td>
-      <td>Integer</td>
-      <td>Minimum number of Iceberg metadata files to trigger metadata compaction.</td>
-    </tr>
-    <tr>
-      <td><h5>metadata.iceberg.compaction.max.file-num</h5></td>
-      <td style="word-wrap: break-word;">50</td>
-      <td>Integer</td>
-      <td>If number of small Iceberg metadata files exceeds this limit, always trigger metadata compaction regardless of their total size.</td>
-    </tr>
-    </tbody>
-</table>
+Options for Iceberg Compatibility.
+
+{{< generated/iceberg_configuration >}}

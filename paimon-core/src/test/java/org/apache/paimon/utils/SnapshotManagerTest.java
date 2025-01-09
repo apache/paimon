@@ -39,6 +39,7 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /** Tests for {@link SnapshotManager}. */
 public class SnapshotManagerTest {
@@ -397,5 +398,16 @@ public class SnapshotManagerTest {
         Assertions.assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(6);
         Assertions.assertThat(snapshotManager.latestSnapshotId()).isEqualTo(10);
         Assertions.assertThat(snapshotManager.changelog(1)).isNotNull();
+    }
+
+    @Test
+    public void testCommitChangelogWhenSameChangelogCommitTwice() throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+        long id = 1L;
+        Changelog changelog = createChangelogWithMillis(id, 1L);
+        snapshotManager.commitChangelog(changelog, id);
+        assertDoesNotThrow(() -> snapshotManager.commitChangelog(changelog, id));
     }
 }

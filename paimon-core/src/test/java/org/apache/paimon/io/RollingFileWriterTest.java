@@ -84,7 +84,8 @@ public class RollingFileWriterTest {
                                                                 .defaultValue(),
                                                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION
                                                                 .defaultValue(),
-                                                        CoreOptions.FILE_COMPRESSION.defaultValue())
+                                                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                                                        null)
                                                 .newPath(),
                                         SCHEMA,
                                         fileFormat
@@ -103,7 +104,8 @@ public class RollingFileWriterTest {
                                         new FileIndexOptions(),
                                         FileSource.APPEND,
                                         true,
-                                        statsDenseStore),
+                                        statsDenseStore,
+                                        false),
                         TARGET_FILE_SIZE);
     }
 

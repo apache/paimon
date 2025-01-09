@@ -38,7 +38,7 @@ import org.scalactic.source.Position
 import org.scalatest.Tag
 
 import java.io.File
-import java.util.TimeZone
+import java.util.{TimeZone, UUID}
 
 import scala.util.Random
 
@@ -47,6 +47,8 @@ class PaimonSparkTestBase
   with SharedSparkSession
   with WithTableOptions
   with SparkVersionSupport {
+
+  protected lazy val commitUser: String = UUID.randomUUID.toString
 
   protected lazy val fileIO: FileIO = LocalFileIO.create
 

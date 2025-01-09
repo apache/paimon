@@ -880,8 +880,13 @@ components:
         partitions:
           type: array
           items:
-            $ref: '#/components/schemas/PartitionResponse'
+            $ref: '#/components/schemas/Partition'
     PartitionResponse:
+      type: object
+      properties:
+        partition:
+          $ref: '#/components/schemas/Partition'
+    Partition:
       type: object
       properties:
         spec:

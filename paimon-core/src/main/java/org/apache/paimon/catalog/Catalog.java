@@ -20,7 +20,7 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
@@ -72,6 +72,8 @@ public interface Catalog extends AutoCloseable {
 
     /** Return a boolean that indicates whether this catalog is case-sensitive. */
     boolean caseSensitive();
+
+    // ======================= database methods ===============================
 
     /**
      * Get the names of all databases in this catalog.
@@ -138,6 +140,8 @@ public interface Catalog extends AutoCloseable {
      */
     void alterDatabase(String name, List<PropertyChange> changes, boolean ignoreIfNotExists)
             throws DatabaseNotExistException;
+
+    // ======================= table methods ===============================
 
     /**
      * Return a {@link Table} identified by the given {@link Identifier}.
@@ -231,38 +235,6 @@ public interface Catalog extends AutoCloseable {
     default void invalidateTable(Identifier identifier) {}
 
     /**
-     * Create the partition of the specify table.
-     *
-     * <p>Only catalog with metastore can support this method, and only table with
-     * 'metastore.partitioned-table' can support this method.
-     *
-     * @param identifier path of the table to drop partition
-     * @param partitionSpec the partition to be created
-     * @throws TableNotExistException if the table does not exist
-     */
-    void createPartition(Identifier identifier, Map<String, String> partitionSpec)
-            throws TableNotExistException;
-
-    /**
-     * Drop the partition of the specify table.
-     *
-     * @param identifier path of the table to drop partition
-     * @param partition the partition to be deleted
-     * @throws TableNotExistException if the table does not exist
-     * @throws PartitionNotExistException if the partition does not exist
-     */
-    void dropPartition(Identifier identifier, Map<String, String> partition)
-            throws TableNotExistException, PartitionNotExistException;
-
-    /**
-     * Get PartitionEntry of all partitions of the table.
-     *
-     * @param identifier path of the table to list partitions
-     * @throws TableNotExistException if the table does not exist
-     */
-    List<PartitionEntry> listPartitions(Identifier identifier) throws TableNotExistException;
-
-    /**
      * Modify an existing table from a {@link SchemaChange}.
      *
      * <p>NOTE: System tables can not be altered.
@@ -277,6 +249,67 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         alterTable(identifier, Collections.singletonList(change), ignoreIfNotExists);
     }
+
+    // ======================= partition methods ===============================
+
+    /**
+     * Create partitions of the specify table.
+     *
+     * <p>Only catalog with metastore can support this method, and only table with
+     * 'metastore.partitioned-table' can support this method.
+     *
+     * @param identifier path of the table to create partitions
+     * @param partitions partitions to be created
+     * @throws TableNotExistException if the table does not exist
+     */
+    void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException;
+
+    /**
+     * Drop partitions of the specify table.
+     *
+     * @param identifier path of the table to drop partitions
+     * @param partitions partitions to be deleted
+     * @throws TableNotExistException if the table does not exist
+     */
+    void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException;
+
+    /**
+     * Alter partitions of the specify table.
+     *
+     * <p>Only catalog with metastore can support this method, and only table with
+     * 'metastore.partitioned-table' can support this method.
+     *
+     * @param identifier path of the table to alter partitions
+     * @param partitions partitions to be altered
+     * @throws TableNotExistException if the table does not exist
+     */
+    void alterPartitions(Identifier identifier, List<Partition> partitions)
+            throws TableNotExistException;
+
+    /**
+     * Mark partitions done of the specify table.
+     *
+     * <p>Only catalog with metastore can support this method, and only table with
+     * 'metastore.partitioned-table' can support this method.
+     *
+     * @param identifier path of the table to mark done partitions
+     * @param partitions partitions to be marked done
+     * @throws TableNotExistException if the table does not exist
+     */
+    void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException;
+
+    /**
+     * Get Partition of all partitions of the table.
+     *
+     * @param identifier path of the table to list partitions
+     * @throws TableNotExistException if the table does not exist
+     */
+    List<Partition> listPartitions(Identifier identifier) throws TableNotExistException;
+
+    // ======================= view methods ===============================
 
     /**
      * Return a {@link View} identified by the given {@link Identifier}.
@@ -339,6 +372,8 @@ public interface Catalog extends AutoCloseable {
             throws ViewNotExistException, ViewAlreadyExistException {
         throw new UnsupportedOperationException();
     }
+
+    // ======================= repair methods ===============================
 
     /**
      * Repair the entire Catalog, repair the metadata in the metastore consistent with the metadata
@@ -505,36 +540,6 @@ public interface Catalog extends AutoCloseable {
 
         public Identifier identifier() {
             return identifier;
-        }
-    }
-
-    /** Exception for trying to operate on a partition that doesn't exist. */
-    class PartitionNotExistException extends Exception {
-
-        private static final String MSG = "Partition %s do not exist in the table %s.";
-
-        private final Identifier identifier;
-
-        private final Map<String, String> partitionSpec;
-
-        public PartitionNotExistException(
-                Identifier identifier, Map<String, String> partitionSpec) {
-            this(identifier, partitionSpec, null);
-        }
-
-        public PartitionNotExistException(
-                Identifier identifier, Map<String, String> partitionSpec, Throwable cause) {
-            super(String.format(MSG, partitionSpec, identifier.getFullName()), cause);
-            this.identifier = identifier;
-            this.partitionSpec = partitionSpec;
-        }
-
-        public Identifier identifier() {
-            return identifier;
-        }
-
-        public Map<String, String> partitionSpec() {
-            return partitionSpec;
         }
     }
 

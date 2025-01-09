@@ -93,6 +93,15 @@ public class BitmapDeletionVector implements DeletionVector {
         }
     }
 
+    /**
+     * Note: the result is read only, do not call any modify operation outside.
+     *
+     * @return the deleted position
+     */
+    public RoaringBitmap32 get() {
+        return roaringBitmap;
+    }
+
     public static DeletionVector deserializeFromByteBuffer(ByteBuffer buffer) throws IOException {
         RoaringBitmap32 bitmap = new RoaringBitmap32();
         bitmap.deserialize(buffer);

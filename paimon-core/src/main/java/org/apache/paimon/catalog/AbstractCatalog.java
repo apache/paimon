@@ -24,11 +24,11 @@ import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -50,10 +50,8 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -65,6 +63,7 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
+import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
@@ -160,32 +159,11 @@ public abstract class AbstractCatalog implements Catalog {
     protected abstract Database getDatabaseImpl(String name) throws DatabaseNotExistException;
 
     @Override
-    public void createPartition(Identifier identifier, Map<String, String> partitionSpec)
-            throws TableNotExistException {
-        Identifier tableIdentifier =
-                Identifier.create(identifier.getDatabaseName(), identifier.getTableName());
-        FileStoreTable table = (FileStoreTable) getTable(tableIdentifier);
-
-        if (table.partitionKeys().isEmpty() || !table.coreOptions().partitionedTableInMetastore()) {
-            return;
-        }
-
-        MetastoreClient.Factory metastoreFactory =
-                table.catalogEnvironment().metastoreClientFactory();
-        if (metastoreFactory == null) {
-            throw new UnsupportedOperationException(
-                    "The catalog must have metastore to create partition.");
-        }
-
-        try (MetastoreClient client = metastoreFactory.create()) {
-            client.addPartition(new LinkedHashMap<>(partitionSpec));
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
+    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {}
 
     @Override
-    public void dropPartition(Identifier identifier, Map<String, String> partitionSpec)
+    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         checkNotSystemTable(identifier, "dropPartition");
         Table table = getTable(identifier);
@@ -195,15 +173,21 @@ public abstract class AbstractCatalog implements Catalog {
                         .store()
                         .newCommit(
                                 createCommitUser(fileStoreTable.coreOptions().toConfiguration()))) {
-            commit.dropPartitions(
-                    Collections.singletonList(partitionSpec), BatchWriteBuilder.COMMIT_IDENTIFIER);
+            commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER);
         }
     }
 
     @Override
-    public List<PartitionEntry> listPartitions(Identifier identifier)
-            throws TableNotExistException {
-        return getTable(identifier).newReadBuilder().newScan().listPartitionEntries();
+    public void alterPartitions(Identifier identifier, List<Partition> partitions)
+            throws TableNotExistException {}
+
+    @Override
+    public void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {}
+
+    @Override
+    public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
+        return listPartitionsFromFileSystem(getTable(identifier));
     }
 
     protected abstract void createDatabaseImpl(String name, Map<String, String> properties);

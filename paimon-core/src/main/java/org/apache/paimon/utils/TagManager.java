@@ -41,6 +41,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
@@ -97,31 +98,34 @@ public class TagManager {
 
     /** Create a tag from given snapshot and save it in the storage. */
     public void createTag(
-            Snapshot snapshot, String tagName, Duration timeRetained, List<TagCallback> callbacks) {
-        checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name '%s' is blank.", tagName);
-        checkArgument(!tagExists(tagName), "Tag name '%s' already exists.", tagName);
+            Snapshot snapshot,
+            String tagName,
+            Duration timeRetained,
+            List<TagCallback> callbacks,
+            boolean ignoreIfExists) {
+        checkArgument(!StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name shouldn't be blank.");
+        if (tagExists(tagName)) {
+            checkArgument(ignoreIfExists, "Tag '%s' already exists.", tagName);
+            return;
+        }
         createOrReplaceTag(snapshot, tagName, timeRetained, callbacks);
     }
 
     /** Replace a tag from given snapshot and save it in the storage. */
     public void replaceTag(Snapshot snapshot, String tagName, Duration timeRetained) {
-        checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name '%s' is blank.", tagName);
-        checkArgument(tagExists(tagName), "Tag name '%s' does not exist.", tagName);
+        checkArgument(!StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name shouldn't be blank.");
+        checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
         createOrReplaceTag(snapshot, tagName, timeRetained, null);
     }
 
-    public void createOrReplaceTag(
+    private void createOrReplaceTag(
             Snapshot snapshot,
             String tagName,
             @Nullable Duration timeRetained,
             @Nullable List<TagCallback> callbacks) {
-        // When timeRetained is not defined, please do not write the tagCreatorTime field,
-        // as this will cause older versions (<= 0.7) of readers to be unable to read this
-        // tag.
-        // When timeRetained is defined, it is fine, because timeRetained is the new
-        // feature.
+        // When timeRetained is not defined, please do not write the tagCreatorTime field, as this
+        // will cause older versions (<= 0.7) of readers to be unable to read this tag.
+        // When timeRetained is defined, it is fine, because timeRetained is the new feature.
         String content =
                 timeRetained != null
                         ? Tag.fromSnapshotAndTagTtl(snapshot, timeRetained, LocalDateTime.now())
@@ -152,17 +156,17 @@ public class TagManager {
     }
 
     public void renameTag(String tagName, String targetTagName) {
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(tagName),
+                "Original tag name shouldn't be blank.");
+        checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
+
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(targetTagName),
+                "New tag name shouldn't be blank.");
+        checkArgument(!tagExists(targetTagName), "Tag '%s' already exists.", tagName);
+
         try {
-            if (!tagExists(tagName)) {
-                throw new RuntimeException(
-                        String.format("The specified tag name [%s] does not exist.", tagName));
-            }
-            if (tagExists(targetTagName)) {
-                throw new RuntimeException(
-                        String.format(
-                                "The specified target tag name [%s] existed, please set a  non-existent tag name.",
-                                targetTagName));
-            }
             fileIO.rename(tagPath(tagName), tagPath(targetTagName));
         } catch (IOException e) {
             throw new RuntimeException(e);
@@ -172,7 +176,7 @@ public class TagManager {
     /** Make sure the tagNames are ALL tags of one snapshot. */
     public void deleteAllTagsOfOneSnapshot(
             List<String> tagNames, TagDeletion tagDeletion, SnapshotManager snapshotManager) {
-        Snapshot taggedSnapshot = taggedSnapshot(tagNames.get(0));
+        Snapshot taggedSnapshot = getOrThrow(tagNames.get(0)).trimToSnapshot();
         List<Snapshot> taggedSnapshots;
 
         // skip file deletion if snapshot exists
@@ -188,19 +192,20 @@ public class TagManager {
         doClean(taggedSnapshot, taggedSnapshots, snapshotManager, tagDeletion);
     }
 
+    /** Ignore errors if the tag doesn't exist. */
     public void deleteTag(
             String tagName,
             TagDeletion tagDeletion,
             SnapshotManager snapshotManager,
             List<TagCallback> callbacks) {
-        checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name '%s' is blank.", tagName);
-        if (!tagExists(tagName)) {
+        checkArgument(!StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name shouldn't be blank.");
+        Optional<Tag> tag = get(tagName);
+        if (!tag.isPresent()) {
             LOG.warn("Tag '{}' doesn't exist.", tagName);
             return;
         }
 
-        Snapshot taggedSnapshot = taggedSnapshot(tagName);
+        Snapshot taggedSnapshot = tag.get().trimToSnapshot();
         List<Snapshot> taggedSnapshots;
 
         // skip file deletion if snapshot exists
@@ -303,10 +308,21 @@ public class TagManager {
         }
     }
 
-    /** Get the tagged snapshot by name. */
-    public Snapshot taggedSnapshot(String tagName) {
-        checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
-        return Tag.fromPath(fileIO, tagPath(tagName)).trimToSnapshot();
+    /** Return the tag or Optional.empty() if the tag file not found. */
+    public Optional<Tag> get(String tagName) {
+        checkArgument(!StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name shouldn't be blank.");
+        try {
+            return Optional.of(Tag.tryFromPath(fileIO, tagPath(tagName)));
+        } catch (FileNotFoundException e) {
+            return Optional.empty();
+        }
+    }
+
+    /** Return the tag or throw exception indicating the tag not found. */
+    public Tag getOrThrow(String tagName) {
+        return get(tagName)
+                .orElseThrow(
+                        () -> new IllegalArgumentException("Tag '" + tagName + "' doesn't exist."));
     }
 
     public long tagCount() {
@@ -410,12 +426,7 @@ public class TagManager {
         }
         throw new RuntimeException(
                 String.format(
-                        "Didn't find tag with snapshot id '%s'.This is unexpected.",
+                        "Didn't find tag with snapshot id '%s'. This is unexpected.",
                         taggedSnapshot.id()));
-    }
-
-    /** Read tag for tagName. */
-    public Tag tag(String tagName) {
-        return Tag.fromPath(fileIO, tagPath(tagName));
     }
 }

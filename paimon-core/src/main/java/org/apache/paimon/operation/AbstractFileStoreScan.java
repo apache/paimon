@@ -119,6 +119,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
+    public FileStoreScan withPartitionsFilter(List<Map<String, String>> partitions) {
+        manifestsReader.withPartitionsFilter(partitions);
+        return this;
+    }
+
+    @Override
     public FileStoreScan withPartitionFilter(PartitionPredicate predicate) {
         manifestsReader.withPartitionFilter(predicate);
         return this;

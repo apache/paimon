@@ -39,6 +39,10 @@ public interface InnerTableScan extends TableScan {
         return this;
     }
 
+    default InnerTableScan withPartitionsFilter(List<Map<String, String>> partitions) {
+        return this;
+    }
+
     default InnerTableScan withPartitionFilter(List<BinaryRow> partitions) {
         return this;
     }

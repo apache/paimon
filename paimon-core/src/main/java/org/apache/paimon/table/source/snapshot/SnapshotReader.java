@@ -73,6 +73,8 @@ public interface SnapshotReader {
 
     SnapshotReader withPartitionFilter(List<BinaryRow> partitions);
 
+    SnapshotReader withPartitionsFilter(List<Map<String, String>> partitions);
+
     SnapshotReader withMode(ScanMode scanMode);
 
     SnapshotReader withLevelFilter(Filter<Integer> levelFilter);

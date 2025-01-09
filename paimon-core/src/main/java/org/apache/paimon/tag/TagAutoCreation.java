@@ -167,9 +167,8 @@ public class TagAutoCreation {
             }
             String tagName = periodHandler.timeToTag(thisTag);
             LOG.info("The tag name is {}.", tagName);
-            if (!tagManager.tagExists(tagName)) {
-                tagManager.createTag(snapshot, tagName, defaultTimeRetained, callbacks);
-            }
+            // shouldn't throw exception when tag exists
+            tagManager.createTag(snapshot, tagName, defaultTimeRetained, callbacks, true);
             nextTag = periodHandler.nextTagTime(thisTag);
             LOG.info("The next tag time after this is {}.", nextTag);
 

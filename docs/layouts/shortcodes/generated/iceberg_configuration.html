@@ -1,0 +1,96 @@
+{{/*
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+*/}}
+<table class="configuration table table-bordered">
+    <thead>
+        <tr>
+            <th class="text-left" style="width: 20%">Key</th>
+            <th class="text-left" style="width: 15%">Default</th>
+            <th class="text-left" style="width: 10%">Type</th>
+            <th class="text-left" style="width: 55%">Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><h5>metadata.iceberg.compaction.max.file-num</h5></td>
+            <td style="word-wrap: break-word;">50</td>
+            <td>Integer</td>
+            <td>If number of small Iceberg metadata files exceeds this limit, always trigger metadata compaction regardless of their total size.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.compaction.min.file-num</h5></td>
+            <td style="word-wrap: break-word;">10</td>
+            <td>Integer</td>
+            <td>Minimum number of Iceberg metadata files to trigger metadata compaction.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.database</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Metastore database name for Iceberg Catalog. Set this as an iceberg database alias if using a centralized Catalog.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.hadoop-conf-dir</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>hadoop-conf-dir for Iceberg Hive catalog.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.hive-client-class</h5></td>
+            <td style="word-wrap: break-word;">"org.apache.hadoop.hive.metastore.HiveMetaStoreClient"</td>
+            <td>String</td>
+            <td>Hive client class name for Iceberg Hive Catalog.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.hive-conf-dir</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>hive-conf-dir for Iceberg Hive catalog.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.manifest-compression</h5></td>
+            <td style="word-wrap: break-word;">"snappy"</td>
+            <td>String</td>
+            <td>Compression for Iceberg manifest files.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.manifest-legacy-version</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Should use the legacy manifest version to generate Iceberg's 1.4 manifest files.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.storage</h5></td>
+            <td style="word-wrap: break-word;">disabled</td>
+            <td><p>Enum</p></td>
+            <td>When set, produce Iceberg metadata after a snapshot is committed, so that Iceberg readers can read Paimon's raw data files.<br /><br />Possible values:<ul><li>"disabled": Disable Iceberg compatibility support.</li><li>"table-location": Store Iceberg metadata in each table's directory.</li><li>"hadoop-catalog": Store Iceberg metadata in a separate directory. This directory can be specified as the warehouse directory of an Iceberg Hadoop catalog.</li><li>"hive-catalog": Not only store Iceberg metadata like hadoop-catalog, but also create Iceberg external table in Hive.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.table</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Metastore table name for Iceberg Catalog.Set this as an iceberg table alias if using a centralized Catalog.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.uri</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Hive metastore uri for Iceberg Hive catalog.</td>
+        </tr>
+    </tbody>
+</table>

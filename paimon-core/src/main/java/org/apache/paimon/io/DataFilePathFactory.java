@@ -19,9 +19,11 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileEntry;
 
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
 import java.util.Optional;
@@ -43,6 +45,7 @@ public class DataFilePathFactory {
     private final String changelogFilePrefix;
     private final boolean fileSuffixIncludeCompression;
     private final String fileCompression;
+    @Nullable private final ExternalPathProvider externalPathProvider;
 
     public DataFilePathFactory(
             Path parent,
@@ -50,7 +53,8 @@ public class DataFilePathFactory {
             String dataFilePrefix,
             String changelogFilePrefix,
             boolean fileSuffixIncludeCompression,
-            String fileCompression) {
+            String fileCompression,
+            @Nullable ExternalPathProvider externalPathProvider) {
         this.parent = parent;
         this.uuid = UUID.randomUUID().toString();
         this.pathCount = new AtomicInteger(0);
@@ -59,6 +63,7 @@ public class DataFilePathFactory {
         this.changelogFilePrefix = changelogFilePrefix;
         this.fileSuffixIncludeCompression = fileSuffixIncludeCompression;
         this.fileCompression = fileCompression;
+        this.externalPathProvider = externalPathProvider;
     }
 
     public Path newPath() {
@@ -74,7 +79,11 @@ public class DataFilePathFactory {
     }
 
     public Path newPath(String prefix) {
-        return new Path(parent, newFileName(prefix));
+        String fileName = newFileName(prefix);
+        if (externalPathProvider != null) {
+            return externalPathProvider.getNextExternalDataPath(fileName);
+        }
+        return new Path(parent, fileName);
     }
 
     private String newFileName(String prefix) {
@@ -131,6 +140,10 @@ public class DataFilePathFactory {
         }
 
         return fileName.substring(index + 1);
+    }
+
+    public boolean isExternalPath() {
+        return externalPathProvider != null;
     }
 
     @VisibleForTesting

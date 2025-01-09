@@ -23,13 +23,13 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.hive.pool.CachedClientPool;
 import org.apache.paimon.metastore.MetastoreClient;
-import org.apache.paimon.metastore.PartitionStats;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.PartitionPathUtils;
 
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.AlreadyExistsException;
+import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.PartitionEventType;
@@ -57,6 +57,7 @@ public class HiveMetastoreClient implements MetastoreClient {
     private final Identifier identifier;
 
     private final ClientPool<IMetaStoreClient, TException> clients;
+    private final List<String> partitionKeys;
     private final StorageDescriptor sd;
     private final String dataFilePath;
 
@@ -69,6 +70,10 @@ public class HiveMetastoreClient implements MetastoreClient {
                         client ->
                                 client.getTable(
                                         identifier.getDatabaseName(), identifier.getTableName()));
+        this.partitionKeys =
+                table.getPartitionKeys().stream()
+                        .map(FieldSchema::getName)
+                        .collect(Collectors.toList());
         this.sd = table.getSd();
         this.dataFilePath =
                 table.getParameters().containsKey(CoreOptions.DATA_FILE_PATH_DIRECTORY.key())
@@ -103,17 +108,17 @@ public class HiveMetastoreClient implements MetastoreClient {
     }
 
     @Override
-    public void alterPartition(
-            LinkedHashMap<String, String> partition, PartitionStats partitionStats)
-            throws Exception {
-        List<String> partitionValues = new ArrayList<>(partition.values());
+    public void alterPartition(org.apache.paimon.partition.Partition partition) throws Exception {
+        Map<String, String> spec = partition.spec();
+        List<String> partitionValues =
+                partitionKeys.stream().map(spec::get).collect(Collectors.toList());
 
         Map<String, String> statistic = new HashMap<>();
-        statistic.put(NUM_FILES_PROP, String.valueOf(partitionStats.numFiles()));
-        statistic.put(TOTAL_SIZE_PROP, String.valueOf(partitionStats.totalSize()));
-        statistic.put(NUM_ROWS_PROP, String.valueOf(partitionStats.numRows()));
+        statistic.put(NUM_FILES_PROP, String.valueOf(partition.fileCount()));
+        statistic.put(TOTAL_SIZE_PROP, String.valueOf(partition.fileSizeInBytes()));
+        statistic.put(NUM_ROWS_PROP, String.valueOf(partition.recordCount()));
 
-        String modifyTimeSeconds = String.valueOf(partitionStats.lastUpdateTimeMillis() / 1000);
+        String modifyTimeSeconds = String.valueOf(partition.lastFileCreationTime() / 1000);
         statistic.put(LAST_UPDATE_TIME_PROP, modifyTimeSeconds);
 
         // just for being compatible with hive metastore
@@ -128,7 +133,7 @@ public class HiveMetastoreClient implements MetastoreClient {
                                             identifier.getObjectName(),
                                             partitionValues));
             hivePartition.setValues(partitionValues);
-            hivePartition.setLastAccessTime((int) (partitionStats.lastUpdateTimeMillis() / 1000));
+            hivePartition.setLastAccessTime((int) (partition.lastFileCreationTime() / 1000));
             hivePartition.getParameters().putAll(statistic);
             clients.execute(
                     client ->

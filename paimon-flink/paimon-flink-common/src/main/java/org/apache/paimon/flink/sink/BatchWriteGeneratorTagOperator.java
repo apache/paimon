@@ -108,16 +108,15 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
                                 + localDateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
         try {
             // If the tag already exists, delete the tag
-            if (tagManager.tagExists(tagName)) {
-                tagManager.deleteTag(
-                        tagName, tagDeletion, snapshotManager, table.store().createTagCallbacks());
-            }
+            tagManager.deleteTag(
+                    tagName, tagDeletion, snapshotManager, table.store().createTagCallbacks());
             // Create a new tag
             tagManager.createTag(
                     snapshot,
                     tagName,
                     table.coreOptions().tagDefaultTimeRetained(),
-                    table.store().createTagCallbacks());
+                    table.store().createTagCallbacks(),
+                    false);
             // Expire the tag
             expireTag();
         } catch (Exception e) {

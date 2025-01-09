@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
@@ -143,10 +144,31 @@ public class PrivilegedCatalog extends DelegateCatalog {
     }
 
     @Override
-    public void dropPartition(Identifier identifier, Map<String, String> partitions)
-            throws TableNotExistException, PartitionNotExistException {
+    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
         privilegeManager.getPrivilegeChecker().assertCanInsert(identifier);
-        wrapped.dropPartition(identifier, partitions);
+        wrapped.createPartitions(identifier, partitions);
+    }
+
+    @Override
+    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        privilegeManager.getPrivilegeChecker().assertCanInsert(identifier);
+        wrapped.dropPartitions(identifier, partitions);
+    }
+
+    @Override
+    public void alterPartitions(Identifier identifier, List<Partition> partitions)
+            throws TableNotExistException {
+        privilegeManager.getPrivilegeChecker().assertCanInsert(identifier);
+        wrapped.alterPartitions(identifier, partitions);
+    }
+
+    @Override
+    public void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        privilegeManager.getPrivilegeChecker().assertCanInsert(identifier);
+        wrapped.markDonePartitions(identifier, partitions);
     }
 
     public void createPrivilegedUser(String user, String password) {

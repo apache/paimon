@@ -31,6 +31,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.SupplierWithIOException;
 
 import javax.annotation.Nullable;
 
@@ -176,12 +177,12 @@ public class PickFilesUtil {
     }
 
     @Nullable
-    private static <T> T retryReadingFiles(ReaderWithIOException<T> reader) throws IOException {
+    private static <T> T retryReadingFiles(SupplierWithIOException<T> reader) throws IOException {
         int retryNumber = 0;
         IOException caught = null;
         while (retryNumber++ < READ_FILE_RETRY_NUM) {
             try {
-                return reader.read();
+                return reader.get();
             } catch (FileNotFoundException e) {
                 return null;
             } catch (IOException e) {
@@ -196,11 +197,5 @@ public class PickFilesUtil {
         }
 
         throw caught;
-    }
-
-    /** A helper functional interface for method {@link #retryReadingFiles}. */
-    @FunctionalInterface
-    interface ReaderWithIOException<T> {
-        T read() throws IOException;
     }
 }

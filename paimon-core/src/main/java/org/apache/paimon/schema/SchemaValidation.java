@@ -62,6 +62,7 @@ import static org.apache.paimon.CoreOptions.FIELDS_SEPARATOR;
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
+import static org.apache.paimon.CoreOptions.INCREMENTAL_TO_AUTO_TAG;
 import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
@@ -203,12 +204,6 @@ public class SchemaValidation {
                                 "The record level time field type should be one of INT, BIGINT, or TIMESTAMP, but field type is %s.",
                                 dataType));
             }
-            if (dataType.isNullable()) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "Time field %s for record-level expire should be not null.",
-                                recordLevelTimeField));
-            }
         }
 
         if (options.mergeEngine() == MergeEngine.FIRST_ROW) {
@@ -278,7 +273,8 @@ public class SchemaValidation {
                             SCAN_FILE_CREATION_TIME_MILLIS,
                             SCAN_TAG_NAME,
                             INCREMENTAL_BETWEEN_TIMESTAMP,
-                            INCREMENTAL_BETWEEN),
+                            INCREMENTAL_BETWEEN,
+                            INCREMENTAL_TO_AUTO_TAG),
                     Arrays.asList(SCAN_TIMESTAMP_MILLIS, SCAN_TIMESTAMP));
         } else if (options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT) {
             checkExactOneOptionExistInMode(
@@ -294,14 +290,16 @@ public class SchemaValidation {
                             SCAN_TIMESTAMP,
                             SCAN_FILE_CREATION_TIME_MILLIS,
                             INCREMENTAL_BETWEEN_TIMESTAMP,
-                            INCREMENTAL_BETWEEN),
+                            INCREMENTAL_BETWEEN,
+                            INCREMENTAL_TO_AUTO_TAG),
                     Arrays.asList(SCAN_SNAPSHOT_ID, SCAN_TAG_NAME));
         } else if (options.startupMode() == CoreOptions.StartupMode.INCREMENTAL) {
             checkExactOneOptionExistInMode(
                     options,
                     options.startupMode(),
                     INCREMENTAL_BETWEEN,
-                    INCREMENTAL_BETWEEN_TIMESTAMP);
+                    INCREMENTAL_BETWEEN_TIMESTAMP,
+                    INCREMENTAL_TO_AUTO_TAG);
             checkOptionsConflict(
                     options,
                     Arrays.asList(
@@ -310,7 +308,10 @@ public class SchemaValidation {
                             SCAN_FILE_CREATION_TIME_MILLIS,
                             SCAN_TIMESTAMP,
                             SCAN_TAG_NAME),
-                    Arrays.asList(INCREMENTAL_BETWEEN, INCREMENTAL_BETWEEN_TIMESTAMP));
+                    Arrays.asList(
+                            INCREMENTAL_BETWEEN,
+                            INCREMENTAL_BETWEEN_TIMESTAMP,
+                            INCREMENTAL_TO_AUTO_TAG));
         } else if (options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT_FULL) {
             checkOptionExistInMode(options, SCAN_SNAPSHOT_ID, options.startupMode());
             checkOptionsConflict(
@@ -321,7 +322,8 @@ public class SchemaValidation {
                             SCAN_FILE_CREATION_TIME_MILLIS,
                             SCAN_TAG_NAME,
                             INCREMENTAL_BETWEEN_TIMESTAMP,
-                            INCREMENTAL_BETWEEN),
+                            INCREMENTAL_BETWEEN,
+                            INCREMENTAL_TO_AUTO_TAG),
                     Collections.singletonList(SCAN_SNAPSHOT_ID));
         } else if (options.startupMode() == CoreOptions.StartupMode.FROM_FILE_CREATION_TIME) {
             checkOptionExistInMode(
@@ -335,7 +337,8 @@ public class SchemaValidation {
                             SCAN_TIMESTAMP_MILLIS,
                             SCAN_TAG_NAME,
                             INCREMENTAL_BETWEEN_TIMESTAMP,
-                            INCREMENTAL_BETWEEN),
+                            INCREMENTAL_BETWEEN,
+                            INCREMENTAL_TO_AUTO_TAG),
                     Collections.singletonList(SCAN_FILE_CREATION_TIME_MILLIS));
         } else {
             checkOptionNotExistInMode(options, SCAN_TIMESTAMP_MILLIS, options.startupMode());
@@ -347,6 +350,7 @@ public class SchemaValidation {
             checkOptionNotExistInMode(
                     options, INCREMENTAL_BETWEEN_TIMESTAMP, options.startupMode());
             checkOptionNotExistInMode(options, INCREMENTAL_BETWEEN, options.startupMode());
+            checkOptionNotExistInMode(options, INCREMENTAL_TO_AUTO_TAG, options.startupMode());
         }
     }
 

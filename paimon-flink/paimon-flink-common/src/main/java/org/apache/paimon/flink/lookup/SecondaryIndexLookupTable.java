@@ -46,7 +46,7 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
 
     @Override
     public void open() throws Exception {
-        openStateFactory();
+        init();
         createTableState();
         this.indexState =
                 stateFactory.setState(

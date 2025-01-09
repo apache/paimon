@@ -53,7 +53,7 @@ class RecordLevelExpireWithMillisecondTest extends PrimaryKeyTableTestBase {
                 Schema.newBuilder()
                         .column("pt", DataTypes.INT())
                         .column("pk", DataTypes.INT())
-                        .column("col1", DataTypes.BIGINT().notNull())
+                        .column("col1", DataTypes.BIGINT())
                         .partitionKeys("pt")
                         .primaryKey("pk", "pt")
                         .options(tableOptions().toMap())
@@ -96,5 +96,15 @@ class RecordLevelExpireWithMillisecondTest extends PrimaryKeyTableTestBase {
         // compact, expired
         compact(1);
         assertThat(query(new int[] {0, 1})).containsExactlyInAnyOrder(GenericRow.of(1, 4));
+
+        writeCommit(GenericRow.of(1, 5, null));
+        assertThat(query(new int[] {0, 1}))
+                .containsExactlyInAnyOrder(GenericRow.of(1, 4), GenericRow.of(1, 5));
+
+        writeCommit(GenericRow.of(1, 5, currentSecs + 60 * 60 * 1000));
+        // compact, merged
+        compact(1);
+        assertThat(query(new int[] {0, 1}))
+                .containsExactlyInAnyOrder(GenericRow.of(1, 4), GenericRow.of(1, 5));
     }
 }

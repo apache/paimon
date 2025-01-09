@@ -18,6 +18,7 @@
 
 package org.apache.paimon;
 
+import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.FileIO;
@@ -47,6 +48,7 @@ import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.TagCallback;
+import org.apache.paimon.tag.SuccessFileTagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -63,6 +65,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Base {@link FileStore} implementation.
@@ -119,7 +123,43 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.legacyPartitionName(),
                 options.fileSuffixIncludeCompression(),
                 options.fileCompression(),
-                options.dataFilePathDirectory());
+                options.dataFilePathDirectory(),
+                createExternalPaths());
+    }
+
+    private List<Path> createExternalPaths() {
+        String externalPaths = options.dataFileExternalPaths();
+        ExternalPathStrategy strategy = options.externalPathStrategy();
+        if (externalPaths == null
+                || externalPaths.isEmpty()
+                || strategy == ExternalPathStrategy.NONE) {
+            return Collections.emptyList();
+        }
+
+        String specificFS = options.externalSpecificFS();
+
+        List<Path> paths = new ArrayList<>();
+        for (String pathString : externalPaths.split(",")) {
+            Path path = new Path(pathString.trim());
+            String scheme = path.toUri().getScheme();
+            if (scheme == null) {
+                throw new IllegalArgumentException("scheme should not be null: " + path);
+            }
+
+            if (strategy == ExternalPathStrategy.SPECIFIC_FS) {
+                checkArgument(
+                        specificFS != null,
+                        "External path specificFS should not be null when strategy is specificFS.");
+                if (scheme.equalsIgnoreCase(specificFS)) {
+                    paths.add(path);
+                }
+            } else {
+                paths.add(path);
+            }
+        }
+
+        checkArgument(!paths.isEmpty(), "External paths should not be empty");
+        return paths;
     }
 
     @Override
@@ -192,7 +232,11 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     }
 
     protected ManifestsReader newManifestsReader(boolean forWrite) {
-        return new ManifestsReader(partitionType, snapshotManager(), manifestListFactory(forWrite));
+        return new ManifestsReader(
+                partitionType,
+                options.partitionDefaultName(),
+                snapshotManager(),
+                manifestListFactory(forWrite));
     }
 
     @Override
@@ -338,6 +382,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         if (partitionField != null && metastoreClientFactory != null) {
             callbacks.add(
                     new AddPartitionTagCallback(metastoreClientFactory.create(), partitionField));
+        }
+        if (options.tagCreateSuccessFile()) {
+            callbacks.add(new SuccessFileTagCallback(fileIO, newTagManager().tagDirectory()));
         }
         return callbacks;
     }

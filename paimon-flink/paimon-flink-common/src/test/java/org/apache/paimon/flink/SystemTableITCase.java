@@ -76,7 +76,7 @@ public class SystemTableITCase extends CatalogTableITCase {
         List<Row> rows = sql("SELECT * FROM `T$table_indexes` WHERE index_type = 'HASH'");
         assertThat(rows.size()).isEqualTo(1);
         Row row = rows.get(0);
-        assertThat(row.getField(0)).isEqualTo("[2024-10-01]");
+        assertThat(row.getField(0)).isEqualTo("{2024-10-01}");
         assertThat(row.getField(1)).isEqualTo(0);
         assertThat(row.getField(2)).isEqualTo("HASH");
         assertThat(row.getField(3).toString().startsWith("index-")).isTrue();
@@ -87,7 +87,7 @@ public class SystemTableITCase extends CatalogTableITCase {
         rows = sql("SELECT * FROM `T$table_indexes` WHERE index_type = 'DELETION_VECTORS'");
         assertThat(rows.size()).isEqualTo(1);
         row = rows.get(0);
-        assertThat(row.getField(0)).isEqualTo("[2024-10-01]");
+        assertThat(row.getField(0)).isEqualTo("{2024-10-01}");
         assertThat(row.getField(1)).isEqualTo(0);
         assertThat(row.getField(2)).isEqualTo("DELETION_VECTORS");
         assertThat(row.getField(3).toString().startsWith("index-")).isTrue();

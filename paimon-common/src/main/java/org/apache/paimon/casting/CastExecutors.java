@@ -21,6 +21,7 @@ package org.apache.paimon.casting;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.DataTypes;
 
 import javax.annotation.Nullable;
 
@@ -58,6 +59,9 @@ public class CastExecutors {
                 .addRule(TimeToStringCastRule.INSTANCE)
                 .addRule(DateToStringCastRule.INSTANCE)
                 .addRule(StringToStringCastRule.INSTANCE)
+                .addRule(ArrayToStringCastRule.INSTANCE)
+                .addRule(MapToStringCastRule.INSTANCE)
+                .addRule(RowToStringCastRule.INSTANCE)
                 // From string rules
                 .addRule(StringToBooleanCastRule.INSTANCE)
                 .addRule(StringToDecimalCastRule.INSTANCE)
@@ -96,6 +100,16 @@ public class CastExecutors {
             return null;
         }
         return rule.create(inputType, outputType);
+    }
+
+    /** Resolve a {@link CastExecutor} for the provided input type to StringType. */
+    public static CastExecutor<?, ?> resolveToString(DataType inputType) {
+        CastExecutor<?, ?> castExecutor = resolve(inputType, DataTypes.STRING());
+        if (castExecutor == null) {
+            throw new UnsupportedOperationException(
+                    "Cast " + inputType + " to StringType is not supported.");
+        }
+        return castExecutor;
     }
 
     public static CastExecutor<?, ?> identityCastExecutor() {

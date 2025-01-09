@@ -18,8 +18,6 @@
 
 package org.apache.parquet.internal.filter2.columnindex;
 
-import org.apache.paimon.fileindex.FileIndexResult;
-import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.parquet.filter2.compat.FilterCompat.Filter;
@@ -40,11 +38,12 @@ import java.util.Set;
  * column index based filtering. To be used iterate over the matching row indexes to be read from a
  * row-group, retrieve the count of the matching rows or check overlapping of a row index range.
  *
- * <p>Note: The class was copied over to support using {@link FileIndexResult} to filter {@link
- * RowRanges}. Added a new method {@link RowRanges#create(long, PrimitiveIterator.OfInt,
- * OffsetIndex, FileIndexResult)}
+ * <p>Note: The class was copied over to support using selected position to filter or narrow the
+ * {@link RowRanges}. Added a new method {@link RowRanges#create(long, long,
+ * PrimitiveIterator.OfInt, OffsetIndex, RoaringBitmap32)}
  *
- * @see ColumnIndexFilter#calculateRowRanges(Filter, ColumnIndexStore, Set, long, FileIndexResult)
+ * @see ColumnIndexFilter#calculateRowRanges(Filter, ColumnIndexStore, Set, long, long,
+ *     RoaringBitmap32)
  */
 public class RowRanges {
 
@@ -162,29 +161,28 @@ public class RowRanges {
         return ranges;
     }
 
-    /** Support using {@link FileIndexResult} to filter the row ranges. */
+    /** Support using the selected position to filter or narrow the row ranges. */
     public static RowRanges create(
             long rowCount,
+            long rowIndexOffset,
             PrimitiveIterator.OfInt pageIndexes,
             OffsetIndex offsetIndex,
-            @Nullable FileIndexResult fileIndexResult) {
+            @Nullable RoaringBitmap32 selection) {
         RowRanges ranges = new RowRanges();
         while (pageIndexes.hasNext()) {
             int pageIndex = pageIndexes.nextInt();
             long firstRowIndex = offsetIndex.getFirstRowIndex(pageIndex);
             long lastRowIndex = offsetIndex.getLastRowIndex(pageIndex, rowCount);
 
-            // using file index result to filter or narrow the row ranges
-            if (fileIndexResult instanceof BitmapIndexResult) {
-                RoaringBitmap32 bitmap = ((BitmapIndexResult) fileIndexResult).get();
-                RoaringBitmap32 range =
-                        RoaringBitmap32.bitmapOfRange(firstRowIndex, lastRowIndex + 1);
-                RoaringBitmap32 result = RoaringBitmap32.and(bitmap, range);
-                if (result.isEmpty()) {
+            // using selected position to filter or narrow the row ranges
+            if (selection != null) {
+                long first = rowIndexOffset + firstRowIndex;
+                long last = rowIndexOffset + lastRowIndex;
+                if (!selection.intersects(first, last + 1)) {
                     continue;
                 }
-                firstRowIndex = result.first();
-                lastRowIndex = result.last();
+                firstRowIndex = selection.nextValue((int) first) - rowIndexOffset;
+                lastRowIndex = selection.previousValue((int) (last)) - rowIndexOffset;
             }
 
             ranges.add(new Range(firstRowIndex, lastRowIndex));

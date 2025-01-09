@@ -49,6 +49,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
 
     private final long schemaId;
     private final LongCounter seqNumCounter;
+    private final boolean isExternalPath;
     private final SimpleStatsConverter statsArraySerializer;
     @Nullable private final DataFileIndexWriter dataFileIndexWriter;
     private final FileSource fileSource;
@@ -66,7 +67,8 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             FileIndexOptions fileIndexOptions,
             FileSource fileSource,
             boolean asyncFileWrite,
-            boolean statsDenseStore) {
+            boolean statsDenseStore,
+            boolean isExternalPath) {
         super(
                 fileIO,
                 factory,
@@ -79,6 +81,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 asyncFileWrite);
         this.schemaId = schemaId;
         this.seqNumCounter = seqNumCounter;
+        this.isExternalPath = isExternalPath;
         this.statsArraySerializer = new SimpleStatsConverter(writeSchema, statsDenseStore);
         this.dataFileIndexWriter =
                 DataFileIndexWriter.create(
@@ -111,6 +114,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 dataFileIndexWriter == null
                         ? DataFileIndexWriter.EMPTY_RESULT
                         : dataFileIndexWriter.result();
+        String externalPath = isExternalPath ? path.toString() : null;
         return DataFileMeta.forAppend(
                 path.getName(),
                 fileIO.getFileSize(path),
@@ -125,6 +129,6 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 indexResult.embeddedIndexBytes(),
                 fileSource,
                 statsPair.getKey(),
-                null);
+                externalPath);
     }
 }

@@ -34,6 +34,9 @@ import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ProjectedRow;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
@@ -186,8 +189,11 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     static class LocalQueryExecutor implements QueryExecutor {
 
+        private static final Logger LOG = LoggerFactory.getLogger(LocalQueryExecutor.class);
+
         private final LocalTableQuery tableQuery;
         private final StreamTableScan scan;
+        private final String tableName;
 
         private LocalQueryExecutor(
                 FileStoreTable table,
@@ -214,6 +220,8 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                                             ? null
                                             : requireCachedBucketIds::contains)
                             .newStreamScan();
+
+            this.tableName = table.name();
         }
 
         @Override
@@ -226,15 +234,13 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         public void refresh() {
             while (true) {
                 List<Split> splits = scan.plan().splits();
+                log(splits);
+
                 if (splits.isEmpty()) {
                     return;
                 }
 
                 for (Split split : splits) {
-                    if (!(split instanceof DataSplit)) {
-                        throw new IllegalArgumentException(
-                                "Unsupported split: " + split.getClass());
-                    }
                     BinaryRow partition = ((DataSplit) split).partition();
                     int bucket = ((DataSplit) split).bucket();
                     List<DataFileMeta> before = ((DataSplit) split).beforeFiles();
@@ -248,6 +254,19 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         @Override
         public void close() throws IOException {
             tableQuery.close();
+        }
+
+        private void log(List<Split> splits) {
+            if (splits.isEmpty()) {
+                LOG.info("LocalQueryExecutor didn't get splits from {}.", tableName);
+                return;
+            }
+
+            DataSplit dataSplit = (DataSplit) splits.get(0);
+            LOG.info(
+                    "LocalQueryExecutor get splits from {} with snapshotId {}.",
+                    tableName,
+                    dataSplit.snapshotId());
         }
     }
 

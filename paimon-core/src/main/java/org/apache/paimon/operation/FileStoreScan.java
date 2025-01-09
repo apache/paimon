@@ -53,6 +53,8 @@ public interface FileStoreScan {
 
     FileStoreScan withPartitionFilter(List<BinaryRow> partitions);
 
+    FileStoreScan withPartitionsFilter(List<Map<String, String>> partitions);
+
     FileStoreScan withPartitionFilter(PartitionPredicate predicate);
 
     FileStoreScan withBucket(int bucket);
