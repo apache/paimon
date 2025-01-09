@@ -79,11 +79,6 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
         map.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
         map.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
 
-        PartitionHandler partitionHandler =
-                fileStore.options().partitionedTableInMetastore()
-                        ? fileStoreTable.catalogEnvironment().partitionHandler()
-                        : null;
-
         PartitionExpire partitionExpire =
                 new PartitionExpire(
                         TimeUtils.parseDuration(expirationTime),
@@ -92,7 +87,7 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
                                 CoreOptions.fromMap(map), fileStore.partitionType()),
                         fileStore.newScan(),
                         fileStore.newCommit(""),
-                        partitionHandler,
+                        fileStoreTable.catalogEnvironment().partitionHandler(),
                         fileStore.options().partitionExpireMaxNum());
         if (maxExpires != null) {
             partitionExpire.withMaxExpireNum(maxExpires);

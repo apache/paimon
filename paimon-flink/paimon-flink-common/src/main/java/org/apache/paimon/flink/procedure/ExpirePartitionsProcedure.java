@@ -23,7 +23,6 @@ import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.PartitionHandler;
 import org.apache.paimon.utils.TimeUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
@@ -83,11 +82,6 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
         map.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
         map.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
 
-        PartitionHandler partitionHandler =
-                fileStore.options().partitionedTableInMetastore()
-                        ? fileStoreTable.catalogEnvironment().partitionHandler()
-                        : null;
-
         PartitionExpire partitionExpire =
                 new PartitionExpire(
                         TimeUtils.parseDuration(expirationTime),
@@ -96,7 +90,7 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
                                 CoreOptions.fromMap(map), fileStore.partitionType()),
                         fileStore.newScan(),
                         fileStore.newCommit(""),
-                        partitionHandler,
+                        fileStoreTable.catalogEnvironment().partitionHandler(),
                         fileStore.options().partitionExpireMaxNum());
         if (maxExpires != null) {
             partitionExpire.withMaxExpireNum(maxExpires);

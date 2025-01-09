@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.PartitionHandler;
 import org.apache.paimon.utils.TimeUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
@@ -93,11 +92,6 @@ public class ExpirePartitionsProcedure extends BaseProcedure {
                     map.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
                     map.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
 
-                    PartitionHandler partitionHandler =
-                            fileStore.options().partitionedTableInMetastore()
-                                    ? fileStoreTable.catalogEnvironment().partitionHandler()
-                                    : null;
-
                     PartitionExpire partitionExpire =
                             new PartitionExpire(
                                     TimeUtils.parseDuration(expirationTime),
@@ -106,7 +100,7 @@ public class ExpirePartitionsProcedure extends BaseProcedure {
                                             CoreOptions.fromMap(map), fileStore.partitionType()),
                                     fileStore.newScan(),
                                     fileStore.newCommit(""),
-                                    partitionHandler,
+                                    fileStoreTable.catalogEnvironment().partitionHandler(),
                                     fileStore.options().partitionExpireMaxNum());
                     if (maxExpires != null) {
                         partitionExpire.withMaxExpireNum(maxExpires);
