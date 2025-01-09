@@ -16,20 +16,28 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.catalog;
+package org.apache.paimon.rest;
 
-import org.apache.paimon.annotation.Public;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.options.Options;
 
-import java.io.Serializable;
+/** Loader to create {@link RESTCatalog}. */
+public class RESTCatalogLoader implements CatalogLoader {
 
-/**
- * Loader for creating a {@link Catalog}.
- *
- * @since 1.1.0
- */
-@Public
-@FunctionalInterface
-public interface CatalogLoader extends Serializable {
+    private static final long serialVersionUID = 1L;
 
-    Catalog load();
+    private final Options options;
+    private final FileIO fileIO;
+
+    public RESTCatalogLoader(Options options, FileIO fileIO) {
+        this.options = options;
+        this.fileIO = fileIO;
+    }
+
+    @Override
+    public Catalog load() {
+        return new RESTCatalog(options, fileIO);
+    }
 }

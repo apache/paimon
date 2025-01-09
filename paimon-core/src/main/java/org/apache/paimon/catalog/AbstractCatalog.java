@@ -24,7 +24,6 @@ import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
@@ -410,7 +409,7 @@ public abstract class AbstractCatalog implements Catalog {
                                         lockFactory().orElse(null),
                                         lockContext().orElse(null),
                                         identifier),
-                                metastoreClientFactory(identifier).orElse(null)));
+                                catalogLoader()));
         CoreOptions options = table.coreOptions();
         if (options.type() == TableType.OBJECT_TABLE) {
             String objectLocation = options.objectLocation();
@@ -476,11 +475,6 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected abstract TableSchema getDataTableSchema(Identifier identifier)
             throws TableNotExistException;
-
-    /** Get metastore client factory for the table specified by {@code identifier}. */
-    public Optional<MetastoreClient.Factory> metastoreClientFactory(Identifier identifier) {
-        return Optional.empty();
-    }
 
     public Path getTableLocation(Identifier identifier) {
         return new Path(newDatabasePath(identifier.getDatabaseName()), identifier.getTableName());

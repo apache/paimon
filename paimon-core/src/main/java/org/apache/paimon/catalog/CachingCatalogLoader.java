@@ -18,18 +18,23 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.paimon.annotation.Public;
+import org.apache.paimon.options.Options;
 
-import java.io.Serializable;
+/** Loader to create {@link CachingCatalog}. */
+public class CachingCatalogLoader implements CatalogLoader {
 
-/**
- * Loader for creating a {@link Catalog}.
- *
- * @since 1.1.0
- */
-@Public
-@FunctionalInterface
-public interface CatalogLoader extends Serializable {
+    private static final long serialVersionUID = 1L;
 
-    Catalog load();
+    private final CatalogLoader catalogLoader;
+    private final Options options;
+
+    public CachingCatalogLoader(CatalogLoader catalogLoader, Options options) {
+        this.catalogLoader = catalogLoader;
+        this.options = options;
+    }
+
+    @Override
+    public Catalog load() {
+        return CachingCatalog.tryToCreate(catalogLoader.load(), options);
+    }
 }

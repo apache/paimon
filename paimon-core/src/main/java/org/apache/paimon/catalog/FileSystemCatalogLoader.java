@@ -18,18 +18,27 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.paimon.annotation.Public;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 
-import java.io.Serializable;
+/** Loader to create {@link FileSystemCatalog}. */
+public class FileSystemCatalogLoader implements CatalogLoader {
 
-/**
- * Loader for creating a {@link Catalog}.
- *
- * @since 1.1.0
- */
-@Public
-@FunctionalInterface
-public interface CatalogLoader extends Serializable {
+    private static final long serialVersionUID = 1L;
 
-    Catalog load();
+    private final FileIO fileIO;
+    private final Path warehouse;
+    private final Options options;
+
+    public FileSystemCatalogLoader(FileIO fileIO, Path warehouse, Options options) {
+        this.fileIO = fileIO;
+        this.warehouse = warehouse;
+        this.options = options;
+    }
+
+    @Override
+    public Catalog load() {
+        return new FileSystemCatalog(fileIO, warehouse, options);
+    }
 }

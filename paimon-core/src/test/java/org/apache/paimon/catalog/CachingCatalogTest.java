@@ -59,9 +59,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.data.BinaryString.fromString;
+import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRATION_INTERVAL_MS;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_MAX_MEMORY;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_MEMORY;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_THRESHOLD;
+import static org.apache.paimon.options.CatalogOptions.CACHE_PARTITION_MAX_NUM;
+import static org.apache.paimon.options.CatalogOptions.CACHE_SNAPSHOT_MAX_NUM_PER_TABLE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doNothing;
@@ -92,7 +95,7 @@ class CachingCatalogTest extends CatalogTestBase {
     @Test
     public void testInvalidateWhenDatabaseIsAltered() throws Exception {
         Catalog mockcatalog = Mockito.mock(Catalog.class);
-        Catalog catalog = new CachingCatalog(mockcatalog);
+        Catalog catalog = new CachingCatalog(mockcatalog, new Options());
         String databaseName = "db";
         boolean ignoreIfExists = false;
         Database database = Database.of(databaseName);
@@ -111,7 +114,7 @@ class CachingCatalogTest extends CatalogTestBase {
 
     @Test
     public void testInvalidateSystemTablesIfBaseTableIsModified() throws Exception {
-        Catalog catalog = new CachingCatalog(this.catalog);
+        Catalog catalog = new CachingCatalog(this.catalog, new Options());
         Identifier tableIdent = new Identifier("db", "tbl");
         catalog.createTable(new Identifier("db", "tbl"), DEFAULT_TABLE_SCHEMA, false);
         Identifier sysIdent = new Identifier("db", "tbl$files");
@@ -369,14 +372,14 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     private void innerTestManifestCache(long manifestCacheThreshold) throws Exception {
-        Catalog catalog =
-                new CachingCatalog(
-                        this.catalog,
-                        Duration.ofSeconds(10),
-                        MemorySize.ofMebiBytes(1),
-                        manifestCacheThreshold,
-                        0L,
-                        10);
+        Options options = new Options();
+        options.set(CACHE_EXPIRATION_INTERVAL_MS, Duration.ofSeconds(10));
+        options.set(CACHE_MANIFEST_SMALL_FILE_MEMORY, MemorySize.ofMebiBytes(1));
+        options.set(
+                CACHE_MANIFEST_SMALL_FILE_THRESHOLD, MemorySize.ofBytes(manifestCacheThreshold));
+        options.set(CACHE_PARTITION_MAX_NUM, 0L);
+        options.set(CACHE_SNAPSHOT_MAX_NUM_PER_TABLE, 10);
+        Catalog catalog = new CachingCatalog(this.catalog, options);
         Identifier tableIdent = new Identifier("db", "tbl");
         catalog.dropTable(tableIdent, true);
         catalog.createTable(tableIdent, DEFAULT_TABLE_SCHEMA, false);

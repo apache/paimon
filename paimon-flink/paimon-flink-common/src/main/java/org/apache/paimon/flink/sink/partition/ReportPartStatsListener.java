@@ -23,6 +23,7 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.PartitionHandler;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
@@ -157,7 +158,9 @@ public class ReportPartStatsListener implements PartitionListener {
             return Optional.empty();
         }
 
-        if (table.catalogEnvironment().metastoreClientFactory() == null) {
+        PartitionHandler partitionHandler = table.catalogEnvironment().partitionHandler();
+
+        if (partitionHandler == null) {
             return Optional.empty();
         }
 
@@ -171,9 +174,7 @@ public class ReportPartStatsListener implements PartitionListener {
         return Optional.of(
                 new ReportPartStatsListener(
                         partitionComputer,
-                        new PartitionStatisticsReporter(
-                                table,
-                                table.catalogEnvironment().metastoreClientFactory().create()),
+                        new PartitionStatisticsReporter(table, partitionHandler),
                         stateStore,
                         isRestored,
                         options.get(FlinkConnectorOptions.PARTITION_IDLE_TIME_TO_REPORT_STATISTIC)

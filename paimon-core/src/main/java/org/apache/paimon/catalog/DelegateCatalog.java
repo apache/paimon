@@ -29,7 +29,7 @@ import java.util.List;
 import java.util.Map;
 
 /** A {@link Catalog} to delegate all operations to another {@link Catalog}. */
-public class DelegateCatalog implements Catalog {
+public abstract class DelegateCatalog implements Catalog {
 
     protected final Catalog wrapped;
 

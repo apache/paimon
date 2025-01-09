@@ -18,7 +18,7 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.table.Table;
 
@@ -29,6 +29,9 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
+import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRATION_INTERVAL_MS;
+import static org.apache.paimon.options.CatalogOptions.CACHE_PARTITION_MAX_NUM;
+
 /**
  * A wrapper around CachingCatalog that provides accessor methods to test the underlying cache,
  * without making those fields public in the CachingCatalog itself.
@@ -38,15 +41,16 @@ public class TestableCachingCatalog extends CachingCatalog {
     private final Duration cacheExpirationInterval;
 
     public TestableCachingCatalog(Catalog catalog, Duration expirationInterval, Ticker ticker) {
-        super(
-                catalog,
-                expirationInterval,
-                MemorySize.ZERO,
-                Long.MAX_VALUE,
-                Long.MAX_VALUE,
-                Integer.MAX_VALUE,
-                ticker);
+        super(catalog, createOptions(expirationInterval));
+        init(ticker);
         this.cacheExpirationInterval = expirationInterval;
+    }
+
+    private static Options createOptions(Duration expirationInterval) {
+        Options options = new Options();
+        options.set(CACHE_EXPIRATION_INTERVAL_MS, expirationInterval);
+        options.set(CACHE_PARTITION_MAX_NUM, 100L);
+        return options;
     }
 
     public Cache<Identifier, Table> tableCache() {

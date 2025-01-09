@@ -23,6 +23,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
@@ -31,7 +32,6 @@ import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.pool.CachedClientPool;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -68,6 +68,7 @@ import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.Partition;
+import org.apache.hadoop.hive.metastore.api.PartitionEventType;
 import org.apache.hadoop.hive.metastore.api.SerDeInfo;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
@@ -202,15 +203,6 @@ public class HiveCatalog extends AbstractCatalog {
         return Optional.of(
                 new HiveCatalogLockContext(
                         new SerializableHiveConf(hiveConf), clientClassName, catalogOptions));
-    }
-
-    @Override
-    public Optional<MetastoreClient.Factory> metastoreClientFactory(Identifier identifier) {
-        Identifier tableIdentifier =
-                new Identifier(identifier.getDatabaseName(), identifier.getTableName());
-        return Optional.of(
-                new HiveMetastoreClient.Factory(
-                        tableIdentifier, hiveConf, clientClassName, options));
     }
 
     @Override
@@ -369,15 +361,31 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         int currentTime = (int) (System.currentTimeMillis() / 1000);
-
+        StorageDescriptor sd = hmsTable.getSd();
+        String dataFilePath =
+                hmsTable.getParameters().containsKey(DATA_FILE_PATH_DIRECTORY.key())
+                        ? sd.getLocation()
+                                + "/"
+                                + hmsTable.getParameters().get(DATA_FILE_PATH_DIRECTORY.key())
+                        : sd.getLocation();
+        List<Partition> hivePartitions = new ArrayList<>();
+        for (Map<String, String> partitionSpec : partitions) {
+            Partition hivePartition = new Partition();
+            StorageDescriptor newSd = new StorageDescriptor(sd);
+            newSd.setLocation(
+                    dataFilePath
+                            + "/"
+                            + PartitionPathUtils.generatePartitionPath(
+                                    new LinkedHashMap<>(partitionSpec)));
+            hivePartition.setDbName(identifier.getDatabaseName());
+            hivePartition.setTableName(identifier.getTableName());
+            hivePartition.setValues(new ArrayList<>(partitionSpec.values()));
+            hivePartition.setSd(newSd);
+            hivePartition.setCreateTime(currentTime);
+            hivePartition.setLastAccessTime(currentTime);
+            hivePartitions.add(hivePartition);
+        }
         try {
-            List<Partition> hivePartitions =
-                    toHivePartitions(
-                            identifier,
-                            location.toString(),
-                            hmsTable.getSd(),
-                            partitions,
-                            currentTime);
             clients.execute(client -> client.add_partitions(hivePartitions, true, false));
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -466,6 +474,27 @@ public class HiveCatalog extends AbstractCatalog {
                     throw new RuntimeException(e);
                 }
             }
+        }
+    }
+
+    @Override
+    public void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        try {
+            clients.execute(
+                    client -> {
+                        for (Map<String, String> partition : partitions) {
+                            client.markPartitionForEvent(
+                                    identifier.getDatabaseName(),
+                                    identifier.getTableName(),
+                                    partition,
+                                    PartitionEventType.LOAD_DONE);
+                        }
+                    });
+        } catch (NoSuchObjectException e) {
+            // do nothing if the partition not exists
+        } catch (TException | InterruptedException e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -809,7 +838,7 @@ public class HiveCatalog extends AbstractCatalog {
                                     lockFactory().orElse(null),
                                     lockContext().orElse(null),
                                     identifier),
-                            metastoreClientFactory(identifier).orElse(null)));
+                            catalogLoader()));
         } catch (TableNotExistException ignore) {
         }
 
@@ -1179,9 +1208,8 @@ public class HiveCatalog extends AbstractCatalog {
                                 tableSchema.logicalPartitionType(),
                                 tableSchema.partitionKeys().toArray(new String[0]),
                                 options.legacyPartitionName());
-                @SuppressWarnings("resource")
-                HiveMetastoreClient metastoreClient = new HiveMetastoreClient(identifier, clients);
-                metastoreClient.addPartitions(
+                createPartitions(
+                        identifier,
                         getTable(identifier).newReadBuilder().newScan().listPartitions().stream()
                                 .map(partitionComputer::generatePartValues)
                                 .collect(Collectors.toList()));
@@ -1199,6 +1227,12 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public String warehouse() {
         return warehouse;
+    }
+
+    @Override
+    public CatalogLoader catalogLoader() {
+        return new HiveCatalogLoader(
+                fileIO, new SerializableHiveConf(hiveConf), clientClassName, options, warehouse);
     }
 
     public Table getHmsTable(Identifier identifier) throws TableNotExistException {
@@ -1606,31 +1640,5 @@ public class HiveCatalog extends AbstractCatalog {
                     e);
             return DEFAULT_TABLE_BATCH_SIZE;
         }
-    }
-
-    private List<Partition> toHivePartitions(
-            Identifier identifier,
-            String tablePath,
-            StorageDescriptor sd,
-            List<Map<String, String>> partitions,
-            int currentTime) {
-        List<Partition> hivePartitions = new ArrayList<>();
-        for (Map<String, String> partitionSpec : partitions) {
-            Partition hivePartition = new Partition();
-            StorageDescriptor newSd = new StorageDescriptor(sd);
-            newSd.setLocation(
-                    tablePath
-                            + "/"
-                            + PartitionPathUtils.generatePartitionPath(
-                                    new LinkedHashMap<>(partitionSpec)));
-            hivePartition.setDbName(identifier.getDatabaseName());
-            hivePartition.setTableName(identifier.getTableName());
-            hivePartition.setValues(new ArrayList<>(partitionSpec.values()));
-            hivePartition.setSd(newSd);
-            hivePartition.setCreateTime(currentTime);
-            hivePartition.setLastAccessTime(currentTime);
-            hivePartitions.add(hivePartition);
-        }
-        return hivePartitions;
     }
 }

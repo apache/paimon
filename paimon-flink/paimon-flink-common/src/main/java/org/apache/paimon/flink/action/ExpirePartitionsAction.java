@@ -20,7 +20,6 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.TimeUtils;
@@ -28,7 +27,6 @@ import org.apache.paimon.utils.TimeUtils;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Optional;
 
 import static org.apache.paimon.partition.PartitionExpireStrategy.createPartitionExpireStrategy;
 
@@ -66,12 +64,7 @@ public class ExpirePartitionsAction extends TableActionBase {
                                 CoreOptions.fromMap(map), fileStore.partitionType()),
                         fileStore.newScan(),
                         fileStore.newCommit(""),
-                        Optional.ofNullable(
-                                        fileStoreTable
-                                                .catalogEnvironment()
-                                                .metastoreClientFactory())
-                                .map(MetastoreClient.Factory::create)
-                                .orElse(null),
+                        fileStoreTable.catalogEnvironment().partitionHandler(),
                         fileStore.options().partitionExpireMaxNum());
     }
 
