@@ -80,9 +80,7 @@ public class RESTCatalogITCase extends CatalogITCaseBase {
     public void testAlterTable() {
         sql(String.format("ALTER TABLE %s.%s ADD e INT AFTER b", databaseName, tableName));
         sql(String.format("ALTER TABLE %s.%s DROP b", databaseName, tableName));
-        ;
         sql(String.format("ALTER TABLE %s.%s RENAME a TO a1", databaseName, tableName));
-        ;
         List<Row> result = sql(String.format("SHOW CREATE TABLE %s.%s", databaseName, tableName));
         assertThat(result.toString())
                 .contains(
