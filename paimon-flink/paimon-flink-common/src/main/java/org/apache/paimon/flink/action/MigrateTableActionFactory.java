@@ -47,7 +47,6 @@ public class MigrateTableActionFactory implements ActionFactory {
         Integer parallelism =
                 params.get(PARALLELISM) == null ? null : Integer.parseInt(params.get(PARALLELISM));
 
-        String targetPaimonTable = params.get(TARGET_TYPE);
         String icebergOptions = params.get(ICEBERG_OPTIONS);
 
         MigrateTableAction migrateTableAction =
@@ -57,7 +56,6 @@ public class MigrateTableActionFactory implements ActionFactory {
                         catalogConfig,
                         tableConf,
                         parallelism,
-                        targetPaimonTable,
                         icebergOptions);
         return Optional.of(migrateTableAction);
     }

@@ -28,11 +28,10 @@ import java.util.Map;
 public class MigrateTableAction extends ActionBase {
 
     private final String connector;
-    private final String hiveTableFullName;
+    private final String sourceTableFullName;
     private final String tableProperties;
     private final Integer parallelism;
 
-    private final String paimonTableFullName;
     private final String icebergProperties;
 
     public MigrateTableAction(
@@ -43,10 +42,9 @@ public class MigrateTableAction extends ActionBase {
             Integer parallelism) {
         super(catalogConfig);
         this.connector = connector;
-        this.hiveTableFullName = hiveTableFullName;
+        this.sourceTableFullName = hiveTableFullName;
         this.tableProperties = tableProperties;
         this.parallelism = parallelism;
-        this.paimonTableFullName = null;
         this.icebergProperties = null;
     }
 
@@ -56,14 +54,12 @@ public class MigrateTableAction extends ActionBase {
             Map<String, String> catalogConfig,
             String tableProperties,
             Integer parallelism,
-            String paimonTableFullName,
             String icebergProperties) {
         super(catalogConfig);
         this.connector = connector;
-        this.hiveTableFullName = hiveTableFullName;
+        this.sourceTableFullName = hiveTableFullName;
         this.tableProperties = tableProperties;
         this.parallelism = parallelism;
-        this.paimonTableFullName = paimonTableFullName;
         this.icebergProperties = icebergProperties;
     }
 
@@ -74,10 +70,9 @@ public class MigrateTableAction extends ActionBase {
         migrateTableProcedure.call(
                 new DefaultProcedureContext(env),
                 connector,
-                hiveTableFullName,
+                sourceTableFullName,
                 tableProperties,
                 parallelism,
-                paimonTableFullName,
                 icebergProperties);
     }
 }
