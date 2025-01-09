@@ -22,7 +22,11 @@ import org.apache.paimon.annotation.Public;
 
 import java.io.Serializable;
 
-/** Loader for creating a {@link Catalog}. */
+/**
+ * Loader for creating a {@link Catalog}.
+ *
+ * @since 1.1.0
+ */
 @Public
 @FunctionalInterface
 public interface CatalogLoader extends Serializable {
