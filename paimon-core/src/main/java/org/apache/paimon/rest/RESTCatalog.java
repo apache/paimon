@@ -214,7 +214,7 @@ public class RESTCatalog implements Catalog {
                 throw new DatabaseNotEmptyException(name);
             }
             client.delete(resourcePaths.database(name), headers());
-        } catch (NoSuchResourceException e) {
+        } catch (NoSuchResourceException | DatabaseNotExistException e) {
             if (!ignoreIfNotExists) {
                 throw new DatabaseNotExistException(name);
             }
@@ -254,12 +254,19 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
-        ListTablesResponse response =
-                client.get(resourcePaths.tables(databaseName), ListTablesResponse.class, headers());
-        if (response.getTables() != null) {
-            return response.getTables();
+        try {
+            ListTablesResponse response =
+                    client.get(
+                            resourcePaths.tables(databaseName),
+                            ListTablesResponse.class,
+                            headers());
+            if (response.getTables() != null) {
+                return response.getTables();
+            }
+            return ImmutableList.of();
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName);
         }
-        return ImmutableList.of();
     }
 
     @Override
