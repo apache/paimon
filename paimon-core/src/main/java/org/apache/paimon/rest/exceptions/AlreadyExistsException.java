@@ -18,10 +18,29 @@
 
 package org.apache.paimon.rest.exceptions;
 
+import org.apache.paimon.rest.responses.ErrorResponseResourceType;
+
 /** Exception thrown on HTTP 409 means a resource already exists. */
 public class AlreadyExistsException extends RESTException {
 
-    public AlreadyExistsException(String message, Object... args) {
+    private final ErrorResponseResourceType resourceType;
+    private final String resourceName;
+
+    public AlreadyExistsException(
+            ErrorResponseResourceType resourceType,
+            String resourceName,
+            String message,
+            Object... args) {
         super(message, args);
+        this.resourceType = resourceType;
+        this.resourceName = resourceName;
+    }
+
+    public ErrorResponseResourceType resourceType() {
+        return resourceType;
+    }
+
+    public String resourceName() {
+        return resourceName;
     }
 }

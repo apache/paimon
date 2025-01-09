@@ -20,6 +20,9 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.rest.auth.BearTokenCredentialsProvider;
 import org.apache.paimon.rest.auth.CredentialsProvider;
+import org.apache.paimon.rest.exceptions.BadRequestException;
+import org.apache.paimon.rest.responses.ErrorResponse;
+import org.apache.paimon.rest.responses.ErrorResponseResourceType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -31,28 +34,26 @@ import org.junit.Test;
 
 import java.io.IOException;
 import java.time.Duration;
-import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
+import static org.junit.Assert.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /** Test for {@link HttpClient}. */
 public class HttpClientTest {
 
     private static final String MOCK_PATH = "/v1/api/mock";
     private static final String TOKEN = "token";
-
-    private final ObjectMapper objectMapper = RESTObjectMapper.create();
+    private static final ObjectMapper OBJECT_MAPPER = RESTObjectMapper.create();
 
     private MockWebServer mockWebServer;
     private HttpClient httpClient;
     private ErrorHandler errorHandler;
     private MockRESTData mockResponseData;
     private String mockResponseDataStr;
+    private ErrorResponse errorResponse;
+    private String errorResponseStr;
     private Map<String, String> headers;
 
     @Before
@@ -60,11 +61,13 @@ public class HttpClientTest {
         mockWebServer = new MockWebServer();
         mockWebServer.start();
         String baseUrl = mockWebServer.url("").toString();
-        errorHandler = mock(ErrorHandler.class);
+        errorHandler = DefaultErrorHandler.getInstance();
         HttpClientOptions httpClientOptions =
                 new HttpClientOptions(baseUrl, Duration.ofSeconds(3), Duration.ofSeconds(3), 1);
         mockResponseData = new MockRESTData(MOCK_PATH);
-        mockResponseDataStr = objectMapper.writeValueAsString(mockResponseData);
+        mockResponseDataStr = OBJECT_MAPPER.writeValueAsString(mockResponseData);
+        errorResponse = new ErrorResponse(ErrorResponseResourceType.DATABASE, "test", "test", 400);
+        errorResponseStr = OBJECT_MAPPER.writeValueAsString(errorResponse);
         httpClient = new HttpClient(httpClientOptions);
         httpClient.setErrorHandler(errorHandler);
         CredentialsProvider credentialsProvider = new BearTokenCredentialsProvider(TOKEN);
@@ -80,15 +83,15 @@ public class HttpClientTest {
     public void testGetSuccess() {
         mockHttpCallWithCode(mockResponseDataStr, 200);
         MockRESTData response = httpClient.get(MOCK_PATH, MockRESTData.class, headers);
-        verify(errorHandler, times(0)).accept(any());
         assertEquals(mockResponseData.data(), response.data());
     }
 
     @Test
     public void testGetFail() {
-        mockHttpCallWithCode(mockResponseDataStr, 400);
-        httpClient.get(MOCK_PATH, MockRESTData.class, headers);
-        verify(errorHandler, times(1)).accept(any());
+        mockHttpCallWithCode(errorResponseStr, 400);
+        assertThrows(
+                BadRequestException.class,
+                () -> httpClient.get(MOCK_PATH, MockRESTData.class, headers));
     }
 
     @Test
@@ -96,35 +99,27 @@ public class HttpClientTest {
         mockHttpCallWithCode(mockResponseDataStr, 200);
         MockRESTData response =
                 httpClient.post(MOCK_PATH, mockResponseData, MockRESTData.class, headers);
-        verify(errorHandler, times(0)).accept(any());
         assertEquals(mockResponseData.data(), response.data());
     }
 
     @Test
     public void testPostFail() {
-        mockHttpCallWithCode(mockResponseDataStr, 400);
-        httpClient.post(MOCK_PATH, mockResponseData, MockRESTData.class, headers);
-        verify(errorHandler, times(1)).accept(any());
+        mockHttpCallWithCode(errorResponseStr, 400);
+        assertThrows(
+                BadRequestException.class,
+                () -> httpClient.post(MOCK_PATH, mockResponseData, ErrorResponse.class, headers));
     }
 
     @Test
     public void testDeleteSuccess() {
         mockHttpCallWithCode(mockResponseDataStr, 200);
-        MockRESTData response = httpClient.delete(MOCK_PATH, headers);
-        verify(errorHandler, times(0)).accept(any());
+        assertDoesNotThrow(() -> httpClient.delete(MOCK_PATH, headers));
     }
 
     @Test
     public void testDeleteFail() {
-        mockHttpCallWithCode(mockResponseDataStr, 400);
-        httpClient.delete(MOCK_PATH, headers);
-        verify(errorHandler, times(1)).accept(any());
-    }
-
-    private Map<String, String> headers(String token) {
-        Map<String, String> header = new HashMap<>();
-        header.put("Authorization", "Bearer " + token);
-        return header;
+        mockHttpCallWithCode(errorResponseStr, 400);
+        assertThrows(BadRequestException.class, () -> httpClient.delete(MOCK_PATH, headers));
     }
 
     private void mockHttpCallWithCode(String body, Integer code) {

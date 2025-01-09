@@ -35,8 +35,10 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
+import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
+import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
@@ -45,6 +47,7 @@ import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
+import org.apache.paimon.rest.responses.ErrorResponseResourceType;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
@@ -75,9 +78,12 @@ import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
+import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.rest.RESTUtil.extractPrefixMap;
 import static org.apache.paimon.rest.auth.AuthSession.createAuthSession;
@@ -209,7 +215,7 @@ public class RESTCatalog implements Catalog {
                 throw new DatabaseNotEmptyException(name);
             }
             client.delete(resourcePaths.database(name), headers());
-        } catch (NoSuchResourceException e) {
+        } catch (NoSuchResourceException | DatabaseNotExistException e) {
             if (!ignoreIfNotExists) {
                 throw new DatabaseNotExistException(name);
             }
@@ -249,12 +255,19 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
-        ListTablesResponse response =
-                client.get(resourcePaths.tables(databaseName), ListTablesResponse.class, headers());
-        if (response.getTables() != null) {
-            return response.getTables();
+        try {
+            ListTablesResponse response =
+                    client.get(
+                            resourcePaths.tables(databaseName),
+                            ListTablesResponse.class,
+                            headers());
+            if (response.getTables() != null) {
+                return response.getTables();
+            }
+            return ImmutableList.of();
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName);
         }
-        return ImmutableList.of();
     }
 
     @Override
@@ -272,6 +285,9 @@ public class RESTCatalog implements Catalog {
     public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException {
         try {
+            checkNotBranch(identifier, "createTable");
+            checkNotSystemTable(identifier, "createTable");
+            validateAutoCreateClose(schema.options());
             CreateTableRequest request = new CreateTableRequest(identifier, schema);
             client.post(
                     resourcePaths.tables(identifier.getDatabaseName()),
@@ -282,12 +298,24 @@ public class RESTCatalog implements Catalog {
             if (!ignoreIfExists) {
                 throw new TableAlreadyExistException(identifier);
             }
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(identifier.getDatabaseName());
+        } catch (BadRequestException e) {
+            throw new RuntimeException(new IllegalArgumentException(e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 
     @Override
     public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
             throws TableNotExistException, TableAlreadyExistException {
+        checkNotBranch(fromTable, "renameTable");
+        checkNotBranch(toTable, "renameTable");
+        checkNotSystemTable(fromTable, "renameTable");
+        checkNotSystemTable(toTable, "renameTable");
         try {
             RenameTableRequest request = new RenameTableRequest(toTable);
             client.post(
@@ -311,6 +339,7 @@ public class RESTCatalog implements Catalog {
     public void alterTable(
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
+        checkNotSystemTable(identifier, "alterTable");
         try {
             AlterTableRequest request = new AlterTableRequest(changes);
             client.post(
@@ -320,16 +349,30 @@ public class RESTCatalog implements Catalog {
                     headers());
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
-                throw new TableNotExistException(identifier);
+                if (e.resourceType() == ErrorResponseResourceType.TABLE) {
+                    throw new TableNotExistException(identifier);
+                } else if (e.resourceType() == ErrorResponseResourceType.COLUMN) {
+                    throw new ColumnNotExistException(identifier, e.resourceName());
+                }
             }
+        } catch (AlreadyExistsException e) {
+            throw new ColumnAlreadyExistException(identifier, e.resourceName());
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
+        } catch (org.apache.paimon.rest.exceptions.UnsupportedOperationException e) {
+            throw new UnsupportedOperationException(e.getMessage());
+        } catch (ServiceFailureException e) {
+            throw new IllegalStateException(e.getMessage());
+        } catch (BadRequestException e) {
+            throw new RuntimeException(new IllegalArgumentException(e.getMessage()));
         }
     }
 
     @Override
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
             throws TableNotExistException {
+        checkNotBranch(identifier, "dropTable");
+        checkNotSystemTable(identifier, "dropTable");
         try {
             client.delete(
                     resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),

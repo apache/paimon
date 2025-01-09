@@ -48,6 +48,23 @@ public class AuthSessionTest {
     @Rule public TemporaryFolder folder = new TemporaryFolder();
 
     @Test
+    public void testBearToken() {
+        String token = UUID.randomUUID().toString();
+        Map<String, String> initialHeaders = new HashMap<>();
+        initialHeaders.put("k1", "v1");
+        initialHeaders.put("k2", "v2");
+        CredentialsProvider credentialsProvider = new BearTokenCredentialsProvider(token);
+        AuthSession session = new AuthSession(initialHeaders, credentialsProvider);
+        Map<String, String> header = session.getHeaders();
+        assertEquals(header.get("Authorization"), "Bearer " + token);
+        assertEquals(header.get("k1"), "v1");
+        for (Map.Entry<String, String> entry : initialHeaders.entrySet()) {
+            assertEquals(entry.getValue(), header.get(entry.getKey()));
+        }
+        assertEquals(header.size(), initialHeaders.size() + 1);
+    }
+
+    @Test
     public void testRefreshBearTokenFileCredentialsProvider()
             throws IOException, InterruptedException {
         String fileName = "token";

@@ -63,7 +63,11 @@ public class HttpClient implements RESTClient {
     }
 
     public HttpClient(HttpClientOptions httpClientOptions) {
-        this.uri = httpClientOptions.uri();
+        if (httpClientOptions.uri() != null && httpClientOptions.uri().endsWith("/")) {
+            this.uri = httpClientOptions.uri().substring(0, httpClientOptions.uri().length() - 1);
+        } else {
+            this.uri = httpClientOptions.uri();
+        }
         this.okHttpClient = createHttpClient(httpClientOptions);
         this.errorHandler = DefaultErrorHandler.getInstance();
     }
@@ -132,10 +136,19 @@ public class HttpClient implements RESTClient {
         try (Response response = okHttpClient.newCall(request).execute()) {
             String responseBodyStr = response.body() != null ? response.body().string() : null;
             if (!response.isSuccessful()) {
-                ErrorResponse error =
-                        new ErrorResponse(
-                                responseBodyStr != null ? responseBodyStr : "response body is null",
-                                response.code());
+                ErrorResponse error;
+                try {
+                    error = OBJECT_MAPPER.readValue(responseBodyStr, ErrorResponse.class);
+                } catch (JsonProcessingException e) {
+                    error =
+                            new ErrorResponse(
+                                    null,
+                                    null,
+                                    responseBodyStr != null
+                                            ? responseBodyStr
+                                            : "response body is null",
+                                    response.code());
+                }
                 errorHandler.accept(error);
             }
             if (responseType != null && responseBodyStr != null) {

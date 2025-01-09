@@ -30,7 +30,6 @@ import org.apache.paimon.rest.requests.DropPartitionRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
-import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
@@ -47,6 +46,8 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+
+import okhttp3.mockwebserver.MockResponse;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -87,10 +88,6 @@ public class MockRESTMessage {
         List<String> databaseNameList = new ArrayList<>();
         databaseNameList.add(name);
         return new ListDatabasesResponse(databaseNameList);
-    }
-
-    public static ErrorResponse noSuchResourceExceptionErrorResponse() {
-        return new ErrorResponse("message", 404, new ArrayList<>());
     }
 
     public static AlterDatabaseRequest alterDatabaseRequest() {
@@ -241,6 +238,13 @@ public class MockRESTMessage {
         options.put("option-1", "value-1");
         options.put("option-2", "value-2");
         return new GetTableResponse("/tmp/1", 1, schema(options));
+    }
+
+    public static MockResponse mockResponse(String body, int httpCode) {
+        return new MockResponse()
+                .setResponseCode(httpCode)
+                .setBody(body)
+                .addHeader("Content-Type", "application/json");
     }
 
     private static Schema schema(Map<String, String> options) {

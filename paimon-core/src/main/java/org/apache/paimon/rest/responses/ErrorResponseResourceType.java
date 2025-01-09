@@ -16,12 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.exceptions;
+package org.apache.paimon.rest.responses;
 
-/** Exception thrown on HTTP 500 - Bad Request. */
-public class ServiceFailureException extends RESTException {
-
-    public ServiceFailureException(String message, Object... args) {
-        super(String.format(message, args));
-    }
+/** The type of resource that caused the error. */
+public enum ErrorResponseResourceType {
+    DATABASE,
+    TABLE,
+    COLUMN,
 }

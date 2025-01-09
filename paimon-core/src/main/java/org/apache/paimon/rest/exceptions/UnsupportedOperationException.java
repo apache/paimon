@@ -18,10 +18,10 @@
 
 package org.apache.paimon.rest.exceptions;
 
-/** Exception thrown on HTTP 500 - Bad Request. */
-public class ServiceFailureException extends RESTException {
+/** Exception thrown on HTTP 501 - UnsupportedOperationException. */
+public class UnsupportedOperationException extends RESTException {
 
-    public ServiceFailureException(String message, Object... args) {
+    public UnsupportedOperationException(String message, Object... args) {
         super(String.format(message, args));
     }
 }

@@ -20,6 +20,7 @@ package org.apache.paimon.rest.exceptions;
 
 /** Exception thrown on HTTP 401 Unauthorized. */
 public class NotAuthorizedException extends RESTException {
+
     public NotAuthorizedException(String message, Object... args) {
         super(String.format(message, args));
     }

@@ -63,6 +63,7 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
+import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
@@ -502,17 +503,6 @@ public abstract class AbstractCatalog implements Catalog {
 
     private void copyTableDefaultOptions(Map<String, String> options) {
         tableDefaultOptions.forEach(options::putIfAbsent);
-    }
-
-    private void validateAutoCreateClose(Map<String, String> options) {
-        checkArgument(
-                !Boolean.parseBoolean(
-                        options.getOrDefault(
-                                CoreOptions.AUTO_CREATE.key(),
-                                CoreOptions.AUTO_CREATE.defaultValue().toString())),
-                String.format(
-                        "The value of %s property should be %s.",
-                        CoreOptions.AUTO_CREATE.key(), Boolean.FALSE));
     }
 
     private void validateCustomTablePath(Map<String, String> options) {
