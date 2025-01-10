@@ -86,6 +86,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     @Nullable private final Predicate predicate;
     @Nullable private final RefreshBlacklist refreshBlacklist;
 
+    private final List<InternalRow.FieldGetter> projectFieldsGetters;
+
     private transient File path;
     private transient LookupTable lookupTable;
 
@@ -116,6 +118,11 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         this.projectFields =
                 Arrays.stream(projection)
                         .mapToObj(i -> table.rowType().getFieldNames().get(i))
+                        .collect(Collectors.toList());
+
+        this.projectFieldsGetters =
+                Arrays.stream(projection)
+                        .mapToObj(i -> table.rowType().fieldGetters()[i])
                         .collect(Collectors.toList());
 
         // add primary keys
@@ -161,6 +168,11 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
         List<String> fieldNames = table.rowType().getFieldNames();
         int[] projection = projectFields.stream().mapToInt(fieldNames::indexOf).toArray();
+        LOG.info(
+                "lookup projection fields in lookup table:{}, join fields in lookup table:{}",
+                projectFields,
+                joinKeys);
+
         FileStoreTable storeTable = (FileStoreTable) table;
 
         LOG.info("Creating lookup table for {}.", table.name());
@@ -241,6 +253,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         try {
             tryRefresh();
 
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("lookup key:{}", keyRow.toString());
+            }
             InternalRow key = new FlinkRowWrapper(keyRow);
             if (partitionLoader == null) {
                 return lookupInternal(key);
@@ -269,6 +284,16 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         for (InternalRow matchedRow : lookupResults) {
             rows.add(new FlinkRowData(matchedRow));
         }
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "matched rows in lookup table, size:{}, rows:{}",
+                    lookupResults.size(),
+                    lookupResults.stream()
+                            .map(row -> logRow(projectFieldsGetters, row))
+                            .collect(Collectors.toList()));
+        }
+
         return rows;
     }
 
@@ -390,5 +415,16 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     protected void setCacheRowFilter(@Nullable Filter<InternalRow> cacheRowFilter) {
         this.cacheRowFilter = cacheRowFilter;
+    }
+
+    private String logRow(List<InternalRow.FieldGetter> fieldGetters, InternalRow row) {
+        List<String> rowValues = new ArrayList<>(fieldGetters.size());
+
+        for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
+            Object fieldValue = fieldGetter.getFieldOrNull(row);
+            String value = fieldValue == null ? "null" : fieldValue.toString();
+            rowValues.add(value);
+        }
+        return rowValues.toString();
     }
 }
