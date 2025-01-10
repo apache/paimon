@@ -30,7 +30,6 @@ public class MigrateTableActionFactory implements ActionFactory {
     private static final String OPTIONS = "options";
     private static final String PARALLELISM = "parallelism";
 
-    private static final String TARGET_TYPE = "target_type";
     private static final String ICEBERG_OPTIONS = "iceberg_options";
 
     @Override
