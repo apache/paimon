@@ -136,26 +136,28 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
 
         // clean empty directory
         if (!dryRun) {
-            cleanEmptyDirectory(deleteFiles);
+            cleanEmptyDataDirectory(deleteFiles);
         }
 
         return new CleanOrphanFilesResult(
                 deleteFiles.size(), deletedFilesLenInBytes.get(), deleteFiles);
     }
 
-    private void cleanEmptyDirectory(List<Path> deleteFiles) {
+    private void cleanEmptyDataDirectory(List<Path> deleteFiles) {
         if (deleteFiles.isEmpty()) {
             return;
         }
-        Set<Path> bucketDirectory =
+        Set<Path> bucketDirs =
                 deleteFiles.stream()
                         .map(Path::getParent)
                         .filter(path -> path.toUri().toString().contains(BUCKET_PATH_PREFIX))
                         .collect(Collectors.toSet());
-        randomlyOnlyExecute(executor, this::tryDeleteEmptyDirectory, bucketDirectory);
+        randomlyOnlyExecute(executor, this::tryDeleteEmptyDirectory, bucketDirs);
 
-        tryCleanPartitionDirectory(
-                bucketDirectory.stream().map(Path::getParent).collect(Collectors.toSet()));
+        // Clean partition directory individually to avoiding conflicts
+        Set<Path> partitionDirs =
+                bucketDirs.stream().map(Path::getParent).collect(Collectors.toSet());
+        tryCleanDataDirectory(partitionDirs, partitionKeysNum);
     }
 
     private void collectWithoutDataFile(

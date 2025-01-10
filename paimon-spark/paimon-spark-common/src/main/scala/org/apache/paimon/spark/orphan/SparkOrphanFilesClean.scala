@@ -127,20 +127,23 @@ case class SparkOrphanFilesClean(
       .flatMap {
         dir =>
           tryBestListingDirs(new Path(dir)).asScala.filter(oldEnough).map {
-            file => (file.getPath.getName, file.getPath.toUri.toString, file.getLen)
+            file =>
+              val path = file.getPath
+              (path.getName, path.toUri.toString, file.getLen, path.getParent.toUri.toString)
           }
       }
-      .toDF("name", "path", "len")
+      .toDF("name", "path", "len", "dataDir")
       .repartition(parallelism)
 
     // use left anti to filter files which is not used
     val deleted = candidates
       .join(usedFiles, $"name" === $"used_name", "left_anti")
+      .repartition($"dataDir")
       .mapPartitions {
         it =>
           var deletedFilesCount = 0L
           var deletedFilesLenInBytes = 0L
-          val bucketDirs = new mutable.HashSet[String]()
+          val dataDirs = new mutable.HashSet[String]()
 
           while (it.hasNext) {
             val fileInfo = it.next();
@@ -149,18 +152,16 @@ case class SparkOrphanFilesClean(
             deletedFilesLenInBytes += fileInfo.getLong(2)
             specifiedFileCleaner.accept(deletedPath)
             logInfo(s"Cleaned file: $pathToClean")
-            bucketDirs.add(deletedPath.getParent.toUri.toString)
+            dataDirs.add(deletedPath.getParent.toUri.toString)
             deletedFilesCount += 1
           }
 
           // clean empty directory
           if (!dryRun) {
-            val partitionDirs = bucketDirs
+            val bucketDirs = dataDirs
               .filter(_.contains(BUCKET_PATH_PREFIX))
               .map(new Path(_))
-              .filter(tryDeleteEmptyDirectory)
-              .map(_.getParent)
-            tryCleanPartitionDirectory(partitionDirs.asJava)
+            tryCleanDataDirectory(bucketDirs.asJava, partitionKeysNum + 1)
           }
 
           logInfo(
@@ -178,24 +179,6 @@ case class SparkOrphanFilesClean(
       }
 
     (finalDeletedDataset, usedManifestFiles)
-  }
-
-  private def cleanEmptyDirectory(deletedPaths: Dataset[String]): Unit = {
-    import spark.implicits._
-
-    val partitionDirectory = deletedPaths
-      .filter(_.contains(BUCKET_PATH_PREFIX))
-      .mapPartitions {
-        iter =>
-          iter.map {
-            location =>
-              val path = new Path(location)
-              tryDeleteEmptyDirectory(path)
-              path.getParent.toUri.toString
-          }
-      }
-
-    tryCleanPartitionDirectory(partitionDirectory.collect().map(new Path(_)).toSet.asJava)
   }
 }
 
