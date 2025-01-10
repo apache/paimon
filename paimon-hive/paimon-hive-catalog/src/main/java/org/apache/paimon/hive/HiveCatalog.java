@@ -56,7 +56,6 @@ import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
-import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.apache.flink.table.hive.LegacyHiveClasses;
 import org.apache.hadoop.conf.Configuration;
@@ -588,20 +587,18 @@ public class HiveCatalog extends AbstractCatalog {
     protected void alterDatabaseImpl(String name, List<PropertyChange> changes) {
         try {
             Database database = clients.run(client -> client.getDatabase(name));
-            Map<String, String> parameter = Maps.newHashMap();
-            parameter.putAll(database.getParameters());
+            Map<String, String> parameter = new HashMap<>(database.getParameters());
             Pair<Map<String, String>, Set<String>> setPropertiesToRemoveKeys =
                     PropertyChange.getSetPropertiesToRemoveKeys(changes);
             Map<String, String> setProperties = setPropertiesToRemoveKeys.getLeft();
             Set<String> removeKeys = setPropertiesToRemoveKeys.getRight();
-            if (setProperties.size() > 0) {
+            if (!setProperties.isEmpty()) {
                 parameter.putAll(setProperties);
             }
-            if (removeKeys.size() > 0) {
+            if (!removeKeys.isEmpty()) {
                 parameter.keySet().removeAll(removeKeys);
             }
-            Map<String, String> newProperties = Collections.unmodifiableMap(parameter);
-            Database alterDatabase = convertToHiveDatabase(name, newProperties);
+            Database alterDatabase = convertToHiveDatabase(name, parameter);
             clients.execute(client -> client.alterDatabase(name, alterDatabase));
         } catch (TException e) {
             throw new RuntimeException("Failed to alter database " + name, e);

@@ -24,7 +24,6 @@ import org.apache.paimon.metrics.Histogram;
 import org.apache.paimon.metrics.Metric;
 import org.apache.paimon.metrics.MetricGroup;
 
-import java.util.Collections;
 import java.util.Map;
 
 /**
@@ -75,7 +74,7 @@ public class FlinkMetricGroup implements MetricGroup {
 
     @Override
     public Map<String, String> getAllVariables() {
-        return Collections.unmodifiableMap(variables);
+        return variables;
     }
 
     @Override
