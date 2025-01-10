@@ -18,15 +18,19 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.FileStore;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.clone.CloneFilesUtil;
 import org.apache.paimon.flink.clone.FileType;
-import org.apache.paimon.flink.clone.PickFilesUtil;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.TableEnvironment;
@@ -459,8 +463,26 @@ public class CloneActionITCase extends ActionITCaseBase {
             String targetTableName)
             throws Exception {
         FileStoreTable targetTable = getFileStoreTable(targetWarehouse, targetDb, targetTableName);
+
+        FileStore<?> store = targetTable.store();
+        SnapshotManager snapshotManager = store.snapshotManager();
+        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+        assertThat(latestSnapshot).isNotNull();
+        long snapshotId = latestSnapshot.id();
         Map<FileType, List<Path>> filesMap =
-                PickFilesUtil.getUsedFilesForLatestSnapshot(targetTable);
+                CloneFilesUtil.getSchemaUsedFilesForSnapshot(targetTable, snapshotId);
+
+        Map<FileType, List<Path>> filesManifestMap =
+                CloneFilesUtil.getManifestUsedFilesForSnapshot(targetTable, snapshotId);
+
+        filesManifestMap.forEach(
+                (fileType, paths) ->
+                        filesMap.computeIfAbsent(fileType, k -> new ArrayList<>()).addAll(paths));
+
+        Map<FileType, List<Pair<Path, Path>>> dataFilesMap =
+                CloneFilesUtil.getDataUsedFilesForSnapshot(targetTable, snapshotId);
+        mergeDataFilesMapToFilesMap(filesMap, dataFilesMap);
+
         List<Path> targetTableFiles =
                 filesMap.values().stream().flatMap(List::stream).collect(Collectors.toList());
         List<Pair<Path, Path>> filesPathInfoList =
@@ -475,13 +497,45 @@ public class CloneActionITCase extends ActionITCaseBase {
 
         FileStoreTable sourceTable = getFileStoreTable(sourceWarehouse, sourceDb, sourceTableName);
         Path tableLocation = sourceTable.location();
-        for (Pair<Path, Path> filesPathInfo : filesPathInfoList) {
-            Path sourceTableFile = new Path(tableLocation.toString() + filesPathInfo.getRight());
-            assertThat(sourceTable.fileIO().exists(sourceTableFile)).isTrue();
-            // TODO, need to check the manifest file's content
-            if (!filesPathInfo.getLeft().toString().contains("/manifest/manifest-")) {
+        if (!sourceTable.options().containsKey(CoreOptions.DATA_FILE_EXTERNAL_PATHS.key())) {
+            for (Pair<Path, Path> filesPathInfo : filesPathInfoList) {
+                Path sourceTableFile =
+                        new Path(tableLocation.toString() + filesPathInfo.getRight());
+                assertThat(sourceTable.fileIO().exists(sourceTableFile)).isTrue();
                 assertThat(targetTable.fileIO().getFileSize(filesPathInfo.getLeft()))
                         .isEqualTo(sourceTable.fileIO().getFileSize(sourceTableFile));
+            }
+        } else {
+            for (Pair<Path, Path> filesPathInfo : filesPathInfoList) {
+                Path sourceTableFile =
+                        new Path(tableLocation.toString() + filesPathInfo.getRight());
+                assertThat(sourceTable.fileIO().exists(sourceTableFile)).isTrue();
+                // TODO, need to check the manifest file's content
+                if (!filesPathInfo.getLeft().toString().contains("/manifest/manifest-")) {
+                    assertThat(targetTable.fileIO().getFileSize(filesPathInfo.getLeft()))
+                            .isEqualTo(sourceTable.fileIO().getFileSize(sourceTableFile));
+                }
+            }
+        }
+    }
+
+    public static void mergeDataFilesMapToFilesMap(
+            Map<FileType, List<Path>> filesMap,
+            Map<FileType, List<Pair<Path, Path>>> dataFilesMap) {
+        for (Map.Entry<FileType, List<Pair<Path, Path>>> entry : dataFilesMap.entrySet()) {
+            FileType key = entry.getKey();
+            List<Pair<Path, Path>> pairs = entry.getValue();
+
+            for (Pair<Path, Path> pair : pairs) {
+                Path firstPath = pair.getLeft(); // 获取 Pair 中的第一个 Path
+
+                if (filesMap.containsKey(key)) {
+                    filesMap.get(key).add(firstPath);
+                } else {
+                    List<Path> newList = new ArrayList<>();
+                    newList.add(firstPath);
+                    filesMap.put(key, newList);
+                }
             }
         }
     }

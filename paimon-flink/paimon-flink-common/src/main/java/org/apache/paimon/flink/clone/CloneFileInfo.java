@@ -18,32 +18,38 @@
 
 package org.apache.paimon.flink.clone;
 
+import javax.annotation.Nullable;
+
 /** The information of copy file. */
 public class CloneFileInfo {
-
-    private final String sourceFilePath;
-    private final String filePathExcludeTableRoot;
+    @Nullable private final String sourceFilePath;
+    @Nullable private final String filePathExcludeTableRoot;
     private final String sourceIdentifier;
     private final String targetIdentifier;
-    private final FileType fileType;
+    @Nullable private final FileType fileType;
+    private final long snapshotId;
 
     public CloneFileInfo(
-            String sourceFilePath,
-            String filePathExcludeTableRoot,
+            @Nullable String sourceFilePath,
+            @Nullable String filePathExcludeTableRoot,
             String sourceIdentifier,
             String targetIdentifier,
-            FileType fileType) {
+            @Nullable FileType fileType,
+            long snapshotId) {
         this.sourceFilePath = sourceFilePath;
         this.filePathExcludeTableRoot = filePathExcludeTableRoot;
         this.sourceIdentifier = sourceIdentifier;
         this.targetIdentifier = targetIdentifier;
         this.fileType = fileType;
+        this.snapshotId = snapshotId;
     }
 
+    @Nullable
     public String getSourceFilePath() {
         return sourceFilePath;
     }
 
+    @Nullable
     public String getFilePathExcludeTableRoot() {
         return filePathExcludeTableRoot;
     }
@@ -56,18 +62,25 @@ public class CloneFileInfo {
         return targetIdentifier;
     }
 
+    @Nullable
     public FileType getFileType() {
         return fileType;
+    }
+
+    public long getSnapshotId() {
+        return snapshotId;
     }
 
     @Override
     public String toString() {
         return String.format(
-                "{ sourceFilePath: %s, filePathExcludeTableRoot: %s, sourceIdentifier: %s, targetIdentifier: %s, fileType: %s }",
+                "{ sourceFilePath: %s, filePathExcludeTableRoot: %s, sourceIdentifier: %s, targetIdentifier: %s, "
+                        + "fileType: %s, snapshotId: %d}",
                 sourceFilePath,
                 filePathExcludeTableRoot,
                 sourceIdentifier,
                 targetIdentifier,
-                fileType);
+                fileType,
+                snapshotId);
     }
 }

@@ -21,7 +21,10 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.flink.clone.CloneFileInfo;
 import org.apache.paimon.flink.clone.CloneSourceBuilder;
 import org.apache.paimon.flink.clone.CopyFileOperator;
-import org.apache.paimon.flink.clone.PickFilesForCloneOperator;
+import org.apache.paimon.flink.clone.CopyManifestFileOperator;
+import org.apache.paimon.flink.clone.PickDataFileForCloneOperator;
+import org.apache.paimon.flink.clone.PickManifestFileForCloneOperator;
+import org.apache.paimon.flink.clone.PickSchemaFilesForCloneOperator;
 import org.apache.paimon.flink.clone.SnapshotHintChannelComputer;
 import org.apache.paimon.flink.clone.SnapshotHintOperator;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
@@ -105,20 +108,55 @@ public class CloneAction extends ActionBase {
                                 targetTableName)
                         .build();
 
-        SingleOutputStreamOperator<CloneFileInfo> pickFilesForClone =
+        SingleOutputStreamOperator<CloneFileInfo> pickSchemaFilesForClone =
                 cloneSource
                         .transform(
-                                "Pick Files",
+                                "Pick Schema Files",
                                 TypeInformation.of(CloneFileInfo.class),
-                                new PickFilesForCloneOperator(
+                                new PickSchemaFilesForCloneOperator(
                                         sourceCatalogConfig, targetCatalogConfig))
-                        .forceNonParallel();
+                        .setParallelism(1);
+
+        SingleOutputStreamOperator<CloneFileInfo> copySchemaFile =
+                pickSchemaFilesForClone
+                        .transform(
+                                "Copy Schema Files",
+                                TypeInformation.of(CloneFileInfo.class),
+                                new CopyFileOperator(sourceCatalogConfig, targetCatalogConfig))
+                        .setParallelism(1);
+
+        SingleOutputStreamOperator<CloneFileInfo> pickManifestFile =
+                copySchemaFile
+                        .transform(
+                                "Pick Manifest Files",
+                                TypeInformation.of(CloneFileInfo.class),
+                                new PickManifestFileForCloneOperator(
+                                        sourceCatalogConfig, targetCatalogConfig))
+                        .setParallelism(1);
+
+        SingleOutputStreamOperator<CloneFileInfo> copyManifestFile =
+                pickManifestFile
+                        .transform(
+                                "Copy Manifest Files",
+                                TypeInformation.of(CloneFileInfo.class),
+                                new CopyManifestFileOperator(
+                                        sourceCatalogConfig, targetCatalogConfig))
+                        .setParallelism(parallelism);
+
+        SingleOutputStreamOperator<CloneFileInfo> pickDataFile =
+                copyManifestFile
+                        .transform(
+                                "Pick Data Files",
+                                TypeInformation.of(CloneFileInfo.class),
+                                new PickDataFileForCloneOperator(
+                                        sourceCatalogConfig, targetCatalogConfig))
+                        .setParallelism(1);
 
         SingleOutputStreamOperator<CloneFileInfo> copyFiles =
-                pickFilesForClone
-                        .rebalance()
+                pickDataFile
+                        .keyBy(CloneFileInfo::getSourceIdentifier) // key by source identifier
                         .transform(
-                                "Copy Files",
+                                "Copy Data Files",
                                 TypeInformation.of(CloneFileInfo.class),
                                 new CopyFileOperator(sourceCatalogConfig, targetCatalogConfig))
                         .setParallelism(parallelism);
