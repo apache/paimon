@@ -112,8 +112,7 @@ under the License.
         <test.unit.pattern>**/*Test.*</test.unit.pattern>
         <test.flink.main.version>1.20</test.flink.main.version>
         <test.flink.version>1.20.0</test.flink.version>
-        <!-- TODO upgrade after connector releases x-1.19 version -->
-        <test.flink.connector.kafka.version>3.0.1-1.18</test.flink.connector.kafka.version>
+        <test.flink.connector.kafka.version>3.4.0-1.20</test.flink.connector.kafka.version>
         <test.mysql.connector.java.version>8.0.27</test.mysql.connector.java.version>
 
         <!-- spark profile properties-->
