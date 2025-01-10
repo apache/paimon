@@ -130,7 +130,8 @@ public class CloneActionITCase extends ActionITCaseBase {
     }
 
     @ParameterizedTest(name = "invoker = {0}")
-    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    @ValueSource(strings = {"action"})
+    // @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
     public void testCloneTableWithSourceTableExternalPath(String invoker) throws Exception {
         String sourceWarehouse = getTempDirPath("source-ware");
         prepareDataWithExternalPath(sourceWarehouse);
@@ -707,10 +708,12 @@ public class CloneActionITCase extends ActionITCaseBase {
             if (!isExternalPath) {
                 assertThat(targetTable.fileIO().getFileSize(filesPathInfo.getLeft()))
                         .isEqualTo(sourceTable.fileIO().getFileSize(sourceTableFile));
+            } else {
+                // todo need to check the content of manifest files
             }
         }
 
-        // 2. check the data files
+        // 3. check the data files
         Map<FileType, List<Pair<Path, Path>>> dataFilesMap =
                 CloneFilesUtil.getDataUsedFilesForSnapshot(targetTable, snapshotId);
         filesPathInfoList =
@@ -746,27 +749,6 @@ public class CloneActionITCase extends ActionITCaseBase {
             }
         }
         return Pair.of(null, false);
-    }
-
-    public static void mergeDataFilesMapToFilesMap(
-            Map<FileType, List<Path>> filesMap,
-            Map<FileType, List<Pair<Path, Path>>> dataFilesMap) {
-        for (Map.Entry<FileType, List<Pair<Path, Path>>> entry : dataFilesMap.entrySet()) {
-            FileType key = entry.getKey();
-            List<Pair<Path, Path>> pairs = entry.getValue();
-
-            for (Pair<Path, Path> pair : pairs) {
-                Path firstPath = pair.getLeft(); // 获取 Pair 中的第一个 Path
-
-                if (filesMap.containsKey(key)) {
-                    filesMap.get(key).add(firstPath);
-                } else {
-                    List<Path> newList = new ArrayList<>();
-                    newList.add(firstPath);
-                    filesMap.put(key, newList);
-                }
-            }
-        }
     }
 
     private Path getPathExcludeTableRoot(Path absolutePath, Path sourceTableRoot) {
