@@ -152,7 +152,7 @@ case class SparkOrphanFilesClean(
             deletedFilesLenInBytes += fileInfo.getLong(2)
             specifiedFileCleaner.accept(deletedPath)
             logInfo(s"Cleaned file: $pathToClean")
-            dataDirs.add(deletedPath.getParent.toUri.toString)
+            dataDirs.add(fileInfo.getString(3))
             deletedFilesCount += 1
           }
 
