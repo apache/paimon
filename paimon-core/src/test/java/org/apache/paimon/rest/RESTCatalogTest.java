@@ -67,11 +67,6 @@ class RESTCatalogTest extends CatalogTestBase {
         restCatalogServer.shutdown();
     }
 
-    @Override
-    protected boolean supportGetFromSystemDatabase() {
-        return false;
-    }
-
     @Test
     void testInitFailWhenDefineWarehouse() {
         Options options = new Options();

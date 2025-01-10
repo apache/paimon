@@ -39,8 +39,6 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
-import org.apache.paimon.table.system.AllTableOptionsTable;
-import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
@@ -66,8 +64,6 @@ import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSyste
 import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
-import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
-import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -372,15 +368,7 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
         if (isSystemDatabase(identifier.getDatabaseName())) {
-            String tableName = identifier.getTableName();
-            switch (tableName.toLowerCase()) {
-                case ALL_TABLE_OPTIONS:
-                    return new AllTableOptionsTable(fileIO, allTablePaths());
-                case CATALOG_OPTIONS:
-                    return new CatalogOptionsTable(catalogOptions);
-                default:
-                    throw new TableNotExistException(identifier);
-            }
+            return CatalogUtils.createGlobalSystemTable(identifier.getTableName(), this);
         } else if (identifier.isSystemTable()) {
             Table originTable =
                     getDataOrFormatTable(
@@ -452,22 +440,6 @@ public abstract class AbstractCatalog implements Catalog {
      */
     public Path newDatabasePath(String database) {
         return newDatabasePath(warehouse(), database);
-    }
-
-    public Map<String, Map<String, Path>> allTablePaths() {
-        try {
-            Map<String, Map<String, Path>> allPaths = new HashMap<>();
-            for (String database : listDatabases()) {
-                Map<String, Path> tableMap =
-                        allPaths.computeIfAbsent(database, d -> new HashMap<>());
-                for (String table : listTables(database)) {
-                    tableMap.put(table, getTableLocation(Identifier.create(database, table)));
-                }
-            }
-            return allPaths;
-        } catch (DatabaseNotExistException e) {
-            throw new RuntimeException("Database is deleted while listing", e);
-        }
     }
 
     protected TableMeta getDataTableMeta(Identifier identifier) throws TableNotExistException {

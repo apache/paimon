@@ -26,11 +26,14 @@ import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.system.AllTableOptionsTable;
+import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Preconditions;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -39,6 +42,8 @@ import static org.apache.paimon.CoreOptions.PARTITION_GENERATE_LEGCY_NAME;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
+import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
+import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for {@link Catalog}. */
@@ -119,6 +124,31 @@ public class CatalogUtils {
                 String.format(
                         "The value of %s property should be %s.",
                         CoreOptions.AUTO_CREATE.key(), Boolean.FALSE));
+    }
+
+    public static Table createGlobalSystemTable(String tableName, Catalog catalog)
+            throws Catalog.TableNotExistException {
+        switch (tableName.toLowerCase()) {
+            case ALL_TABLE_OPTIONS:
+                try {
+                    Map<Identifier, Map<String, String>> allOptions = new HashMap<>();
+                    for (String database : catalog.listDatabases()) {
+                        for (String name : catalog.listTables(database)) {
+                            Identifier identifier = Identifier.create(database, name);
+                            Table table = catalog.getTable(identifier);
+                            allOptions.put(identifier, table.options());
+                        }
+                    }
+                    return new AllTableOptionsTable(allOptions);
+                } catch (Catalog.DatabaseNotExistException | Catalog.TableNotExistException e) {
+                    throw new RuntimeException("Database is deleted while listing", e);
+                }
+            case CATALOG_OPTIONS:
+                return new CatalogOptionsTable(Options.fromMap(catalog.options()));
+            default:
+                throw new Catalog.TableNotExistException(
+                        Identifier.create(SYSTEM_DATABASE_NAME, tableName));
+        }
     }
 
     public static Table createSystemTable(Identifier identifier, Table originTable)
