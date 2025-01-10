@@ -78,9 +78,11 @@ import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
+import static org.apache.paimon.catalog.CatalogUtils.buildFormatTableByTableSchema;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
+import static org.apache.paimon.catalog.CatalogUtils.getTableType;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
@@ -470,15 +472,26 @@ public class RESTCatalog implements Catalog {
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         }
-
+        TableType tableType = getTableType(response.getSchema().options());
+        if (tableType == TableType.FORMAT_TABLE) {
+            Schema schema = response.getSchema();
+            return buildFormatTableByTableSchema(
+                    identifier,
+                    schema.options(),
+                    schema.rowType(),
+                    schema.partitionKeys(),
+                    schema.comment());
+        }
         FileStoreTable table =
                 FileStoreTableFactory.create(
                         fileIO(),
                         new Path(response.getPath()),
                         TableSchema.create(response.getSchemaId(), response.getSchema()),
-                        // TODO add uuid from server
                         new CatalogEnvironment(
-                                identifier, null, Lock.emptyFactory(), catalogLoader()));
+                                identifier,
+                                response.getUuid(),
+                                Lock.emptyFactory(),
+                                catalogLoader()));
         CoreOptions options = table.coreOptions();
         if (options.type() == TableType.OBJECT_TABLE) {
             String objectLocation = options.objectLocation();

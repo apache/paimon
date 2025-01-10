@@ -241,7 +241,8 @@ public class RESTCatalogController {
                         ImmutableList.of(),
                         ImmutableList.of(),
                         new HashMap<>(),
-                        "comment"));
+                        "comment"),
+                "uuid");
     }
 
     @Operation(
@@ -268,7 +269,8 @@ public class RESTCatalogController {
                         ImmutableList.of(),
                         ImmutableList.of(),
                         new HashMap<>(),
-                        "comment"));
+                        "comment"),
+                "uuid");
     }
 
     @Operation(
@@ -300,7 +302,8 @@ public class RESTCatalogController {
                         ImmutableList.of(),
                         ImmutableList.of(),
                         new HashMap<>(),
-                        "comment"));
+                        "comment"),
+                "uuid");
     }
 
     @Operation(
@@ -351,7 +354,8 @@ public class RESTCatalogController {
                         ImmutableList.of(),
                         ImmutableList.of(),
                         new HashMap<>(),
-                        "comment"));
+                        "comment"),
+                "uuid");
     }
 
     @Operation(

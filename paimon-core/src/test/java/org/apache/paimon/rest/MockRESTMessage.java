@@ -55,6 +55,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.apache.paimon.rest.RESTCatalogInternalOptions.DATABASE_COMMENT;
 
@@ -230,14 +231,14 @@ public class MockRESTMessage {
         Map<String, String> options = new HashMap<>();
         options.put("option-1", "value-1");
         options.put(CoreOptions.METASTORE_PARTITIONED_TABLE.key(), "true");
-        return new GetTableResponse("/tmp/2", 1, schema(options));
+        return new GetTableResponse("/tmp/2", 1, schema(options), UUID.randomUUID().toString());
     }
 
     public static GetTableResponse getTableResponse() {
         Map<String, String> options = new HashMap<>();
         options.put("option-1", "value-1");
         options.put("option-2", "value-2");
-        return new GetTableResponse("/tmp/1", 1, schema(options));
+        return new GetTableResponse("/tmp/1", 1, schema(options), UUID.randomUUID().toString());
     }
 
     public static MockResponse mockResponse(String body, int httpCode) {

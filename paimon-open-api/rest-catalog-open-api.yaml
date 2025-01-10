@@ -671,6 +671,8 @@ components:
           format: int64
         schema:
           $ref: '#/components/schemas/Schema'
+        uuid:
+          type: string
     AlterTableRequest:
       type: object
       properties:

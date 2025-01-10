@@ -33,6 +33,7 @@ public class GetTableResponse implements RESTResponse {
     private static final String FIELD_PATH = "path";
     private static final String FIELD_SCHEMA_ID = "schemaId";
     private static final String FIELD_SCHEMA = "schema";
+    private static final String FIELD_UUID = "uuid";
 
     @JsonProperty(FIELD_PATH)
     private final String path;
@@ -43,14 +44,19 @@ public class GetTableResponse implements RESTResponse {
     @JsonProperty(FIELD_SCHEMA)
     private final Schema schema;
 
+    @JsonProperty(FIELD_UUID)
+    private final String uuid;
+
     @JsonCreator
     public GetTableResponse(
             @JsonProperty(FIELD_PATH) String path,
             @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
-            @JsonProperty(FIELD_SCHEMA) Schema schema) {
+            @JsonProperty(FIELD_SCHEMA) Schema schema,
+            @JsonProperty(FIELD_UUID) String uuid) {
         this.path = path;
         this.schemaId = schemaId;
         this.schema = schema;
+        this.uuid = uuid;
     }
 
     @JsonGetter(FIELD_PATH)
@@ -66,5 +72,10 @@ public class GetTableResponse implements RESTResponse {
     @JsonGetter(FIELD_SCHEMA)
     public Schema getSchema() {
         return this.schema;
+    }
+
+    @JsonGetter(FIELD_UUID)
+    public String getUuid() {
+        return uuid;
     }
 }

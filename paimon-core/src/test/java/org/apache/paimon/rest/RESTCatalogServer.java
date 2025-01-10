@@ -51,6 +51,7 @@ import okhttp3.mockwebserver.RecordedRequest;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.UUID;
 
 /** Mock REST server for testing. */
 public class RESTCatalogServer {
@@ -223,7 +224,8 @@ public class RESTCatalogServer {
                                         catalog.warehouse(), requestBody.getNewIdentifier())
                                 .toString(),
                         table.schema().id(),
-                        table.schema().toSchema());
+                        table.schema().toSchema(),
+                        table.uuid());
         return mockResponse(response, 200);
     }
 
@@ -267,7 +269,9 @@ public class RESTCatalogServer {
             CreateTableRequest requestBody =
                     OBJECT_MAPPER.readValue(request.getBody().readUtf8(), CreateTableRequest.class);
             catalog.createTable(requestBody.getIdentifier(), requestBody.getSchema(), false);
-            response = new GetTableResponse("", 1L, requestBody.getSchema());
+            response =
+                    new GetTableResponse(
+                            "", 1L, requestBody.getSchema(), UUID.randomUUID().toString());
             return mockResponse(response, 200);
         } else if (request.getMethod().equals("GET")) {
             catalog.listTables(databaseName);
@@ -289,7 +293,8 @@ public class RESTCatalogServer {
                             AbstractCatalog.newTableLocation(catalog.warehouse(), identifier)
                                     .toString(),
                             table.schema().id(),
-                            table.schema().toSchema());
+                            table.schema().toSchema(),
+                            table.uuid());
             return mockResponse(response, 200);
         } else if (request.getMethod().equals("POST")) {
             Identifier identifier = Identifier.create(databaseName, tableName);
@@ -297,7 +302,9 @@ public class RESTCatalogServer {
                     OBJECT_MAPPER.readValue(request.getBody().readUtf8(), AlterTableRequest.class);
             catalog.alterTable(identifier, requestBody.getChanges(), false);
             FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-            response = new GetTableResponse("", table.schema().id(), table.schema().toSchema());
+            response =
+                    new GetTableResponse(
+                            "", table.schema().id(), table.schema().toSchema(), table.uuid());
             return mockResponse(response, 200);
         } else if (request.getMethod().equals("DELETE")) {
             Identifier identifier = Identifier.create(databaseName, tableName);
