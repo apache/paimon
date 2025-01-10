@@ -27,10 +27,12 @@ import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.clone.CloneFilesUtil;
 import org.apache.paimon.flink.clone.FileType;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.TableEnvironment;
@@ -42,6 +44,7 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -68,6 +71,69 @@ public class CloneActionITCase extends ActionITCaseBase {
     public void testCloneTable(String invoker) throws Exception {
         String sourceWarehouse = getTempDirPath("source-ware");
         prepareData(sourceWarehouse);
+
+        String targetWarehouse = getTempDirPath("target-ware");
+        switch (invoker) {
+            case "action":
+                String[] args =
+                        new String[] {
+                            "clone",
+                            "--warehouse",
+                            sourceWarehouse,
+                            "--database",
+                            "db1",
+                            "--table",
+                            "t1",
+                            "--target_warehouse",
+                            targetWarehouse,
+                            "--target_database",
+                            "mydb",
+                            "--target_table",
+                            "myt"
+                        };
+                ActionFactory.createAction(args).get().run();
+                break;
+            case "procedure_indexed":
+                executeSQL(
+                        String.format(
+                                "CALL sys.clone('%s', 'db1', 't1', '', '%s', 'mydb', 'myt')",
+                                sourceWarehouse, targetWarehouse),
+                        true,
+                        true);
+                break;
+            case "procedure_named":
+                executeSQL(
+                        String.format(
+                                "CALL sys.clone(warehouse => '%s', database => 'db1', `table` => 't1', target_warehouse => '%s', target_database => 'mydb', target_table => 'myt')",
+                                sourceWarehouse, targetWarehouse),
+                        true,
+                        true);
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
+        }
+
+        // check result
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql(
+                "CREATE CATALOG targetcat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + String.format("  'warehouse' = '%s'\n", targetWarehouse)
+                        + ")");
+        tEnv.executeSql("USE CATALOG targetcat");
+
+        List<String> actual = collect(tEnv, "SELECT pt, k, v FROM mydb.myt ORDER BY pt, k");
+        assertThat(actual)
+                .containsExactly(
+                        "+I[one, 1, 10]", "+I[one, 2, 21]", "+I[two, 1, 101]", "+I[two, 2, 200]");
+        compareCloneFiles(sourceWarehouse, "db1", "t1", targetWarehouse, "mydb", "myt");
+    }
+
+    @ParameterizedTest(name = "invoker = {0}")
+    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    public void testCloneTableWithSourceTableExternalPath(String invoker) throws Exception {
+        String sourceWarehouse = getTempDirPath("source-ware");
+        prepareDataWithExternalPath(sourceWarehouse);
 
         String targetWarehouse = getTempDirPath("target-ware");
         switch (invoker) {
@@ -368,6 +434,130 @@ public class CloneActionITCase extends ActionITCaseBase {
                 .await();
     }
 
+    private void prepareDataWithExternalPath(String sourceWarehouse) throws Exception {
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql(
+                "CREATE CATALOG sourcecat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + String.format("  'warehouse' = '%s'\n", sourceWarehouse)
+                        + ")");
+        tEnv.executeSql("USE CATALOG sourcecat");
+
+        tEnv.executeSql("CREATE DATABASE db1");
+        tEnv.executeSql("CREATE DATABASE db2");
+
+        String db1T1ExternalPath = TraceableFileIO.SCHEME + "://" + getTempDirPath();
+        String db1T2ExternalPath = TraceableFileIO.SCHEME + "://" + getTempDirPath();
+        String db2T3ExternalPath = TraceableFileIO.SCHEME + "://" + getTempDirPath();
+        String db2T4ExternalPath = TraceableFileIO.SCHEME + "://" + getTempDirPath();
+
+        // prepare data: db1.t1
+        tEnv.executeSql(
+                "CREATE TABLE db1.t1 (\n"
+                        + "  pt STRING,\n"
+                        + "  k INT,\n"
+                        + "  v INT,\n"
+                        + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (pt) WITH (\n"
+                        + "  'changelog-producer' = 'lookup',\n"
+                        + "  'data-file.external-paths' = '"
+                        + db1T1ExternalPath
+                        + "',\n"
+                        + "  'data-file.external-paths.strategy' = 'round-robin'\n"
+                        + ")");
+        tEnv.executeSql(
+                        "INSERT INTO db1.t1 VALUES "
+                                + "('one', 1, 10), "
+                                + "('one', 2, 20), "
+                                + "('two', 1, 100)")
+                .await();
+        tEnv.executeSql(
+                        "INSERT INTO db1.t1 VALUES "
+                                + "('one', 2, 21), "
+                                + "('two', 1, 101), "
+                                + "('two', 2, 200)")
+                .await();
+
+        // prepare data: db1.t2
+        tEnv.executeSql(
+                "CREATE TABLE db1.t2 (\n"
+                        + "  k INT,\n"
+                        + "  v INT,\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'changelog-producer' = 'lookup',\n"
+                        + "  'data-file.external-paths' = '"
+                        + db1T2ExternalPath
+                        + "',\n"
+                        + "  'data-file.external-paths.strategy' = 'round-robin'\n"
+                        + ")");
+        tEnv.executeSql(
+                        "INSERT INTO db1.t2 VALUES "
+                                + "(10, 100), "
+                                + "(20, 200), "
+                                + "(100, 1000)")
+                .await();
+        tEnv.executeSql(
+                        "INSERT INTO db1.t2 VALUES "
+                                + "(20, 201), "
+                                + "(100, 1001), "
+                                + "(200, 2000)")
+                .await();
+
+        // prepare data: db2.t3
+        tEnv.executeSql(
+                "CREATE TABLE db2.t3 (\n"
+                        + "  pt INT,\n"
+                        + "  k INT,\n"
+                        + "  v STRING,\n"
+                        + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (pt) WITH (\n"
+                        + "  'changelog-producer' = 'lookup',\n"
+                        + "  'data-file.external-paths' = '"
+                        + db2T3ExternalPath
+                        + "',\n"
+                        + "  'data-file.external-paths.strategy' = 'round-robin'\n"
+                        + ")");
+        tEnv.executeSql(
+                        "INSERT INTO db2.t3 VALUES "
+                                + "(1, 1, 'one'), "
+                                + "(1, 2, 'two'), "
+                                + "(2, 1, 'apple')")
+                .await();
+        tEnv.executeSql(
+                        "INSERT INTO db2.t3 VALUES "
+                                + "(1, 2, 'twenty'), "
+                                + "(2, 1, 'banana'), "
+                                + "(2, 2, 'orange')")
+                .await();
+
+        // prepare data: db2.t4
+        tEnv.executeSql(
+                "CREATE TABLE db2.t4 (\n"
+                        + "  k INT,\n"
+                        + "  v STRING,\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'changelog-producer' = 'lookup',\n"
+                        + "  'data-file.external-paths' = '"
+                        + db2T4ExternalPath
+                        + "',\n"
+                        + "  'data-file.external-paths.strategy' = 'round-robin'\n"
+                        + ")");
+        tEnv.executeSql(
+                        "INSERT INTO db2.t4 VALUES "
+                                + "(10, 'one'), "
+                                + "(20, 'two'), "
+                                + "(100, 'apple')")
+                .await();
+        tEnv.executeSql(
+                        "INSERT INTO db2.t4 VALUES "
+                                + "(20, 'twenty'), "
+                                + "(100, 'banana'), "
+                                + "(200, 'orange')")
+                .await();
+    }
+
     @ParameterizedTest(name = "invoker = {0}")
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
     public void testCloneWithSchemaEvolution(String invoker) throws Exception {
@@ -469,24 +659,16 @@ public class CloneActionITCase extends ActionITCaseBase {
         Snapshot latestSnapshot = snapshotManager.latestSnapshot();
         assertThat(latestSnapshot).isNotNull();
         long snapshotId = latestSnapshot.id();
-        Map<FileType, List<Path>> filesMap =
+        FileStoreTable sourceTable = getFileStoreTable(sourceWarehouse, sourceDb, sourceTableName);
+        Path tableLocation = sourceTable.location();
+
+        // 1. check the schema files
+        Map<FileType, List<Path>> schemaFilesMap =
                 CloneFilesUtil.getSchemaUsedFilesForSnapshot(targetTable, snapshotId);
-
-        Map<FileType, List<Path>> filesManifestMap =
-                CloneFilesUtil.getManifestUsedFilesForSnapshot(targetTable, snapshotId);
-
-        filesManifestMap.forEach(
-                (fileType, paths) ->
-                        filesMap.computeIfAbsent(fileType, k -> new ArrayList<>()).addAll(paths));
-
-        Map<FileType, List<Pair<Path, Path>>> dataFilesMap =
-                CloneFilesUtil.getDataUsedFilesForSnapshot(targetTable, snapshotId);
-        mergeDataFilesMapToFilesMap(filesMap, dataFilesMap);
-
-        List<Path> targetTableFiles =
-                filesMap.values().stream().flatMap(List::stream).collect(Collectors.toList());
+        List<Path> targetTableSchemaFiles =
+                schemaFilesMap.values().stream().flatMap(List::stream).collect(Collectors.toList());
         List<Pair<Path, Path>> filesPathInfoList =
-                targetTableFiles.stream()
+                targetTableSchemaFiles.stream()
                         .map(
                                 absolutePath ->
                                         Pair.of(
@@ -494,29 +676,76 @@ public class CloneActionITCase extends ActionITCaseBase {
                                                 getPathExcludeTableRoot(
                                                         absolutePath, targetTable.location())))
                         .collect(Collectors.toList());
+        for (Pair<Path, Path> filesPathInfo : filesPathInfoList) {
+            Path sourceTableFile = new Path(tableLocation.toString() + filesPathInfo.getRight());
+            assertThat(sourceTable.fileIO().exists(sourceTableFile)).isTrue();
+            assertThat(targetTable.fileIO().getFileSize(filesPathInfo.getLeft()))
+                    .isEqualTo(sourceTable.fileIO().getFileSize(sourceTableFile));
+        }
 
-        FileStoreTable sourceTable = getFileStoreTable(sourceWarehouse, sourceDb, sourceTableName);
-        Path tableLocation = sourceTable.location();
-        if (!sourceTable.options().containsKey(CoreOptions.DATA_FILE_EXTERNAL_PATHS.key())) {
-            for (Pair<Path, Path> filesPathInfo : filesPathInfoList) {
-                Path sourceTableFile =
-                        new Path(tableLocation.toString() + filesPathInfo.getRight());
-                assertThat(sourceTable.fileIO().exists(sourceTableFile)).isTrue();
+        // 2. check the manifest files
+        Map<FileType, List<Path>> manifestFilesMap =
+                CloneFilesUtil.getManifestUsedFilesForSnapshot(targetTable, snapshotId);
+        List<Path> targetTableManifestFiles =
+                manifestFilesMap.values().stream()
+                        .flatMap(List::stream)
+                        .collect(Collectors.toList());
+        filesPathInfoList =
+                targetTableManifestFiles.stream()
+                        .map(
+                                absolutePath ->
+                                        Pair.of(
+                                                absolutePath,
+                                                getPathExcludeTableRoot(
+                                                        absolutePath, targetTable.location())))
+                        .collect(Collectors.toList());
+        boolean isExternalPath =
+                sourceTable.options().containsKey(CoreOptions.DATA_FILE_EXTERNAL_PATHS.key());
+        for (Pair<Path, Path> filesPathInfo : filesPathInfoList) {
+            Path sourceTableFile = new Path(tableLocation.toString() + filesPathInfo.getRight());
+            assertThat(sourceTable.fileIO().exists(sourceTableFile)).isTrue();
+            if (!isExternalPath) {
                 assertThat(targetTable.fileIO().getFileSize(filesPathInfo.getLeft()))
                         .isEqualTo(sourceTable.fileIO().getFileSize(sourceTableFile));
             }
-        } else {
-            for (Pair<Path, Path> filesPathInfo : filesPathInfoList) {
-                Path sourceTableFile =
-                        new Path(tableLocation.toString() + filesPathInfo.getRight());
-                assertThat(sourceTable.fileIO().exists(sourceTableFile)).isTrue();
-                // TODO, need to check the manifest file's content
-                if (!filesPathInfo.getLeft().toString().contains("/manifest/manifest-")) {
-                    assertThat(targetTable.fileIO().getFileSize(filesPathInfo.getLeft()))
-                            .isEqualTo(sourceTable.fileIO().getFileSize(sourceTableFile));
+        }
+
+        // 2. check the data files
+        Map<FileType, List<Pair<Path, Path>>> dataFilesMap =
+                CloneFilesUtil.getDataUsedFilesForSnapshot(targetTable, snapshotId);
+        filesPathInfoList =
+                dataFilesMap.values().stream().flatMap(List::stream).collect(Collectors.toList());
+        isExternalPath =
+                sourceTable.options().containsKey(CoreOptions.DATA_FILE_EXTERNAL_PATHS.key());
+        String externalPaths = null;
+        if (isExternalPath) {
+            externalPaths = sourceTable.options().get(CoreOptions.DATA_FILE_EXTERNAL_PATHS.key());
+        }
+
+        for (Pair<Path, Path> filesPathInfo : filesPathInfoList) {
+            List<Path> paths = new ArrayList<>();
+            if (externalPaths == null) {
+                paths.add(new Path(tableLocation.toString() + filesPathInfo.getRight()));
+            } else {
+                for (String externalPath : externalPaths.split(",")) {
+                    paths.add(new Path(externalPath + filesPathInfo.getRight()));
                 }
             }
+
+            Pair<Path, Boolean> result = pathExist(targetTable.fileIO(), paths);
+            assertThat(result.getRight()).isTrue();
+            assertThat(targetTable.fileIO().getFileSize(filesPathInfo.getLeft()))
+                    .isEqualTo(sourceTable.fileIO().getFileSize(result.getLeft()));
         }
+    }
+
+    private Pair<Path, Boolean> pathExist(FileIO fileIO, List<Path> paths) throws IOException {
+        for (Path path : paths) {
+            if (fileIO.exists(path)) {
+                return Pair.of(path, true);
+            }
+        }
+        return Pair.of(null, false);
     }
 
     public static void mergeDataFilesMapToFilesMap(
