@@ -102,6 +102,11 @@ class RESTCatalogTest extends CatalogTestBase {
         assertEquals(0, result.size());
     }
 
+    @Override
+    protected boolean supportGetFromSystemDatabase() {
+        return false;
+    }
+
     private void createTable(
             Identifier identifier, Map<String, String> options, List<String> partitionKeys)
             throws Exception {

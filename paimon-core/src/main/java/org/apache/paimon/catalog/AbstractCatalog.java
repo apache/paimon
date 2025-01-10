@@ -57,11 +57,9 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.OBJECT_LOCATION;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.CoreOptions.createCommitUser;
-import static org.apache.paimon.catalog.CatalogUtils.buildFormatTableByTableSchema;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
-import static org.apache.paimon.catalog.CatalogUtils.getTableType;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
@@ -386,19 +384,10 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
+    // here just data table, hive override this method.
     protected Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
         Preconditions.checkArgument(identifier.getSystemTableName() == null);
         TableMeta tableMeta = getDataTableMeta(identifier);
-        TableType tableType = getTableType(tableMeta.schema().options());
-        if (tableType == TableType.FORMAT_TABLE) {
-            TableSchema schema = tableMeta.schema();
-            return buildFormatTableByTableSchema(
-                    identifier,
-                    schema.options(),
-                    schema.logicalRowType(),
-                    schema.partitionKeys(),
-                    schema.comment());
-        }
         FileStoreTable table =
                 FileStoreTableFactory.create(
                         fileIO,
@@ -412,8 +401,9 @@ public abstract class AbstractCatalog implements Catalog {
                                         lockContext().orElse(null),
                                         identifier),
                                 catalogLoader()));
-        if (tableType == TableType.OBJECT_TABLE) {
-            String objectLocation = table.coreOptions().objectLocation();
+        CoreOptions options = table.coreOptions();
+        if (options.type() == TableType.OBJECT_TABLE) {
+            String objectLocation = options.objectLocation();
             checkNotNull(objectLocation, "Object location should not be null for object table.");
             table =
                     ObjectTable.builder()
