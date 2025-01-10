@@ -158,7 +158,10 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("CREATE TABLE T (a INT, b INT) with ('a.aa.aaa'='val1', 'b.bb.bbb'='val2')");
         sql("ALTER TABLE T SET ('c.cc.ccc' = 'val3')");
 
-        List<Row> result = sql("SELECT * FROM sys.all_table_options");
+        List<Row> result =
+                sql("SELECT * FROM sys.all_table_options").stream()
+                        .filter(row -> !row.getField(2).equals("path"))
+                        .collect(Collectors.toList());
         assertThat(result)
                 .containsExactly(
                         Row.of("default", "T", "a.aa.aaa", "val1"),
@@ -1098,6 +1101,72 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("DROP TABLE T");
         sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED) WITH ('bucket' = '-1')");
         innerTestReadOptimizedTable();
+    }
+
+    @Test
+    public void testBinlogTableStreamRead() throws Exception {
+        sql(
+                "CREATE TABLE T (a INT, b INT, primary key (a) NOT ENFORCED) with ('changelog-producer' = 'lookup', "
+                        + "'bucket' = '2')");
+        BlockingIterator<Row, Row> iterator =
+                streamSqlBlockIter("SELECT * FROM T$binlog /*+ OPTIONS('scan.mode' = 'latest') */");
+        sql("INSERT INTO T VALUES (1, 2)");
+        sql("INSERT INTO T VALUES (1, 3)");
+        sql("INSERT INTO T VALUES (2, 2)");
+        List<Row> rows = iterator.collect(3);
+        assertThat(rows)
+                .containsExactly(
+                        Row.of("+I", new Integer[] {1}, new Integer[] {2}),
+                        Row.of("+U", new Integer[] {1, 1}, new Integer[] {2, 3}),
+                        Row.of("+I", new Integer[] {2}, new Integer[] {2}));
+        iterator.close();
+    }
+
+    @Test
+    public void testBinlogTableBatchRead() throws Exception {
+        sql(
+                "CREATE TABLE T (a INT, b INT, primary key (a) NOT ENFORCED) with ('changelog-producer' = 'lookup', "
+                        + "'bucket' = '2')");
+        sql("INSERT INTO T VALUES (1, 2)");
+        sql("INSERT INTO T VALUES (1, 3)");
+        sql("INSERT INTO T VALUES (2, 2)");
+        List<Row> rows = sql("SELECT * FROM T$binlog /*+ OPTIONS('scan.mode' = 'latest') */");
+        assertThat(rows)
+                .containsExactly(
+                        Row.of("+I", new Integer[] {1}, new Integer[] {3}),
+                        Row.of("+I", new Integer[] {2}, new Integer[] {2}));
+    }
+
+    @Test
+    public void testIndexesTable() {
+        sql(
+                "CREATE TABLE T (pt STRING, a INT, b STRING, PRIMARY KEY (pt, a) NOT ENFORCED)"
+                        + " PARTITIONED BY (pt) with ('deletion-vectors.enabled'='true')");
+        sql(
+                "INSERT INTO T VALUES ('2024-10-01', 1, 'aaaaaaaaaaaaaaaaaaa'), ('2024-10-01', 2, 'b'), ('2024-10-01', 3, 'c')");
+        sql("INSERT INTO T VALUES ('2024-10-01', 1, 'a_new1'), ('2024-10-01', 3, 'c_new1')");
+
+        List<Row> rows = sql("SELECT * FROM `T$table_indexes` WHERE index_type = 'HASH'");
+        assertThat(rows.size()).isEqualTo(1);
+        Row row = rows.get(0);
+        assertThat(row.getField(0)).isEqualTo("{2024-10-01}");
+        assertThat(row.getField(1)).isEqualTo(0);
+        assertThat(row.getField(2)).isEqualTo("HASH");
+        assertThat(row.getField(3).toString().startsWith("index-")).isTrue();
+        assertThat(row.getField(4)).isEqualTo(12L);
+        assertThat(row.getField(5)).isEqualTo(3L);
+        assertThat(row.getField(6)).isNull();
+
+        rows = sql("SELECT * FROM `T$table_indexes` WHERE index_type = 'DELETION_VECTORS'");
+        assertThat(rows.size()).isEqualTo(1);
+        row = rows.get(0);
+        assertThat(row.getField(0)).isEqualTo("{2024-10-01}");
+        assertThat(row.getField(1)).isEqualTo(0);
+        assertThat(row.getField(2)).isEqualTo("DELETION_VECTORS");
+        assertThat(row.getField(3).toString().startsWith("index-")).isTrue();
+        assertThat(row.getField(4)).isEqualTo(33L);
+        assertThat(row.getField(5)).isEqualTo(1L);
+        assertThat(row.getField(6)).isNotNull();
     }
 
     private void innerTestReadOptimizedTable() {

@@ -273,7 +273,7 @@ public class RESTCatalog implements Catalog {
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
         if (SYSTEM_DATABASE_NAME.equals(identifier.getDatabaseName())) {
-            throw new UnsupportedOperationException("TODO support global system tables.");
+            return CatalogUtils.createGlobalSystemTable(identifier.getTableName(), this);
         } else if (identifier.isSystemTable()) {
             return getSystemTable(identifier);
         } else {

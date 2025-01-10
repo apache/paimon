@@ -426,10 +426,6 @@ public abstract class CatalogTestBase {
                         () -> catalog.getTable(Identifier.create("non_existing_db", "test_table")))
                 .withMessage("Table non_existing_db.test_table does not exist.");
 
-        // Get all table options from system database
-        if (!supportGetFromSystemDatabase()) {
-            return;
-        }
         Table allTableOptionsTable =
                 catalog.getTable(Identifier.create(SYSTEM_DATABASE_NAME, ALL_TABLE_OPTIONS));
         assertThat(allTableOptionsTable).isNotNull();
@@ -1027,10 +1023,6 @@ public abstract class CatalogTestBase {
         assertThat(uuid).startsWith(identifier.getFullName() + ".");
         assertThat(Long.parseLong(uuid.substring((identifier.getFullName() + ".").length())))
                 .isGreaterThan(0);
-    }
-
-    protected boolean supportGetFromSystemDatabase() {
-        return true;
     }
 
     protected boolean supportsAlterDatabase() {
