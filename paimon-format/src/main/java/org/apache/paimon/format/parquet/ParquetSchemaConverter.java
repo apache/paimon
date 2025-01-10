@@ -23,6 +23,7 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
@@ -30,6 +31,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.parquet.schema.ConversionPatterns;
 import org.apache.parquet.schema.GroupType;
@@ -39,6 +41,9 @@ import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.Type;
 import org.apache.parquet.schema.Types;
 
+import java.util.List;
+import java.util.stream.Collectors;
+
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT32;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT64;
@@ -46,24 +51,28 @@ import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT64;
 /** Schema converter converts Parquet schema to and from Paimon internal types. */
 public class ParquetSchemaConverter {
 
+    static final String PAIMON_SCHEMA = "paimon_schema";
+
     static final String MAP_REPEATED_NAME = "key_value";
     static final String MAP_KEY_NAME = "key";
     static final String MAP_VALUE_NAME = "value";
-    static final String LIST_NAME = "list";
+    static final String LIST_REPEATED_NAME = "list";
     static final String LIST_ELEMENT_NAME = "element";
 
-    public static MessageType convertToParquetMessageType(String name, RowType rowType) {
-        return new MessageType(name, convertToParquetTypes(rowType));
-    }
-
-    public static Type convertToParquetType(String name, DataField field) {
-        return convertToParquetType(name, field.type(), field.id(), 0);
+    /** Convert paimon {@link RowType} to parquet {@link MessageType}. */
+    public static MessageType convertToParquetMessageType(RowType rowType) {
+        return new MessageType(PAIMON_SCHEMA, convertToParquetTypes(rowType));
     }
 
     private static Type[] convertToParquetTypes(RowType rowType) {
         return rowType.getFields().stream()
-                .map(f -> convertToParquetType(f.name(), f.type(), f.id(), 0))
+                .map(ParquetSchemaConverter::convertToParquetType)
                 .toArray(Type[]::new);
+    }
+
+    /** Convert paimon {@link DataField} to parquet {@link Type}. */
+    public static Type convertToParquetType(DataField field) {
+        return convertToParquetType(field.name(), field.type(), field.id(), 0);
     }
 
     private static Type convertToParquetType(String name, DataType type, int fieldId, int depth) {
@@ -259,5 +268,145 @@ public class ParquetSchemaConverter {
 
     public static boolean is64BitDecimal(int precision) {
         return precision <= 18 && precision > 9;
+    }
+
+    /** Convert parquet {@link MessageType} to paimon {@link RowType}. */
+    public static RowType convertToPaimonRowType(MessageType messageType) {
+        List<DataField> dataFields =
+                messageType.asGroupType().getFields().stream()
+                        .map(ParquetSchemaConverter::convertToPaimonField)
+                        .collect(Collectors.toList());
+        return new RowType(dataFields);
+    }
+
+    /** Convert parquet {@link Type} to paimon {@link DataField} to. */
+    public static DataField convertToPaimonField(Type parquetType) {
+        LogicalTypeAnnotation logicalType = parquetType.getLogicalTypeAnnotation();
+        DataType paimonDataType;
+
+        if (parquetType.isPrimitive()) {
+            switch (parquetType.asPrimitiveType().getPrimitiveTypeName()) {
+                case BINARY:
+                    if (logicalType instanceof LogicalTypeAnnotation.StringLogicalTypeAnnotation) {
+                        paimonDataType = DataTypes.STRING();
+                    } else {
+                        paimonDataType = DataTypes.BYTES();
+                    }
+                    break;
+                case BOOLEAN:
+                    paimonDataType = DataTypes.BOOLEAN();
+                    break;
+                case FLOAT:
+                    paimonDataType = DataTypes.FLOAT();
+                    break;
+                case DOUBLE:
+                    paimonDataType = DataTypes.DOUBLE();
+                    break;
+                case INT32:
+                    if (logicalType instanceof LogicalTypeAnnotation.DecimalLogicalTypeAnnotation) {
+                        LogicalTypeAnnotation.DecimalLogicalTypeAnnotation decimalType =
+                                (LogicalTypeAnnotation.DecimalLogicalTypeAnnotation) logicalType;
+                        paimonDataType =
+                                new DecimalType(decimalType.getPrecision(), decimalType.getScale());
+                    } else if (logicalType
+                            instanceof LogicalTypeAnnotation.IntLogicalTypeAnnotation) {
+                        LogicalTypeAnnotation.IntLogicalTypeAnnotation intType =
+                                (LogicalTypeAnnotation.IntLogicalTypeAnnotation) logicalType;
+                        int bitWidth = intType.getBitWidth();
+                        if (bitWidth == 8) {
+                            paimonDataType = DataTypes.TINYINT();
+                        } else if (bitWidth == 16) {
+                            paimonDataType = DataTypes.SMALLINT();
+                        } else {
+                            paimonDataType = DataTypes.INT();
+                        }
+                    } else if (logicalType
+                            instanceof LogicalTypeAnnotation.DateLogicalTypeAnnotation) {
+                        paimonDataType = DataTypes.DATE();
+                    } else if (logicalType
+                            instanceof LogicalTypeAnnotation.TimeLogicalTypeAnnotation) {
+                        paimonDataType = DataTypes.TIME();
+                    } else {
+                        paimonDataType = DataTypes.INT();
+                    }
+                    break;
+                case INT64:
+                    if (logicalType instanceof LogicalTypeAnnotation.DecimalLogicalTypeAnnotation) {
+                        LogicalTypeAnnotation.DecimalLogicalTypeAnnotation decimalType =
+                                (LogicalTypeAnnotation.DecimalLogicalTypeAnnotation) logicalType;
+                        paimonDataType =
+                                new DecimalType(decimalType.getPrecision(), decimalType.getScale());
+                    } else if (logicalType
+                            instanceof LogicalTypeAnnotation.TimestampLogicalTypeAnnotation) {
+                        LogicalTypeAnnotation.TimestampLogicalTypeAnnotation timestampType =
+                                (LogicalTypeAnnotation.TimestampLogicalTypeAnnotation) logicalType;
+                        int precision =
+                                timestampType
+                                                .getUnit()
+                                                .equals(LogicalTypeAnnotation.TimeUnit.MILLIS)
+                                        ? 3
+                                        : 6;
+                        paimonDataType =
+                                timestampType.isAdjustedToUTC()
+                                        ? new LocalZonedTimestampType(precision)
+                                        : new TimestampType(precision);
+                    } else {
+                        paimonDataType = DataTypes.BIGINT();
+                    }
+                    break;
+                case INT96:
+                    paimonDataType = new TimestampType(9);
+                    break;
+                case FIXED_LEN_BYTE_ARRAY:
+                    LogicalTypeAnnotation.DecimalLogicalTypeAnnotation decimalType =
+                            (LogicalTypeAnnotation.DecimalLogicalTypeAnnotation) logicalType;
+                    paimonDataType =
+                            new DecimalType(decimalType.getPrecision(), decimalType.getScale());
+                    break;
+                default:
+                    throw new UnsupportedOperationException("Unsupported type: " + parquetType);
+            }
+            if (parquetType.getRepetition().equals(Type.Repetition.REQUIRED)) {
+                paimonDataType = paimonDataType.notNull();
+            }
+            return new DataField(
+                    parquetType.getId().intValue(), parquetType.getName(), paimonDataType);
+        } else {
+            GroupType groupType = parquetType.asGroupType();
+            if (logicalType instanceof LogicalTypeAnnotation.ListLogicalTypeAnnotation) {
+                paimonDataType =
+                        new ArrayType(
+                                convertToPaimonField(parquetListElementType(groupType)).type());
+            } else if (logicalType instanceof LogicalTypeAnnotation.MapLogicalTypeAnnotation) {
+                Pair<Type, Type> keyValueType = parquetMapKeyValueType(groupType);
+                paimonDataType =
+                        new MapType(
+                                // Since parquet does not support nullable key, when converting
+                                // back to Paimon, set as nullable by default.
+                                convertToPaimonField(keyValueType.getLeft()).type().nullable(),
+                                convertToPaimonField(keyValueType.getRight()).type());
+            } else {
+                paimonDataType =
+                        new RowType(
+                                groupType.getFields().stream()
+                                        .map(ParquetSchemaConverter::convertToPaimonField)
+                                        .collect(Collectors.toList()));
+            }
+        }
+
+        if (parquetType.getRepetition().equals(Type.Repetition.REQUIRED)) {
+            paimonDataType = paimonDataType.notNull();
+        }
+
+        return new DataField(parquetType.getId().intValue(), parquetType.getName(), paimonDataType);
+    }
+
+    public static Type parquetListElementType(GroupType listType) {
+        return listType.getType(LIST_REPEATED_NAME).asGroupType().getType(LIST_ELEMENT_NAME);
+    }
+
+    public static Pair<Type, Type> parquetMapKeyValueType(GroupType mapType) {
+        GroupType keyValue = mapType.getType(MAP_REPEATED_NAME).asGroupType();
+        return Pair.of(keyValue.getType(MAP_KEY_NAME), keyValue.getType(MAP_VALUE_NAME));
     }
 }

@@ -534,7 +534,7 @@ public class ParquetReadWriteTest {
                         .withId(baseId + depthLimit * 2 + 1);
         Type expected =
                 new MessageType(
-                        "table",
+                        ParquetSchemaConverter.PAIMON_SCHEMA,
                         Types.primitive(INT32, Type.Repetition.OPTIONAL).named("a").withId(0),
                         ConversionPatterns.listOfElements(
                                         Type.Repetition.OPTIONAL,
@@ -555,7 +555,7 @@ public class ParquetReadWriteTest {
                                                 .withId(baseId - depthLimit * 2 - 1),
                                         outerMapValueType)
                                 .withId(2));
-        Type actual = ParquetSchemaConverter.convertToParquetMessageType("table", rowType);
+        Type actual = ParquetSchemaConverter.convertToParquetMessageType(rowType);
         assertThat(actual).isEqualTo(expected);
     }
 
@@ -906,8 +906,7 @@ public class ParquetReadWriteTest {
         Configuration conf = new Configuration();
         conf.setInt("parquet.block.size", rowGroupSize);
         MessageType schema =
-                ParquetSchemaConverter.convertToParquetMessageType(
-                        "paimon-parquet", NESTED_ARRAY_MAP_TYPE);
+                ParquetSchemaConverter.convertToParquetMessageType(NESTED_ARRAY_MAP_TYPE);
         try (ParquetWriter<Group> writer =
                 ExampleParquetWriter.builder(
                                 HadoopOutputFile.fromPath(
