@@ -44,6 +44,7 @@ under the License.
         <flink.connector.pulsar.version>4.0.0-1.17</flink.connector.pulsar.version>
         <confluent.platform.version>7.5.0</confluent.platform.version>
         <flink.connector.kafka.version>3.3.0-1.20</flink.connector.kafka.version>
+        <bson.version>5.2.1</bson.version>
     </properties>
 
     <repositories>
@@ -163,6 +164,13 @@ under the License.
             <groupId>com.jayway.jsonpath</groupId>
             <artifactId>json-path</artifactId>
             <version>${json-path.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.mongodb</groupId>
+            <artifactId>bson</artifactId>
+            <version>${bson.version}</version>
+            <scope>provided</scope>
         </dependency>
 
         <!-- test dependencies -->
