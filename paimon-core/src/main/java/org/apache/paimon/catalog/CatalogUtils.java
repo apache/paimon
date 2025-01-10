@@ -19,16 +19,19 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.TableType;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Preconditions;
 
@@ -190,5 +193,34 @@ public class CatalogUtils {
                             entry.lastFileCreationTime()));
         }
         return partitions;
+    }
+
+    public static TableType getTableType(Map<String, String> options) {
+        return options.containsKey(CoreOptions.TYPE.key())
+                ? TableType.fromString(options.get(CoreOptions.TYPE.key()))
+                : CoreOptions.TYPE.defaultValue();
+    }
+
+    public static FormatTable buildFormatTableByTableSchema(
+            Identifier identifier,
+            Map<String, String> options,
+            RowType rowType,
+            List<String> partitionKeys,
+            String comment) {
+        FormatTable.Format format =
+                FormatTable.parseFormat(
+                        options.getOrDefault(
+                                CoreOptions.FILE_FORMAT.key(),
+                                CoreOptions.FILE_FORMAT.defaultValue()));
+        String location = options.get(CoreOptions.PATH.key());
+        return FormatTable.builder()
+                .identifier(identifier)
+                .rowType(rowType)
+                .partitionKeys(partitionKeys)
+                .location(location)
+                .format(format)
+                .options(options)
+                .comment(comment)
+                .build();
     }
 }

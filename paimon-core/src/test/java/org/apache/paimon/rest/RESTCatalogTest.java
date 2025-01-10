@@ -107,6 +107,11 @@ class RESTCatalogTest extends CatalogTestBase {
         return false;
     }
 
+    @Override
+    protected boolean supportsFormatTable() {
+        return true;
+    }
+
     private void createTable(
             Identifier identifier, Map<String, String> options, List<String> partitionKeys)
             throws Exception {

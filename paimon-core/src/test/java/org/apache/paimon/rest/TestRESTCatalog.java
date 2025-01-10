@@ -1,0 +1,131 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.rest;
+
+import org.apache.paimon.TableType;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.CatalogUtils;
+import org.apache.paimon.catalog.FileSystemCatalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.TableSchema;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/** A catalog for testing RESTCatalog. */
+public class TestRESTCatalog extends FileSystemCatalog {
+    public Map<String, TableSchema> tableFullName2Schema = new HashMap<String, TableSchema>();
+
+    public TestRESTCatalog(FileIO fileIO, Path warehouse, Options options) {
+        super(fileIO, warehouse, options);
+    }
+
+    public static TestRESTCatalog create(CatalogContext context) {
+        String warehouse = CatalogFactory.warehouse(context).toUri().toString();
+
+        Path warehousePath = new Path(warehouse);
+        FileIO fileIO;
+
+        try {
+            fileIO = FileIO.get(warehousePath, context);
+            fileIO.checkOrMkdirs(warehousePath);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+
+        return new TestRESTCatalog(fileIO, warehousePath, context.options());
+    }
+
+    @Override
+    protected List<String> listTablesImpl(String databaseName) {
+        List<String> tables = super.listTablesImpl(databaseName);
+        for (Map.Entry<String, TableSchema> entry : tableFullName2Schema.entrySet()) {
+            Identifier identifier = Identifier.fromString(entry.getKey());
+            if (databaseName.equals(identifier.getDatabaseName())) {
+                tables.add(identifier.getTableName());
+            }
+        }
+        return tables;
+    }
+
+    @Override
+    protected void dropTableImpl(Identifier identifier) {
+        if (tableFullName2Schema.containsKey(identifier.getFullName())) {
+            tableFullName2Schema.remove(identifier.getFullName());
+        } else {
+            super.dropTableImpl(identifier);
+        }
+    }
+
+    @Override
+    public void renameTableImpl(Identifier fromTable, Identifier toTable) {
+        if (tableFullName2Schema.containsKey(fromTable.getFullName())) {
+            TableSchema tableSchema = tableFullName2Schema.get(fromTable.getFullName());
+            tableFullName2Schema.remove(fromTable.getFullName());
+            tableFullName2Schema.put(toTable.getFullName(), tableSchema);
+        } else {
+            super.renameTableImpl(fromTable, toTable);
+        }
+    }
+
+    @Override
+    protected void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
+            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
+        if (tableFullName2Schema.containsKey(identifier.getFullName())) {
+            TableSchema schema = tableFullName2Schema.get(identifier.getFullName());
+            if (CatalogUtils.getTableType(schema.options()) == TableType.FORMAT_TABLE) {
+                throw new UnsupportedOperationException("Only data table support alter table.");
+            }
+        } else {
+            super.alterTableImpl(identifier, changes);
+        }
+    }
+
+    @Override
+    public void createFormatTable(Identifier identifier, Schema schema) {
+        TableSchema tableSchema =
+                new TableSchema(
+                        1L,
+                        schema.fields(),
+                        1,
+                        schema.partitionKeys(),
+                        schema.primaryKeys(),
+                        schema.options(),
+                        schema.comment());
+        tableFullName2Schema.put(identifier.getFullName(), tableSchema);
+    }
+
+    @Override
+    protected TableMeta getDataTableMeta(Identifier identifier) throws TableNotExistException {
+        if (tableFullName2Schema.containsKey(identifier.getFullName())) {
+            TableSchema tableSchema = tableFullName2Schema.get(identifier.getFullName());
+            return new TableMeta(tableSchema, "uuid");
+        }
+        return super.getDataTableMeta(identifier);
+    }
+}

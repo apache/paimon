@@ -18,7 +18,6 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -59,7 +58,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
-import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.utils.Pair;
@@ -79,9 +77,11 @@ import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
+import static org.apache.paimon.catalog.CatalogUtils.buildFormatTableByTableSchema;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
+import static org.apache.paimon.catalog.CatalogUtils.getTableType;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
@@ -474,22 +474,12 @@ public class RESTCatalog implements Catalog {
         TableType tableType = getTableType(response.getSchema().options());
         if (tableType == TableType.FORMAT_TABLE) {
             Schema schema = response.getSchema();
-            FormatTable.Format format =
-                    FormatTable.parseFormat(
-                            schema.options()
-                                    .getOrDefault(
-                                            CoreOptions.FILE_FORMAT.key(),
-                                            CoreOptions.FILE_FORMAT.defaultValue()));
-            String location = options.get(CoreOptions.PATH.key());
-            return FormatTable.builder()
-                    .identifier(identifier)
-                    .rowType(schema.rowType())
-                    .partitionKeys(schema.partitionKeys())
-                    .location(location)
-                    .format(format)
-                    .options(schema.options())
-                    .comment(schema.comment())
-                    .build();
+            return buildFormatTableByTableSchema(
+                    identifier,
+                    schema.options(),
+                    schema.rowType(),
+                    schema.partitionKeys(),
+                    schema.comment());
         }
         FileStoreTable table =
                 FileStoreTableFactory.create(
@@ -539,11 +529,5 @@ public class RESTCatalog implements Catalog {
         }
 
         return refreshExecutor;
-    }
-
-    private static TableType getTableType(Map<String, String> options) {
-        return options.containsKey(CoreOptions.TYPE.key())
-                ? TableType.fromString(options.get(CoreOptions.TYPE.key()))
-                : CoreOptions.TYPE.defaultValue();
     }
 }

@@ -21,7 +21,6 @@ package org.apache.paimon.rest;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.CatalogOptions;
@@ -39,7 +38,11 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.types.DataField;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
@@ -69,9 +72,7 @@ public class RESTCatalogServer {
         authToken = initToken;
         Options conf = new Options();
         conf.setString("warehouse", warehouse);
-        this.catalog =
-                CatalogFactory.createCatalog(
-                        CatalogContext.create(conf), this.getClass().getClassLoader());
+        this.catalog = TestRESTCatalog.create(CatalogContext.create(conf));
         this.dispatcher = initDispatcher(catalog, authToken);
         MockWebServer mockWebServer = new MockWebServer();
         mockWebServer.setDispatcher(dispatcher);
@@ -217,15 +218,11 @@ public class RESTCatalogServer {
                 OBJECT_MAPPER.readValue(request.getBody().readUtf8(), RenameTableRequest.class);
         catalog.renameTable(
                 Identifier.create(databaseName, tableName), requestBody.getNewIdentifier(), false);
-        FileStoreTable table = (FileStoreTable) catalog.getTable(requestBody.getNewIdentifier());
-        RESTResponse response =
-                new GetTableResponse(
-                        AbstractCatalog.newTableLocation(
-                                        catalog.warehouse(), requestBody.getNewIdentifier())
-                                .toString(),
-                        table.schema().id(),
-                        table.schema().toSchema(),
-                        table.uuid());
+        GetTableResponse response =
+                getTable(
+                        catalog,
+                        requestBody.getNewIdentifier().getDatabaseName(),
+                        requestBody.getNewIdentifier().getTableName());
         return mockResponse(response, 200);
     }
 
@@ -286,25 +283,14 @@ public class RESTCatalogServer {
             throws Exception {
         RESTResponse response;
         if (request.getMethod().equals("GET")) {
-            Identifier identifier = Identifier.create(databaseName, tableName);
-            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-            response =
-                    new GetTableResponse(
-                            AbstractCatalog.newTableLocation(catalog.warehouse(), identifier)
-                                    .toString(),
-                            table.schema().id(),
-                            table.schema().toSchema(),
-                            table.uuid());
+            response = getTable(catalog, databaseName, tableName);
             return mockResponse(response, 200);
         } else if (request.getMethod().equals("POST")) {
             Identifier identifier = Identifier.create(databaseName, tableName);
             AlterTableRequest requestBody =
                     OBJECT_MAPPER.readValue(request.getBody().readUtf8(), AlterTableRequest.class);
             catalog.alterTable(identifier, requestBody.getChanges(), false);
-            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-            response =
-                    new GetTableResponse(
-                            "", table.schema().id(), table.schema().toSchema(), table.uuid());
+            response = getTable(catalog, databaseName, tableName);
             return mockResponse(response, 200);
         } else if (request.getMethod().equals("DELETE")) {
             Identifier identifier = Identifier.create(databaseName, tableName);
@@ -312,6 +298,34 @@ public class RESTCatalogServer {
             return new MockResponse().setResponseCode(200);
         }
         return new MockResponse().setResponseCode(404);
+    }
+
+    private static GetTableResponse getTable(Catalog catalog, String databaseName, String tableName)
+            throws Exception {
+        Identifier identifier = Identifier.create(databaseName, tableName);
+        Table table = catalog.getTable(identifier);
+        Schema schema;
+        Long schemaId = 1L;
+        if (table instanceof FileStoreTable) {
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+            schema = fileStoreTable.schema().toSchema();
+            schemaId = fileStoreTable.schema().id();
+        } else {
+            FormatTable formatTable = (FormatTable) table;
+            List<DataField> fields = formatTable.rowType().getFields();
+            schema =
+                    new Schema(
+                            fields,
+                            table.partitionKeys(),
+                            table.primaryKeys(),
+                            table.options(),
+                            table.comment().orElse(null));
+        }
+        return new GetTableResponse(
+                AbstractCatalog.newTableLocation(catalog.warehouse(), identifier).toString(),
+                schemaId,
+                schema,
+                table.uuid());
     }
 
     private static MockResponse mockResponse(RESTResponse response, int httpCode) {
