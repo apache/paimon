@@ -43,19 +43,26 @@ import org.apache.paimon.migrate.FileMetaUtils;
 import org.apache.paimon.migrate.Migrator;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.avro.file.DataFileStream;
+import org.apache.avro.generic.GenericDatumReader;
+import org.apache.avro.generic.GenericRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -136,15 +143,28 @@ public class IcebergMigrator implements Migrator {
 
     @Override
     public void executeMigrate() throws Exception {
-        Schema paimonSchema = icebergSchemaToPaimonSchema(icebergMetadata);
+        List<TableSchema> paimonSchemas = icebergSchemasToPaimonSchemas(icebergMetadata);
+        Preconditions.checkArgument(
+                !paimonSchemas.isEmpty(),
+                "paimon schemas transformed from iceberg table is empty.");
         Identifier paimonIdentifier = Identifier.create(paimonDatabaseName, paimonTableName);
 
         paimonCatalog.createDatabase(paimonDatabaseName, true);
-        paimonCatalog.createTable(paimonIdentifier, paimonSchema, false);
+        TableSchema firstSchema = paimonSchemas.get(0);
+        Preconditions.checkArgument(firstSchema.id() == 0, "Unexpected, first schema id is not 0.");
+        paimonCatalog.createTable(paimonIdentifier, firstSchema.toSchema(), false);
 
         try {
             FileStoreTable paimonTable = (FileStoreTable) paimonCatalog.getTable(paimonIdentifier);
             FileIO fileIO = paimonTable.fileIO();
+            SchemaManager schemaManager = paimonTable.schemaManager();
+            // commit all the iceberg schemas
+            for (int i = 1; i < paimonSchemas.size(); i++) {
+                LOG.info(
+                        "commit new schema from iceberg, new schema id:{}",
+                        paimonSchemas.get(i).id());
+                schemaManager.commit(paimonSchemas.get(i));
+            }
 
             IcebergManifestFile manifestFile =
                     IcebergManifestFile.create(paimonTable, icebergMetaPathFactory);
@@ -157,25 +177,36 @@ public class IcebergMigrator implements Migrator {
             // check manifest file with 'DELETE' kind
             checkAndFilterManifestFiles(icebergManifestFileMetas);
 
-            // get all live iceberg entries
-            List<IcebergManifestEntry> icebergEntries =
-                    icebergManifestFileMetas.stream()
-                            .flatMap(fileMeta -> manifestFile.read(fileMeta).stream())
-                            .filter(IcebergManifestEntry::isLive)
-                            .collect(Collectors.toList());
-            if (icebergEntries.isEmpty()) {
+            Map<Long, List<IcebergManifestEntry>> icebergEntries = new HashMap<>();
+            for (IcebergManifestFileMeta icebergManifestFileMeta : icebergManifestFileMetas) {
+                long schemaId =
+                        getSchemaIdFromIcebergManifestFile(
+                                new Path(icebergManifestFileMeta.manifestPath()), fileIO);
+                List<IcebergManifestEntry> entries = manifestFile.read(icebergManifestFileMeta);
+                icebergEntries
+                        .computeIfAbsent(schemaId, v -> new ArrayList<>())
+                        .addAll(
+                                entries.stream()
+                                        .filter(IcebergManifestEntry::isLive)
+                                        .collect(Collectors.toList()));
+            }
+
+            List<IcebergDataFileMeta> icebergDataFileMetas = new ArrayList<>();
+            // write schema id to IcebergDataFileMeta
+            for (Map.Entry<Long, List<IcebergManifestEntry>> kv : icebergEntries.entrySet()) {
+                icebergDataFileMetas.addAll(
+                        kv.getValue().stream()
+                                .map(entry -> entry.file().withSchemaId(kv.getKey()))
+                                .collect(Collectors.toList()));
+            }
+
+            if (icebergDataFileMetas.isEmpty()) {
                 LOG.info(
-                        "No live manifest entry in iceberg table for snapshot {}, iceberg table meta path is {}.",
+                        "No live iceberg data files in iceberg table for snapshot {}, iceberg table meta path is {}.",
                         icebergMetadata.currentSnapshotId(),
                         icebergLatestMetadataLocation);
                 return;
             }
-
-            List<IcebergDataFileMeta> icebergDataFileMetas =
-                    icebergEntries.stream()
-                            .map(IcebergManifestEntry::file)
-                            .collect(Collectors.toList());
-
             // Again, check if delete File exists
             checkAndFilterDataFiles(icebergDataFileMetas);
 
@@ -246,10 +277,21 @@ public class IcebergMigrator implements Migrator {
         paimonCatalog.renameTable(targetTableId, sourceTableId, ignoreIfNotExists);
     }
 
-    public Schema icebergSchemaToPaimonSchema(IcebergMetadata icebergMetadata) {
-        // get iceberg current schema
-        IcebergSchema icebergSchema =
-                icebergMetadata.schemas().get(icebergMetadata.currentSchemaId());
+    public List<TableSchema> icebergSchemasToPaimonSchemas(IcebergMetadata icebergMetadata) {
+        return icebergMetadata.schemas().stream()
+                .map(
+                        icebergSchema -> {
+                            LOG.info(
+                                    "Convert iceberg schema to paimon schema, iceberg schema id: {}",
+                                    icebergSchema.schemaId());
+                            return TableSchema.create(
+                                    icebergSchema.schemaId(),
+                                    icebergSchemaToPaimonSchema(icebergSchema));
+                        })
+                .collect(Collectors.toList());
+    }
+
+    public Schema icebergSchemaToPaimonSchema(IcebergSchema icebergSchema) {
 
         // get iceberg current partition spec
         int currentPartitionSpecId = icebergMetadata.defaultSpecId();
@@ -289,6 +331,18 @@ public class IcebergMigrator implements Migrator {
         }
     }
 
+    public long getSchemaIdFromIcebergManifestFile(Path manifestPath, FileIO fileIO) {
+
+        try (DataFileStream<GenericRecord> dataFileStream =
+                new DataFileStream<>(
+                        fileIO.newInputStream(manifestPath), new GenericDatumReader<>())) {
+            String schema = dataFileStream.getMetaString("schema");
+            return JsonSerdeUtil.fromJson(schema, IcebergSchema.class).schemaId();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     private static List<DataFileMeta> construct(
             List<IcebergDataFileMeta> icebergDataFileMetas,
             FileIO fileIO,
@@ -318,7 +372,9 @@ public class IcebergMigrator implements Migrator {
                     e);
         }
         String format = icebergDataFileMeta.fileFormat();
-        return FileMetaUtils.constructFileMeta(format, status, fileIO, table, dir, rollback);
+        long schemaId = icebergDataFileMeta.schemaId();
+        return FileMetaUtils.constructFileMeta(
+                format, status, fileIO, table, dir, rollback, schemaId);
     }
 
     private MigrateTask importUnPartitionedTable(
