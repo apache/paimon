@@ -58,6 +58,8 @@ under the License.
                 <li>"char-to-string": maps MySQL CHAR(length)/VARCHAR(length) types to STRING.</li>
                 <li>"longtext-to-bytes": maps MySQL LONGTEXT types to BYTES.</li>
                 <li>"bigint-unsigned-to-bigint": maps MySQL BIGINT UNSIGNED, BIGINT UNSIGNED ZEROFILL, SERIAL to BIGINT. You should ensure overflow won't occur when using this option.</li>
+                <li>"decimal-no-change": Ignore decimal type change.</li>
+                <li>"no-change": Ignore any type change.</li>
             </ul>
         </td>
     </tr>
