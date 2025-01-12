@@ -49,6 +49,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -2302,6 +2303,12 @@ public class CoreOptions implements Serializable {
         return options.get(PARTITION_MARK_DONE_CUSTOM_CLASS);
     }
 
+    public Set<PartitionMarkDoneAction> partitionMarkDoneActions() {
+        return Arrays.stream(options.get(PARTITION_MARK_DONE_ACTION).split(","))
+                .map(x -> PartitionMarkDoneAction.valueOf(x.replace('-', '_').toUpperCase()))
+                .collect(Collectors.toCollection(HashSet::new));
+    }
+
     public String consumerId() {
         String consumerId = options.get(CONSUMER_ID);
         if (consumerId != null && consumerId.isEmpty()) {
@@ -3198,5 +3205,25 @@ public class CoreOptions implements Serializable {
         INITIALIZING,
         ACTIVATED,
         SUSPENDED
+    }
+
+    /** Partition mark done actions. */
+    public enum PartitionMarkDoneAction {
+        SUCCESS_FILE("success-file"),
+        DONE_PARTITION("done-partition"),
+        MARK_EVENT("mark-event"),
+        HTTP_REPORT("http-report"),
+        CUSTOM("custom");
+
+        private final String value;
+
+        PartitionMarkDoneAction(String value) {
+            this.value = value;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
     }
 }

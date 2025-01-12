@@ -23,7 +23,6 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.flink.sink.partition.MockCustomPartitionMarkDoneAction;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.partition.actions.HttpReportMarkDoneAction;
-import org.apache.paimon.partition.actions.PartitionMarkDoneAction;
 import org.apache.paimon.partition.file.SuccessFile;
 import org.apache.paimon.rest.TestHttpWebServer;
 import org.apache.paimon.table.FileStoreTable;
@@ -50,6 +49,9 @@ import java.util.stream.Stream;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION_URL;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_CUSTOM_CLASS;
+import static org.apache.paimon.CoreOptions.PartitionMarkDoneAction.CUSTOM;
+import static org.apache.paimon.CoreOptions.PartitionMarkDoneAction.HTTP_REPORT;
+import static org.apache.paimon.CoreOptions.PartitionMarkDoneAction.SUCCESS_FILE;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link MarkPartitionDoneAction}. */
@@ -166,9 +168,7 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
     public void testCustomPartitionMarkDoneAction(boolean hasPk, String invoker) throws Exception {
 
         Map<String, String> options = new HashMap<>(2);
-        options.put(
-                PARTITION_MARK_DONE_ACTION.key(),
-                PartitionMarkDoneAction.SUCCESS_FILE + "," + PartitionMarkDoneAction.CUSTOM);
+        options.put(PARTITION_MARK_DONE_ACTION.key(), SUCCESS_FILE + "," + CUSTOM);
         options.put(
                 PARTITION_MARK_DONE_CUSTOM_CLASS.key(),
                 MockCustomPartitionMarkDoneAction.class.getName());
@@ -229,11 +229,7 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
         server.start();
         try {
             Map<String, String> options = new HashMap<>();
-            options.put(
-                    PARTITION_MARK_DONE_ACTION.key(),
-                    PartitionMarkDoneAction.SUCCESS_FILE
-                            + ","
-                            + PartitionMarkDoneAction.HTTP_REPORT);
+            options.put(PARTITION_MARK_DONE_ACTION.key(), SUCCESS_FILE + "," + HTTP_REPORT);
             options.put(PARTITION_MARK_DONE_ACTION_URL.key(), server.getBaseUrl());
 
             FileStoreTable table = prepareTable(hasPk, options);
