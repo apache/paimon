@@ -40,6 +40,7 @@ import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
+import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
@@ -47,6 +48,7 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
+import org.apache.paimon.rest.responses.AlterPartitionsResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
@@ -461,7 +463,27 @@ public class RESTCatalog implements Catalog {
     @Override
     public void alterPartitions(Identifier identifier, List<Partition> partitions)
             throws TableNotExistException {
-        throw new UnsupportedOperationException();
+        Table table = getTable(identifier);
+        Options options = Options.fromMap(table.options());
+        if (Boolean.TRUE.equals(options.get(METASTORE_PARTITIONED_TABLE))) {
+            try {
+                AlterPartitionsRequest request = new AlterPartitionsRequest(partitions);
+                AlterPartitionsResponse response =
+                        client.post(
+                                resourcePaths.alterPartitions(
+                                        identifier.getDatabaseName(), identifier.getTableName()),
+                                request,
+                                AlterPartitionsResponse.class,
+                                headers());
+                if (response.getFailPartitions() != null
+                        && !response.getFailPartitions().isEmpty()) {
+                    throw new RuntimeException(
+                            "Alter partitions failed: " + response.getFailPartitions());
+                }
+            } catch (NoSuchResourceException e) {
+                throw new TableNotExistException(identifier);
+            }
+        }
     }
 
     @Override

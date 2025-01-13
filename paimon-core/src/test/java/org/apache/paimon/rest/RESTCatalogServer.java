@@ -26,12 +26,14 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.responses.AlterPartitionsResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
@@ -131,6 +133,11 @@ public class RESTCatalogServer {
                                         && "tables".equals(resources[1])
                                         && "partitions".equals(resources[3])
                                         && "drop".equals(resources[4]);
+                        boolean isAlterPartitions =
+                                resources.length == 5
+                                        && "tables".equals(resources[1])
+                                        && "partitions".equals(resources[3])
+                                        && "alter".equals(resources[4]);
                         if (isDropPartitions) {
                             String tableName = resources[2];
                             Identifier identifier = Identifier.create(databaseName, tableName);
@@ -143,6 +150,20 @@ public class RESTCatalogServer {
                             response =
                                     new PartitionsResponse(
                                             dropPartitionsRequest.getPartitionSpecs(),
+                                            ImmutableList.of());
+                            return mockResponse(response, 200);
+                        } else if (isAlterPartitions) {
+                            String tableName = resources[2];
+                            Identifier identifier = Identifier.create(databaseName, tableName);
+                            AlterPartitionsRequest alterPartitionsRequest =
+                                    OBJECT_MAPPER.readValue(
+                                            request.getBody().readUtf8(),
+                                            AlterPartitionsRequest.class);
+                            catalog.alterPartitions(
+                                    identifier, alterPartitionsRequest.getPartitions());
+                            response =
+                                    new AlterPartitionsResponse(
+                                            alterPartitionsRequest.getPartitions(),
                                             ImmutableList.of());
                             return mockResponse(response, 200);
                         } else if (isPartitions) {

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest.responses;
 
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.RESTResponse;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -26,38 +27,35 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgn
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
-import java.util.Map;
 
-/** Partition for rest api. */
+/** response for altering partitions. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class PartitionsResponse implements RESTResponse {
+public class AlterPartitionsResponse implements RESTResponse {
 
-    public static final String FIELD_SUCCESS_PARTITION_SPECS = "successPartitionSpecs";
-    public static final String FIELD_FAIL_PARTITION_SPECS = "failPartitionSpecs";
+    public static final String FIELD_SUCCESS_PARTITIONS = "successPartitions";
+    public static final String FIELD_FAIL_PARTITIONS = "failPartitions";
 
-    @JsonProperty(FIELD_SUCCESS_PARTITION_SPECS)
-    private final List<Map<String, String>> successPartitionSpecs;
+    @JsonProperty(FIELD_SUCCESS_PARTITIONS)
+    private final List<Partition> successPartitions;
 
-    @JsonProperty(FIELD_FAIL_PARTITION_SPECS)
-    private final List<Map<String, String>> failPartitionSpecs;
+    @JsonProperty(FIELD_FAIL_PARTITIONS)
+    private final List<Partition> failPartitions;
 
     @JsonCreator
-    public PartitionsResponse(
-            @JsonProperty(FIELD_SUCCESS_PARTITION_SPECS)
-                    List<Map<String, String>> successPartitionSpecs,
-            @JsonProperty(FIELD_FAIL_PARTITION_SPECS)
-                    List<Map<String, String>> failPartitionSpecs) {
-        this.successPartitionSpecs = successPartitionSpecs;
-        this.failPartitionSpecs = failPartitionSpecs;
+    public AlterPartitionsResponse(
+            @JsonProperty(FIELD_SUCCESS_PARTITIONS) List<Partition> successPartitions,
+            @JsonProperty(FIELD_FAIL_PARTITIONS) List<Partition> failPartitions) {
+        this.successPartitions = successPartitions;
+        this.failPartitions = failPartitions;
     }
 
-    @JsonGetter(FIELD_SUCCESS_PARTITION_SPECS)
-    public List<Map<String, String>> getSuccessPartitionSpecs() {
-        return successPartitionSpecs;
+    @JsonGetter(FIELD_SUCCESS_PARTITIONS)
+    public List<Partition> getSuccessPartitions() {
+        return successPartitions;
     }
 
-    @JsonGetter(FIELD_FAIL_PARTITION_SPECS)
-    public List<Map<String, String>> getFailPartitionSpecs() {
-        return failPartitionSpecs;
+    @JsonGetter(FIELD_FAIL_PARTITIONS)
+    public List<Partition> getFailPartitions() {
+        return failPartitions;
     }
 }

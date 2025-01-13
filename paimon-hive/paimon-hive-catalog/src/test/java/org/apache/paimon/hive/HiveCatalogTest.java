@@ -419,6 +419,12 @@ public class HiveCatalogTest extends CatalogTestBase {
         return true;
     }
 
+    @Override
+    protected void checkPartition(Partition expected, Partition actual) {
+        assertThat(actual.recordCount()).isEqualTo(expected.recordCount());
+        assertThat(actual.lastFileCreationTime() / 1000).isEqualTo(expected.lastFileCreationTime());
+    }
+
     @Test
     public void testCreateExternalTableWithLocation(@TempDir java.nio.file.Path tempDir)
             throws Exception {

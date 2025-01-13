@@ -513,15 +513,30 @@ public class HiveCatalog extends AbstractCatalog {
                                                 Short.MAX_VALUE));
                 return partitions.stream()
                         .map(
-                                part ->
-                                        new org.apache.paimon.partition.Partition(
-                                                Collections.singletonMap(
-                                                        tagToPartitionField,
-                                                        part.getValues().get(0)),
-                                                1L,
-                                                1L,
-                                                1L,
-                                                System.currentTimeMillis()))
+                                part -> {
+                                    Map<String, String> parameters = part.getParameters();
+                                    long recordCount =
+                                            Long.parseLong(
+                                                    parameters.getOrDefault(NUM_ROWS_PROP, "1"));
+                                    long fileSizeInBytes =
+                                            Long.parseLong(
+                                                    parameters.getOrDefault(TOTAL_SIZE_PROP, "1"));
+                                    long fileCount =
+                                            Long.parseLong(
+                                                    parameters.getOrDefault(NUM_FILES_PROP, "1"));
+                                    long lastFileCreationTime =
+                                            Long.parseLong(
+                                                    parameters.getOrDefault(
+                                                            LAST_UPDATE_TIME_PROP,
+                                                            System.currentTimeMillis() + ""));
+                                    return new org.apache.paimon.partition.Partition(
+                                            Collections.singletonMap(
+                                                    tagToPartitionField, part.getValues().get(0)),
+                                            recordCount,
+                                            fileSizeInBytes,
+                                            fileCount,
+                                            lastFileCreationTime);
+                                })
                         .collect(Collectors.toList());
             } catch (Exception e) {
                 throw new RuntimeException(e);

@@ -1063,7 +1063,42 @@ public abstract class CatalogTestBase {
                 Arrays.asList(
                         Collections.singletonMap("dt", "20250102"),
                         Collections.singletonMap("dt", "20250101")));
-        assertThat(catalog.listPartitions(identifier).isEmpty()).isTrue();
+        assertThat(catalog.listPartitions(identifier)).isEmpty();
+    }
+
+    @Test
+    public void testAlterPartitions() throws Exception {
+        if (!supportPartitions()) {
+            return;
+        }
+        String databaseName = "testAlterPartitionTable";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier alterIdentifier = Identifier.create(databaseName, "alert_partitions");
+        catalog.createTable(
+                alterIdentifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                true);
+        catalog.createPartitions(
+                alterIdentifier, Arrays.asList(Collections.singletonMap("dt", "20250101")));
+        assertThat(catalog.listPartitions(alterIdentifier).stream().map(Partition::spec))
+                .containsExactlyInAnyOrder(Collections.singletonMap("dt", "20250101"));
+        Partition partition =
+                new Partition(
+                        Collections.singletonMap("dt", "20250101"),
+                        1,
+                        2,
+                        3,
+                        System.currentTimeMillis());
+        catalog.alterPartitions(alterIdentifier, Arrays.asList(partition));
+        Partition partitionFromServer = catalog.listPartitions(alterIdentifier).get(0);
+        checkPartition(partition, partitionFromServer);
     }
 
     protected boolean supportsAlterDatabase() {
@@ -1076,6 +1111,10 @@ public abstract class CatalogTestBase {
 
     protected boolean supportsView() {
         return false;
+    }
+
+    protected void checkPartition(Partition expected, Partition actual) {
+        assertThat(actual).isEqualTo(expected);
     }
 
     protected boolean supportPartitions() {

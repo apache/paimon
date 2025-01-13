@@ -526,6 +526,48 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/partitions/alter:
+    post:
+      tags:
+        - partition
+      summary: Alter partitions
+      operationId: alterPartitions
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlterPartitionsRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlterPartitionsResponse'
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
 components:
   schemas:
     CreateDatabaseRequest:
@@ -834,6 +876,13 @@ components:
           type: object
           additionalProperties:
             type: string
+    AlterPartitionsRequest:
+      type: object
+      properties:
+        partitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Partition'
     AlterDatabaseResponse:
       type: object
       properties:
@@ -916,6 +965,17 @@ components:
         lastFileCreationTime:
           type: integer
           format: int64
+    AlterPartitionsResponse:
+      type: object
+      properties:
+        successPartitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Partition'
+        failPartitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Partition'
   securitySchemes:
     BearerAuth:
       type: http

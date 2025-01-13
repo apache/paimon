@@ -74,4 +74,9 @@ public class ResourcePaths {
         return SLASH.join(
                 V1, prefix, DATABASES, databaseName, TABLES, tableName, "partitions", "drop");
     }
+
+    public String alterPartitions(String databaseName, String tableName) {
+        return SLASH.join(
+                V1, prefix, DATABASES, databaseName, TABLES, tableName, "partitions", "alter");
+    }
 }
