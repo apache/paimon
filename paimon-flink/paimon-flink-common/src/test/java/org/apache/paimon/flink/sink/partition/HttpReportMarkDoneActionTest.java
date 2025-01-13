@@ -24,9 +24,8 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.actions.HttpReportMarkDoneAction;
 import org.apache.paimon.partition.actions.HttpReportMarkDoneAction.HttpReportMarkDoneRequest;
-import org.apache.paimon.partition.actions.HttpReportMarkDoneAction.HttpReportMarkDoneResponse;
+import org.apache.paimon.partition.actions.HttpReportMarkDoneException;
 import org.apache.paimon.rest.TestHttpWebServer;
-import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -62,6 +61,8 @@ public class HttpReportMarkDoneActionTest {
 
     private static final String partition = "partition";
     private static String params = "key1=value1,key2=value2";
+    private static final String successResponse = "{\"result\":\"success\"}";
+    private static final String failedResponse = "{\"result\":\"failed\"}";
     private static FileStoreTable fileStoreTable;
     @Rule public TemporaryFolder folder = new TemporaryFolder();
 
@@ -81,8 +82,7 @@ public class HttpReportMarkDoneActionTest {
     public void testHttpReportMarkDoneActionSuccessResponse() throws Exception {
         HttpReportMarkDoneAction httpReportMarkDoneAction = createHttpReportMarkDoneAction();
 
-        HttpReportMarkDoneResponse expectedResponse = new HttpReportMarkDoneResponse("success");
-        server.enqueueResponse(expectedResponse, 200);
+        server.enqueueResponse(successResponse, 200);
 
         httpReportMarkDoneAction.markDone(partition);
         RecordedRequest request = server.takeRequest(10, TimeUnit.SECONDS);
@@ -98,8 +98,7 @@ public class HttpReportMarkDoneActionTest {
         // test params is null.
         params = null;
         HttpReportMarkDoneAction httpReportMarkDoneAction3 = createHttpReportMarkDoneAction();
-        HttpReportMarkDoneResponse expectedResponse3 = new HttpReportMarkDoneResponse("success");
-        server.enqueueResponse(expectedResponse3, 200);
+        server.enqueueResponse(successResponse, 200);
         httpReportMarkDoneAction3.markDone(partition);
         RecordedRequest request3 = server.takeRequest(10, TimeUnit.SECONDS);
         assertRequest(request3);
@@ -110,7 +109,6 @@ public class HttpReportMarkDoneActionTest {
         HttpReportMarkDoneAction markDoneAction = createHttpReportMarkDoneAction();
 
         // status failed.
-        HttpReportMarkDoneResponse failedResponse = new HttpReportMarkDoneResponse("failed");
         server.enqueueResponse(failedResponse, 200);
         Assertions.assertThatThrownBy(() -> markDoneAction.markDone(partition))
                 .isInstanceOf(IllegalStateException.class)
@@ -125,10 +123,17 @@ public class HttpReportMarkDoneActionTest {
                 .hasMessageContaining(
                         "The http-report action's response attribute `result` should be 'SUCCESS' but is 'null'.");
 
-        // 400.
-        server.enqueueResponse("", 400);
+        // empty response.
+        server.enqueueResponse("", 200);
         Assertions.assertThatThrownBy(() -> markDoneAction.markDone(partition))
-                .isInstanceOf(BadRequestException.class);
+                .isInstanceOf(HttpReportMarkDoneException.class)
+                .hasMessageContaining("ResponseBody is null or empty.");
+
+        // 400.
+        server.enqueueResponse(successResponse, 400);
+        Assertions.assertThatThrownBy(() -> markDoneAction.markDone(partition))
+                .isInstanceOf(HttpReportMarkDoneException.class)
+                .hasMessageContaining("Response is not successful");
     }
 
     public static void assertRequest(RecordedRequest recordedRequest)

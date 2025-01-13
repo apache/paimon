@@ -87,12 +87,11 @@ public class TestHttpWebServer {
         return objectMapper.writeValueAsString(response);
     }
 
-    public <T extends RESTRequest> T readRequestBody(String body, Class<T> requestType)
-            throws JsonProcessingException {
+    public <T> T readRequestBody(String body, Class<T> requestType) throws JsonProcessingException {
         return objectMapper.readValue(body, requestType);
     }
 
-    public <T extends RESTResponse> T readResponseBody(String body, Class<T> responseType)
+    public <T> T readResponseBody(String body, Class<T> responseType)
             throws JsonProcessingException {
         return objectMapper.readValue(body, responseType);
     }

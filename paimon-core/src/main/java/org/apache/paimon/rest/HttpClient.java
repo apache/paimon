@@ -51,7 +51,7 @@ import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 public class HttpClient implements RESTClient {
 
     private static final ObjectMapper OBJECT_MAPPER = RESTObjectMapper.create();
-    private static final String THREAD_NAME = "PAIMON-HTTP-CLIENT-THREAD-POOL";
+    private static final String THREAD_NAME = "REST-CATALOG-HTTP-CLIENT-THREAD-POOL";
     private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
 
     private final OkHttpClient okHttpClient;

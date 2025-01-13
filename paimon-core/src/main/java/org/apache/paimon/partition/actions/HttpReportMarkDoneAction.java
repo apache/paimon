@@ -20,11 +20,6 @@ package org.apache.paimon.partition.actions;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.rest.HttpClient;
-import org.apache.paimon.rest.HttpClientOptions;
-import org.apache.paimon.rest.RESTClient;
-import org.apache.paimon.rest.RESTRequest;
-import org.apache.paimon.rest.RESTResponse;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
@@ -33,22 +28,45 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCre
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.SerializationFeature;
+
+import okhttp3.Dispatcher;
+import okhttp3.Headers;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.Map;
+import java.util.concurrent.SynchronousQueue;
 
+import static okhttp3.ConnectionSpec.CLEARTEXT;
+import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
+import static okhttp3.ConnectionSpec.MODERN_TLS;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION_URL;
+import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
 /** Report partition submission information to remote http server. */
 public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
 
-    private final RESTClient client;
+    private final OkHttpClient client;
+    private final String url;
+    private final ObjectMapper mapper;
+    private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
 
     private final FileStoreTable fileStoreTable;
 
     private final String params;
 
     private static final String RESPONSE_SUCCESS = "SUCCESS";
+
+    private static final String THREAD_NAME = "PAIMON-HTTP-REPORT-MARK-DONE-ACTION-THREAD";
 
     public HttpReportMarkDoneAction(FileStoreTable fileStoreTable, CoreOptions options) {
 
@@ -60,27 +78,34 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
 
         this.fileStoreTable = fileStoreTable;
         this.params = options.httpReportMarkDoneActionParams();
+        this.url = options.httpReportMarkDoneActionUrl();
+        this.mapper = new ObjectMapper();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
 
-        HttpClientOptions httpClientOptions =
-                new HttpClientOptions(
-                        options.httpReportMarkDoneActionUrl(),
-                        options.httpReportMarkDoneActionTimeout(),
-                        options.httpReportMarkDoneActionTimeout(),
-                        1);
-        this.client = new HttpClient(httpClientOptions);
+        OkHttpClient.Builder builder =
+                new OkHttpClient.Builder()
+                        .dispatcher(
+                                new Dispatcher(
+                                        createCachedThreadPool(
+                                                1, THREAD_NAME, new SynchronousQueue<>())))
+                        .retryOnConnectionFailure(true)
+                        .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT))
+                        .connectTimeout(options.httpReportMarkDoneActionTimeout())
+                        .readTimeout(options.httpReportMarkDoneActionTimeout());
+
+        this.client = builder.build();
     }
 
     @Override
     public void markDone(String partition) throws Exception {
         HttpReportMarkDoneResponse response =
-                client.post(
-                        null,
+                post(
                         new HttpReportMarkDoneRequest(
                                 params,
                                 fileStoreTable.fullName(),
                                 fileStoreTable.location().toString(),
                                 partition),
-                        HttpReportMarkDoneResponse.class,
                         Collections.emptyMap());
         Preconditions.checkState(
                 reportIsSuccess(response),
@@ -96,7 +121,8 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
     @Override
     public void close() throws IOException {
         try {
-            this.client.close();
+            client.dispatcher().cancelAll();
+            client.connectionPool().evictAll();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -105,7 +131,7 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
     /** RestRequest only for HttpReportMarkDoneAction. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     @VisibleForTesting
-    public static class HttpReportMarkDoneRequest implements RESTRequest {
+    public static class HttpReportMarkDoneRequest {
 
         private static final String MARK_DONE_PARTITION = "partition";
         private static final String TABLE = "table";
@@ -160,7 +186,7 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
     /** Response only for HttpReportMarkDoneAction. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     @VisibleForTesting
-    public static class HttpReportMarkDoneResponse implements RESTResponse {
+    public static class HttpReportMarkDoneResponse {
         private static final String RESULT = "result";
 
         @JsonProperty(RESULT)
@@ -173,6 +199,32 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
         @JsonGetter(RESULT)
         public String getResult() {
             return result;
+        }
+    }
+
+    public HttpReportMarkDoneResponse post(
+            HttpReportMarkDoneRequest body, Map<String, String> headers) throws IOException {
+        RequestBody requestBody = RequestBody.create(mapper.writeValueAsBytes(body), MEDIA_TYPE);
+        Request request =
+                new Request.Builder()
+                        .url(url)
+                        .post(requestBody)
+                        .headers(Headers.of(headers))
+                        .build();
+        try (Response response = client.newCall(request).execute()) {
+            String responseBodyStr = response.body() != null ? response.body().string() : null;
+            if (!response.isSuccessful() || StringUtils.isNullOrWhitespaceOnly(responseBodyStr)) {
+                throw new HttpReportMarkDoneException(
+                        response.isSuccessful()
+                                ? "ResponseBody is null or empty."
+                                : String.format(
+                                        "Response is not successful, response is %s", response));
+            }
+            return mapper.readValue(responseBodyStr, HttpReportMarkDoneResponse.class);
+        } catch (HttpReportMarkDoneException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new HttpReportMarkDoneException(e);
         }
     }
 }

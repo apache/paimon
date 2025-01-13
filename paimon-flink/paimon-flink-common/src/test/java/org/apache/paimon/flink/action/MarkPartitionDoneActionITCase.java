@@ -234,8 +234,7 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
 
             FileStoreTable table = prepareTable(hasPk, options);
 
-            HttpReportMarkDoneAction.HttpReportMarkDoneResponse expectResponse =
-                    new HttpReportMarkDoneAction.HttpReportMarkDoneResponse("success");
+            String expectResponse = "{\"result\":\"success\"}";
             server.enqueueResponse(expectResponse, 200);
             server.enqueueResponse(expectResponse, 200);
 
