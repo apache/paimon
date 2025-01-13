@@ -25,12 +25,12 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 import java.util.List;
 import java.util.Map;
 
-/** Request for creating partition. */
+/** Request for dropping partition. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class CreatePartitionsRequest extends BasePartitionsRequest {
+public class DropPartitionsRequest extends BasePartitionsRequest {
 
     @JsonCreator
-    public CreatePartitionsRequest(
+    public DropPartitionsRequest(
             @JsonProperty(FIELD_PARTITION_SPECS) List<Map<String, String>> partitionSpecs) {
         super(partitionSpecs);
     }

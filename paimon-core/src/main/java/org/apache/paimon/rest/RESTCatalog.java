@@ -28,6 +28,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -43,6 +44,7 @@ import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -62,6 +64,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
@@ -79,6 +82,7 @@ import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
+import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.catalog.CatalogUtils.buildFormatTableByTableSchema;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
@@ -396,8 +400,7 @@ public class RESTCatalog implements Catalog {
         Options options = Options.fromMap(table.options());
         if (Boolean.TRUE.equals(options.get(METASTORE_PARTITIONED_TABLE))) {
             try {
-                CreatePartitionsRequest request =
-                        new CreatePartitionsRequest(identifier, partitions);
+                CreatePartitionsRequest request = new CreatePartitionsRequest(partitions);
                 PartitionsResponse response =
                         client.post(
                                 resourcePaths.partitions(
@@ -422,7 +425,37 @@ public class RESTCatalog implements Catalog {
     @Override
     public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        throw new UnsupportedOperationException();
+        Table table = getTable(identifier);
+        Options options = Options.fromMap(table.options());
+        if (Boolean.TRUE.equals(options.get(METASTORE_PARTITIONED_TABLE))) {
+            try {
+                DropPartitionsRequest request = new DropPartitionsRequest(partitions);
+                PartitionsResponse response =
+                        client.post(
+                                resourcePaths.dropPartitions(
+                                        identifier.getDatabaseName(), identifier.getTableName()),
+                                request,
+                                PartitionsResponse.class,
+                                headers());
+                if (response.getFailPartitionSpecs() != null
+                        && !response.getFailPartitionSpecs().isEmpty()) {
+                    throw new RuntimeException(
+                            "Drop partitions failed: " + response.getFailPartitionSpecs());
+                }
+            } catch (NoSuchResourceException e) {
+                throw new TableNotExistException(identifier);
+            }
+        } else {
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+            try (FileStoreCommit commit =
+                    fileStoreTable
+                            .store()
+                            .newCommit(
+                                    createCommitUser(
+                                            fileStoreTable.coreOptions().toConfiguration()))) {
+                commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER);
+            }
+        }
     }
 
     @Override

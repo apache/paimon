@@ -1030,7 +1030,7 @@ public abstract class CatalogTestBase {
     }
 
     @Test
-    public void testCreatePartitions() throws Exception {
+    public void testPartitions() throws Exception {
         if (!supportPartitions()) {
             return;
         }
@@ -1058,6 +1058,12 @@ public abstract class CatalogTestBase {
                 .containsExactlyInAnyOrder(
                         Collections.singletonMap("dt", "20250102"),
                         Collections.singletonMap("dt", "20250101"));
+        catalog.dropPartitions(
+                identifier,
+                Arrays.asList(
+                        Collections.singletonMap("dt", "20250102"),
+                        Collections.singletonMap("dt", "20250101")));
+        assertThat(catalog.listPartitions(identifier).isEmpty()).isTrue();
     }
 
     protected boolean supportsAlterDatabase() {

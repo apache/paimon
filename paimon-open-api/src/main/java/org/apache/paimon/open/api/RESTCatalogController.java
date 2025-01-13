@@ -25,7 +25,7 @@ import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
-import org.apache.paimon.rest.requests.DropPartitionRequest;
+import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -413,10 +413,12 @@ public class RESTCatalogController {
     }
 
     @Operation(
-            summary = "Drop partition",
+            summary = "Drop partitions",
             tags = {"partition"})
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Success, no content"),
+        @ApiResponse(
+                responseCode = "200",
+                content = {@Content(schema = @Schema(implementation = PartitionsResponse.class))}),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
@@ -425,10 +427,10 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @DeleteMapping("/v1/{prefix}/databases/{database}/tables/{table}/partitions")
-    public void dropPartition(
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/partitions/drop")
+    public void dropPartitions(
             @PathVariable String prefix,
             @PathVariable String database,
             @PathVariable String table,
-            @RequestBody DropPartitionRequest request) {}
+            @RequestBody DropPartitionsRequest request) {}
 }

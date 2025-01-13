@@ -23,7 +23,7 @@ import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
-import org.apache.paimon.rest.requests.DropPartitionRequest;
+import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -210,21 +210,20 @@ public class RESTObjectMapperTest {
 
     @Test
     public void createPartitionRequestParseTest() throws JsonProcessingException {
-        CreatePartitionsRequest request = MockRESTMessage.createPartitionRequest("t1");
+        CreatePartitionsRequest request = MockRESTMessage.createPartitionRequest();
         String requestStr = OBJECT_MAPPER.writeValueAsString(request);
         CreatePartitionsRequest parseData =
                 OBJECT_MAPPER.readValue(requestStr, CreatePartitionsRequest.class);
-        assertEquals(parseData.getIdentifier(), parseData.getIdentifier());
         assertEquals(parseData.getPartitionSpecs().size(), parseData.getPartitionSpecs().size());
     }
 
     @Test
     public void dropPartitionRequestParseTest() throws JsonProcessingException {
-        DropPartitionRequest request = MockRESTMessage.dropPartitionRequest();
+        DropPartitionsRequest request = MockRESTMessage.dropPartitionsRequest();
         String requestStr = OBJECT_MAPPER.writeValueAsString(request);
-        DropPartitionRequest parseData =
-                OBJECT_MAPPER.readValue(requestStr, DropPartitionRequest.class);
-        assertEquals(parseData.getPartitionSpec().size(), parseData.getPartitionSpec().size());
+        DropPartitionsRequest parseData =
+                OBJECT_MAPPER.readValue(requestStr, DropPartitionsRequest.class);
+        assertEquals(parseData.getPartitionSpecs().size(), parseData.getPartitionSpecs().size());
     }
 
     @Test

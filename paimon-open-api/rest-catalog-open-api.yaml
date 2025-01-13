@@ -484,11 +484,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-    delete:
+  /v1/{prefix}/databases/{database}/tables/{table}/partitions/drop:
+    post:
       tags:
         - partition
-      summary: Drop partition
-      operationId: dropPartition
+      summary: Drop partitions
+      operationId: dropPartitions
       parameters:
         - name: prefix
           in: path
@@ -509,10 +510,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DropPartitionRequest'
+              $ref: '#/components/schemas/DropPartitionsRequest'
       responses:
         "200":
-          description: Success, no content
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartitionsResponse'
         "404":
           description: Resource not found
           content:
@@ -535,16 +540,17 @@ components:
     CreatePartitionsRequest:
       type: object
       properties:
-        identifier:
-          $ref: '#/components/schemas/Identifier'
         specs:
           type: array
-          items: object
-    DropPartitionRequest:
+          items:
+            type: object
+    DropPartitionsRequest:
       type: object
       properties:
-        spec:
-          type: object
+        specs:
+          type: array
+          items:
+            type: object
     CreateDatabaseResponse:
       type: object
       properties:

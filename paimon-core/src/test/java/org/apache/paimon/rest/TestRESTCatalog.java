@@ -78,7 +78,22 @@ public class TestRESTCatalog extends FileSystemCatalog {
     @Override
     public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        tableFullName2Partitions.remove(identifier.getFullName());
+        List<Partition> existPartitions = tableFullName2Partitions.get(identifier.getFullName());
+        partitions.forEach(
+                partition -> {
+                    for (Map.Entry<String, String> entry : partition.entrySet()) {
+                        existPartitions.stream()
+                                .filter(
+                                        p ->
+                                                p.spec().containsKey(entry.getKey())
+                                                        && p.spec()
+                                                                .get(entry.getKey())
+                                                                .equals(entry.getValue()))
+                                .findFirst()
+                                .ifPresent(
+                                        existPartition -> existPartitions.remove(existPartition));
+                    }
+                });
     }
 
     @Override
