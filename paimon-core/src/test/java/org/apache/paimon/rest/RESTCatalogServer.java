@@ -28,6 +28,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
@@ -38,6 +39,7 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.PartitionsResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
@@ -51,6 +53,7 @@ import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
+import org.testcontainers.shaded.com.google.common.collect.ImmutableList;
 
 import java.io.IOException;
 import java.util.List;
@@ -123,11 +126,7 @@ public class RESTCatalogServer {
                                         && "partitions".equals(resources[3]);
                         if (isPartitions) {
                             String tableName = resources[2];
-                            List<Partition> partitions =
-                                    catalog.listPartitions(
-                                            Identifier.create(databaseName, tableName));
-                            response = new ListPartitionsResponse(partitions);
-                            return mockResponse(response, 200);
+                            return partitionsApiHandler(catalog, request, databaseName, tableName);
                         } else if (isTableRename) {
                             return renameTableApiHandler(
                                     catalog, request, databaseName, resources[2]);
@@ -229,75 +228,108 @@ public class RESTCatalogServer {
     private static MockResponse databasesApiHandler(Catalog catalog, RecordedRequest request)
             throws Exception {
         RESTResponse response;
-        if (request.getMethod().equals("GET")) {
-            List<String> databaseNameList = catalog.listDatabases();
-            response = new ListDatabasesResponse(databaseNameList);
-            return mockResponse(response, 200);
-        } else if (request.getMethod().equals("POST")) {
-            CreateDatabaseRequest requestBody =
-                    OBJECT_MAPPER.readValue(
-                            request.getBody().readUtf8(), CreateDatabaseRequest.class);
-            String databaseName = requestBody.getName();
-            catalog.createDatabase(databaseName, false);
-            response = new CreateDatabaseResponse(databaseName, requestBody.getOptions());
-            return mockResponse(response, 200);
+        switch (request.getMethod()) {
+            case "GET":
+                List<String> databaseNameList = catalog.listDatabases();
+                response = new ListDatabasesResponse(databaseNameList);
+                return mockResponse(response, 200);
+            case "POST":
+                CreateDatabaseRequest requestBody =
+                        OBJECT_MAPPER.readValue(
+                                request.getBody().readUtf8(), CreateDatabaseRequest.class);
+                String databaseName = requestBody.getName();
+                catalog.createDatabase(databaseName, false);
+                response = new CreateDatabaseResponse(databaseName, requestBody.getOptions());
+                return mockResponse(response, 200);
+            default:
+                return new MockResponse().setResponseCode(404);
         }
-        return new MockResponse().setResponseCode(404);
     }
 
     private static MockResponse databaseApiHandler(
             Catalog catalog, RecordedRequest request, String databaseName) throws Exception {
         RESTResponse response;
-        if (request.getMethod().equals("GET")) {
-            Database database = catalog.getDatabase(databaseName);
-            response = new GetDatabaseResponse(database.name(), database.options());
-            return mockResponse(response, 200);
-        } else if (request.getMethod().equals("DELETE")) {
-            catalog.dropDatabase(databaseName, false, true);
-            return new MockResponse().setResponseCode(200);
+        switch (request.getMethod()) {
+            case "GET":
+                Database database = catalog.getDatabase(databaseName);
+                response = new GetDatabaseResponse(database.name(), database.options());
+                return mockResponse(response, 200);
+            case "DELETE":
+                catalog.dropDatabase(databaseName, false, true);
+                return new MockResponse().setResponseCode(200);
+            default:
+                return new MockResponse().setResponseCode(404);
         }
-        return new MockResponse().setResponseCode(404);
     }
 
     private static MockResponse tablesApiHandler(
             Catalog catalog, RecordedRequest request, String databaseName) throws Exception {
         RESTResponse response;
-        if (request.getMethod().equals("POST")) {
-            CreateTableRequest requestBody =
-                    OBJECT_MAPPER.readValue(request.getBody().readUtf8(), CreateTableRequest.class);
-            catalog.createTable(requestBody.getIdentifier(), requestBody.getSchema(), false);
-            response =
-                    new GetTableResponse(
-                            "", 1L, requestBody.getSchema(), UUID.randomUUID().toString());
-            return mockResponse(response, 200);
-        } else if (request.getMethod().equals("GET")) {
-            catalog.listTables(databaseName);
-            response = new ListTablesResponse(catalog.listTables(databaseName));
-            return mockResponse(response, 200);
+        switch (request.getMethod()) {
+            case "GET":
+                catalog.listTables(databaseName);
+                response = new ListTablesResponse(catalog.listTables(databaseName));
+                return mockResponse(response, 200);
+            case "POST":
+                CreateTableRequest requestBody =
+                        OBJECT_MAPPER.readValue(
+                                request.getBody().readUtf8(), CreateTableRequest.class);
+                catalog.createTable(requestBody.getIdentifier(), requestBody.getSchema(), false);
+                response =
+                        new GetTableResponse(
+                                "", 1L, requestBody.getSchema(), UUID.randomUUID().toString());
+                return mockResponse(response, 200);
+            default:
+                return new MockResponse().setResponseCode(404);
         }
-        return new MockResponse().setResponseCode(404);
     }
 
     private static MockResponse tableApiHandler(
             Catalog catalog, RecordedRequest request, String databaseName, String tableName)
             throws Exception {
         RESTResponse response;
-        if (request.getMethod().equals("GET")) {
-            response = getTable(catalog, databaseName, tableName);
-            return mockResponse(response, 200);
-        } else if (request.getMethod().equals("POST")) {
-            Identifier identifier = Identifier.create(databaseName, tableName);
-            AlterTableRequest requestBody =
-                    OBJECT_MAPPER.readValue(request.getBody().readUtf8(), AlterTableRequest.class);
-            catalog.alterTable(identifier, requestBody.getChanges(), false);
-            response = getTable(catalog, databaseName, tableName);
-            return mockResponse(response, 200);
-        } else if (request.getMethod().equals("DELETE")) {
-            Identifier identifier = Identifier.create(databaseName, tableName);
-            catalog.dropTable(identifier, false);
-            return new MockResponse().setResponseCode(200);
+        Identifier identifier = Identifier.create(databaseName, tableName);
+        switch (request.getMethod()) {
+            case "GET":
+                response = getTable(catalog, databaseName, tableName);
+                return mockResponse(response, 200);
+            case "POST":
+                AlterTableRequest requestBody =
+                        OBJECT_MAPPER.readValue(
+                                request.getBody().readUtf8(), AlterTableRequest.class);
+                catalog.alterTable(identifier, requestBody.getChanges(), false);
+                response = getTable(catalog, databaseName, tableName);
+                return mockResponse(response, 200);
+            case "DELETE":
+                catalog.dropTable(identifier, false);
+                return new MockResponse().setResponseCode(200);
+            default:
+                return new MockResponse().setResponseCode(404);
         }
-        return new MockResponse().setResponseCode(404);
+    }
+
+    private static MockResponse partitionsApiHandler(
+            Catalog catalog, RecordedRequest request, String databaseName, String tableName)
+            throws Exception {
+        RESTResponse response;
+        switch (request.getMethod()) {
+            case "GET":
+                List<Partition> partitions =
+                        catalog.listPartitions(Identifier.create(databaseName, tableName));
+                response = new ListPartitionsResponse(partitions);
+                return mockResponse(response, 200);
+            case "POST":
+                CreatePartitionsRequest requestBody =
+                        OBJECT_MAPPER.readValue(
+                                request.getBody().readUtf8(), CreatePartitionsRequest.class);
+                catalog.createPartitions(
+                        requestBody.getIdentifier(), requestBody.getPartitionSpecs());
+                response =
+                        new PartitionsResponse(requestBody.getPartitionSpecs(), ImmutableList.of());
+                return mockResponse(response, 200);
+            default:
+                return new MockResponse().setResponseCode(404);
+        }
     }
 
     private static GetTableResponse getTable(Catalog catalog, String databaseName, String tableName)

@@ -27,6 +27,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
@@ -36,10 +37,13 @@ import java.io.UncheckedIOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /** A catalog for testing RESTCatalog. */
 public class TestRESTCatalog extends FileSystemCatalog {
     public Map<String, TableSchema> tableFullName2Schema = new HashMap<String, TableSchema>();
+    public Map<String, List<Partition>> tableFullName2Partitions =
+            new HashMap<String, List<Partition>>();
 
     public TestRESTCatalog(FileIO fileIO, Path warehouse, Options options) {
         super(fileIO, warehouse, options);
@@ -59,6 +63,33 @@ public class TestRESTCatalog extends FileSystemCatalog {
         }
 
         return new TestRESTCatalog(fileIO, warehousePath, context.options());
+    }
+
+    @Override
+    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        tableFullName2Partitions.put(
+                identifier.getFullName(),
+                partitions.stream()
+                        .map(partition -> spec2Partition(partition))
+                        .collect(Collectors.toList()));
+    }
+
+    @Override
+    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        tableFullName2Partitions.remove(identifier.getFullName());
+    }
+
+    @Override
+    public void alterPartitions(Identifier identifier, List<Partition> partitions)
+            throws TableNotExistException {
+        tableFullName2Partitions.put(identifier.getFullName(), partitions);
+    }
+
+    @Override
+    public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
+        return tableFullName2Partitions.get(identifier.getFullName());
     }
 
     @Override
@@ -127,5 +158,9 @@ public class TestRESTCatalog extends FileSystemCatalog {
             return new TableMeta(tableSchema, "uuid");
         }
         return super.getDataTableMeta(identifier);
+    }
+
+    private Partition spec2Partition(Map<String, String> spec) {
+        return new Partition(spec, 123, 456, 789, 123);
     }
 }

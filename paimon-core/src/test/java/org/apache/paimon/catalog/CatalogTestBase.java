@@ -23,6 +23,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
@@ -51,6 +52,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
+import static org.apache.paimon.CoreOptions.METASTORE_TAG_TO_PARTITION;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
@@ -1040,6 +1042,7 @@ public abstract class CatalogTestBase {
                 identifier,
                 Schema.newBuilder()
                         .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
                         .column("col", DataTypes.INT())
                         .column("dt", DataTypes.STRING())
                         .partitionKeys("dt")
@@ -1051,9 +1054,10 @@ public abstract class CatalogTestBase {
                 Arrays.asList(
                         Collections.singletonMap("dt", "20250101"),
                         Collections.singletonMap("dt", "20250102")));
-
-        // list partitions from filesystem, so here return empty.
-        assertThat(catalog.listPartitions(identifier)).isEmpty();
+        assertThat(catalog.listPartitions(identifier).stream().map(Partition::spec))
+                .containsExactlyInAnyOrder(
+                        Collections.singletonMap("dt", "20250102"),
+                        Collections.singletonMap("dt", "20250101"));
     }
 
     protected boolean supportsAlterDatabase() {
