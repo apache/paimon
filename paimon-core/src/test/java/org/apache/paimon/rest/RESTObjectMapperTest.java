@@ -19,6 +19,7 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
+import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
@@ -26,6 +27,7 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
+import org.apache.paimon.rest.responses.AlterPartitionsResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
@@ -246,5 +248,24 @@ public class RESTObjectMapperTest {
                         OBJECT_MAPPER.readValue(
                                 OBJECT_MAPPER.writeValueAsString(response),
                                 PartitionsResponse.class));
+    }
+
+    @Test
+    public void alterPartitionsRequestParseTest() throws Exception {
+        AlterPartitionsRequest request = MockRESTMessage.alterPartitionsRequest();
+        String requestStr = OBJECT_MAPPER.writeValueAsString(request);
+        AlterPartitionsRequest parseData =
+                OBJECT_MAPPER.readValue(requestStr, AlterPartitionsRequest.class);
+        assertEquals(request.getPartitions(), parseData.getPartitions());
+    }
+
+    @Test
+    public void alterPartitionsResponseParseTest() throws Exception {
+        AlterPartitionsResponse response = MockRESTMessage.alterPartitionsResponse();
+        String responseStr = OBJECT_MAPPER.writeValueAsString(response);
+        AlterPartitionsResponse parseData =
+                OBJECT_MAPPER.readValue(responseStr, AlterPartitionsResponse.class);
+        assertEquals(response.getFailPartitions(), parseData.getFailPartitions());
+        assertEquals(response.getSuccessPartitions(), parseData.getSuccessPartitions());
     }
 }

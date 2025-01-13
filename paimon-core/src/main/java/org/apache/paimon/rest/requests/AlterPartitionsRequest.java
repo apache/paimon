@@ -34,7 +34,7 @@ public class AlterPartitionsRequest implements RESTRequest {
     public static final String FIELD_PARTITIONS = "partitions";
 
     @JsonProperty(FIELD_PARTITIONS)
-    private List<Partition> partitions;
+    private final List<Partition> partitions;
 
     @JsonCreator
     public AlterPartitionsRequest(@JsonProperty(FIELD_PARTITIONS) List<Partition> partitions) {

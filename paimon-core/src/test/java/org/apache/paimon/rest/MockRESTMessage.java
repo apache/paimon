@@ -18,10 +18,10 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
+import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
@@ -29,6 +29,7 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
+import org.apache.paimon.rest.responses.AlterPartitionsResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
@@ -46,8 +47,6 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
-
-import okhttp3.mockwebserver.MockResponse;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -228,13 +227,6 @@ public class MockRESTMessage {
         return schemaChanges;
     }
 
-    public static GetTableResponse getTableResponseEnablePartition() {
-        Map<String, String> options = new HashMap<>();
-        options.put("option-1", "value-1");
-        options.put(CoreOptions.METASTORE_PARTITIONED_TABLE.key(), "true");
-        return new GetTableResponse("/tmp/2", 1, schema(options), UUID.randomUUID().toString());
-    }
-
     public static GetTableResponse getTableResponse() {
         Map<String, String> options = new HashMap<>();
         options.put("option-1", "value-1");
@@ -242,11 +234,17 @@ public class MockRESTMessage {
         return new GetTableResponse("/tmp/1", 1, schema(options), UUID.randomUUID().toString());
     }
 
-    public static MockResponse mockResponse(String body, int httpCode) {
-        return new MockResponse()
-                .setResponseCode(httpCode)
-                .setBody(body)
-                .addHeader("Content-Type", "application/json");
+    public static AlterPartitionsRequest alterPartitionsRequest() {
+        return new AlterPartitionsRequest(ImmutableList.of(partition()));
+    }
+
+    public static AlterPartitionsResponse alterPartitionsResponse() {
+        return new AlterPartitionsResponse(
+                ImmutableList.of(partition()), ImmutableList.of(partition()));
+    }
+
+    private static Partition partition() {
+        return new Partition(Collections.singletonMap("pt", "1"), 1, 1, 1, 1);
     }
 
     private static Schema schema(Map<String, String> options) {
