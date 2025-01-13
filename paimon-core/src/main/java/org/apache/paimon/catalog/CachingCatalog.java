@@ -178,7 +178,8 @@ public class CachingCatalog extends DelegateCatalog {
 
         // clear all branch tables of this table
         for (Identifier i : tableCache.asMap().keySet()) {
-            if (identifier.getTableName().equals(i.getTableName())) {
+            if (identifier.getTableName().equals(i.getTableName())
+                    && identifier.getDatabaseName().equals(i.getDatabaseName())) {
                 tableCache.invalidate(i);
             }
         }
