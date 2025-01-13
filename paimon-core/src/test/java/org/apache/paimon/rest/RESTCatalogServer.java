@@ -18,7 +18,6 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
@@ -50,7 +49,6 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
@@ -62,10 +60,11 @@ import java.io.IOException;
 import java.util.List;
 import java.util.UUID;
 
+import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
+
 /** Mock REST server for testing. */
 public class RESTCatalogServer {
 
-    private static final ObjectMapper OBJECT_MAPPER = RESTObjectMapper.create();
     private static final String PREFIX = "paimon";
     private static final String DATABASE_URI = String.format("/v1/%s/databases", PREFIX);
 
@@ -395,10 +394,10 @@ public class RESTCatalogServer {
                             table.comment().orElse(null));
         }
         return new GetTableResponse(
-                AbstractCatalog.newTableLocation(catalog.warehouse(), identifier).toString(),
+                table.id(),
+                table.name(),
                 schemaId,
-                schema,
-                table.uuid());
+                schema);
     }
 
     private static MockResponse mockResponse(RESTResponse response, int httpCode) {

@@ -86,6 +86,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.catalog.CatalogUtils.buildFormatTableByTableSchema;
+import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
@@ -562,14 +563,15 @@ public class RESTCatalog implements Catalog {
                     schema.partitionKeys(),
                     schema.comment());
         }
+        TableSchema schema = TableSchema.create(response.getSchemaId(), response.getSchema());
         FileStoreTable table =
                 FileStoreTableFactory.create(
                         fileIO(),
-                        new Path(response.getPath()),
-                        TableSchema.create(response.getSchemaId(), response.getSchema()),
+                        new Path(schema.options().get(PATH.key())),
+                        schema,
                         new CatalogEnvironment(
                                 identifier,
-                                response.getUuid(),
+                                response.getId(),
                                 Lock.emptyFactory(),
                                 catalogLoader()));
         if (tableType == TableType.OBJECT_TABLE) {

@@ -713,7 +713,9 @@ components:
     GetTableResponse:
       type: object
       properties:
-        path:
+        id:
+          type: string
+        name:
           type: string
         schemaId:
           type: integer
@@ -908,6 +910,8 @@ components:
     GetDatabaseResponse:
       type: object
       properties:
+        id:
+          type: string
         name:
           type: string
         options:

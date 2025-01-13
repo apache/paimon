@@ -22,9 +22,9 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.exceptions.RESTException;
 import org.apache.paimon.rest.responses.ErrorResponse;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import okhttp3.Dispatcher;
 import okhttp3.Headers;
@@ -44,12 +44,12 @@ import java.util.concurrent.SynchronousQueue;
 import static okhttp3.ConnectionSpec.CLEARTEXT;
 import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
 import static okhttp3.ConnectionSpec.MODERN_TLS;
+import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
 /** HTTP client for REST catalog. */
 public class HttpClient implements RESTClient {
 
-    private static final ObjectMapper OBJECT_MAPPER = RESTObjectMapper.create();
     private static final String THREAD_NAME = "REST-CATALOG-HTTP-CLIENT-THREAD-POOL";
     private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
 
@@ -81,7 +81,11 @@ public class HttpClient implements RESTClient {
     public <T extends RESTResponse> T get(
             String path, Class<T> responseType, Map<String, String> headers) {
         Request request =
-                new Request.Builder().url(uri + path).get().headers(Headers.of(headers)).build();
+                new Request.Builder()
+                        .url(getRequestUrl(path))
+                        .get()
+                        .headers(Headers.of(headers))
+                        .build();
         return exec(request, responseType);
     }
 
@@ -92,7 +96,7 @@ public class HttpClient implements RESTClient {
             RequestBody requestBody = buildRequestBody(body);
             Request request =
                     new Request.Builder()
-                            .url(uri + path)
+                            .url(getRequestUrl(path))
                             .post(requestBody)
                             .headers(Headers.of(headers))
                             .build();
@@ -105,7 +109,11 @@ public class HttpClient implements RESTClient {
     @Override
     public <T extends RESTResponse> T delete(String path, Map<String, String> headers) {
         Request request =
-                new Request.Builder().url(uri + path).delete().headers(Headers.of(headers)).build();
+                new Request.Builder()
+                        .url(getRequestUrl(path))
+                        .delete()
+                        .headers(Headers.of(headers))
+                        .build();
         return exec(request, null);
     }
 
@@ -116,7 +124,7 @@ public class HttpClient implements RESTClient {
             RequestBody requestBody = buildRequestBody(body);
             Request request =
                     new Request.Builder()
-                            .url(uri + path)
+                            .url(getRequestUrl(path))
                             .delete(requestBody)
                             .headers(Headers.of(headers))
                             .build();
@@ -167,6 +175,10 @@ public class HttpClient implements RESTClient {
 
     private RequestBody buildRequestBody(RESTRequest body) throws JsonProcessingException {
         return RequestBody.create(OBJECT_MAPPER.writeValueAsBytes(body), MEDIA_TYPE);
+    }
+
+    private String getRequestUrl(String path) {
+        return StringUtils.isNullOrWhitespaceOnly(path) ? uri : uri + path;
     }
 
     private static OkHttpClient createHttpClient(HttpClientOptions httpClientOptions) {

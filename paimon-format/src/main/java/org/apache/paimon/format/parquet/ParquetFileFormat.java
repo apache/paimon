@@ -71,7 +71,7 @@ public class ParquetFileFormat extends FileFormat {
 
     @Override
     public void validateDataFields(RowType rowType) {
-        ParquetSchemaConverter.convertToParquetMessageType("paimon_schema", rowType);
+        ParquetSchemaConverter.convertToParquetMessageType(rowType);
     }
 
     @Override

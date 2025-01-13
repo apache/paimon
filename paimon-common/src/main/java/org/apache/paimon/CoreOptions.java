@@ -49,6 +49,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -1220,7 +1221,10 @@ public class CoreOptions implements Serializable {
                                     .text("3. 'mark-event': mark partition event to metastore.")
                                     .linebreak()
                                     .text(
-                                            "4. 'custom': use policy class to create a mark-partition policy.")
+                                            "4. 'http-report': report partition mark done to remote http server.")
+                                    .linebreak()
+                                    .text(
+                                            "5. 'custom': use policy class to create a mark-partition policy.")
                                     .linebreak()
                                     .text(
                                             "Both can be configured at the same time: 'done-partition,success-file,mark-event,custom'.")
@@ -1233,6 +1237,27 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The partition mark done class for implement"
                                     + " PartitionMarkDoneAction interface. Only work in custom mark-done-action.");
+
+    public static final ConfigOption<String> PARTITION_MARK_DONE_ACTION_URL =
+            key("partition.mark-done-action.http.url")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Mark done action will reports the partition to the remote http server, this can only be used by http-report partition mark done action.");
+
+    public static final ConfigOption<Duration> PARTITION_MARK_DONE_ACTION_TIMEOUT =
+            key("partition.mark-done-action.http.timeout")
+                    .durationType()
+                    .defaultValue(Duration.ofSeconds(5))
+                    .withDescription(
+                            "Http client connection timeout, this can only be used by http-report partition mark done action.");
+
+    public static final ConfigOption<String> PARTITION_MARK_DONE_ACTION_PARAMS =
+            key("partition.mark-done-action.http.params")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Http client request parameters will be written to the request body, this can only be used by http-report partition mark done action.");
 
     public static final ConfigOption<Boolean> METASTORE_PARTITIONED_TABLE =
             key("metastore.partitioned-table")
@@ -2262,8 +2287,26 @@ public class CoreOptions implements Serializable {
         return options.get(PARTITION_TIMESTAMP_PATTERN);
     }
 
+    public String httpReportMarkDoneActionUrl() {
+        return options.get(PARTITION_MARK_DONE_ACTION_URL);
+    }
+
+    public Duration httpReportMarkDoneActionTimeout() {
+        return options.get(PARTITION_MARK_DONE_ACTION_TIMEOUT);
+    }
+
+    public String httpReportMarkDoneActionParams() {
+        return options.get(PARTITION_MARK_DONE_ACTION_PARAMS);
+    }
+
     public String partitionMarkDoneCustomClass() {
         return options.get(PARTITION_MARK_DONE_CUSTOM_CLASS);
+    }
+
+    public Set<PartitionMarkDoneAction> partitionMarkDoneActions() {
+        return Arrays.stream(options.get(PARTITION_MARK_DONE_ACTION).split(","))
+                .map(x -> PartitionMarkDoneAction.valueOf(x.replace('-', '_').toUpperCase()))
+                .collect(Collectors.toCollection(HashSet::new));
     }
 
     public String consumerId() {
@@ -3162,5 +3205,25 @@ public class CoreOptions implements Serializable {
         INITIALIZING,
         ACTIVATED,
         SUSPENDED
+    }
+
+    /** Partition mark done actions. */
+    public enum PartitionMarkDoneAction {
+        SUCCESS_FILE("success-file"),
+        DONE_PARTITION("done-partition"),
+        MARK_EVENT("mark-event"),
+        HTTP_REPORT("http-report"),
+        CUSTOM("custom");
+
+        private final String value;
+
+        PartitionMarkDoneAction(String value) {
+            this.value = value;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
     }
 }
