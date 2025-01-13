@@ -23,7 +23,8 @@ import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.TimeUtils;
+import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
@@ -48,7 +49,10 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
     @ProcedureHint(
             argument = {
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
-                @ArgumentHint(name = "expiration_time", type = @DataTypeHint(value = "STRING")),
+                @ArgumentHint(
+                        name = "expiration_time",
+                        type = @DataTypeHint(value = "STRING"),
+                        isOptional = true),
                 @ArgumentHint(
                         name = "timestamp_formatter",
                         type = @DataTypeHint("STRING"),
@@ -77,24 +81,38 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
             throws Catalog.TableNotExistException {
         FileStoreTable fileStoreTable = (FileStoreTable) table(tableId);
         FileStore fileStore = fileStoreTable.store();
-        Map<String, String> map = new HashMap<>();
-        map.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
-        map.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
-        map.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
+        HashMap<String, String> tableOptions = new HashMap<>(fileStore.options().toMap());
+
+        // partition.expiration-time should not be null.
+        setTableOptions(tableOptions, CoreOptions.PARTITION_EXPIRATION_TIME.key(), expirationTime);
+        Preconditions.checkArgument(
+                tableOptions.get(CoreOptions.PARTITION_EXPIRATION_TIME.key()) != null,
+                String.format(
+                        "%s should not be null", CoreOptions.PARTITION_EXPIRATION_TIME.key()));
+
+        setTableOptions(
+                tableOptions, CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
+        setTableOptions(
+                tableOptions, CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
+        setTableOptions(
+                tableOptions, CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
+        setTableOptions(
+                tableOptions,
+                CoreOptions.PARTITION_EXPIRATION_MAX_NUM.key(),
+                maxExpires != null ? maxExpires.toString() : null);
+
+        CoreOptions runtimeOptions = CoreOptions.fromMap(tableOptions);
 
         PartitionExpire partitionExpire =
                 new PartitionExpire(
-                        TimeUtils.parseDuration(expirationTime),
+                        runtimeOptions.partitionExpireTime(),
                         Duration.ofMillis(0L),
-                        createPartitionExpireStrategy(
-                                CoreOptions.fromMap(map), fileStore.partitionType()),
+                        createPartitionExpireStrategy(runtimeOptions, fileStore.partitionType()),
                         fileStore.newScan(),
                         fileStore.newCommit(""),
                         fileStoreTable.catalogEnvironment().partitionHandler(),
-                        fileStore.options().partitionExpireMaxNum());
-        if (maxExpires != null) {
-            partitionExpire.withMaxExpireNum(maxExpires);
-        }
+                        runtimeOptions.partitionExpireMaxNum());
+
         List<Map<String, String>> expired = partitionExpire.expire(Long.MAX_VALUE);
         return expired == null || expired.isEmpty()
                 ? new Row[] {Row.of("No expired partitions.")}
@@ -105,5 +123,11 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
                                     return Row.of(r.substring(1, r.length() - 1));
                                 })
                         .toArray(Row[]::new);
+    }
+
+    private void setTableOptions(HashMap<String, String> tableOptions, String key, String value) {
+        if (!StringUtils.isNullOrWhitespaceOnly(value)) {
+            tableOptions.put(key, value);
+        }
     }
 }

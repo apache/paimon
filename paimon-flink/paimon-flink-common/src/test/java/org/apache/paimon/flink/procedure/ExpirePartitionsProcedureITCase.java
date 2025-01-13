@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.CatalogITCaseBase;
 import org.apache.paimon.table.FileStoreTable;
@@ -31,6 +32,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatException;
 
 /** IT Case for {@link ExpirePartitionsProcedure}. */
 public class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
@@ -450,6 +452,79 @@ public class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
 
         assertThat(read(table, consumerReadResult))
                 .containsExactlyInAnyOrder("c:2024-06-03", "Never-expire:9999-09-09");
+    }
+
+    @Test
+    public void testExpirePartitionsWithTableOptions()
+            throws Catalog.TableNotExistException, IOException {
+        sql(
+                "CREATE TABLE T ("
+                        + " k STRING,"
+                        + " dt STRING,"
+                        + " hm STRING,"
+                        + " PRIMARY KEY (k, dt, hm) NOT ENFORCED"
+                        + ") PARTITIONED BY (dt, hm) WITH ("
+                        + " 'bucket' = '1'"
+                        + " ,'partition.expiration-check-interval' = '0 s'"
+                        + " ,'partition.timestamp-pattern' = '$dt $hm'"
+                        + " ,'partition.timestamp-formatter' = 'yyyy/MM/dd HHmm'"
+                        + ")");
+        FileStoreTable table = paimonTable("T");
+        // Do not use yyyy-MM-dd formatter, because it is default.
+        // Table options are correct.
+        sql("INSERT INTO T VALUES ('HunterXHunter', '2024/06/01', '1010')");
+        // This partition never expires.
+        sql("INSERT INTO T VALUES ('Never-expire', '9999/09/09', '1010')");
+
+        Function<InternalRow, String> consumerReadResult =
+                (InternalRow row) ->
+                        row.getString(0) + ":" + row.getString(1) + ":" + row.getString(2);
+        assertThat(read(table, consumerReadResult))
+                .containsExactlyInAnyOrder(
+                        "HunterXHunter:2024/06/01:1010", "Never-expire:9999/09/09:1010");
+
+        // partition.expiration-time should not be null.
+        assertThatException()
+                .isThrownBy(
+                        () ->
+                                callExpirePartitions(
+                                        "CALL sys.expire_partitions("
+                                                + "`table` => 'default.T'"
+                                                + ",timestamp_pattern => '$dt $hm'"
+                                                + ",timestamp_formatter => 'yyyy-MM-dd HHmm')"))
+                .withRootCauseInstanceOf(IllegalArgumentException.class)
+                .withMessageContaining("partition.expiration-time should not be null");
+
+        // Use the specified options : timestamp_pattern => '$dt-$hm', this is a wrong pattern.
+        assertThat(
+                        callExpirePartitions(
+                                "CALL sys.expire_partitions("
+                                        + "`table` => 'default.T'"
+                                        + ", timestamp_pattern => '$dt-$hm'"
+                                        + " , timestamp_formatter = 'yyyy/MM/dd HHmm'"
+                                        + ", expiration_time => '1 d')"))
+                .containsExactlyInAnyOrder("No expired partitions.");
+
+        // Use the specified options : timestamp_formatter => 'yyyy-MM/dd HHmm' , this is a wrong
+        // formatter.
+        assertThat(
+                        callExpirePartitions(
+                                "CALL sys.expire_partitions("
+                                        + "`table` => 'default.T'"
+                                        + ",expiration_time => '1 d'"
+                                        + ",timestamp_formatter => 'yyyy-MM/dd HHmm')"))
+                .containsExactlyInAnyOrder("No expired partitions.");
+
+        // Use the table options.
+        assertThat(
+                        callExpirePartitions(
+                                "CALL sys.expire_partitions("
+                                        + "`table` => 'default.T'"
+                                        + ",expiration_time => '1 d')"))
+                .containsExactlyInAnyOrder("dt=2024/06/01, hm=1010");
+
+        assertThat(read(table, consumerReadResult))
+                .containsExactlyInAnyOrder("Never-expire:9999/09/09:1010");
     }
 
     /** Return a list of expired partitions. */

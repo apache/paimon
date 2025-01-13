@@ -34,7 +34,9 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -124,7 +126,81 @@ public class ExpirePartitionsActionITCase extends ActionITCaseBase {
         assertThat(actual).isEqualTo(expected);
     }
 
+    @Test
+    public void testExpirePartitionsWithTableOptions() throws Exception {
+        HashMap<String, String> tableOptions = new HashMap<>();
+        tableOptions.put("partition.expiration-time", "1 d");
+        tableOptions.put("partition.timestamp-pattern", "$dt $hm");
+        tableOptions.put("partition.timestamp-formatter", "yyyy-MM-dd HH:mm");
+
+        FileStoreTable table = prepareTable(tableOptions);
+        TableScan.Plan plan = table.newReadBuilder().newScan().plan();
+        List<String> actual = getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE);
+        List<String> expected;
+        expected = Arrays.asList("+I[1, 2024-01-01, 01:00]", "+I[2, 9999-09-20, 02:00]");
+
+        assertThat(actual).isEqualTo(expected);
+
+        // Use the specified options : timestamp_pattern => '$dt-$hm', this is a wrong pattern.
+        createAction(
+                        ExpirePartitionsAction.class,
+                        "expire_partitions",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--timestamp_pattern",
+                        "$dt-$hm")
+                .run();
+
+        actual = getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE);
+        assertThat(actual).isEqualTo(expected);
+
+        // Use the specified options : timestamp_formatter => 'yyyy/MM/dd HHmm' , this is a wrong
+        // formatter.
+        createAction(
+                        ExpirePartitionsAction.class,
+                        "expire_partitions",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--timestamp_formatter",
+                        "yyyy/MM/dd HH:mm")
+                .run();
+
+        actual = getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE);
+        assertThat(actual).isEqualTo(expected);
+
+        // Use the table options.
+        createAction(
+                        ExpirePartitionsAction.class,
+                        "expire_partitions",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName)
+                .run();
+
+        plan = table.newReadBuilder().newScan().plan();
+        actual = getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE);
+
+        expected = Collections.singletonList("+I[2, 9999-09-20, 02:00]");
+
+        assertThat(actual).isEqualTo(expected);
+    }
+
     private FileStoreTable prepareTable() throws Exception {
+        return prepareTable(Collections.emptyMap());
+    }
+
+    private FileStoreTable prepareTable(Map<String, String> options) throws Exception {
         init(warehouse);
 
         RowType rowType =
@@ -139,7 +215,7 @@ public class ExpirePartitionsActionITCase extends ActionITCaseBase {
                         new ArrayList<>(Arrays.asList(partitions)),
                         new ArrayList<>(Arrays.asList(pk)),
                         Collections.singletonList("k"),
-                        Collections.emptyMap());
+                        options);
 
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
         write = writeBuilder.newWrite();

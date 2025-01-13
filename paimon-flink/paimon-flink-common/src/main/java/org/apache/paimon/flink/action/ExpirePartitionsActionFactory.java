@@ -32,18 +32,16 @@ public class ExpirePartitionsActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        String expireStrategy = params.get(EXPIRE_STRATEGY);
-        String timestampPattern = params.get(TIMESTAMP_PATTERN);
 
         return Optional.of(
                 new ExpirePartitionsAction(
                         params.getRequired(DATABASE),
                         params.getRequired(TABLE),
                         catalogConfigMap(params),
-                        params.getRequired(EXPIRATIONTIME),
-                        params.getRequired(TIMESTAMPFORMATTER),
-                        timestampPattern,
-                        expireStrategy));
+                        params.get(EXPIRATIONTIME),
+                        params.get(TIMESTAMPFORMATTER),
+                        params.get(TIMESTAMP_PATTERN),
+                        params.get(EXPIRE_STRATEGY)));
     }
 
     @Override

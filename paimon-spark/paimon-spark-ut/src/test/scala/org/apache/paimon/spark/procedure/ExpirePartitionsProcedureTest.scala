@@ -616,4 +616,87 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
       }
     }
   }
+
+  test("Paimon procedure : expire partitions use table options.") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql(s"""
+                       |CREATE TABLE T (k STRING, pt STRING, hm STRING)
+                       |TBLPROPERTIES ('primary-key'='k,pt,hm',
+                       | 'bucket'='1'
+                       | ,'partition.expiration-check-interval' = '0 s'
+                       | ,'partition.timestamp-pattern' = '$$pt $$hm'
+                       | ,'partition.timestamp-formatter' = 'yyyy/MM/dd HH:mm'
+                       | )
+                       | PARTITIONED BY (hm, pt)
+                       |""".stripMargin)
+
+          val location = loadTable("T").location().toString
+
+          val inputData = MemoryStream[(String, String, String)]
+          val stream = inputData
+            .toDS()
+            .toDF("k", "pt", "hm")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], _: Long) =>
+                batch.write.format("paimon").mode("append").save(location)
+            }
+            .start()
+
+          val query = () => spark.sql("SELECT * FROM T")
+
+          try {
+
+            inputData.addData(("a", "2024/06/01", "01:00"))
+            stream.processAllAvailable()
+
+            inputData.addData(("Never-expire", "9999-09-09", "99:99"))
+            stream.processAllAvailable()
+
+            // Use the specified options : timestamp_pattern => '$dt-$hm', this is a wrong pattern.
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.expire_partitions(" +
+                  "table => 'test.T'" +
+                  ", expiration_time => '1 d'" +
+                  ", timestamp_pattern => '$pt-$hm')"),
+              Row("No expired partitions.") :: Nil
+            )
+
+            // Use the specified options : timestamp_formatter => 'yyyy-MM/dd HHmm' , this is a wrong
+            // formatter.
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.expire_partitions(" +
+                  "table => 'test.T'" +
+                  ", expiration_time => '1 d'" +
+                  ", timestamp_pattern => '$pt $hm'" +
+                  ", timestamp_formatter => 'yyyy-MM/dd HH:mm'" +
+                  ")"),
+              Row("No expired partitions.") :: Nil
+            )
+
+            checkAnswer(
+              query(),
+              Row("a", "2024/06/01", "01:00") :: Row("Never-expire", "9999-09-09", "99:99") :: Nil)
+
+            // Use the table options.
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.expire_partitions(table => 'test.T'" +
+                  ", expiration_time => '1 d')"),
+              Row("hm=01:00, pt=2024/06/01") :: Nil
+            )
+
+            checkAnswer(query(), Row("Never-expire", "9999-09-09", "99:99") :: Nil)
+
+          } finally {
+            stream.stop()
+          }
+      }
+    }
+  }
 }

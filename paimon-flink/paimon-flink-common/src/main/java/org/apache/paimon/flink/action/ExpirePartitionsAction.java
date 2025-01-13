@@ -22,7 +22,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.TimeUtils;
+import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.StringUtils;
 
 import java.time.Duration;
 import java.util.HashMap;
@@ -49,23 +50,43 @@ public class ExpirePartitionsAction extends TableActionBase {
                             "Only FileStoreTable supports expire_partitions action. The table type is '%s'.",
                             table.getClass().getName()));
         }
-        Map<String, String> map = new HashMap<>();
-        map.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
-        map.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
-        map.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
 
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         FileStore<?> fileStore = fileStoreTable.store();
+
+        HashMap<String, String> tableOptions = new HashMap<>(fileStore.options().toMap());
+
+        // partition.expiration-time should not be null.
+        setTableOptions(tableOptions, CoreOptions.PARTITION_EXPIRATION_TIME.key(), expirationTime);
+        Preconditions.checkArgument(
+                tableOptions.get(CoreOptions.PARTITION_EXPIRATION_TIME.key()) != null,
+                String.format(
+                        "%s should not be null", CoreOptions.PARTITION_EXPIRATION_TIME.key()));
+
+        setTableOptions(
+                tableOptions, CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
+        setTableOptions(
+                tableOptions, CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
+        setTableOptions(
+                tableOptions, CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
+
+        CoreOptions runtimeOptions = CoreOptions.fromMap(tableOptions);
+
         this.partitionExpire =
                 new PartitionExpire(
-                        TimeUtils.parseDuration(expirationTime),
+                        runtimeOptions.partitionExpireTime(),
                         Duration.ofMillis(0L),
-                        createPartitionExpireStrategy(
-                                CoreOptions.fromMap(map), fileStore.partitionType()),
+                        createPartitionExpireStrategy(runtimeOptions, fileStore.partitionType()),
                         fileStore.newScan(),
                         fileStore.newCommit(""),
                         fileStoreTable.catalogEnvironment().partitionHandler(),
-                        fileStore.options().partitionExpireMaxNum());
+                        runtimeOptions.partitionExpireMaxNum());
+    }
+
+    private void setTableOptions(HashMap<String, String> tableOptions, String key, String value) {
+        if (!StringUtils.isNullOrWhitespaceOnly(value)) {
+            tableOptions.put(key, value);
+        }
     }
 
     @Override
