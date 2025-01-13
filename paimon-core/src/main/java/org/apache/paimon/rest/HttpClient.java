@@ -25,7 +25,6 @@ import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import okhttp3.Dispatcher;
 import okhttp3.Headers;
@@ -45,12 +44,12 @@ import java.util.concurrent.SynchronousQueue;
 import static okhttp3.ConnectionSpec.CLEARTEXT;
 import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
 import static okhttp3.ConnectionSpec.MODERN_TLS;
+import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
 /** HTTP client for REST catalog. */
 public class HttpClient implements RESTClient {
 
-    private static final ObjectMapper OBJECT_MAPPER = RESTObjectMapper.create();
     private static final String THREAD_NAME = "REST-CATALOG-HTTP-CLIENT-THREAD-POOL";
     private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
 

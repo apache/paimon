@@ -78,6 +78,7 @@ import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
+import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
@@ -471,14 +472,17 @@ public class RESTCatalog implements Catalog {
             throw new TableNoPermissionException(identifier, e);
         }
 
+        TableSchema schema = TableSchema.create(response.getSchemaId(), response.getSchema());
         FileStoreTable table =
                 FileStoreTableFactory.create(
                         fileIO(),
-                        new Path(response.getPath()),
-                        TableSchema.create(response.getSchemaId(), response.getSchema()),
-                        // TODO add uuid from server
+                        new Path(schema.options().get(PATH.key())),
+                        schema,
                         new CatalogEnvironment(
-                                identifier, null, Lock.emptyFactory(), catalogLoader()));
+                                identifier,
+                                response.getId(),
+                                Lock.emptyFactory(),
+                                catalogLoader()));
         CoreOptions options = table.coreOptions();
         if (options.type() == TableType.OBJECT_TABLE) {
             String objectLocation = options.objectLocation();
