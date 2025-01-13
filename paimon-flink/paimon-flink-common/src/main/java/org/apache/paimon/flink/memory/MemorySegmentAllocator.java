@@ -62,9 +62,8 @@ public class MemorySegmentAllocator {
             checkNotNull(segment, "Allocate null segment from memory manager for paimon.");
             checkArgument(segment.isOffHeap(), "Segment is not off heap from memory manager.");
             allocatedSegments.add(segment);
-            // TODO Use getOffHeapBuffer in MemorySegment after
-            // https://issues.apache.org/jira/browse/FLINK-32213
-            return MemorySegment.wrapOffHeapMemory((ByteBuffer) offHeapBufferField.get(segment));
+            ByteBuffer offHeapBuffer = segment.getOffHeapBuffer();
+            return MemorySegment.wrapOffHeapMemory(offHeapBuffer);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
