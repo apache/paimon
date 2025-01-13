@@ -392,22 +392,30 @@ public class RESTCatalog implements Catalog {
     @Override
     public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        try {
-            CreatePartitionsRequest request = new CreatePartitionsRequest(identifier, partitions);
-            PartitionsResponse response =
-                    client.post(
-                            resourcePaths.partitions(
-                                    identifier.getDatabaseName(), identifier.getTableName()),
-                            request,
-                            PartitionsResponse.class,
-                            headers());
-            if (response.getFailPartitionSpecs() != null
-                    && !response.getFailPartitionSpecs().isEmpty()) {
-                throw new RuntimeException(
-                        "Create partitions failed: " + response.getFailPartitionSpecs());
+        Table table = getTable(identifier);
+        Options options = Options.fromMap(table.options());
+        if (Boolean.TRUE.equals(options.get(METASTORE_PARTITIONED_TABLE))) {
+            try {
+                CreatePartitionsRequest request =
+                        new CreatePartitionsRequest(identifier, partitions);
+                PartitionsResponse response =
+                        client.post(
+                                resourcePaths.partitions(
+                                        identifier.getDatabaseName(), identifier.getTableName()),
+                                request,
+                                PartitionsResponse.class,
+                                headers());
+                if (response.getFailPartitionSpecs() != null
+                        && !response.getFailPartitionSpecs().isEmpty()) {
+                    // todo: whether this exception is ok?
+                    throw new RuntimeException(
+                            "Create partitions failed: " + response.getFailPartitionSpecs());
+                }
+            } catch (NoSuchResourceException e) {
+                throw new TableNotExistException(identifier);
             }
-        } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
+        } else {
+            throw new UnsupportedOperationException();
         }
     }
 
