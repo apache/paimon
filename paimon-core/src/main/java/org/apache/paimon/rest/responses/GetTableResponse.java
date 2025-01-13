@@ -30,12 +30,16 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class GetTableResponse implements RESTResponse {
 
-    private static final String FIELD_PATH = "path";
+    private static final String FIELD_ID = "id";
+    private static final String FIELD_NAME = "name";
     private static final String FIELD_SCHEMA_ID = "schemaId";
     private static final String FIELD_SCHEMA = "schema";
 
-    @JsonProperty(FIELD_PATH)
-    private final String path;
+    @JsonProperty(FIELD_ID)
+    private final String id;
+
+    @JsonProperty(FIELD_NAME)
+    private final String name;
 
     @JsonProperty(FIELD_SCHEMA_ID)
     private final long schemaId;
@@ -45,17 +49,24 @@ public class GetTableResponse implements RESTResponse {
 
     @JsonCreator
     public GetTableResponse(
-            @JsonProperty(FIELD_PATH) String path,
+            @JsonProperty(FIELD_ID) String id,
+            @JsonProperty(FIELD_NAME) String name,
             @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
             @JsonProperty(FIELD_SCHEMA) Schema schema) {
-        this.path = path;
+        this.id = id;
+        this.name = name;
         this.schemaId = schemaId;
         this.schema = schema;
     }
 
-    @JsonGetter(FIELD_PATH)
-    public String getPath() {
-        return this.path;
+    @JsonGetter(FIELD_ID)
+    public String getId() {
+        return this.id;
+    }
+
+    @JsonGetter(FIELD_NAME)
+    public String getName() {
+        return this.name;
     }
 
     @JsonGetter(FIELD_SCHEMA_ID)

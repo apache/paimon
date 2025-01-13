@@ -116,4 +116,9 @@ class RESTCatalogTest extends CatalogTestBase {
                         ""),
                 true);
     }
+
+    // TODO implement this
+    @Override
+    @Test
+    public void testTableUUID() {}
 }

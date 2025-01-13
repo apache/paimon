@@ -18,7 +18,6 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -42,7 +41,6 @@ import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
@@ -51,11 +49,13 @@ import okhttp3.mockwebserver.RecordedRequest;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.UUID;
+
+import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 
 /** Mock REST server for testing. */
 public class RESTCatalogServer {
 
-    private static final ObjectMapper OBJECT_MAPPER = RESTObjectMapper.create();
     private static final String PREFIX = "paimon";
     private static final String DATABASE_URI = String.format("/v1/%s/databases", PREFIX);
 
@@ -219,9 +219,8 @@ public class RESTCatalogServer {
         FileStoreTable table = (FileStoreTable) catalog.getTable(requestBody.getNewIdentifier());
         RESTResponse response =
                 new GetTableResponse(
-                        AbstractCatalog.newTableLocation(
-                                        catalog.warehouse(), requestBody.getNewIdentifier())
-                                .toString(),
+                        UUID.randomUUID().toString(),
+                        tableName,
                         table.schema().id(),
                         table.schema().toSchema());
         return mockResponse(response, 200);
@@ -251,7 +250,9 @@ public class RESTCatalogServer {
         RESTResponse response;
         if (request.getMethod().equals("GET")) {
             Database database = catalog.getDatabase(databaseName);
-            response = new GetDatabaseResponse(database.name(), database.options());
+            response =
+                    new GetDatabaseResponse(
+                            UUID.randomUUID().toString(), database.name(), database.options());
             return mockResponse(response, 200);
         } else if (request.getMethod().equals("DELETE")) {
             catalog.dropDatabase(databaseName, false, true);
@@ -267,7 +268,12 @@ public class RESTCatalogServer {
             CreateTableRequest requestBody =
                     OBJECT_MAPPER.readValue(request.getBody().readUtf8(), CreateTableRequest.class);
             catalog.createTable(requestBody.getIdentifier(), requestBody.getSchema(), false);
-            response = new GetTableResponse("", 1L, requestBody.getSchema());
+            response =
+                    new GetTableResponse(
+                            UUID.randomUUID().toString(),
+                            requestBody.getIdentifier().getTableName(),
+                            1L,
+                            requestBody.getSchema());
             return mockResponse(response, 200);
         } else if (request.getMethod().equals("GET")) {
             catalog.listTables(databaseName);
@@ -286,8 +292,8 @@ public class RESTCatalogServer {
             FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
             response =
                     new GetTableResponse(
-                            AbstractCatalog.newTableLocation(catalog.warehouse(), identifier)
-                                    .toString(),
+                            UUID.randomUUID().toString(),
+                            tableName,
                             table.schema().id(),
                             table.schema().toSchema());
             return mockResponse(response, 200);
@@ -297,7 +303,12 @@ public class RESTCatalogServer {
                     OBJECT_MAPPER.readValue(request.getBody().readUtf8(), AlterTableRequest.class);
             catalog.alterTable(identifier, requestBody.getChanges(), false);
             FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-            response = new GetTableResponse("", table.schema().id(), table.schema().toSchema());
+            response =
+                    new GetTableResponse(
+                            UUID.randomUUID().toString(),
+                            tableName,
+                            table.schema().id(),
+                            table.schema().toSchema());
             return mockResponse(response, 200);
         } else if (request.getMethod().equals("DELETE")) {
             Identifier identifier = Identifier.create(databaseName, tableName);
