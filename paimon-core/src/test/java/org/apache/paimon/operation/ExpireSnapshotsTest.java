@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.TestFileStore;
@@ -29,6 +30,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
@@ -74,6 +76,7 @@ public class ExpireSnapshotsTest {
     protected final FileIO fileIO = new LocalFileIO();
     protected TestKeyValueGenerator gen;
     @TempDir java.nio.file.Path tempDir;
+    @TempDir java.nio.file.Path tempExternalPath;
     protected TestFileStore store;
     protected SnapshotManager snapshotManager;
 
@@ -111,6 +114,75 @@ public class ExpireSnapshotsTest {
                         .map(p -> new Path(p.toString()))
                         .filter(p -> !filesInUse.contains(p))
                         .collect(Collectors.toList());
+
+        for (int i = 0; i < unusedFileList.size(); i++) {
+            System.out.println("qihouliang111= " + unusedFileList.get(i));
+        }
+
+        for (Path path : filesInUse) {
+            System.out.println("qihouliang222= " + path);
+        }
+
+        // shuffle list
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        for (int i = unusedFileList.size() - 1; i > 0; i--) {
+            int j = random.nextInt(i + 1);
+            Collections.swap(unusedFileList, i, j);
+        }
+
+        // delete some unused files
+        int numFilesToDelete = random.nextInt(unusedFileList.size());
+        for (int i = 0; i < numFilesToDelete; i++) {
+            fileIO.deleteQuietly(unusedFileList.get(i));
+        }
+
+        expire.expire();
+
+        for (int i = 1; i < latestSnapshotId; i++) {
+            assertThat(snapshotManager.snapshotExists(i)).isFalse();
+        }
+        assertThat(snapshotManager.snapshotExists(latestSnapshotId)).isTrue();
+        assertSnapshot(latestSnapshotId, allData, snapshotPositions);
+    }
+
+    @Test
+    public void testExpireWithMissingFilesWithExternalPath() throws Exception {
+        String externalPath = "file://" + tempExternalPath.toString();
+        store.options().toConfiguration().set(CoreOptions.DATA_FILE_EXTERNAL_PATHS, externalPath);
+        store.options()
+                .toConfiguration()
+                .set(
+                        CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY,
+                        ExternalPathStrategy.ROUND_ROBIN);
+        ExpireSnapshots expire = store.newExpire(1, 1, 1);
+
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(5, allData, snapshotPositions);
+
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+        Set<Path> filesInUseTmp = store.getFilesInUse(latestSnapshotId);
+
+        Set<Path> filesInUse =
+                filesInUseTmp.stream()
+                        .map(p -> new Path(Paths.get(p.toUri().getPath()).toString()))
+                        .collect(Collectors.toSet());
+        List<Path> unusedFileList =
+                Files.walk(Paths.get(tempDir.toString()))
+                        .filter(Files::isRegularFile)
+                        .filter(p -> !p.getFileName().toString().startsWith("snapshot"))
+                        .filter(p -> !p.getFileName().toString().startsWith("schema"))
+                        .map(p -> new Path(p.toString()))
+                        .filter(p -> !filesInUse.contains(p))
+                        .collect(Collectors.toList());
+        unusedFileList.addAll(
+                Files.walk(Paths.get(tempExternalPath.toString()))
+                        .filter(Files::isRegularFile)
+                        .filter(p -> !p.getFileName().toString().startsWith("snapshot"))
+                        .filter(p -> !p.getFileName().toString().startsWith("schema"))
+                        .map(p -> new Path(p.toString()))
+                        .filter(p -> !filesInUse.contains(p))
+                        .collect(Collectors.toList()));
 
         // shuffle list
         ThreadLocalRandom random = ThreadLocalRandom.current();
@@ -217,6 +289,67 @@ public class ExpireSnapshotsTest {
                         FileSource.APPEND,
                         null,
                         null);
+        ManifestEntry add = new ManifestEntry(FileKind.ADD, partition, 0, 1, dataFile);
+        ManifestEntry delete = new ManifestEntry(FileKind.DELETE, partition, 0, 1, dataFile);
+
+        // expire
+        expire.snapshotDeletion()
+                .cleanUnusedDataFile(
+                        Arrays.asList(ExpireFileEntry.from(add), ExpireFileEntry.from(delete)));
+
+        // check
+        assertThat(fileIO.exists(myDataFile)).isFalse();
+        assertThat(fileIO.exists(extra1)).isFalse();
+        assertThat(fileIO.exists(extra2)).isFalse();
+
+        store.assertCleaned();
+    }
+
+    @Test
+    public void testExpireExtraFilesWithExternalPath() throws IOException {
+        String externalPath = "file://" + tempExternalPath.toString();
+        store.options().toConfiguration().set(CoreOptions.DATA_FILE_EXTERNAL_PATHS, externalPath);
+        store.options()
+                .toConfiguration()
+                .set(
+                        CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY,
+                        ExternalPathStrategy.ROUND_ROBIN);
+        ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) store.newExpire(1, 3, Long.MAX_VALUE);
+        // write test files
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        DataFilePathFactory dataFilePathFactory =
+                store.pathFactory().createDataFilePathFactory(partition, 0);
+        Path myDataFile = dataFilePathFactory.newPath();
+        String fileName = myDataFile.getName();
+        new LocalFileIO().tryToWriteAtomic(myDataFile, "1");
+        Path extra1 = new Path(myDataFile.getParent(), "extra1");
+        fileIO.tryToWriteAtomic(extra1, "2");
+        Path extra2 = new Path(myDataFile.getParent(), "extra2");
+        fileIO.tryToWriteAtomic(extra2, "3");
+
+        // create DataFileMeta and ManifestEntry
+        List<String> extraFiles = Arrays.asList("extra1", "extra2");
+        DataFileMeta dataFile =
+                new DataFileMeta(
+                        fileName,
+                        1,
+                        1,
+                        EMPTY_ROW,
+                        EMPTY_ROW,
+                        null,
+                        null,
+                        0,
+                        1,
+                        0,
+                        0,
+                        extraFiles,
+                        Timestamp.now(),
+                        0L,
+                        null,
+                        FileSource.APPEND,
+                        null,
+                        myDataFile.toString());
         ManifestEntry add = new ManifestEntry(FileKind.ADD, partition, 0, 1, dataFile);
         ManifestEntry delete = new ManifestEntry(FileKind.DELETE, partition, 0, 1, dataFile);
 
