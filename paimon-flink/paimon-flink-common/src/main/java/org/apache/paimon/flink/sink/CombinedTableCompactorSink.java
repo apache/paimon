@@ -107,7 +107,7 @@ public class CombinedTableCompactorSink implements Serializable {
                         .transform(
                                 String.format("%s-%s", "Multi-Bucket-Table", WRITER_NAME),
                                 new MultiTableCommittableTypeInfo(),
-                                combinedMultiComacptionWriteOperator(
+                                combinedMultiCompactionWriteOperator(
                                         env.getCheckpointConfig(),
                                         isStreaming,
                                         fullCompaction,
@@ -176,7 +176,7 @@ public class CombinedTableCompactorSink implements Serializable {
 
     // TODO:refactor FlinkSink to adopt this sink
     protected OneInputStreamOperatorFactory<RowData, MultiTableCommittable>
-            combinedMultiComacptionWriteOperator(
+            combinedMultiCompactionWriteOperator(
                     CheckpointConfig checkpointConfig,
                     boolean isStreaming,
                     boolean fullCompaction,
