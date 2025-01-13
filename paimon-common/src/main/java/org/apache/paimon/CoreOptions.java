@@ -475,8 +475,7 @@ public class CoreOptions implements Serializable {
             key("write-buffer-spillable")
                     .booleanType()
                     .noDefaultValue()
-                    .withDescription(
-                            "Whether the write buffer can be spillable. Enabled by default when using object storage.");
+                    .withDescription("Whether the write buffer can be spillable.");
 
     public static final ConfigOption<Boolean> WRITE_BUFFER_FOR_APPEND =
             key("write-buffer-for-append")
