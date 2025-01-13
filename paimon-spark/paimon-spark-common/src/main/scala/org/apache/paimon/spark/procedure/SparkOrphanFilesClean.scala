@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.orphan
+package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.{utils, Snapshot}
 import org.apache.paimon.catalog.{Catalog, Identifier}

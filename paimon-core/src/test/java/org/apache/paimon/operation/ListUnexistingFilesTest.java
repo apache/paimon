@@ -65,7 +65,8 @@ public class ListUnexistingFilesTest {
         int numFiles = 10;
         int[] numDeletes = new int[numPartitions];
         FileStoreTable table =
-                prepareRandomlyDeletedTable(tempDir.toString(), bucket, numFiles, numDeletes);
+                prepareRandomlyDeletedTable(
+                        tempDir.toString(), "mydb", "t", bucket, numFiles, numDeletes);
 
         Function<Integer, BinaryRow> binaryRow =
                 i -> {
@@ -84,7 +85,13 @@ public class ListUnexistingFilesTest {
     }
 
     public static FileStoreTable prepareRandomlyDeletedTable(
-            String warehouse, int bucket, int numFiles, int[] numDeletes) throws Exception {
+            String warehouse,
+            String databaseName,
+            String tableName,
+            int bucket,
+            int numFiles,
+            int[] numDeletes)
+            throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
@@ -96,7 +103,13 @@ public class ListUnexistingFilesTest {
             options.put(CoreOptions.BUCKET_KEY.key(), "id");
         }
         FileStoreTable table =
-                createPaimonTable(warehouse, rowType, Collections.singletonList("pt"), options);
+                createPaimonTable(
+                        warehouse,
+                        databaseName,
+                        tableName,
+                        rowType,
+                        Collections.singletonList("pt"),
+                        options);
 
         String commitUser = UUID.randomUUID().toString();
         TableWriteImpl<?> write = table.newWrite(commitUser);
@@ -141,6 +154,8 @@ public class ListUnexistingFilesTest {
 
     private static FileStoreTable createPaimonTable(
             String warehouse,
+            String databaseName,
+            String tableName,
             RowType rowType,
             List<String> partitionKeys,
             Map<String, String> customOptions)
@@ -157,8 +172,8 @@ public class ListUnexistingFilesTest {
                         "");
 
         try (FileSystemCatalog paimonCatalog = new FileSystemCatalog(fileIO, path)) {
-            paimonCatalog.createDatabase("mydb", false);
-            Identifier paimonIdentifier = Identifier.create("mydb", "t");
+            paimonCatalog.createDatabase(databaseName, true);
+            Identifier paimonIdentifier = Identifier.create(databaseName, tableName);
             paimonCatalog.createTable(paimonIdentifier, schema, false);
             return (FileStoreTable) paimonCatalog.getTable(paimonIdentifier);
         }

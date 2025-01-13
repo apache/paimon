@@ -30,11 +30,12 @@ import org.apache.paimon.utils.ThreadPoolUtils;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadPoolExecutor;
 
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
@@ -55,31 +56,49 @@ public class ListUnexistingFiles {
     }
 
     public Map<Integer, Map<String, DataFileMeta>> list(BinaryRow partition) throws Exception {
-        Map<Integer, Map<String, DataFileMeta>> result = new ConcurrentHashMap<>();
+        Map<Integer, Map<String, DataFileMeta>> result = new HashMap<>();
         List<Split> splits =
                 table.newScan()
                         .withPartitionFilter(Collections.singletonList(partition))
                         .plan()
                         .splits();
-        ThreadPoolUtils.randomlyOnlyExecute(
-                executor, split -> listFilesInDataSplit((DataSplit) split, result), splits);
+        Iterator<ListResult> it =
+                ThreadPoolUtils.randomlyExecuteSequentialReturn(
+                        executor, split -> listFilesInDataSplit((DataSplit) split), splits);
+        while (it.hasNext()) {
+            ListResult item = it.next();
+            result.computeIfAbsent(item.bucket, k -> new HashMap<>()).put(item.path, item.meta);
+        }
         return result;
     }
 
-    private void listFilesInDataSplit(
-            DataSplit dataSplit, Map<Integer, Map<String, DataFileMeta>> result) {
+    private List<ListResult> listFilesInDataSplit(DataSplit dataSplit) {
+        List<ListResult> results = new ArrayList<>();
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(dataSplit.partition(), dataSplit.bucket());
         for (DataFileMeta meta : dataSplit.dataFiles()) {
             Path path = dataFilePathFactory.toPath(meta);
             try {
                 if (!table.fileIO().exists(path)) {
-                    result.computeIfAbsent(dataSplit.bucket(), k -> new HashMap<>())
-                            .put(path.toString(), meta);
+                    results.add(new ListResult(dataSplit.bucket(), path.toString(), meta));
                 }
             } catch (IOException e) {
                 throw new UncheckedIOException("Cannot determine if file " + path + " exists.", e);
             }
+        }
+        return results;
+    }
+
+    private static class ListResult {
+
+        private final int bucket;
+        private final String path;
+        private final DataFileMeta meta;
+
+        private ListResult(int bucket, String path, DataFileMeta meta) {
+            this.bucket = bucket;
+            this.path = path;
+            this.meta = meta;
         }
     }
 }

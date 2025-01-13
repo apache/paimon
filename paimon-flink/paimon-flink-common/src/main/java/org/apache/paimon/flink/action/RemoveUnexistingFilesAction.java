@@ -106,7 +106,7 @@ public class RemoveUnexistingFilesAction extends TableActionBase {
 
     public DataStream<String> buildDataStream() throws Exception {
         FileStoreTable fileStoreTable = (FileStoreTable) table;
-        List<BinaryRow> binaryPartitions = ((FileStoreTable) table).newScan().listPartitions();
+        List<BinaryRow> binaryPartitions = fileStoreTable.newScan().listPartitions();
 
         SingleOutputStreamOperator<byte[]> source =
                 env.fromData(
@@ -123,7 +123,7 @@ public class RemoveUnexistingFilesAction extends TableActionBase {
                         new CommittableTypeInfo(),
                         new WorkerOperator(fileStoreTable));
         if (parallelism != null) {
-            worker = worker.setParallelism(parallelism);
+            worker = worker.setParallelism(Math.min(parallelism, binaryPartitions.size()));
         }
 
         DataStream<String> result = worker.getSideOutput(RESULT_SIDE_OUTPUT);
