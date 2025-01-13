@@ -422,7 +422,7 @@ public class HiveCatalogTest extends CatalogTestBase {
     @Override
     protected void checkPartition(Partition expected, Partition actual) {
         assertThat(actual.recordCount()).isEqualTo(expected.recordCount());
-        assertThat(actual.lastFileCreationTime() / 1000).isEqualTo(expected.lastFileCreationTime());
+        assertThat(actual.lastFileCreationTime()).isEqualTo(expected.lastFileCreationTime() / 1000);
     }
 
     @Test
