@@ -44,7 +44,7 @@ import java.util.Optional;
  *  CALL sys.clear_consumers('tableId', 'consumerIds') or CALL sys.clear_consumers('tableId', 'consumerIds', false)
  *
  *  -- clear all consumers in the table
- *  CALL sys.clear_unspecified_consumers('tableId')
+ *  CALL sys.clear_consumers('tableId')
  * </code></pre>
  */
 public class ClearConsumersProcedure extends ProcedureBase {
