@@ -312,4 +312,159 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         Optional<Consumer> consumer3 = consumerManager.consumer("myid");
         assertThat(consumer3).isNotPresent();
     }
+
+    @ParameterizedTest
+    @Timeout(120)
+    @ValueSource(strings = {"procedure_indexed", "procedure_named"})
+    public void testClearConsumers(String invoker) throws Exception {
+        init(warehouse);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"pk1", "col1"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("pk1"),
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = writeBuilder.newWrite();
+        commit = writeBuilder.newCommit();
+
+        // 3 snapshots
+        writeData(rowData(1L, BinaryString.fromString("Hi")));
+        writeData(rowData(2L, BinaryString.fromString("Hello")));
+        writeData(rowData(3L, BinaryString.fromString("Paimon")));
+
+        // use consumer streaming read table
+        BlockingIterator<Row, Row> iterator1 =
+                testStreamingRead(
+                        "SELECT * FROM `"
+                                + tableName
+                                + "` /*+ OPTIONS('consumer-id'='myid1','consumer.expiration-time'='3h') */",
+                        Arrays.asList(
+                                changelogRow("+I", 1L, "Hi"),
+                                changelogRow("+I", 2L, "Hello"),
+                                changelogRow("+I", 3L, "Paimon")));
+
+        ConsumerManager consumerManager = new ConsumerManager(table.fileIO(), table.location());
+        while (!consumerManager.consumer("myid1").isPresent()) {
+            Thread.sleep(1000);
+        }
+        iterator1.close();
+
+        // use consumer streaming read table
+        BlockingIterator<Row, Row> iterator2 =
+                testStreamingRead(
+                        "SELECT * FROM `"
+                                + tableName
+                                + "` /*+ OPTIONS('consumer-id'='myid2','consumer.expiration-time'='3h') */",
+                        Arrays.asList(
+                                changelogRow("+I", 1L, "Hi"),
+                                changelogRow("+I", 2L, "Hello"),
+                                changelogRow("+I", 3L, "Paimon")));
+
+        while (!consumerManager.consumer("myid2").isPresent()) {
+            Thread.sleep(1000);
+        }
+        iterator2.close();
+
+        // use consumer streaming read table
+        BlockingIterator<Row, Row> iterator3 =
+                testStreamingRead(
+                        "SELECT * FROM `"
+                                + tableName
+                                + "` /*+ OPTIONS('consumer-id'='myid3','consumer.expiration-time'='3h') */",
+                        Arrays.asList(
+                                changelogRow("+I", 1L, "Hi"),
+                                changelogRow("+I", 2L, "Hello"),
+                                changelogRow("+I", 3L, "Paimon")));
+
+        while (!consumerManager.consumer("myid3").isPresent()) {
+            Thread.sleep(1000);
+        }
+        iterator3.close();
+
+        Optional<Consumer> consumer1 = consumerManager.consumer("myid1");
+        Optional<Consumer> consumer2 = consumerManager.consumer("myid2");
+        Optional<Consumer> consumer3 = consumerManager.consumer("myid3");
+        assertThat(consumer1).isPresent();
+        assertThat(consumer2).isPresent();
+        assertThat(consumer3).isPresent();
+
+        // clear all consumers except the specified consumer in the table
+        switch (invoker) {
+            case "procedure_indexed":
+                executeSQL(
+                        String.format(
+                                "CALL sys.clear_consumers('%s.%s', 'myid1,myid2', true)",
+                                database, tableName));
+                break;
+            case "procedure_named":
+                executeSQL(
+                        String.format(
+                                "CALL sys.clear_consumers(`table` => '%s.%s', consumer_ids => 'myid1,myid2', clear_unspecified => cast(true as BOOLEAN))",
+                                database, tableName));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
+        }
+
+        Optional<Consumer> consumer4 = consumerManager.consumer("myid1");
+        Optional<Consumer> consumer5 = consumerManager.consumer("myid2");
+        Optional<Consumer> consumer6 = consumerManager.consumer("myid3");
+        assertThat(consumer4).isPresent();
+        assertThat(consumer5).isPresent();
+        assertThat(consumer6).isNotPresent();
+
+        // clear all specified consumers in the table
+        switch (invoker) {
+            case "procedure_indexed":
+                executeSQL(
+                        String.format(
+                                "CALL sys.clear_consumers('%s.%s', 'myid1')", database, tableName));
+                break;
+            case "procedure_named":
+                executeSQL(
+                        String.format(
+                                "CALL sys.clear_consumers(`table` => '%s.%s', consumer_ids => 'myid1')",
+                                database, tableName));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
+        }
+
+        Optional<Consumer> consumer7 = consumerManager.consumer("myid1");
+        Optional<Consumer> consumer8 = consumerManager.consumer("myid2");
+        Optional<Consumer> consumer9 = consumerManager.consumer("myid3");
+        assertThat(consumer7).isNotPresent();
+        assertThat(consumer8).isPresent();
+        assertThat(consumer9).isNotPresent();
+
+        // clear all consumers in the table
+        switch (invoker) {
+            case "procedure_indexed":
+                executeSQL(String.format("CALL sys.clear_consumers('%s.%s')", database, tableName));
+                break;
+            case "procedure_named":
+                executeSQL(
+                        String.format(
+                                "CALL sys.clear_consumers(`table` => '%s.%s')",
+                                database, tableName));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
+        }
+
+        Optional<Consumer> consumer10 = consumerManager.consumer("myid1");
+        Optional<Consumer> consumer11 = consumerManager.consumer("myid2");
+        Optional<Consumer> consumer12 = consumerManager.consumer("myid3");
+        assertThat(consumer10).isNotPresent();
+        assertThat(consumer11).isNotPresent();
+        assertThat(consumer12).isNotPresent();
+    }
 }
