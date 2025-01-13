@@ -29,14 +29,12 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
-import org.apache.paimon.rest.responses.AlterPartitionsResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
-import org.apache.paimon.rest.responses.PartitionsResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.types.DataField;
@@ -143,12 +141,6 @@ public class MockRESTMessage {
         return new DropPartitionsRequest(ImmutableList.of(Collections.singletonMap("pt", "1")));
     }
 
-    public static PartitionsResponse partitionResponse() {
-        Map<String, String> spec = new HashMap<>();
-        spec.put("f0", "1");
-        return new PartitionsResponse(ImmutableList.of(spec), ImmutableList.of());
-    }
-
     public static ListPartitionsResponse listPartitionsResponse() {
         Map<String, String> spec = new HashMap<>();
         spec.put("f0", "1");
@@ -236,11 +228,6 @@ public class MockRESTMessage {
 
     public static AlterPartitionsRequest alterPartitionsRequest() {
         return new AlterPartitionsRequest(ImmutableList.of(partition()));
-    }
-
-    public static AlterPartitionsResponse alterPartitionsResponse() {
-        return new AlterPartitionsResponse(
-                ImmutableList.of(partition()), ImmutableList.of(partition()));
     }
 
     private static Partition partition() {

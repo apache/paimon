@@ -91,6 +91,12 @@ public class HttpClient implements RESTClient {
 
     @Override
     public <T extends RESTResponse> T post(
+            String path, RESTRequest body, Map<String, String> headers) {
+        return post(path, body, null, headers);
+    }
+
+    @Override
+    public <T extends RESTResponse> T post(
             String path, RESTRequest body, Class<T> responseType, Map<String, String> headers) {
         try {
             RequestBody requestBody = buildRequestBody(body);

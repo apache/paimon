@@ -46,9 +46,9 @@ import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
-import org.apache.paimon.rest.responses.AlterPartitionsResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
@@ -57,7 +57,6 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
-import org.apache.paimon.rest.responses.PartitionsResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
@@ -404,19 +403,11 @@ public class RESTCatalog implements Catalog {
         if (Boolean.TRUE.equals(options.get(METASTORE_PARTITIONED_TABLE))) {
             try {
                 CreatePartitionsRequest request = new CreatePartitionsRequest(partitions);
-                PartitionsResponse response =
-                        client.post(
-                                resourcePaths.partitions(
-                                        identifier.getDatabaseName(), identifier.getTableName()),
-                                request,
-                                PartitionsResponse.class,
-                                headers());
-                if (response.getFailPartitionSpecs() != null
-                        && !response.getFailPartitionSpecs().isEmpty()) {
-                    // todo: whether this exception is ok?
-                    throw new RuntimeException(
-                            "Create partitions failed: " + response.getFailPartitionSpecs());
-                }
+                client.post(
+                        resourcePaths.partitions(
+                                identifier.getDatabaseName(), identifier.getTableName()),
+                        request,
+                        headers());
             } catch (NoSuchResourceException e) {
                 throw new TableNotExistException(identifier);
             }
@@ -433,18 +424,11 @@ public class RESTCatalog implements Catalog {
         if (Boolean.TRUE.equals(options.get(METASTORE_PARTITIONED_TABLE))) {
             try {
                 DropPartitionsRequest request = new DropPartitionsRequest(partitions);
-                PartitionsResponse response =
-                        client.post(
-                                resourcePaths.dropPartitions(
-                                        identifier.getDatabaseName(), identifier.getTableName()),
-                                request,
-                                PartitionsResponse.class,
-                                headers());
-                if (response.getFailPartitionSpecs() != null
-                        && !response.getFailPartitionSpecs().isEmpty()) {
-                    throw new RuntimeException(
-                            "Drop partitions failed: " + response.getFailPartitionSpecs());
-                }
+                client.post(
+                        resourcePaths.dropPartitions(
+                                identifier.getDatabaseName(), identifier.getTableName()),
+                        request,
+                        headers());
             } catch (NoSuchResourceException e) {
                 throw new TableNotExistException(identifier);
             }
@@ -469,18 +453,11 @@ public class RESTCatalog implements Catalog {
         if (Boolean.TRUE.equals(options.get(METASTORE_PARTITIONED_TABLE))) {
             try {
                 AlterPartitionsRequest request = new AlterPartitionsRequest(partitions);
-                AlterPartitionsResponse response =
-                        client.post(
-                                resourcePaths.alterPartitions(
-                                        identifier.getDatabaseName(), identifier.getTableName()),
-                                request,
-                                AlterPartitionsResponse.class,
-                                headers());
-                if (response.getFailPartitions() != null
-                        && !response.getFailPartitions().isEmpty()) {
-                    throw new RuntimeException(
-                            "Alter partitions failed: " + response.getFailPartitions());
-                }
+                client.post(
+                        resourcePaths.alterPartitions(
+                                identifier.getDatabaseName(), identifier.getTableName()),
+                        request,
+                        headers());
             } catch (NoSuchResourceException e) {
                 throw new TableNotExistException(identifier);
             }
@@ -490,6 +467,20 @@ public class RESTCatalog implements Catalog {
     @Override
     public void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
+        Table table = getTable(identifier);
+        Options options = Options.fromMap(table.options());
+        if (Boolean.TRUE.equals(options.get(METASTORE_PARTITIONED_TABLE))) {
+            try {
+                MarkDonePartitionsRequest request = new MarkDonePartitionsRequest(partitions);
+                client.post(
+                        resourcePaths.markDonePartitions(
+                                identifier.getDatabaseName(), identifier.getTableName()),
+                        request,
+                        headers());
+            } catch (NoSuchResourceException e) {
+                throw new TableNotExistException(identifier);
+            }
+        }
         throw new UnsupportedOperationException();
     }
 

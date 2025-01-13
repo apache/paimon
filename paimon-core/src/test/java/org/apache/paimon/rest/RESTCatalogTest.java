@@ -123,6 +123,21 @@ class RESTCatalogTest extends CatalogTestBase {
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 
+    @Test
+    void testMarkDonePartitionsWhenMetastorePartitionedIsFalse() throws Exception {
+        Identifier identifier = Identifier.create("test_db", "test_table");
+        createTable(
+                identifier,
+                ImmutableMap.of(METASTORE_PARTITIONED_TABLE.key(), "" + false),
+                Lists.newArrayList("col1"));
+        assertThatThrownBy(
+                        () ->
+                                catalog.markDonePartitions(
+                                        identifier,
+                                        Arrays.asList(Collections.singletonMap("col1", "1"))))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
     @Override
     protected boolean supportsFormatTable() {
         return true;

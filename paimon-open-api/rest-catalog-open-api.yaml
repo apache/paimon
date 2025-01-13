@@ -471,11 +471,7 @@ paths:
               $ref: '#/components/schemas/CreatePartitionsRequest'
       responses:
         "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PartitionsResponse'
+          description: Success, no content
         "404":
           description: Resource not found
           content:
@@ -513,11 +509,7 @@ paths:
               $ref: '#/components/schemas/DropPartitionsRequest'
       responses:
         "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PartitionsResponse'
+          description: Success, no content
         "404":
           description: Resource not found
           content:
@@ -555,11 +547,45 @@ paths:
               $ref: '#/components/schemas/AlterPartitionsRequest'
       responses:
         "200":
-          description: OK
+          description: Success, no content
+        "404":
+          description: Resource not found
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AlterPartitionsResponse'
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/partitions/mark:
+    post:
+      tags:
+        - partition
+      summary: MarkDone partitions
+      operationId: markDonePartitions
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarkDonePartitionsRequest'
+      responses:
+        "200":
+          description: Success, no content
         "404":
           description: Resource not found
           content:
@@ -587,6 +613,20 @@ components:
           items:
             type: object
     DropPartitionsRequest:
+      type: object
+      properties:
+        specs:
+          type: array
+          items:
+            type: object
+    AlterTableRequest:
+      type: object
+      properties:
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SchemaChange'
+    MarkDonePartitionsRequest:
       type: object
       properties:
         specs:
@@ -724,13 +764,6 @@ components:
           $ref: '#/components/schemas/Schema'
         uuid:
           type: string
-    AlterTableRequest:
-      type: object
-      properties:
-        changes:
-          type: array
-          items:
-            $ref: '#/components/schemas/SchemaChange'
     SchemaChange:
       anyOf:
         - $ref: '#/components/schemas/SetOption'
@@ -943,15 +976,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Partition'
-    PartitionsResponse:
-      type: object
-      properties:
-        successPartitionSpecs:
-          type: array
-          items: object
-        failPartitionSpecs:
-          type: array
-          items: object
     Partition:
       type: object
       properties:
@@ -969,17 +993,6 @@ components:
         lastFileCreationTime:
           type: integer
           format: int64
-    AlterPartitionsResponse:
-      type: object
-      properties:
-        successPartitions:
-          type: array
-          items:
-            $ref: '#/components/schemas/Partition'
-        failPartitions:
-          type: array
-          items:
-            $ref: '#/components/schemas/Partition'
   securitySchemes:
     BearerAuth:
       type: http

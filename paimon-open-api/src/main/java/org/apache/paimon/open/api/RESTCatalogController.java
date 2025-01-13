@@ -27,9 +27,9 @@ import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
-import org.apache.paimon.rest.responses.AlterPartitionsResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
@@ -38,7 +38,6 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
-import org.apache.paimon.rest.responses.PartitionsResponse;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -393,9 +392,7 @@ public class RESTCatalogController {
             summary = "Create partition",
             tags = {"partition"})
     @ApiResponses({
-        @ApiResponse(
-                responseCode = "200",
-                content = {@Content(schema = @Schema(implementation = PartitionsResponse.class))}),
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
@@ -405,23 +402,17 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema())})
     })
     @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/partitions")
-    public PartitionsResponse createPartitions(
+    public void createPartitions(
             @PathVariable String prefix,
             @PathVariable String database,
             @PathVariable String table,
-            @RequestBody CreatePartitionsRequest request) {
-        Map<String, String> spec = new HashMap<>();
-        spec.put("f1", "1");
-        return new PartitionsResponse(ImmutableList.of(spec), ImmutableList.of());
-    }
+            @RequestBody CreatePartitionsRequest request) {}
 
     @Operation(
             summary = "Drop partitions",
             tags = {"partition"})
     @ApiResponses({
-        @ApiResponse(
-                responseCode = "200",
-                content = {@Content(schema = @Schema(implementation = PartitionsResponse.class))}),
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
@@ -431,21 +422,17 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema())})
     })
     @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/partitions/drop")
-    public PartitionsResponse dropPartitions(
+    public void dropPartitions(
             @PathVariable String prefix,
             @PathVariable String database,
             @PathVariable String table,
-            @RequestBody DropPartitionsRequest request) {
-        return new PartitionsResponse(ImmutableList.of(), ImmutableList.of());
-    }
+            @RequestBody DropPartitionsRequest request) {}
 
     @Operation(
-            summary = "Drop partitions",
+            summary = "Alter partitions",
             tags = {"partition"})
     @ApiResponses({
-        @ApiResponse(
-                responseCode = "200",
-                content = {@Content(schema = @Schema(implementation = PartitionsResponse.class))}),
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
@@ -455,11 +442,29 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema())})
     })
     @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/partitions/alter")
-    public AlterPartitionsResponse alterPartitions(
+    public void alterPartitions(
             @PathVariable String prefix,
             @PathVariable String database,
             @PathVariable String table,
-            @RequestBody AlterPartitionsRequest request) {
-        return new AlterPartitionsResponse(ImmutableList.of(), ImmutableList.of());
-    }
+            @RequestBody AlterPartitionsRequest request) {}
+
+    @Operation(
+            summary = "MarkDone partitions",
+            tags = {"partition"})
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/partitions/mark")
+    public void markDonePartitions(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table,
+            @RequestBody MarkDonePartitionsRequest request) {}
 }
