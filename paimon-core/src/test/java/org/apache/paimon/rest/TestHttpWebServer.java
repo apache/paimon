@@ -19,7 +19,6 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
@@ -28,11 +27,12 @@ import okhttp3.mockwebserver.RecordedRequest;
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
+import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
+
 /** Mock a http web service locally. */
 public class TestHttpWebServer {
 
     private MockWebServer mockWebServer;
-    private final ObjectMapper objectMapper = RESTObjectMapper.create();
     private String baseUrl;
     private final String path;
 
@@ -63,17 +63,8 @@ public class TestHttpWebServer {
         mockWebServer.enqueue(mockResponseObj);
     }
 
-    public void enqueueResponse(RESTResponse response, Integer code)
-            throws JsonProcessingException {
-        enqueueResponse(createResponseBody(response), code);
-    }
-
     public String getBaseUrl() {
         return baseUrl;
-    }
-
-    public ObjectMapper getObjectMapper() {
-        return objectMapper;
     }
 
     public MockResponse generateMockResponse(String data, Integer code) {
@@ -84,15 +75,10 @@ public class TestHttpWebServer {
     }
 
     public String createResponseBody(RESTResponse response) throws JsonProcessingException {
-        return objectMapper.writeValueAsString(response);
+        return OBJECT_MAPPER.writeValueAsString(response);
     }
 
     public <T> T readRequestBody(String body, Class<T> requestType) throws JsonProcessingException {
-        return objectMapper.readValue(body, requestType);
-    }
-
-    public <T> T readResponseBody(String body, Class<T> responseType)
-            throws JsonProcessingException {
-        return objectMapper.readValue(body, responseType);
+        return OBJECT_MAPPER.readValue(body, requestType);
     }
 }
