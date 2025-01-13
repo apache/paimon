@@ -57,7 +57,6 @@ public class GetTableResponse implements RESTResponse {
         this.name = name;
         this.schemaId = schemaId;
         this.schema = schema;
-        this.uuid = uuid;
     }
 
     @JsonGetter(FIELD_ID)

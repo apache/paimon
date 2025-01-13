@@ -293,7 +293,9 @@ public class RESTCatalogServer {
         switch (request.getMethod()) {
             case "GET":
                 Database database = catalog.getDatabase(databaseName);
-                response = new GetDatabaseResponse(database.name(), database.options());
+                response =
+                        new GetDatabaseResponse(
+                                UUID.randomUUID().toString(), database.name(), database.options());
                 return mockResponse(response, 200);
             case "DELETE":
                 catalog.dropDatabase(databaseName, false, true);
@@ -318,7 +320,7 @@ public class RESTCatalogServer {
                 catalog.createTable(requestBody.getIdentifier(), requestBody.getSchema(), false);
                 response =
                         new GetTableResponse(
-                                "", 1L, requestBody.getSchema(), UUID.randomUUID().toString());
+                                UUID.randomUUID().toString(), "", 1L, requestBody.getSchema());
                 return mockResponse(response, 200);
             default:
                 return new MockResponse().setResponseCode(404);
@@ -393,11 +395,7 @@ public class RESTCatalogServer {
                             table.options(),
                             table.comment().orElse(null));
         }
-        return new GetTableResponse(
-                table.id(),
-                table.name(),
-                schemaId,
-                schema);
+        return new GetTableResponse(table.uuid(), table.name(), schemaId, schema);
     }
 
     private static MockResponse mockResponse(RESTResponse response, int httpCode) {
