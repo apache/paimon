@@ -107,6 +107,28 @@ public class ConsumerManager implements Serializable {
         }
     }
 
+    /** Clear consumers. */
+    public void clearConsumers(List<String> consumerIds, Boolean clearUnspecified) {
+        try {
+            listVersionedFileStatus(fileIO, consumerDirectory(), CONSUMER_PREFIX)
+                    .forEach(
+                            status -> {
+                                String consumerName =
+                                        status.getPath()
+                                                .getName()
+                                                .substring(CONSUMER_PREFIX.length());
+                                if (consumerIds == null
+                                        || (!clearUnspecified && consumerIds.contains(consumerName))
+                                        || (clearUnspecified
+                                                && !consumerIds.contains(consumerName))) {
+                                    fileIO.deleteQuietly(status.getPath());
+                                }
+                            });
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     /** Get all consumer. */
     public Map<String, Long> consumers() throws IOException {
         Map<String, Long> consumers = new HashMap<>();
