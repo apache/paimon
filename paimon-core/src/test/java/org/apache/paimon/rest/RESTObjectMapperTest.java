@@ -40,7 +40,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.junit.Test;
 
@@ -48,13 +47,12 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 import static org.junit.Assert.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /** Test for {@link RESTObjectMapper}. */
 public class RESTObjectMapperTest {
-
-    private static final ObjectMapper OBJECT_MAPPER = RESTObjectMapper.create();
 
     @Test
     public void configResponseParseTest() throws Exception {

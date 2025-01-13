@@ -56,6 +56,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 /** RESTCatalog management APIs. */
 @CrossOrigin(origins = "http://localhost:8081")
@@ -141,7 +142,7 @@ public class RESTCatalogController {
     public GetDatabaseResponse getDatabases(
             @PathVariable String prefix, @PathVariable String database) {
         Map<String, String> options = new HashMap<>();
-        return new GetDatabaseResponse("name", options);
+        return new GetDatabaseResponse(UUID.randomUUID().toString(), "name", options);
     }
 
     @Operation(
@@ -234,6 +235,7 @@ public class RESTCatalogController {
             @PathVariable String database,
             @PathVariable String table) {
         return new GetTableResponse(
+                UUID.randomUUID().toString(),
                 "",
                 1,
                 new org.apache.paimon.schema.Schema(
@@ -261,6 +263,7 @@ public class RESTCatalogController {
             @PathVariable String database,
             @RequestBody CreateTableRequest request) {
         return new GetTableResponse(
+                UUID.randomUUID().toString(),
                 "",
                 1,
                 new org.apache.paimon.schema.Schema(
@@ -293,6 +296,7 @@ public class RESTCatalogController {
             @PathVariable String table,
             @RequestBody AlterTableRequest request) {
         return new GetTableResponse(
+                UUID.randomUUID().toString(),
                 "",
                 1,
                 new org.apache.paimon.schema.Schema(
@@ -344,6 +348,7 @@ public class RESTCatalogController {
             @PathVariable String table,
             @RequestBody RenameTableRequest request) {
         return new GetTableResponse(
+                UUID.randomUUID().toString(),
                 "",
                 1,
                 new org.apache.paimon.schema.Schema(
