@@ -28,7 +28,7 @@ under the License.
 
 This documentation is a guide for using Paimon in Doris.
 
-> More details can be found in [Apache Doris Website](https://doris.apache.org/docs/lakehouse/datalake-analytics/paimon/)
+> More details can be found in [Apache Doris Website](https://doris.apache.org/docs/dev/lakehouse/catalogs/paimon-catalog)
 
 ## Version
 
@@ -65,9 +65,21 @@ CREATE CATALOG `paimon_hms` PROPERTIES (
     "hive.metastore.uris" = "thrift://172.21.0.44:7004",
     "hadoop.username" = "hadoop"
 );
+
+-- Integrate with Aliyun DLF
+CREATE CATALOG paimon_dlf PROPERTIES (
+    'type' = 'paimon',
+    'paimon.catalog.type' = 'dlf',
+    'warehouse' = 'oss://paimon-bucket/paimonoss/',
+    'dlf.proxy.mode' = 'DLF_ONLY',
+    'dlf.uid' = 'xxxxx',
+    'dlf.region' = 'cn-beijing',
+    'dlf.access_key' = 'ak',
+    'dlf.secret_key' = 'sk'
+);
 ```
 
-See [Apache Doris Website](https://doris.apache.org/docs/lakehouse/datalake-analytics/paimon/) for more examples.
+See [Apache Doris Website](https://doris.apache.org/docs/dev/lakehouse/catalogs/paimon-catalog) for more examples.
 
 ## Access Paimon Catalog
 
