@@ -26,27 +26,28 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.List;
 import java.util.Map;
 
 /** Request for creating partition. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class CreatePartitionRequest implements RESTRequest {
+public class CreatePartitionsRequest implements RESTRequest {
 
     private static final String FIELD_IDENTIFIER = "identifier";
-    private static final String FIELD_PARTITION_SPEC = "spec";
+    private static final String FIELD_PARTITION_SPECS = "specs";
 
     @JsonProperty(FIELD_IDENTIFIER)
     private final Identifier identifier;
 
-    @JsonProperty(FIELD_PARTITION_SPEC)
-    private final Map<String, String> partitionSpec;
+    @JsonProperty(FIELD_PARTITION_SPECS)
+    private final List<Map<String, String>> partitionSpecs;
 
     @JsonCreator
-    public CreatePartitionRequest(
+    public CreatePartitionsRequest(
             @JsonProperty(FIELD_IDENTIFIER) Identifier identifier,
-            @JsonProperty(FIELD_PARTITION_SPEC) Map<String, String> partitionSpec) {
+            @JsonProperty(FIELD_PARTITION_SPECS) List<Map<String, String>> partitionSpecs) {
         this.identifier = identifier;
-        this.partitionSpec = partitionSpec;
+        this.partitionSpecs = partitionSpecs;
     }
 
     @JsonGetter(FIELD_IDENTIFIER)
@@ -54,8 +55,8 @@ public class CreatePartitionRequest implements RESTRequest {
         return identifier;
     }
 
-    @JsonGetter(FIELD_PARTITION_SPEC)
-    public Map<String, String> getPartitionSpec() {
-        return partitionSpec;
+    @JsonGetter(FIELD_PARTITION_SPECS)
+    public List<Map<String, String>> getPartitionSpecs() {
+        return partitionSpecs;
     }
 }

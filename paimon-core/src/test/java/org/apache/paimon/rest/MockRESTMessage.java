@@ -24,7 +24,7 @@ import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
-import org.apache.paimon.rest.requests.CreatePartitionRequest;
+import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.DropPartitionRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -35,7 +35,7 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
-import org.apache.paimon.rest.responses.PartitionResponse;
+import org.apache.paimon.rest.responses.PartitionsResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.types.DataField;
@@ -136,23 +136,26 @@ public class MockRESTMessage {
         return new AlterTableRequest(getChanges());
     }
 
-    public static CreatePartitionRequest createPartitionRequest(String tableName) {
+    public static CreatePartitionsRequest createPartitionRequest(String tableName) {
         Identifier identifier = Identifier.create(databaseName(), tableName);
-        return new CreatePartitionRequest(identifier, Collections.singletonMap("pt", "1"));
+        return new CreatePartitionsRequest(
+                identifier, ImmutableList.of(Collections.singletonMap("pt", "1")));
     }
 
     public static DropPartitionRequest dropPartitionRequest() {
         return new DropPartitionRequest(Collections.singletonMap("pt", "1"));
     }
 
-    public static PartitionResponse partitionResponse() {
+    public static PartitionsResponse partitionResponse() {
         Map<String, String> spec = new HashMap<>();
         spec.put("f0", "1");
-        return new PartitionResponse(new Partition(spec, 1, 1, 1, 1));
+        return new PartitionsResponse(ImmutableList.of(spec), ImmutableList.of());
     }
 
     public static ListPartitionsResponse listPartitionsResponse() {
-        Partition partition = partitionResponse().getPartition();
+        Map<String, String> spec = new HashMap<>();
+        spec.put("f0", "1");
+        Partition partition = new Partition(spec, 1, 1, 1, 1);
         return new ListPartitionsResponse(ImmutableList.of(partition));
     }
 

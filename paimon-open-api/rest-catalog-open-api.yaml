@@ -446,8 +446,8 @@ paths:
     post:
       tags:
         - partition
-      summary: Create partition
-      operationId: createPartition
+      summary: Create partitions
+      operationId: createPartitions
       parameters:
         - name: prefix
           in: path
@@ -468,14 +468,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreatePartitionRequest'
+              $ref: '#/components/schemas/CreatePartitionsRequest'
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PartitionResponse'
+                $ref: '#/components/schemas/PartitionsResponse'
         "404":
           description: Resource not found
           content:
@@ -532,13 +532,14 @@ components:
           type: object
           additionalProperties:
             type: string
-    CreatePartitionRequest:
+    CreatePartitionsRequest:
       type: object
       properties:
         identifier:
           $ref: '#/components/schemas/Identifier'
-        spec:
-          type: object
+        specs:
+          type: array
+          items: object
     DropPartitionRequest:
       type: object
       properties:
@@ -883,11 +884,15 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Partition'
-    PartitionResponse:
+    PartitionsResponse:
       type: object
       properties:
-        partition:
-          $ref: '#/components/schemas/Partition'
+        successPartitionSpecs:
+          type: array
+          items: object
+        failPartitionSpecs:
+          type: array
+          items: object
     Partition:
       type: object
       properties:

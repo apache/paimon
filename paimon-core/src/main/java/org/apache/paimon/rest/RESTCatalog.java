@@ -41,6 +41,7 @@ import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
@@ -52,6 +53,7 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.PartitionsResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
@@ -390,7 +392,23 @@ public class RESTCatalog implements Catalog {
     @Override
     public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        throw new UnsupportedOperationException();
+        try {
+            CreatePartitionsRequest request = new CreatePartitionsRequest(identifier, partitions);
+            PartitionsResponse response =
+                    client.post(
+                            resourcePaths.partitions(
+                                    identifier.getDatabaseName(), identifier.getTableName()),
+                            request,
+                            PartitionsResponse.class,
+                            headers());
+            if (response.getFailPartitionSpecs() != null
+                    && !response.getFailPartitionSpecs().isEmpty()) {
+                throw new RuntimeException(
+                        "Create partitions failed: " + response.getFailPartitionSpecs());
+            }
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        }
     }
 
     @Override

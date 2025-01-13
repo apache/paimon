@@ -103,12 +103,12 @@ class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Override
-    protected boolean supportGetFromSystemDatabase() {
-        return false;
+    protected boolean supportsFormatTable() {
+        return true;
     }
 
     @Override
-    protected boolean supportsFormatTable() {
+    protected boolean supportPartitions() {
         return true;
     }
 

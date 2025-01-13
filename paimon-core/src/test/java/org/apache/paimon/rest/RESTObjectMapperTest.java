@@ -21,7 +21,7 @@ package org.apache.paimon.rest;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
-import org.apache.paimon.rest.requests.CreatePartitionRequest;
+import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.DropPartitionRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -34,7 +34,7 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
-import org.apache.paimon.rest.responses.PartitionResponse;
+import org.apache.paimon.rest.responses.PartitionsResponse;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
@@ -210,12 +210,12 @@ public class RESTObjectMapperTest {
 
     @Test
     public void createPartitionRequestParseTest() throws JsonProcessingException {
-        CreatePartitionRequest request = MockRESTMessage.createPartitionRequest("t1");
+        CreatePartitionsRequest request = MockRESTMessage.createPartitionRequest("t1");
         String requestStr = OBJECT_MAPPER.writeValueAsString(request);
-        CreatePartitionRequest parseData =
-                OBJECT_MAPPER.readValue(requestStr, CreatePartitionRequest.class);
+        CreatePartitionsRequest parseData =
+                OBJECT_MAPPER.readValue(requestStr, CreatePartitionsRequest.class);
         assertEquals(parseData.getIdentifier(), parseData.getIdentifier());
-        assertEquals(parseData.getPartitionSpec().size(), parseData.getPartitionSpec().size());
+        assertEquals(parseData.getPartitionSpecs().size(), parseData.getPartitionSpecs().size());
     }
 
     @Test
@@ -240,12 +240,12 @@ public class RESTObjectMapperTest {
 
     @Test
     public void partitionResponseParseTest() throws Exception {
-        PartitionResponse response = MockRESTMessage.partitionResponse();
+        PartitionsResponse response = MockRESTMessage.partitionResponse();
         assertDoesNotThrow(() -> OBJECT_MAPPER.writeValueAsString(response));
         assertDoesNotThrow(
                 () ->
                         OBJECT_MAPPER.readValue(
                                 OBJECT_MAPPER.writeValueAsString(response),
-                                PartitionResponse.class));
+                                PartitionsResponse.class));
     }
 }

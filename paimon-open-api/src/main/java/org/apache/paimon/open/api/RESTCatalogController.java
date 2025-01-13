@@ -23,7 +23,7 @@ import org.apache.paimon.rest.ResourcePaths;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
-import org.apache.paimon.rest.requests.CreatePartitionRequest;
+import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.DropPartitionRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -36,7 +36,7 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
-import org.apache.paimon.rest.responses.PartitionResponse;
+import org.apache.paimon.rest.responses.PartitionsResponse;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -392,7 +392,7 @@ public class RESTCatalogController {
     @ApiResponses({
         @ApiResponse(
                 responseCode = "200",
-                content = {@Content(schema = @Schema(implementation = PartitionResponse.class))}),
+                content = {@Content(schema = @Schema(implementation = PartitionsResponse.class))}),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
@@ -402,14 +402,14 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema())})
     })
     @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/partitions")
-    public PartitionResponse createPartition(
+    public PartitionsResponse createPartitions(
             @PathVariable String prefix,
             @PathVariable String database,
             @PathVariable String table,
-            @RequestBody CreatePartitionRequest request) {
+            @RequestBody CreatePartitionsRequest request) {
         Map<String, String> spec = new HashMap<>();
         spec.put("f1", "1");
-        return new PartitionResponse(new Partition(spec, 0, 0, 0, 4));
+        return new PartitionsResponse(ImmutableList.of(spec), ImmutableList.of());
     }
 
     @Operation(

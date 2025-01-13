@@ -43,12 +43,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
@@ -1025,6 +1027,35 @@ public abstract class CatalogTestBase {
                 .isGreaterThan(0);
     }
 
+    @Test
+    public void testCreatePartitions() throws Exception {
+        if (!supportPartitions()) {
+            return;
+        }
+        String databaseName = "testPartitionTable";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                true);
+
+        catalog.createPartitions(
+                identifier,
+                Arrays.asList(
+                        Collections.singletonMap("dt", "20250101"),
+                        Collections.singletonMap("dt", "20250102")));
+
+        // list partitions from filesystem, so here return empty.
+        assertThat(catalog.listPartitions(identifier)).isEmpty();
+    }
+
     protected boolean supportsAlterDatabase() {
         return false;
     }
@@ -1034,6 +1065,10 @@ public abstract class CatalogTestBase {
     }
 
     protected boolean supportsView() {
+        return false;
+    }
+
+    protected boolean supportPartitions() {
         return false;
     }
 }
